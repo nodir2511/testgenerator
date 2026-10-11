@@ -9,6 +9,7 @@ import { SavedTicketsView } from './components/SavedTicketsView';
 import { BulkImport } from './components/BulkImport';
 import { UserManagementView } from './components/UserManagementView';
 import { AuthModal } from './components/AuthModal';
+import { TelegramLink } from './components/TelegramLink';
 import { Question } from './types/database';
 import { 
   BookOpen, 
@@ -132,6 +133,7 @@ export const App: React.FC = () => {
                   )}
                 </div>
               </div>
+              <TelegramLink />
               <button
                 onClick={() => signOut()}
                 className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition"

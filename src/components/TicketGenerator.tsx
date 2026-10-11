@@ -42,6 +42,18 @@ const getStorageBool = (key: string, fallback: boolean): boolean => {
   return val === 'true';
 };
 
+// Supabase отдаёт не больше 1000 строк за запрос — читаем постранично
+async function fetchAllPages<T>(build: () => any): Promise<{ data: T[] | null; error: any }> {
+  const all: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await build().order('id').range(from, from + 999);
+    if (error) return { data: null, error };
+    all.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return { data: all, error: null };
+}
+
 export const TicketGenerator: React.FC = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -244,19 +256,16 @@ export const TicketGenerator: React.FC = () => {
     queryKey: ['pool_stats', subjectId, selectedChapterIds, selectedTopicIds],
     enabled: Boolean(subjectId),
     queryFn: async () => {
-      let q = supabase
-        .from('questions')
-        .select('id, type, topic_id, chapter_id')
-        .eq('subject_id', subjectId)
-        .eq('is_deleted', false);
-
-      if (selectedTopicIds.length > 0) {
-        q = q.in('topic_id', selectedTopicIds);
-      } else if (selectedChapterIds.length > 0) {
-        q = q.in('chapter_id', selectedChapterIds);
-      }
-
-      const { data } = await q;
+      const { data } = await fetchAllPages<any>(() => {
+        let q = supabase
+          .from('questions')
+          .select('id, type, topic_id, chapter_id')
+          .eq('subject_id', subjectId)
+          .eq('is_deleted', false);
+        if (selectedTopicIds.length > 0) q = q.in('topic_id', selectedTopicIds);
+        else if (selectedChapterIds.length > 0) q = q.in('chapter_id', selectedChapterIds);
+        return q;
+      });
       const all = data || [];
 
       return {
@@ -300,25 +309,22 @@ export const TicketGenerator: React.FC = () => {
       }
 
       // 2. Загружаем все доступные вопросы пула с деталями для снимков
-      let query = supabase
-        .from('questions')
-        .select(`
-          *,
-          chapter:chapters(name),
-          topic:topics(name),
-          options:question_options(*),
-          matching_items:matching_items(*)
-        `)
-        .eq('subject_id', subjectId)
-        .eq('is_deleted', false);
-
-      if (selectedTopicIds.length > 0) {
-        query = query.in('topic_id', selectedTopicIds);
-      } else if (selectedChapterIds.length > 0) {
-        query = query.in('chapter_id', selectedChapterIds);
-      }
-
-      const { data: allQuestionsRaw, error: qErr } = await query;
+      const { data: allQuestionsRaw, error: qErr } = await fetchAllPages<any>(() => {
+        let query = supabase
+          .from('questions')
+          .select(`
+            *,
+            chapter:chapters(name),
+            topic:topics(name),
+            options:question_options(*),
+            matching_items:matching_items(*)
+          `)
+          .eq('subject_id', subjectId)
+          .eq('is_deleted', false);
+        if (selectedTopicIds.length > 0) query = query.in('topic_id', selectedTopicIds);
+        else if (selectedChapterIds.length > 0) query = query.in('chapter_id', selectedChapterIds);
+        return query;
+      });
       if (qErr || !allQuestionsRaw) throw qErr || new Error('Ошибка загрузки вопросов');
 
       const testPool = allQuestionsRaw.filter(q => q.type === 'test');
