@@ -23,7 +23,8 @@ import {
   Menu,
   X,
   FileQuestion,
-  Loader2
+  Loader2,
+  CheckCircle2
 } from 'lucide-react';
 
 type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users';
@@ -46,6 +47,14 @@ export const App: React.FC = () => {
   // Состояние формы редактирования/добавления вопроса
   const [isQuestionFormOpen, setIsQuestionFormOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
+
+  // Всплывающее подтверждение сохранения
+  const [saveToast, setSaveToast] = useState<string | null>(null);
+  React.useEffect(() => {
+    if (!saveToast) return;
+    const timer = setTimeout(() => setSaveToast(null), 2500);
+    return () => clearTimeout(timer);
+  }, [saveToast]);
 
   // Навигационные ссылки
   const navItems = [
@@ -219,6 +228,7 @@ export const App: React.FC = () => {
             onSuccess={() => {
               setIsQuestionFormOpen(false);
               setEditingQuestion(null);
+              setSaveToast('Изменения сохранены в базе');
             }}
             onCancel={() => {
               setIsQuestionFormOpen(false);
@@ -243,6 +253,14 @@ export const App: React.FC = () => {
           </>
         )}
       </main>
+
+      {/* Подтверждение сохранения */}
+      {saveToast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2 bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <CheckCircle2 className="w-5 h-5 shrink-0" />
+          <span className="text-sm font-medium">{saveToast}</span>
+        </div>
+      )}
 
       {/* Футер */}
       <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
