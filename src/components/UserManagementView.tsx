@@ -5,6 +5,20 @@ import { Profile, UserRole, AuditLog } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { Users, ShieldCheck, UserCheck, Activity, Loader2, UserPlus, Pencil } from 'lucide-react';
 
+// supabase-js скрывает тело ответа при 4xx/5xx — достаём сообщение функции сами
+async function functionErrorMessage(error: unknown): Promise<string> {
+  const ctx = (error as { context?: Response }).context;
+  if (ctx && typeof ctx.json === 'function') {
+    try {
+      const body = await ctx.json();
+      if (body?.error) return String(body.error);
+    } catch {
+      /* тело не JSON */
+    }
+  }
+  return (error as Error).message;
+}
+
 export const UserManagementView: React.FC = () => {
   const queryClient = useQueryClient();
   const { user: currentUser, isAdmin } = useAuth();
@@ -28,7 +42,7 @@ export const UserManagementView: React.FC = () => {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(await functionErrorMessage(error));
       if (data?.error) throw new Error(data.error);
       return data;
     },
@@ -79,7 +93,7 @@ export const UserManagementView: React.FC = () => {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(await functionErrorMessage(error));
       if (data?.error) throw new Error(data.error);
       return data;
     },
