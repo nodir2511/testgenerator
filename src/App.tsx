@@ -15,15 +15,15 @@ import {
   Layers, 
   FileCheck2, 
   Sparkles, 
-  Upload, 
-  Users, 
-  LogIn, 
-  LogOut, 
-  ShieldCheck, 
+  Upload,
+  Users,
+  LogOut,
+  ShieldCheck,
   User as UserIcon,
   Menu,
   X,
-  FileQuestion
+  FileQuestion,
+  Loader2
 } from 'lucide-react';
 
 type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users';
@@ -39,7 +39,6 @@ export const App: React.FC = () => {
   React.useEffect(() => {
     localStorage.setItem('examiner_active_tab', activeTab);
   }, [activeTab]);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Состояние формы редактирования/добавления вопроса
@@ -66,6 +65,24 @@ export const App: React.FC = () => {
     setIsQuestionFormOpen(true);
   };
 
+  // Пока идёт проверка сессии — показываем загрузку, не раскрывая содержимое
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+      </div>
+    );
+  }
+
+  // Неавторизованным пользователям сайт полностью недоступен — только форма входа
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <AuthModal isOpen={true} />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900">
       {/* Главный заголовок */}
@@ -86,54 +103,36 @@ export const App: React.FC = () => {
 
           {/* Десктоп-меню пользователя */}
           <div className="hidden md:flex items-center space-x-3">
-            {user ? (
-              <div className="flex items-center space-x-3 bg-slate-100/80 px-3 py-1.5 rounded-xl border border-slate-200">
-                <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
-                  <UserIcon className="w-4 h-4" />
-                </div>
-                <div className="text-left">
-                  <div className="text-xs font-bold text-slate-800 leading-tight">
-                    {profile?.full_name || user.email?.split('@')[0]}
-                  </div>
-                  <div className="text-[10px] text-slate-500 flex items-center font-semibold">
-                    {isAdmin ? (
-                      <span className="text-amber-700 flex items-center">
-                        <ShieldCheck className="w-3 h-3 mr-0.5" /> Главный админ
-                      </span>
-                    ) : (
-                      'Преподаватель'
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={() => signOut()}
-                  className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition"
-                  title="Выйти"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
+            <div className="flex items-center space-x-3 bg-slate-100/80 px-3 py-1.5 rounded-xl border border-slate-200">
+              <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center">
+                <UserIcon className="w-4 h-4" />
               </div>
-            ) : (
+              <div className="text-left">
+                <div className="text-xs font-bold text-slate-800 leading-tight">
+                  {profile?.full_name || user.email?.split('@')[0]}
+                </div>
+                <div className="text-[10px] text-slate-500 flex items-center font-semibold">
+                  {isAdmin ? (
+                    <span className="text-amber-700 flex items-center">
+                      <ShieldCheck className="w-3 h-3 mr-0.5" /> Главный админ
+                    </span>
+                  ) : (
+                    'Преподаватель'
+                  )}
+                </div>
+              </div>
               <button
-                onClick={() => setIsAuthModalOpen(true)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow transition flex items-center space-x-1.5"
+                onClick={() => signOut()}
+                className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition"
+                title="Выйти"
               >
-                <LogIn className="w-4 h-4" />
-                <span>Войти / Регистрация</span>
+                <LogOut className="w-4 h-4" />
               </button>
-            )}
+            </div>
           </div>
 
           {/* Мобильная кнопка бургера */}
           <div className="md:hidden flex items-center space-x-2">
-            {!user && (
-              <button
-                onClick={() => setIsAuthModalOpen(true)}
-                className="px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg"
-              >
-                Войти
-              </button>
-            )}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100"
@@ -173,20 +172,18 @@ export const App: React.FC = () => {
         {/* Мобильное выпадающее меню */}
         {mobileMenuOpen && (
           <div className="md:hidden bg-white border-b border-slate-200 px-4 pt-2 pb-4 space-y-1 shadow-lg">
-            {user && (
-              <div className="p-3 bg-slate-50 rounded-xl mb-3 flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-xs text-slate-900">{profile?.full_name || user.email}</div>
-                  <div className="text-[10px] text-slate-500">{isAdmin ? 'Администратор' : 'Преподаватель'}</div>
-                </div>
-                <button
-                  onClick={() => signOut()}
-                  className="text-xs text-red-600 font-semibold"
-                >
-                  Выйти
-                </button>
+            <div className="p-3 bg-slate-50 rounded-xl mb-3 flex items-center justify-between">
+              <div>
+                <div className="font-bold text-xs text-slate-900">{profile?.full_name || user.email}</div>
+                <div className="text-[10px] text-slate-500">{isAdmin ? 'Администратор' : 'Преподаватель'}</div>
               </div>
-            )}
+              <button
+                onClick={() => signOut()}
+                className="text-xs text-red-600 font-semibold"
+              >
+                Выйти
+              </button>
+            </div>
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -249,9 +246,6 @@ export const App: React.FC = () => {
       <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
         Система экзаменационных билетов • Десктопная и мобильная версии • Supabase RLS
       </footer>
-
-      {/* Модальное окно авторизации */}
-      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
     </div>
   );
 };
