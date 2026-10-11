@@ -33,3 +33,25 @@ desktop.ini
 
 # Build info
 tsconfig.tsbuildinfo
+
+# --- Question bank data & working files: NEVER commit (repo is public) ---
+temp_docs/
+scratch/
+.claude/
+build_output*.json
+still_flagged.json
+textual_*.json
+problems_report.json
+collection_raw.txt
+sample_template.xml
+*.docx
+*.zip
+*.bundle
+# data SQL (imports): ignore every .sql except schema/policy files
+*.sql
+!supabase_schema.sql
+!security_hardening.sql
+!fix_role_escalation.sql
+!enable_public_read.sql
+!step1_unlock.sql
+!step2_lock.sql
