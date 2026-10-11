@@ -16,7 +16,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
-  Loader2
+  Loader2,
+  X,
+  RotateCcw
 } from 'lucide-react';
 
 interface QuestionListProps {
@@ -33,14 +35,47 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const queryClient = useQueryClient();
   const { isAdmin } = useAuth();
 
-  // Фильтры
-  const [filterSubjectId, setFilterSubjectId] = useState('');
-  const [filterChapterId, setFilterChapterId] = useState('');
-  const [filterTopicId, setFilterTopicId] = useState('');
-  const [filterType, setFilterType] = useState<string>('all');
+  // Фильтры (с сохранением в localStorage)
+  const [filterSubjectId, setFilterSubjectId] = useState(() => localStorage.getItem('examiner_ql_subject_id') || '');
+  const [filterChapterId, setFilterChapterId] = useState(() => localStorage.getItem('examiner_ql_chapter_id') || '');
+  const [filterTopicId, setFilterTopicId] = useState(() => localStorage.getItem('examiner_ql_topic_id') || '');
+  const [filterType, setFilterType] = useState<string>(() => localStorage.getItem('examiner_ql_type') || 'all');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(0);
-  const [displayLang, setDisplayLang] = useState<'ru' | 'tg' | 'both'>('ru');
+  const [displayLang, setDisplayLang] = useState<'ru' | 'tg' | 'both'>(
+    () => (localStorage.getItem('examiner_ql_display_lang') as 'ru' | 'tg' | 'both') || 'ru'
+  );
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_ql_subject_id', filterSubjectId);
+  }, [filterSubjectId]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_ql_chapter_id', filterChapterId);
+  }, [filterChapterId]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_ql_topic_id', filterTopicId);
+  }, [filterTopicId]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_ql_type', filterType);
+  }, [filterType]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_ql_display_lang', displayLang);
+  }, [displayLang]);
+
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreviewImage(null);
+    };
+    if (previewImage) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [previewImage]);
 
   // Таксономия для фильтров
   const { data: subjects = [] } = useQuery({
@@ -270,11 +305,31 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               </button>
             </div>
           </div>
-          {data?.totalCount !== undefined && (
-            <span className="text-xs text-slate-400">
-              Всего в базе: <strong className="text-slate-700">{data.totalCount}</strong>
-            </span>
-          )}
+          <div className="flex items-center space-x-3">
+            {(filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || searchQuery) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterSubjectId('');
+                  setFilterChapterId('');
+                  setFilterTopicId('');
+                  setFilterType('all');
+                  setSearchQuery('');
+                  setPage(0);
+                }}
+                className="inline-flex items-center space-x-1.5 text-xs text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg transition font-medium border border-rose-200 shadow-sm"
+                title="Сбросить все установленные фильтры и поиск"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Сбросить фильтры</span>
+              </button>
+            )}
+            {data?.totalCount !== undefined && (
+              <span className="text-xs text-slate-400">
+                Всего в базе: <strong className="text-slate-700">{data.totalCount}</strong>
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -395,7 +450,9 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     <img
                       src={q.image_url}
                       alt="Изображение вопроса"
-                      className="max-h-48 rounded-xl border border-slate-200 object-contain bg-slate-50 p-1"
+                      onClick={() => setPreviewImage(q.image_url || null)}
+                      className="max-h-48 rounded-xl border border-slate-200 object-contain bg-slate-50 p-1 cursor-pointer hover:opacity-90 hover:shadow-md transition"
+                      title="Нажмите для увеличения"
                     />
                   </div>
                 )}
@@ -408,10 +465,18 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                       .map((opt, i) => (
                         <div
                           key={opt.id || i}
-                          className="flex items-start space-x-2 p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700"
+                          className={`flex items-start space-x-2 p-2 rounded-lg border text-xs text-slate-700 transition ${
+                            opt.is_correct
+                              ? 'bg-emerald-50/70 border-emerald-300 ring-1 ring-emerald-200'
+                              : 'bg-slate-50 border-slate-200'
+                          }`}
                         >
-                          <span className="w-5 h-5 rounded-full bg-slate-200 font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5">
-                            {i + 1}
+                          <span className={`w-5 h-5 rounded-full font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5 ${
+                            opt.is_correct
+                              ? 'bg-emerald-600 text-white shadow-sm'
+                              : 'bg-slate-200 text-slate-700'
+                          }`}>
+                            {['A', 'B', 'C', 'D', 'E', 'F'][i] || String.fromCharCode(65 + i)}
                           </span>
                           <div className="flex-1 space-y-0.5">
                             {displayLang === 'ru' && (
@@ -432,7 +497,13 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                             )}
                           </div>
                           {opt.image_url && (
-                            <img src={opt.image_url} alt="" className="w-8 h-8 object-cover rounded border shrink-0" />
+                            <img
+                              src={opt.image_url}
+                              alt=""
+                              onClick={() => setPreviewImage(opt.image_url || null)}
+                              className="w-9 h-9 object-cover rounded-lg border border-slate-200 shrink-0 cursor-pointer hover:opacity-90 hover:scale-105 transition shadow-sm bg-white"
+                              title="Нажмите для увеличения"
+                            />
                           )}
                         </div>
                       ))}
@@ -463,7 +534,15 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                                 </>
                               )}
                             </div>
-                            {m.image_url && <img src={m.image_url} alt="" className="w-6 h-6 object-cover rounded ml-auto shrink-0" />}
+                            {m.image_url && (
+                              <img
+                                src={m.image_url}
+                                alt=""
+                                onClick={() => setPreviewImage(m.image_url || null)}
+                                className="w-7 h-7 object-cover rounded border border-slate-200 ml-auto shrink-0 cursor-pointer hover:opacity-90 hover:scale-110 transition shadow-sm bg-white"
+                                title="Нажмите для увеличения"
+                              />
+                            )}
                           </div>
                         ))}
                     </div>
@@ -489,7 +568,15 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                                 </>
                               )}
                             </div>
-                            {m.image_url && <img src={m.image_url} alt="" className="w-6 h-6 object-cover rounded ml-auto shrink-0" />}
+                            {m.image_url && (
+                              <img
+                                src={m.image_url}
+                                alt=""
+                                onClick={() => setPreviewImage(m.image_url || null)}
+                                className="w-7 h-7 object-cover rounded border border-slate-200 ml-auto shrink-0 cursor-pointer hover:opacity-90 hover:scale-110 transition shadow-sm bg-white"
+                                title="Нажмите для увеличения"
+                              />
+                            )}
                           </div>
                         ))}
                     </div>
@@ -532,6 +619,29 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             <span>Вперед</span>
             <ChevronRight className="w-4 h-4" />
           </button>
+        </div>
+      )}
+
+      {/* Модальное окно увеличения изображения (Lightbox) */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm transition-all animate-in fade-in duration-150"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setPreviewImage(null)}
+              className="absolute -top-11 right-0 text-white hover:text-slate-300 p-2 rounded-full bg-black/50 hover:bg-black/75 transition"
+              title="Закрыть (Esc)"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <img
+              src={previewImage}
+              alt="Увеличенное изображение"
+              className="max-h-[85vh] max-w-full rounded-2xl shadow-2xl object-contain border border-white/20 bg-white p-2"
+            />
+          </div>
         </div>
       )}
     </div>

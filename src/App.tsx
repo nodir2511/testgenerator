@@ -30,7 +30,15 @@ type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_
 
 export const App: React.FC = () => {
   const { user, profile, isAdmin, signOut, isLoading } = useAuth();
-  const [activeTab, setActiveTab] = useState<TabType>('questions');
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    const saved = localStorage.getItem('examiner_active_tab');
+    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users'];
+    return (validTabs.includes(saved as TabType)) ? (saved as TabType) : 'generator';
+  });
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_active_tab', activeTab);
+  }, [activeTab]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 

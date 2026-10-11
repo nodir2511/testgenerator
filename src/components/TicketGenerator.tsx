@@ -19,26 +19,102 @@ import {
 } from 'lucide-react';
 import { exportTicketsToDocx, exportSingleTicketDocx } from '../lib/docxExport';
 
+const getStorageJSON = <T,>(key: string, fallback: T): T => {
+  try {
+    const item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+const getStorageString = (key: string, fallback: string): string => {
+  return localStorage.getItem(key) ?? fallback;
+};
+const getStorageNumber = (key: string, fallback: number): number => {
+  const val = localStorage.getItem(key);
+  if (!val) return fallback;
+  const num = Number(val);
+  return isNaN(num) ? fallback : num;
+};
+const getStorageBool = (key: string, fallback: boolean): boolean => {
+  const val = localStorage.getItem(key);
+  if (val === null) return fallback;
+  return val === 'true';
+};
+
 export const TicketGenerator: React.FC = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
-  // Параметры конфигурации билета
-  const [subjectId, setSubjectId] = useState('');
-  const [selectedChapterIds, setSelectedChapterIds] = useState<string[]>([]);
-  const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
+  // Параметры конфигурации билета (сохраняются при перезагрузке)
+  const [subjectId, setSubjectId] = useState<string>(() => getStorageString('examiner_tg_subject_id', ''));
+  const [selectedChapterIds, setSelectedChapterIds] = useState<string[]>(() => getStorageJSON('examiner_tg_selected_chapter_ids', []));
+  const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>(() => getStorageJSON('examiner_tg_selected_topic_ids', []));
 
-  const [testCount, setTestCount] = useState<number>(10);
-  const [matchingCount, setMatchingCount] = useState<number>(2);
-  const [openCount, setOpenCount] = useState<number>(3);
-  const [ticketCount, setTicketCount] = useState<number>(2); // Число вариантов (по умолчанию 2 параллельных)
-  const [shuffleOptions, setShuffleOptions] = useState<boolean>(true); // Перемешивать варианты A, B, C, D
-  const [shuffleMatching, setShuffleMatching] = useState<boolean>(true); // Перемешивать 1, 2, 3, 4, 5
-  const [batchTitle, setBatchTitle] = useState('Экзаменационные билеты');
+  const [testCount, setTestCount] = useState<number>(() => getStorageNumber('examiner_tg_test_count', 10));
+  const [matchingCount, setMatchingCount] = useState<number>(() => getStorageNumber('examiner_tg_matching_count', 2));
+  const [openCount, setOpenCount] = useState<number>(() => getStorageNumber('examiner_tg_open_count', 3));
+  const [ticketCount, setTicketCount] = useState<number>(() => getStorageNumber('examiner_tg_ticket_count', 2));
+  const [shuffleOptions, setShuffleOptions] = useState<boolean>(() => getStorageBool('examiner_tg_shuffle_options', true));
+  const [shuffleMatching, setShuffleMatching] = useState<boolean>(() => getStorageBool('examiner_tg_shuffle_matching', true));
+  const [batchTitle, setBatchTitle] = useState<string>(() => getStorageString('examiner_tg_batch_title', 'Экзаменационные билеты'));
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [generatedBatch, setGeneratedBatch] = useState<any | null>(null);
+  const [generatedBatch, setGeneratedBatch] = useState<any | null>(() => getStorageJSON('examiner_tg_generated_batch', null));
+
+  // Автосохранение настроек в localStorage
+  React.useEffect(() => {
+    if (subjectId) localStorage.setItem('examiner_tg_subject_id', subjectId);
+  }, [subjectId]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_selected_chapter_ids', JSON.stringify(selectedChapterIds));
+  }, [selectedChapterIds]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_selected_topic_ids', JSON.stringify(selectedTopicIds));
+  }, [selectedTopicIds]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_test_count', String(testCount));
+  }, [testCount]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_matching_count', String(matchingCount));
+  }, [matchingCount]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_open_count', String(openCount));
+  }, [openCount]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_ticket_count', String(ticketCount));
+  }, [ticketCount]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_shuffle_options', String(shuffleOptions));
+  }, [shuffleOptions]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_shuffle_matching', String(shuffleMatching));
+  }, [shuffleMatching]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_batch_title', batchTitle);
+  }, [batchTitle]);
+
+  React.useEffect(() => {
+    if (generatedBatch) {
+      try {
+        localStorage.setItem('examiner_tg_generated_batch', JSON.stringify(generatedBatch));
+      } catch (e) {
+        console.warn('Не удалось сохранить generatedBatch в localStorage', e);
+      }
+    } else {
+      localStorage.removeItem('examiner_tg_generated_batch');
+    }
+  }, [generatedBatch]);
 
   // 1. Предметы
   const { data: subjects = [] } = useQuery({
@@ -49,10 +125,12 @@ export const TicketGenerator: React.FC = () => {
     },
   });
 
-  // Автоматический выбор первого предмета
+  // Автоматический выбор предмета
   React.useEffect(() => {
-    if (!subjectId && subjects.length > 0) {
-      setSubjectId(subjects[0].id);
+    if (subjects.length > 0) {
+      if (!subjectId || !subjects.some(s => s.id === subjectId)) {
+        setSubjectId(subjects[0].id);
+      }
     }
   }, [subjects, subjectId]);
 
@@ -83,20 +161,30 @@ export const TicketGenerator: React.FC = () => {
   });
 
   // Состояние раскрытых глав (аккордеон)
-  const [expandedChapterIds, setExpandedChapterIds] = useState<Record<string, boolean>>({});
+  const [expandedChapterIds, setExpandedChapterIds] = useState<Record<string, boolean>>(() =>
+    getStorageJSON('examiner_tg_expanded_chapters', {})
+  );
 
-  // Раскрываем главы по умолчанию
+  // Раскрываем новые главы по умолчанию
   React.useEffect(() => {
     if (chapters.length > 0) {
       setExpandedChapterIds(prev => {
+        let changed = false;
         const next = { ...prev };
         chapters.forEach(ch => {
-          if (next[ch.id] === undefined) next[ch.id] = true;
+          if (next[ch.id] === undefined) {
+            next[ch.id] = true;
+            changed = true;
+          }
         });
-        return next;
+        return changed ? next : prev;
       });
     }
   }, [chapters]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_expanded_chapters', JSON.stringify(expandedChapterIds));
+  }, [expandedChapterIds]);
 
   // Выбрать все темы по всему предмету
   const handleSelectAllTopics = () => {
@@ -760,9 +848,18 @@ export const TicketGenerator: React.FC = () => {
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div>
-              <h3 className="font-bold text-slate-900 text-base">
-                Сгенерировано вариантов: {generatedBatch.tickets.length}
-              </h3>
+              <div className="flex items-center space-x-3">
+                <h3 className="font-bold text-slate-900 text-base">
+                  Сгенерировано вариантов: {generatedBatch.tickets.length}
+                </h3>
+                <button
+                  onClick={() => setGeneratedBatch(null)}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline font-medium"
+                  title="Скрыть блок предпросмотра"
+                >
+                  Скрыть
+                </button>
+              </div>
               <p className="text-xs text-slate-500">
                 Все билеты сохранены в базу с неизменяемыми снимками (snapshots).
               </p>

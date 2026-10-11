@@ -180,12 +180,17 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
   // ТЕСТОВЫЙ ВОПРОС С ВАРИАНТАМИ ОТВЕТА
   if (q.type === 'test' && q.options && q.options.length > 0) {
     const opts = [...q.options].sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
+    const optImgBuffers = await Promise.all(
+      opts.map((o: any) => o.image_url ? fetchImageBuffer(o.image_url) : Promise.resolve(null))
+    );
+    const hasOptImages = optImgBuffers.some(b => b !== null);
+
     const cleanLengths = opts.map((o: any) => cleanTextLength(isTg ? (o.text_tg || o.text) : (o.text_ru || o.text)));
     const maxLen = Math.max(...cleanLengths, 0);
     const sumLen = cleanLengths.reduce((a, b) => a + b, 0);
 
-    const isShort = maxLen <= 18 && sumLen <= 65;
-    const isMedium = !isShort && (maxLen <= 42 && sumLen <= 150);
+    const isShort = !hasOptImages && maxLen <= 18 && sumLen <= 65;
+    const isMedium = !isShort && (!hasOptImages ? (maxLen <= 42 && sumLen <= 150) : maxLen <= 35);
 
     if (isShort) {
       const rows: TableRow[] = [
@@ -322,6 +327,12 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                     ...parseFormattedTextRuns(oAText || '', false, 24, false),
                   ],
                 }),
+                ...(optImgBuffers[0] ? [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [new ImageRun({ data: optImgBuffers[0]!, transformation: { width: 140, height: 95 }, type: 'png' })],
+                  }),
+                ] : []),
               ],
             }),
             new TableCell({
@@ -335,6 +346,12 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                     ...parseFormattedTextRuns(oBText || '', false, 24, false),
                   ],
                 }),
+                ...(optImgBuffers[1] ? [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [new ImageRun({ data: optImgBuffers[1]!, transformation: { width: 140, height: 95 }, type: 'png' })],
+                  }),
+                ] : []),
               ],
             }),
           ],
@@ -361,6 +378,12 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                     ...parseFormattedTextRuns(oCText || '', false, 24, false),
                   ],
                 }),
+                ...(optImgBuffers[2] ? [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [new ImageRun({ data: optImgBuffers[2]!, transformation: { width: 140, height: 95 }, type: 'png' })],
+                  }),
+                ] : []),
               ],
             }),
             new TableCell({
@@ -374,6 +397,12 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                     ...parseFormattedTextRuns(oDText || '', false, 24, false),
                   ],
                 }),
+                ...(optImgBuffers[3] ? [
+                  new Paragraph({
+                    alignment: AlignmentType.CENTER,
+                    children: [new ImageRun({ data: optImgBuffers[3]!, transformation: { width: 140, height: 95 }, type: 'png' })],
+                  }),
+                ] : []),
               ],
             }),
           ],
@@ -445,6 +474,12 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                       ...parseFormattedTextRuns(oText || '', false, 24, false),
                     ],
                   }),
+                  ...(optImgBuffers[i] ? [
+                    new Paragraph({
+                      alignment: AlignmentType.CENTER,
+                      children: [new ImageRun({ data: optImgBuffers[i]!, transformation: { width: 180, height: 110 }, type: 'png' })],
+                    }),
+                  ] : []),
                 ],
               }),
             ],
@@ -471,6 +506,12 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
       .sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
 
     const maxLen = Math.max(leftItems.length, rightItems.length);
+    const leftImgBuffers = await Promise.all(
+      leftItems.map((m: any) => m.image_url ? fetchImageBuffer(m.image_url) : Promise.resolve(null))
+    );
+    const rightImgBuffers = await Promise.all(
+      rightItems.map((m: any) => m.image_url ? fetchImageBuffer(m.image_url) : Promise.resolve(null))
+    );
 
     const rows: TableRow[] = [
       new TableRow({
@@ -530,6 +571,14 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
             ],
           })
         );
+        if (leftImgBuffers[rowIdx]) {
+          leftParas.push(
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new ImageRun({ data: leftImgBuffers[rowIdx]!, transformation: { width: 130, height: 85 }, type: 'png' })],
+            })
+          );
+        }
       } else {
         leftParas.push(new Paragraph({ children: [] }));
       }
@@ -546,6 +595,14 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
             ],
           })
         );
+        if (rightImgBuffers[rowIdx]) {
+          rightParas.push(
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new ImageRun({ data: rightImgBuffers[rowIdx]!, transformation: { width: 130, height: 85 }, type: 'png' })],
+            })
+          );
+        }
       } else {
         rightParas.push(new Paragraph({ children: [] }));
       }

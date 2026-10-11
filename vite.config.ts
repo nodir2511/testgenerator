@@ -9,6 +9,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    watch: {
+      ignored: ['**/temp_docs/**', '**/node_modules/**', '**/dist/**'],
+    },
+  },
   build: {
     chunkSizeWarningLimit: 1200,
     rollupOptions: {

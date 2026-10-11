@@ -30,3 +30,6 @@ dist-ssr
 
 # Windows folder metadata (cloud-sync artifact)
 desktop.ini
+
+# Build info
+tsconfig.tsbuildinfo

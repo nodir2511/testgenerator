@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Subject, Chapter, Topic, Source, QuestionType } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
+import { parseDocxFile } from '../lib/docxImport';
+import { FormattedText } from './FormulaEditor';
 import { 
   Upload, 
   FileSpreadsheet, 
@@ -14,19 +16,26 @@ import {
   Download, 
   Trash2, 
   Loader2,
-  Undo2
+  Undo2,
+  Image as ImageIcon,
+  X,
+  Sparkles,
+  Layers
 } from 'lucide-react';
 
 interface ParsedRow {
   rowNum: number;
   type: QuestionType;
   content: string;
+  imageUrl?: string | null;
   subjectName: string;
   chapterName: string;
   topicName: string;
   sourceName?: string;
   optionsText?: string;
+  rawOptions?: { text: string; imageUrl?: string | null }[];
   matchingText?: string;
+  rawMatchingItems?: { side: 'left' | 'right'; text: string; image_url?: string | null; order_index: number }[];
   correctAnswer?: string;
   errors: string[];
 }
@@ -39,13 +48,38 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const [pastedText, setPastedText] = useState('');
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // Таксономия по умолчанию для импорта (сохраняется в localStorage)
+  const [defaultSubjectId, setDefaultSubjectId] = useState(
+    () => localStorage.getItem('examiner_import_subject_id') || ''
+  );
+  const [defaultChapterId, setDefaultChapterId] = useState(
+    () => localStorage.getItem('examiner_import_chapter_id') || ''
+  );
+  const [defaultTopicId, setDefaultTopicId] = useState(
+    () => localStorage.getItem('examiner_import_topic_id') || ''
+  );
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_import_subject_id', defaultSubjectId);
+  }, [defaultSubjectId]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_import_chapter_id', defaultChapterId);
+  }, [defaultChapterId]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_import_topic_id', defaultTopicId);
+  }, [defaultTopicId]);
 
   // Справочники
   const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
     queryFn: async () => {
-      const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false);
+      const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
       return (data || []) as Subject[];
     },
   });
@@ -53,7 +87,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const { data: chapters = [] } = useQuery({
     queryKey: ['all_chapters'],
     queryFn: async () => {
-      const { data } = await supabase.from('chapters').select('*').eq('is_deleted', false);
+      const { data } = await supabase.from('chapters').select('*').eq('is_deleted', false).order('order_index');
       return (data || []) as Chapter[];
     },
   });
@@ -61,7 +95,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const { data: topics = [] } = useQuery({
     queryKey: ['all_topics'],
     queryFn: async () => {
-      const { data } = await supabase.from('topics').select('*').eq('is_deleted', false);
+      const { data } = await supabase.from('topics').select('*').eq('is_deleted', false).order('order_index');
       return (data || []) as Topic[];
     },
   });
@@ -74,17 +108,40 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     },
   });
 
+  // Автовыбор первого предмета при первом запуске
+  React.useEffect(() => {
+    if (!defaultSubjectId && subjects.length > 0) {
+      setDefaultSubjectId(subjects[0].id);
+    }
+  }, [subjects, defaultSubjectId]);
+
+  const availableChapters = chapters.filter(c => !defaultSubjectId || c.subject_id === defaultSubjectId);
+  const availableTopics = topics.filter(t => !defaultChapterId || t.chapter_id === defaultChapterId);
+
+  // Найти текущие имена для назначения
+  const getTaxonomyNames = () => {
+    const subj = subjects.find(s => s.id === defaultSubjectId) || subjects[0];
+    const chap = availableChapters.find(c => c.id === defaultChapterId) || availableChapters[0] || chapters[0];
+    const top = availableTopics.find(t => t.id === defaultTopicId) || availableTopics[0] || topics[0];
+    return {
+      subjectName: subj?.name || 'Химия',
+      chapterName: chap?.name || 'Общая химия',
+      topicName: top?.name || 'Общие вопросы',
+    };
+  };
+
   // Парсинг сырых строковых данных (из CSV или Excel)
   const validateAndProcessRawData = (rows: any[]) => {
+    const { subjectName: defSubj, chapterName: defChap, topicName: defTop } = getTaxonomyNames();
     const processed: ParsedRow[] = [];
 
     rows.forEach((row, idx) => {
       // Поддержка русских и английских названий колонок
       const typeRaw = (row['Тип вопроса'] || row['Type'] || row['type'] || 'test').toString().trim().toLowerCase();
       const content = (row['Текст вопроса'] || row['Question'] || row['content'] || '').toString().trim();
-      const subjectName = (row['Предмет'] || row['Subject'] || row['subject'] || '').toString().trim();
-      const chapterName = (row['Глава'] || row['Chapter'] || row['chapter'] || '').toString().trim();
-      const topicName = (row['Тема'] || row['Topic'] || row['topic'] || '').toString().trim();
+      const subjectName = (row['Предмет'] || row['Subject'] || row['subject'] || defSubj).toString().trim();
+      const chapterName = (row['Глава'] || row['Chapter'] || row['chapter'] || defChap).toString().trim();
+      const topicName = (row['Тема'] || row['Topic'] || row['topic'] || defTop).toString().trim();
       const sourceName = (row['Источник'] || row['Source'] || row['source'] || '').toString().trim();
       const optionsText = (row['Варианты ответа'] || row['Options'] || row['options'] || '').toString().trim();
       const matchingText = (row['Элементы соответствия'] || row['Matching'] || row['matching'] || '').toString().trim();
@@ -133,16 +190,65 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     setParsedRows(processed);
   };
 
-  // Загрузка файла (Excel / CSV)
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Загрузка файла (.docx / .xlsx / .xls / .csv)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsProcessing(true);
     setGlobalError(null);
+    setStatusMessage(null);
 
+    const isDocx = file.name.endsWith('.docx');
     const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
 
+    // 1. ИМПОРТ ИЗ WORD (.DOCX) С АВТОМАТИЧЕСКИМ ИЗВЛЕЧЕНИЕМ ИЗОБРАЖЕНИЙ
+    if (isDocx) {
+      try {
+        const docxQuestions = await parseDocxFile(file, (msg) => setStatusMessage(msg));
+        const { subjectName, chapterName, topicName } = getTaxonomyNames();
+        const sourceName = file.name.replace(/\.[^/.]+$/, '');
+
+        const processed: ParsedRow[] = docxQuestions.map((q, idx) => {
+          const errors: string[] = [];
+          if (!q.content && !q.imageUrl) errors.push('Отсутствует текст и рисунок вопроса');
+          if (q.type === 'test' && (!q.options || q.options.length < 2)) {
+            errors.push('Меньше 2 вариантов ответа');
+          }
+
+          return {
+            rowNum: idx + 1,
+            type: q.type,
+            content: q.content,
+            imageUrl: q.imageUrl || null,
+            subjectName,
+            chapterName,
+            topicName,
+            sourceName,
+            optionsText: q.options ? q.options.map(o => o.text).join(' | ') : '',
+            rawOptions: q.options,
+            rawMatchingItems: q.matchingItems ? q.matchingItems.map(m => ({
+              side: m.side,
+              text: m.text,
+              image_url: m.imageUrl || null,
+              order_index: m.orderIndex,
+            })) : undefined,
+            correctAnswer: q.correctAnswer || '',
+            errors,
+          };
+        });
+
+        setParsedRows(processed);
+      } catch (err: any) {
+        setGlobalError('Ошибка импорта Word (.docx): ' + (err.message || String(err)));
+      } finally {
+        setIsProcessing(false);
+        setStatusMessage(null);
+      }
+      return;
+    }
+
+    // 2. ИМПОРТ ИЗ EXCEL
     if (isExcel) {
       const reader = new FileReader();
       reader.onload = (evt) => {
@@ -161,6 +267,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
       };
       reader.readAsBinaryString(file);
     } else {
+      // 3. ИМПОРТ ИЗ CSV
       Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
@@ -193,7 +300,20 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     });
   };
 
-  // Скачивание готового шаблона CSV/Excel
+  // Применить выбранную таксономию ко всем строкам предпросмотра
+  const handleApplyTaxonomyToAll = () => {
+    const { subjectName, chapterName, topicName } = getTaxonomyNames();
+    setParsedRows(prev =>
+      prev.map(r => ({
+        ...r,
+        subjectName,
+        chapterName,
+        topicName,
+      }))
+    );
+  };
+
+  // Скачивание готового шаблона Excel
   const handleDownloadTemplate = () => {
     const templateData = [
       {
@@ -237,7 +357,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     XLSX.writeFile(wb, 'shablon_voprosov.xlsx');
   };
 
-  // Сохранение проверенной партии в базу
+  // Сохранение проверенной партии в базу данных Supabase
   const importMutation = useMutation({
     mutationFn: async (rowsToImport: ParsedRow[]) => {
       // 1. Создаем запись партии
@@ -245,7 +365,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         .from('import_batches')
         .insert({
           created_by: user?.id,
-          filename: `Партия от ${new Date().toLocaleDateString('ru-RU')}`,
+          filename: `Партия от ${new Date().toLocaleDateString('ru-RU')} (${rowsToImport.length} вопр.)`,
           items_count: rowsToImport.length,
         })
         .select()
@@ -290,7 +410,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
 
         if (!subj || !chap || !top) continue;
 
-        // Вставляем вопрос
+        // Вставляем вопрос с сохранением картинки
         const { data: q, error: qErr } = await supabase
           .from('questions')
           .insert({
@@ -301,6 +421,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
             source_id: src?.id || null,
             type: row.type,
             content: row.content,
+            content_ru: row.content,
+            image_url: row.imageUrl || null,
             correct_numeric_answer: row.type === 'open' && row.correctAnswer ? Number(row.correctAnswer) : null,
             created_by: user?.id,
             version: 1,
@@ -310,38 +432,64 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
 
         if (qErr || !q) continue;
 
-        // Варианты тестов
-        if (row.type === 'test' && row.optionsText) {
-          const opts = row.optionsText.split(/[|;]/).map(s => s.trim()).filter(Boolean);
-          const optionRows = opts.map((optText, i) => ({
-            question_id: q.id,
-            text: optText,
-            order_index: i + 1,
-          }));
-          await supabase.from('question_options').insert(optionRows);
+        // Вставляем варианты тестового вопроса
+        if (row.type === 'test') {
+          if (row.rawOptions && row.rawOptions.length > 0) {
+            const optionRows = row.rawOptions.map((opt, i) => ({
+              question_id: q.id,
+              text: opt.text,
+              text_ru: opt.text,
+              image_url: opt.imageUrl || null,
+              order_index: i + 1,
+            }));
+            await supabase.from('question_options').insert(optionRows);
+          } else if (row.optionsText) {
+            const opts = row.optionsText.split(/[|;]/).map(s => s.trim()).filter(Boolean);
+            const optionRows = opts.map((optText, i) => ({
+              question_id: q.id,
+              text: optText,
+              text_ru: optText,
+              order_index: i + 1,
+            }));
+            await supabase.from('question_options').insert(optionRows);
+          }
         }
 
-        // Элементы соответствия
-        if (row.type === 'matching' && row.matchingText) {
-          const [leftPart, rightPart] = row.matchingText.split('||');
-          const leftItems = (leftPart || '').split(/[;]/).map(s => s.trim()).filter(Boolean);
-          const rightItems = (rightPart || '').split(/[;]/).map(s => s.trim()).filter(Boolean);
+        // Вставляем элементы задания на соответствие
+        if (row.type === 'matching') {
+          if (row.rawMatchingItems && row.rawMatchingItems.length > 0) {
+            const allItems = row.rawMatchingItems.map((m) => ({
+              question_id: q.id,
+              side: m.side,
+              text: m.text,
+              text_ru: m.text,
+              image_url: m.image_url || null,
+              order_index: m.order_index,
+            }));
+            await supabase.from('matching_items').insert(allItems);
+          } else if (row.matchingText) {
+            const [leftPart, rightPart] = row.matchingText.split('||');
+            const leftItems = (leftPart || '').split(/[;]/).map(s => s.trim()).filter(Boolean);
+            const rightItems = (rightPart || '').split(/[;]/).map(s => s.trim()).filter(Boolean);
 
-          const allItems = [
-            ...leftItems.map((l, i) => ({
-              question_id: q.id,
-              side: 'left' as const,
-              text: l.replace(/^[А-ЯA-Z]:\s*/i, ''),
-              order_index: i + 1,
-            })),
-            ...rightItems.map((r, i) => ({
-              question_id: q.id,
-              side: 'right' as const,
-              text: r.replace(/^[0-9]+:\s*/, ''),
-              order_index: i + 1,
-            })),
-          ];
-          await supabase.from('matching_items').insert(allItems);
+            const allItems = [
+              ...leftItems.map((l, i) => ({
+                question_id: q.id,
+                side: 'left' as const,
+                text: l.replace(/^[А-ЯA-Z]:\s*/i, ''),
+                text_ru: l.replace(/^[А-ЯA-Z]:\s*/i, ''),
+                order_index: i + 1,
+              })),
+              ...rightItems.map((r, i) => ({
+                question_id: q.id,
+                side: 'right' as const,
+                text: r.replace(/^[0-9]+:\s*/, ''),
+                text_ru: r.replace(/^[0-9]+:\s*/, ''),
+                order_index: i + 1,
+              })),
+            ];
+            await supabase.from('matching_items').insert(allItems);
+          }
         }
       }
     },
@@ -364,7 +512,6 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
 
   const revertBatchMutation = useMutation({
     mutationFn: async (batchId: string) => {
-      // Мягко удаляем все вопросы этой партии
       await supabase.from('questions').update({ is_deleted: true }).eq('batch_id', batchId);
       await supabase.from('import_batches').update({ is_reverted: true }).eq('id', batchId);
     },
@@ -384,10 +531,10 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         <div>
           <h2 className="text-xl font-bold text-slate-900 flex items-center">
             <Upload className="w-5 h-5 mr-2 text-blue-600" />
-            Массовый импорт вопросов
+            Импорт вопросов (Word .docx, Excel, CSV)
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Загрузка из Excel/CSV или вставка текста с предварительной проверкой
+            Прямой импорт документов Word с автоматическим извлечением картинок и формул
           </p>
         </div>
 
@@ -404,28 +551,29 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
       <div className="flex border-b border-slate-200 px-6 bg-white text-xs font-semibold">
         <button
           onClick={() => setActiveTab('file')}
-          className={`py-3 px-4 border-b-2 transition ${
+          className={`py-3 px-4 border-b-2 transition flex items-center space-x-1.5 ${
             activeTab === 'file' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          Файл Excel / CSV
+          <FileText className="w-4 h-4" />
+          <span>Word (.docx) / Excel / CSV</span>
         </button>
         <button
           onClick={() => setActiveTab('text')}
-          className={`py-3 px-4 border-b-2 transition ${
+          className={`py-3 px-4 border-b-2 transition flex items-center space-x-1.5 ${
             activeTab === 'text' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          Вставка текста
+          <span>Вставка текста</span>
         </button>
         {isAdmin && (
           <button
             onClick={() => setActiveTab('history')}
-            className={`py-3 px-4 border-b-2 transition ${
+            className={`py-3 px-4 border-b-2 transition flex items-center space-x-1.5 ${
               activeTab === 'history' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            История партий и откат
+            <span>История партий и откат</span>
           </button>
         )}
       </div>
@@ -437,22 +585,105 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
           </div>
         )}
 
-        {/* Вкладка 1: Файл */}
+        {/* Панель выбора раздела по умолчанию (для документов Word и общих таблиц) */}
+        {activeTab !== 'history' && (
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center">
+                <Layers className="w-3.5 h-3.5 mr-1.5 text-blue-600" />
+                Раздел для вопросов (по умолчанию):
+              </span>
+              {parsedRows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleApplyTaxonomyToAll}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline"
+                >
+                  Применить ко всем ({parsedRows.length})
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Предмет</label>
+                <select
+                  value={defaultSubjectId}
+                  onChange={(e) => {
+                    setDefaultSubjectId(e.target.value);
+                    setDefaultChapterId('');
+                    setDefaultTopicId('');
+                  }}
+                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Глава</label>
+                <select
+                  value={defaultChapterId}
+                  onChange={(e) => {
+                    setDefaultChapterId(e.target.value);
+                    setDefaultTopicId('');
+                  }}
+                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">-- Выберите главу --</option>
+                  {availableChapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Тема</label>
+                <select
+                  value={defaultTopicId}
+                  onChange={(e) => setDefaultTopicId(e.target.value)}
+                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">-- Выберите тему --</option>
+                  {availableTopics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Вкладка 1: Файл (Word / Excel / CSV) */}
         {activeTab === 'file' && (
           <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center bg-slate-50 hover:bg-slate-100/60 transition cursor-pointer relative">
             <input
               type="file"
-              accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+              accept=".docx, .xlsx, .xls, .csv, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
               onChange={handleFileUpload}
-              className="absolute inset-0 opacity-0 cursor-pointer"
+              disabled={isProcessing}
+              className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
             />
-            <FileSpreadsheet className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-            <p className="font-semibold text-slate-800 text-sm">
-              Нажмите для выбора файла или перетащите его сюда
-            </p>
-            <p className="text-xs text-slate-500 mt-1">
-              Поддерживаются файлы .xlsx, .xls и .csv
-            </p>
+            {isProcessing ? (
+              <div className="space-y-2 py-4">
+                <Loader2 className="w-10 h-10 text-blue-600 mx-auto animate-spin" />
+                <p className="font-bold text-slate-800 text-sm">Обработка документа...</p>
+                {statusMessage && <p className="text-xs text-blue-600 font-medium">{statusMessage}</p>}
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-center space-x-3 mb-3">
+                  <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 shadow-sm">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
+                    <FileSpreadsheet className="w-6 h-6" />
+                  </div>
+                </div>
+                <p className="font-bold text-slate-800 text-sm">
+                  Нажмите для выбора файла Word (.docx), Excel или CSV
+                </p>
+                <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                  Картинки из файлов Word (.docx) извлекаются, сжимаются и прикрепляются к вопросам автоматически!
+                </p>
+              </>
+            )}
           </div>
         )}
 
@@ -515,7 +746,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         {/* Предпросмотр распознанных строк */}
         {parsedRows.length > 0 && activeTab !== 'history' && (
           <div className="space-y-4 pt-4 border-t border-slate-200">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="font-bold text-slate-900 text-sm">Предварительный просмотр перед сохранением</h3>
                 <p className="text-xs text-slate-500">
@@ -541,48 +772,106 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                   ) : (
                     <CheckCircle2 className="w-4 h-4" />
                   )}
-                  <span>Импортировать ({validRows.length})</span>
+                  <span>Импортировать в базу ({validRows.length})</span>
                 </button>
               </div>
             </div>
 
-            <div className="max-h-80 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-xs">
+            <div className="max-h-96 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-xs">
               {parsedRows.map((r, i) => (
                 <div key={i} className={`p-3 ${r.errors.length > 0 ? 'bg-red-50/50' : 'bg-white'}`}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-mono text-slate-400">#{r.rowNum}</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        r.type === 'test' ? 'bg-blue-100 text-blue-800' : r.type === 'matching' ? 'bg-purple-100 text-purple-800' : 'bg-emerald-100 text-emerald-800'
-                      }`}>
-                        {r.type}
-                      </span>
-                      <span className="font-semibold text-slate-800">{r.content}</span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-mono text-slate-400 font-semibold">#{r.rowNum}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          r.type === 'test' ? 'bg-blue-100 text-blue-800' : r.type === 'matching' ? 'bg-purple-100 text-purple-800' : 'bg-emerald-100 text-emerald-800'
+                        }`}>
+                          {r.type === 'test' ? 'Тест' : r.type === 'matching' ? 'Соответствие' : 'Открытый'}
+                        </span>
+                        <div className="font-semibold text-slate-800 leading-snug">
+                          <FormattedText text={r.content} />
+                        </div>
+                      </div>
+
+                      {r.errors.length > 0 ? (
+                        <div className="mt-1 text-red-600 text-[11px] flex items-center space-x-1">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                          <span>{r.errors.join('; ')}</span>
+                        </div>
+                      ) : (
+                        <div className="mt-1 text-slate-500 text-[11px]">
+                          {r.type === 'test' && r.rawOptions && (
+                            <div className="flex flex-wrap gap-2 pt-0.5">
+                              {r.rawOptions.map((opt, oIdx) => (
+                                <span key={oIdx} className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                  <strong className="mr-1">{['A', 'B', 'C', 'D', 'E'][oIdx] || String(oIdx + 1)})</strong>
+                                  <FormattedText text={opt.text} />
+                                  {opt.imageUrl && <ImageIcon className="w-3 h-3 text-blue-500 ml-1 inline" />}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {r.type === 'test' && !r.rawOptions && r.optionsText && (
+                            <span>Варианты: {r.optionsText}</span>
+                          )}
+                          {r.type === 'matching' && r.rawMatchingItems && (
+                            <span className="text-purple-700 font-medium">
+                              Элементов соответствия: {r.rawMatchingItems.length} (ABCD / 12345)
+                            </span>
+                          )}
+                          {r.type === 'open' && (
+                            <span>Ответ: <strong className="text-slate-700">{r.correctAnswer || 'не указан'}</strong></span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
-                    <div className="text-[11px] text-slate-400">
-                      {r.subjectName} / {r.chapterName} / {r.topicName}
+                    <div className="flex items-center space-x-3 shrink-0">
+                      {r.imageUrl && (
+                        <img
+                          src={r.imageUrl}
+                          alt="Изображение"
+                          onClick={() => setPreviewImage(r.imageUrl || null)}
+                          className="w-12 h-12 object-contain rounded-lg border border-slate-200 bg-slate-50 p-0.5 cursor-pointer hover:opacity-90 hover:scale-105 transition shadow-sm"
+                          title="Нажмите для просмотра"
+                        />
+                      )}
+                      <div className="text-[11px] text-slate-400 text-right">
+                        <div>{r.subjectName}</div>
+                        <div className="text-[10px] text-slate-300">{r.chapterName}</div>
+                      </div>
                     </div>
                   </div>
-
-                  {r.errors.length > 0 ? (
-                    <div className="mt-1 text-red-600 text-[11px] flex items-center space-x-1">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span>{r.errors.join('; ')}</span>
-                    </div>
-                  ) : (
-                    <div className="mt-1 text-slate-500 text-[11px] truncate">
-                      {r.type === 'test' && `Варианты: ${r.optionsText}`}
-                      {r.type === 'matching' && `Соответствия: ${r.matchingText}`}
-                      {r.type === 'open' && `Ответ: ${r.correctAnswer || 'не указан'}`}
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
           </div>
         )}
       </div>
+
+      {/* Модальное окно увеличения картинки (Lightbox) */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setPreviewImage(null)}
+              className="absolute -top-11 right-0 text-white hover:text-slate-300 p-2 rounded-full bg-black/50 hover:bg-black/75 transition"
+              title="Закрыть (Esc)"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            <img
+              src={previewImage}
+              alt="Увеличенное изображение"
+              className="max-h-[85vh] max-w-full rounded-2xl shadow-2xl object-contain border border-white/20 bg-white p-2"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

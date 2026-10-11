@@ -13,7 +13,8 @@ import {
   Image as ImageIcon, 
   Upload, 
   Loader2,
-  X
+  X,
+  Languages
 } from 'lucide-react';
 
 interface QuestionFormProps {
@@ -25,6 +26,8 @@ interface QuestionFormProps {
 interface TestOptionState {
   id?: string;
   text: string;
+  text_ru?: string;
+  text_tg?: string;
   image_url?: string | null;
   is_correct?: boolean;
 }
@@ -33,6 +36,8 @@ interface MatchingItemState {
   id?: string;
   side: 'left' | 'right';
   text: string;
+  text_ru?: string;
+  text_tg?: string;
   image_url?: string | null;
 }
 
@@ -44,47 +49,92 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
-  // Основные поля
-  const [subjectId, setSubjectId] = useState(initialData?.subject_id || '');
-  const [chapterId, setChapterId] = useState(initialData?.chapter_id || '');
-  const [topicId, setTopicId] = useState(initialData?.topic_id || '');
-  const [sourceId, setSourceId] = useState(initialData?.source_id || '');
-  const [type, setType] = useState<QuestionType>(initialData?.type || 'test');
-  const [content, setContent] = useState(initialData?.content || '');
+  // Режим редактора: 'both' (двойной RU + TG), 'ru' (только русский), 'tg' (только таджикский)
+  const [formMode, setFormMode] = useState<'both' | 'ru' | 'tg'>('both');
+
+  // Основные поля (сохраняем таксономию в localStorage для быстрого добавления пачки вопросов)
+  const [subjectId, setSubjectId] = useState(
+    initialData?.subject_id || localStorage.getItem('examiner_last_new_subject_id') || ''
+  );
+  const [chapterId, setChapterId] = useState(
+    initialData?.chapter_id || localStorage.getItem('examiner_last_new_chapter_id') || ''
+  );
+  const [topicId, setTopicId] = useState(
+    initialData?.topic_id || localStorage.getItem('examiner_last_new_topic_id') || ''
+  );
+  const [sourceId, setSourceId] = useState(
+    initialData?.source_id || localStorage.getItem('examiner_last_new_source_id') || ''
+  );
+  const [type, setType] = useState<QuestionType>(
+    initialData?.type || (localStorage.getItem('examiner_last_new_type') as QuestionType) || 'test'
+  );
+
+  // Текст вопроса на двух языках
+  const [contentRu, setContentRu] = useState(initialData?.content_ru || initialData?.content || '');
+  const [contentTg, setContentTg] = useState(initialData?.content_tg || '');
   const [imageUrl, setImageUrl] = useState<string | null>(initialData?.image_url || null);
+
   const [correctNumeric, setCorrectNumeric] = useState<string>(
     initialData?.correct_numeric_answer !== undefined && initialData?.correct_numeric_answer !== null
       ? String(initialData.correct_numeric_answer)
       : ''
   );
 
-  // Варианты для тестов
+  // Варианты для тестов с поддержкой RU + TG
   const [options, setOptions] = useState<TestOptionState[]>(
     initialData?.options && initialData.options.length > 0
-      ? initialData.options.map(o => ({ text: o.text, image_url: o.image_url, is_correct: o.is_correct }))
+      ? initialData.options.map(o => ({
+          id: o.id,
+          text: o.text_ru || o.text || '',
+          text_ru: o.text_ru || o.text || '',
+          text_tg: o.text_tg || '',
+          image_url: o.image_url,
+          is_correct: o.is_correct || false,
+        }))
       : [
-          { text: '', is_correct: false },
-          { text: '', is_correct: false },
-          { text: '', is_correct: false },
-          { text: '', is_correct: false },
+          { text: '', text_ru: '', text_tg: '', is_correct: true },
+          { text: '', text_ru: '', text_tg: '', is_correct: false },
+          { text: '', text_ru: '', text_tg: '', is_correct: false },
+          { text: '', text_ru: '', text_tg: '', is_correct: false },
         ]
   );
 
-  // Элементы на соответствие
+  // Элементы на соответствие с поддержкой RU + TG
   const [leftItems, setLeftItems] = useState<MatchingItemState[]>(
-    initialData?.matching_items?.filter(m => m.side === 'left') || [
-      { side: 'left', text: '' },
-      { side: 'left', text: '' },
-      { side: 'left', text: '' },
-    ]
+    initialData?.matching_items && initialData.matching_items.filter(m => m.side === 'left').length > 0
+      ? initialData.matching_items.filter(m => m.side === 'left').map(m => ({
+          id: m.id,
+          side: 'left',
+          text: m.text_ru || m.text || '',
+          text_ru: m.text_ru || m.text || '',
+          text_tg: m.text_tg || '',
+          image_url: m.image_url,
+        }))
+      : [
+          { side: 'left', text: '', text_ru: '', text_tg: '' },
+          { side: 'left', text: '', text_ru: '', text_tg: '' },
+          { side: 'left', text: '', text_ru: '', text_tg: '' },
+          { side: 'left', text: '', text_ru: '', text_tg: '' },
+        ]
   );
+
   const [rightItems, setRightItems] = useState<MatchingItemState[]>(
-    initialData?.matching_items?.filter(m => m.side === 'right') || [
-      { side: 'right', text: '' },
-      { side: 'right', text: '' },
-      { side: 'right', text: '' },
-      { side: 'right', text: '' },
-    ]
+    initialData?.matching_items && initialData.matching_items.filter(m => m.side === 'right').length > 0
+      ? initialData.matching_items.filter(m => m.side === 'right').map(m => ({
+          id: m.id,
+          side: 'right',
+          text: m.text_ru || m.text || '',
+          text_ru: m.text_ru || m.text || '',
+          text_tg: m.text_tg || '',
+          image_url: m.image_url,
+        }))
+      : [
+          { side: 'right', text: '', text_ru: '', text_tg: '' },
+          { side: 'right', text: '', text_ru: '', text_tg: '' },
+          { side: 'right', text: '', text_ru: '', text_tg: '' },
+          { side: 'right', text: '', text_ru: '', text_tg: '' },
+          { side: 'right', text: '', text_ru: '', text_tg: '' },
+        ]
   );
 
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -141,6 +191,30 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     }
   };
 
+  // Вставка скриншота из буфера обмена (Ctrl + V)
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          try {
+            setUploadingImage(true);
+            const url = await uploadQuestionImage(file);
+            setImageUrl(url);
+          } catch (err: any) {
+            setErrorMsg('Ошибка вставки картинки: ' + err.message);
+          } finally {
+            setUploadingImage(false);
+          }
+        }
+        break;
+      }
+    }
+  };
+
   // Загрузка изображения для варианта теста
   const handleOptionImageUpload = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -174,35 +248,42 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     }).catch(err => alert(err.message));
   };
 
-  // Сохранение вопроса (Create / Update с оптимистической блокировкой)
+  // Сохранение вопроса (Create / Update)
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!subjectId || !chapterId || !topicId) {
         throw new Error('Пожалуйста, выберите предмет, главу и тему');
       }
-      if (!content.trim()) {
-        throw new Error('Пожалуйста, заполните текст вопроса');
+      if (!contentRu.trim() && !contentTg.trim()) {
+        throw new Error('Пожалуйста, заполните текст вопроса (хотя бы на одном языке)');
       }
 
       if (type === 'test') {
-        const validOptions = options.filter(o => o.text.trim() || o.image_url);
+        const validOptions = options.filter(
+          o => (o.text_ru?.trim() || o.text_tg?.trim() || o.text?.trim() || o.image_url)
+        );
         if (validOptions.length < 2) {
           throw new Error('Тестовый вопрос должен содержать минимум 2 варианта ответа');
         }
       }
 
       if (type === 'matching') {
-        const validLeft = leftItems.filter(l => l.text.trim() || l.image_url);
-        const validRight = rightItems.filter(r => r.text.trim() || r.image_url);
+        const validLeft = leftItems.filter(
+          l => (l.text_ru?.trim() || l.text_tg?.trim() || l.text?.trim() || l.image_url)
+        );
+        const validRight = rightItems.filter(
+          r => (r.text_ru?.trim() || r.text_tg?.trim() || r.text?.trim() || r.image_url)
+        );
         if (validLeft.length === 0 || validRight.length === 0) {
           throw new Error('Заполните элементы в обеих колонках задания на соответствие');
         }
       }
 
       const numericVal = type === 'open' && correctNumeric.trim() !== '' ? Number(correctNumeric) : null;
+      const primaryContent = contentRu.trim() || contentTg.trim();
 
       if (initialData?.id) {
-        // Оптимистическая блокировка: обновляем только если version совпадает
+        // Обновление существующего вопроса
         const { data: updatedQuestion, error: qErr } = await supabase
           .from('questions')
           .update({
@@ -211,7 +292,9 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             topic_id: topicId,
             source_id: sourceId || null,
             type,
-            content,
+            content: primaryContent,
+            content_ru: contentRu.trim() || null,
+            content_tg: contentTg.trim() || null,
             image_url: imageUrl,
             correct_numeric_answer: numericVal,
             updated_by: user?.id,
@@ -228,38 +311,61 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           );
         }
 
-        // Пересохраняем связанные опции
+        // Пересохраняем опции тестов с сохранением двуязычия
         if (type === 'test') {
           await supabase.from('question_options').delete().eq('question_id', initialData.id);
           const validOptions = options
-            .filter(o => o.text.trim() || o.image_url)
-            .map((o, idx) => ({
-              question_id: initialData.id,
-              text: o.text.trim(),
-              image_url: o.image_url,
-              is_correct: o.is_correct || false,
-              order_index: idx + 1,
-            }));
+            .filter(o => o.text_ru?.trim() || o.text_tg?.trim() || o.text?.trim() || o.image_url)
+            .map((o, idx) => {
+              const rText = (o.text_ru || o.text || '').trim();
+              const tText = (o.text_tg || '').trim();
+              return {
+                question_id: initialData.id,
+                text: rText || tText,
+                text_ru: rText || null,
+                text_tg: tText || null,
+                image_url: o.image_url,
+                is_correct: o.is_correct || false,
+                order_index: idx + 1,
+              };
+            });
           await supabase.from('question_options').insert(validOptions);
         }
 
+        // Пересохраняем соответствия с сохранением двуязычия
         if (type === 'matching') {
           await supabase.from('matching_items').delete().eq('question_id', initialData.id);
           const allItems = [
-            ...leftItems.filter(l => l.text.trim() || l.image_url).map((l, idx) => ({
-              question_id: initialData.id,
-              side: 'left' as const,
-              text: l.text.trim(),
-              image_url: l.image_url,
-              order_index: idx + 1,
-            })),
-            ...rightItems.filter(r => r.text.trim() || r.image_url).map((r, idx) => ({
-              question_id: initialData.id,
-              side: 'right' as const,
-              text: r.text.trim(),
-              image_url: r.image_url,
-              order_index: idx + 1,
-            })),
+            ...leftItems
+              .filter(l => l.text_ru?.trim() || l.text_tg?.trim() || l.text?.trim() || l.image_url)
+              .map((l, idx) => {
+                const rText = (l.text_ru || l.text || '').trim();
+                const tText = (l.text_tg || '').trim();
+                return {
+                  question_id: initialData.id,
+                  side: 'left' as const,
+                  text: rText || tText,
+                  text_ru: rText || null,
+                  text_tg: tText || null,
+                  image_url: l.image_url,
+                  order_index: idx + 1,
+                };
+              }),
+            ...rightItems
+              .filter(r => r.text_ru?.trim() || r.text_tg?.trim() || r.text?.trim() || r.image_url)
+              .map((r, idx) => {
+                const rText = (r.text_ru || r.text || '').trim();
+                const tText = (r.text_tg || '').trim();
+                return {
+                  question_id: initialData.id,
+                  side: 'right' as const,
+                  text: rText || tText,
+                  text_ru: rText || null,
+                  text_tg: tText || null,
+                  image_url: r.image_url,
+                  order_index: idx + 1,
+                };
+              }),
           ];
           await supabase.from('matching_items').insert(allItems);
         }
@@ -273,7 +379,9 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             topic_id: topicId,
             source_id: sourceId || null,
             type,
-            content,
+            content: primaryContent,
+            content_ru: contentRu.trim() || null,
+            content_tg: contentTg.trim() || null,
             image_url: imageUrl,
             correct_numeric_answer: numericVal,
             created_by: user?.id,
@@ -286,36 +394,65 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
         if (type === 'test') {
           const validOptions = options
-            .filter(o => o.text.trim() || o.image_url)
-            .map((o, idx) => ({
-              question_id: newQ.id,
-              text: o.text.trim(),
-              image_url: o.image_url,
-              is_correct: o.is_correct || false,
-              order_index: idx + 1,
-            }));
+            .filter(o => o.text_ru?.trim() || o.text_tg?.trim() || o.text?.trim() || o.image_url)
+            .map((o, idx) => {
+              const rText = (o.text_ru || o.text || '').trim();
+              const tText = (o.text_tg || '').trim();
+              return {
+                question_id: newQ.id,
+                text: rText || tText,
+                text_ru: rText || null,
+                text_tg: tText || null,
+                image_url: o.image_url,
+                is_correct: o.is_correct || false,
+                order_index: idx + 1,
+              };
+            });
           await supabase.from('question_options').insert(validOptions);
         }
 
         if (type === 'matching') {
           const allItems = [
-            ...leftItems.filter(l => l.text.trim() || l.image_url).map((l, idx) => ({
-              question_id: newQ.id,
-              side: 'left' as const,
-              text: l.text.trim(),
-              image_url: l.image_url,
-              order_index: idx + 1,
-            })),
-            ...rightItems.filter(r => r.text.trim() || r.image_url).map((r, idx) => ({
-              question_id: newQ.id,
-              side: 'right' as const,
-              text: r.text.trim(),
-              image_url: r.image_url,
-              order_index: idx + 1,
-            })),
+            ...leftItems
+              .filter(l => l.text_ru?.trim() || l.text_tg?.trim() || l.text?.trim() || l.image_url)
+              .map((l, idx) => {
+                const rText = (l.text_ru || l.text || '').trim();
+                const tText = (l.text_tg || '').trim();
+                return {
+                  question_id: newQ.id,
+                  side: 'left' as const,
+                  text: rText || tText,
+                  text_ru: rText || null,
+                  text_tg: tText || null,
+                  image_url: l.image_url,
+                  order_index: idx + 1,
+                };
+              }),
+            ...rightItems
+              .filter(r => r.text_ru?.trim() || r.text_tg?.trim() || r.text?.trim() || r.image_url)
+              .map((r, idx) => {
+                const rText = (r.text_ru || r.text || '').trim();
+                const tText = (r.text_tg || '').trim();
+                return {
+                  question_id: newQ.id,
+                  side: 'right' as const,
+                  text: rText || tText,
+                  text_ru: rText || null,
+                  text_tg: tText || null,
+                  image_url: r.image_url,
+                  order_index: idx + 1,
+                };
+              }),
           ];
           await supabase.from('matching_items').insert(allItems);
         }
+
+        // Запоминаем таксономию для следующего добавления
+        localStorage.setItem('examiner_last_new_subject_id', subjectId);
+        localStorage.setItem('examiner_last_new_chapter_id', chapterId);
+        localStorage.setItem('examiner_last_new_topic_id', topicId);
+        if (sourceId) localStorage.setItem('examiner_last_new_source_id', sourceId);
+        localStorage.setItem('examiner_last_new_type', type);
       }
     },
     onSuccess: () => {
@@ -328,7 +465,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   });
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-w-4xl mx-auto my-6">
+    <div 
+      onPaste={handlePaste}
+      className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-w-4xl mx-auto my-6"
+    >
       {/* Header */}
       <div className="p-6 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
         <div>
@@ -336,7 +476,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             {initialData ? 'Редактирование вопроса' : 'Добавление нового вопроса'}
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Укажите привязку к теме, тип вопроса и содержание
+            Укажите привязку к теме, тип вопроса, текст и варианты на русском и таджикском языках
           </p>
         </div>
         <button
@@ -451,26 +591,99 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           </div>
         </div>
 
-        {/* 3. Текст вопроса и картинка к вопросу */}
-        <div className="space-y-3">
-          <FormulaEditor
-            label="Текст вопроса *"
-            value={content}
-            onChange={setContent}
-            placeholder="Например: Укажите формулу серной кислоты или решите уравнение реакции..."
-            rows={4}
-          />
+        {/* ПЕРЕКЛЮЧАТЕЛЬ ДВУЯЗЫЧНОГО РЕЖИМА */}
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 gap-2">
+          <div className="flex items-center space-x-2">
+            <Languages className="w-4 h-4 text-purple-600" />
+            <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+              Языковой режим редактора:
+            </span>
+          </div>
+          <div className="inline-flex rounded-xl border border-slate-200 p-0.5 bg-slate-100 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setFormMode('both')}
+              className={`px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 ${
+                formMode === 'both'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>🌐 Двойной (RU + TG)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormMode('ru')}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                formMode === 'ru'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Русский</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormMode('tg')}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                formMode === 'tg'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Тоҷикӣ</span>
+            </button>
+          </div>
+        </div>
 
-          {/* Картинка к вопросу */}
+        {/* 3. Текст вопроса */}
+        <div className="space-y-4">
+          {formMode === 'both' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormulaEditor
+                label="Текст вопроса (Русский) *"
+                value={contentRu}
+                onChange={setContentRu}
+                placeholder="Например: Укажите формулу серной кислоты или решите уравнение реакции..."
+                rows={4}
+              />
+              <FormulaEditor
+                label="Матни савол (Тоҷикӣ)"
+                value={contentTg}
+                onChange={setContentTg}
+                placeholder="Масалан: Формулаи кислотаи сулфатро муайян намоед..."
+                rows={4}
+              />
+            </div>
+          ) : formMode === 'ru' ? (
+            <FormulaEditor
+              label="Текст вопроса (Русский) *"
+              value={contentRu}
+              onChange={setContentRu}
+              placeholder="Например: Укажите формулу серной кислоты или решите уравнение реакции..."
+              rows={4}
+            />
+          ) : (
+            <FormulaEditor
+              label="Матни савол (Тоҷикӣ) *"
+              value={contentTg}
+              onChange={setContentTg}
+              placeholder="Масалан: Формулаи кислотаи сулфатро муайян намоед..."
+              rows={4}
+            />
+          )}
+
+          {/* Картинка к вопросу + вставка из буфера (Ctrl+V) */}
           <div className="flex items-center space-x-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
             <div className="flex-1 flex items-center space-x-3">
               {imageUrl ? (
-                <div className="relative group w-16 h-16 rounded-lg overflow-hidden border border-slate-300 bg-white shrink-0">
-                  <img src={imageUrl} alt="Вопрос" className="w-full h-full object-cover" />
+                <div className="relative group h-20 w-auto min-w-[80px] max-w-[200px] rounded-lg overflow-hidden border border-slate-300 bg-white shrink-0 p-1">
+                  <img src={imageUrl} alt="Вопрос" className="h-full w-full object-contain" />
                   <button
                     type="button"
                     onClick={() => setImageUrl(null)}
                     className="absolute inset-0 bg-red-600/80 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition"
+                    title="Удалить картинку"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -485,7 +698,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                   {imageUrl ? 'Изображение прикреплено' : 'Добавить схему, рисунок или формулу'}
                 </span>
                 <span className="text-slate-400">
-                  Автоматически сжимается в WebP (до 500 КБ) для быстрой работы
+                  Можно нажать Ctrl+V для вставки скриншота или загрузить файл (WebP, PNG, JPG)
                 </span>
               </div>
             </div>
@@ -508,19 +721,17 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           </div>
         </div>
 
-        {/* 4. Специфичные поля для каждого типа */}
-
-        {/* ТИП: ТЕСТОВЫЙ */}
+        {/* 4. ТИП: ТЕСТОВЫЙ С ВАРИАНТАМИ */}
         {type === 'test' && (
           <div className="space-y-3 pt-3 border-t border-slate-200">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                Варианты ответа (произвольное количество)
+                Варианты ответа (A, B, C, D...)
               </label>
               <button
                 type="button"
-                onClick={() => setOptions([...options, { text: '', is_correct: false }])}
-                className="text-xs text-blue-600 hover:text-blue-700 font-semibold flex items-center space-x-1"
+                onClick={() => setOptions([...options, { text: '', text_ru: '', text_tg: '', is_correct: false }])}
+                className="text-xs text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg font-semibold flex items-center space-x-1 transition"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Добавить вариант</span>
@@ -528,171 +739,388 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             </div>
 
             <div className="space-y-3">
-              {options.map((opt, idx) => (
-                <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                  <div className="flex items-center space-x-3">
-                    <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center shrink-0">
-                      {idx + 1}
-                    </span>
-                    <input
-                      type="text"
-                      value={opt.text}
-                      onChange={(e) => {
-                        const updated = [...options];
-                        updated[idx].text = e.target.value;
-                        setOptions(updated);
-                      }}
-                      placeholder={`Вариант ${idx + 1}`}
-                      className="flex-1 text-sm p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                    />
+              {options.map((opt, idx) => {
+                const optLetter = ['A', 'B', 'C', 'D', 'E', 'F'][idx] || String.fromCharCode(65 + idx);
 
-                    {/* Загрузка картинки к варианту */}
-                    <label className="cursor-pointer p-2 bg-white hover:bg-slate-100 text-slate-500 rounded-lg border border-slate-300 transition" title="Картинка к варианту">
-                      <ImageIcon className="w-4 h-4" />
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleOptionImageUpload(idx, e)}
-                        className="hidden"
-                      />
-                    </label>
+                return (
+                  <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="w-6 h-6 rounded-lg bg-blue-100 text-blue-800 text-xs font-bold flex items-center justify-center shrink-0">
+                          {optLetter}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...options];
+                            updated[idx].is_correct = !updated[idx].is_correct;
+                            setOptions(updated);
+                          }}
+                          className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center space-x-1 transition ${
+                            opt.is_correct
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                              : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <CheckCircle2 className={`w-3.5 h-3.5 ${opt.is_correct ? 'text-emerald-600' : 'text-slate-300'}`} />
+                          <span>{opt.is_correct ? 'Верный ответ' : 'Отметить как верный'}</span>
+                        </button>
+                      </div>
 
-                    {options.length > 2 && (
-                      <button
-                        type="button"
-                        onClick={() => setOptions(options.filter((_, i) => i !== idx))}
-                        className="p-2 text-slate-400 hover:text-red-600 rounded-lg"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center space-x-1">
+                        <label 
+                          className="cursor-pointer p-1.5 bg-white hover:bg-slate-100 text-slate-500 rounded-lg border border-slate-300 transition" 
+                          title="Прикрепить изображение формулы к варианту"
+                        >
+                          <ImageIcon className="w-3.5 h-3.5" />
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleOptionImageUpload(idx, e)}
+                            className="hidden"
+                          />
+                        </label>
+                        {options.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => setOptions(options.filter((_, i) => i !== idx))}
+                            className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition"
+                            title="Удалить вариант"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Поля ввода варианта в зависимости от выбранного режима */}
+                    {formMode === 'both' ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-0.5">Русский (RU)</label>
+                          <input
+                            type="text"
+                            value={opt.text_ru ?? opt.text ?? ''}
+                            onChange={(e) => {
+                              const updated = [...options];
+                              updated[idx].text_ru = e.target.value;
+                              updated[idx].text = e.target.value;
+                              setOptions(updated);
+                            }}
+                            placeholder={`Вариант ${optLetter} (RU)`}
+                            className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-emerald-600 uppercase mb-0.5">Тоҷикӣ (TG)</label>
+                          <input
+                            type="text"
+                            value={opt.text_tg ?? ''}
+                            onChange={(e) => {
+                              const updated = [...options];
+                              updated[idx].text_tg = e.target.value;
+                              setOptions(updated);
+                            }}
+                            placeholder={`Варианти ${optLetter} (TG)`}
+                            className="w-full text-xs p-2 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                          />
+                        </div>
+                      </div>
+                    ) : formMode === 'ru' ? (
+                      <div>
+                        <input
+                          type="text"
+                          value={opt.text_ru ?? opt.text ?? ''}
+                          onChange={(e) => {
+                            const updated = [...options];
+                            updated[idx].text_ru = e.target.value;
+                            updated[idx].text = e.target.value;
+                            setOptions(updated);
+                          }}
+                          placeholder={`Вариант ${optLetter} (RU)`}
+                          className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <input
+                          type="text"
+                          value={opt.text_tg ?? ''}
+                          onChange={(e) => {
+                            const updated = [...options];
+                            updated[idx].text_tg = e.target.value;
+                            setOptions(updated);
+                          }}
+                          placeholder={`Варианти ${optLetter} (TG)`}
+                          className="w-full text-xs p-2 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                        />
+                      </div>
+                    )}
+
+                    {/* Превью картинки варианта */}
+                    {opt.image_url && (
+                      <div className="flex items-center space-x-2 pt-1">
+                        <img 
+                          src={opt.image_url} 
+                          alt="Превью" 
+                          className="h-16 w-auto max-w-[150px] object-contain rounded border bg-white p-1" 
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...options];
+                            updated[idx].image_url = null;
+                            setOptions(updated);
+                          }}
+                          className="text-xs text-red-500 hover:underline"
+                        >
+                          Удалить картинку
+                        </button>
+                      </div>
                     )}
                   </div>
-
-                  {opt.image_url && (
-                    <div className="flex items-center space-x-2 pl-9">
-                      <img src={opt.image_url} alt="Превью" className="w-12 h-12 object-cover rounded border" />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updated = [...options];
-                          updated[idx].image_url = null;
-                          setOptions(updated);
-                        }}
-                        className="text-xs text-red-500 hover:underline"
-                      >
-                        Удалить картинку варианта
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* ТИП: СООТВЕТСТВИЕ */}
+        {/* 5. ТИП: СООТВЕТСТВИЕ С ДВОЙНЫМ РЕДАКТОРОМ */}
         {type === 'matching' && (
           <div className="space-y-4 pt-3 border-t border-slate-200">
             <p className="text-xs text-slate-500">
-              Количество элементов слева и справа может отличаться. Буквы (A, B, C, D...) для левой части и цифры (1, 2, 3...) для правой части подставляются автоматически.
+              Левая колонка маркируется буквами (A, B, C, D), правая колонка — цифрами (1, 2, 3, 4, 5). В двойном режиме можно заполнять русский и таджикский варианты параллельно.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Левая колонка */}
+              {/* Левая колонка (A, B, C, D) */}
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs uppercase tracking-wider text-slate-700">Левая часть (A, B, C, D...)</span>
                   <button
                     type="button"
-                    onClick={() => setLeftItems([...leftItems, { side: 'left', text: '' }])}
+                    onClick={() => setLeftItems([...leftItems, { side: 'left', text: '', text_ru: '', text_tg: '' }])}
                     className="text-xs text-blue-600 hover:text-blue-700 font-semibold flex items-center space-x-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Добавить</span>
                   </button>
                 </div>
-                {leftItems.map((item, idx) => (
-                  <div key={idx} className="flex items-center space-x-2">
-                    <span className="font-bold text-xs text-slate-500 w-5">
-                      {['A', 'B', 'C', 'D', 'E', 'F'][idx] || String.fromCharCode(65 + idx)}:
-                    </span>
-                    <input
-                      type="text"
-                      value={item.text}
-                      onChange={(e) => {
-                        const updated = [...leftItems];
-                        updated[idx].text = e.target.value;
-                        setLeftItems(updated);
-                      }}
-                      placeholder="Элемент"
-                      className="flex-1 text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <label className="cursor-pointer p-1.5 bg-white text-slate-400 hover:text-slate-600 rounded border border-slate-300">
-                      <ImageIcon className="w-3.5 h-3.5" />
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => e.target.files?.[0] && handleMatchingImageUpload('left', idx, e.target.files[0])}
-                        className="hidden"
-                      />
-                    </label>
-                    {leftItems.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => setLeftItems(leftItems.filter((_, i) => i !== idx))}
-                        className="text-slate-400 hover:text-red-500 p-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+
+                {leftItems.map((item, idx) => {
+                  const letter = ['A', 'B', 'C', 'D', 'E', 'F'][idx] || String.fromCharCode(65 + idx);
+                  return (
+                    <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                          {letter}
+                        </span>
+                        <div className="flex items-center space-x-1">
+                          <label className="cursor-pointer p-1 text-slate-400 hover:text-slate-600 rounded border border-slate-200" title="Картинка">
+                            <ImageIcon className="w-3 h-3" />
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => e.target.files?.[0] && handleMatchingImageUpload('left', idx, e.target.files[0])}
+                              className="hidden"
+                            />
+                          </label>
+                          {leftItems.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setLeftItems(leftItems.filter((_, i) => i !== idx))}
+                              className="text-slate-400 hover:text-red-500 p-1"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {formMode === 'both' ? (
+                        <div className="space-y-1">
+                          <input
+                            type="text"
+                            value={item.text_ru ?? item.text ?? ''}
+                            onChange={(e) => {
+                              const updated = [...leftItems];
+                              updated[idx].text_ru = e.target.value;
+                              updated[idx].text = e.target.value;
+                              setLeftItems(updated);
+                            }}
+                            placeholder={`Элемент ${letter} (RU)`}
+                            className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                          <input
+                            type="text"
+                            value={item.text_tg ?? ''}
+                            onChange={(e) => {
+                              const updated = [...leftItems];
+                              updated[idx].text_tg = e.target.value;
+                              setLeftItems(updated);
+                            }}
+                            placeholder={`Элементи ${letter} (TG)`}
+                            className="w-full text-xs p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          />
+                        </div>
+                      ) : formMode === 'ru' ? (
+                        <input
+                          type="text"
+                          value={item.text_ru ?? item.text ?? ''}
+                          onChange={(e) => {
+                            const updated = [...leftItems];
+                            updated[idx].text_ru = e.target.value;
+                            updated[idx].text = e.target.value;
+                            setLeftItems(updated);
+                          }}
+                          placeholder={`Элемент ${letter} (RU)`}
+                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={item.text_tg ?? ''}
+                          onChange={(e) => {
+                            const updated = [...leftItems];
+                            updated[idx].text_tg = e.target.value;
+                            setLeftItems(updated);
+                          }}
+                          placeholder={`Элементи ${letter} (TG)`}
+                          className="w-full text-xs p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      )}
+
+                      {item.image_url && (
+                        <div className="flex items-center space-x-1 pt-1">
+                          <img src={item.image_url} alt="" className="h-10 w-auto object-contain rounded border" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = [...leftItems];
+                              updated[idx].image_url = null;
+                              setLeftItems(updated);
+                            }}
+                            className="text-[10px] text-red-500 hover:underline"
+                          >
+                            Удалить
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
 
-              {/* Правая колонка */}
+              {/* Правая колонка (1, 2, 3, 4, 5) */}
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs uppercase tracking-wider text-slate-700">Правая часть (1, 2, 3...)</span>
                   <button
                     type="button"
-                    onClick={() => setRightItems([...rightItems, { side: 'right', text: '' }])}
+                    onClick={() => setRightItems([...rightItems, { side: 'right', text: '', text_ru: '', text_tg: '' }])}
                     className="text-xs text-blue-600 hover:text-blue-700 font-semibold flex items-center space-x-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Добавить</span>
                   </button>
                 </div>
+
                 {rightItems.map((item, idx) => (
-                  <div key={idx} className="flex items-center space-x-2">
-                    <span className="font-bold text-xs text-slate-500 w-5">{idx + 1}:</span>
-                    <input
-                      type="text"
-                      value={item.text}
-                      onChange={(e) => {
-                        const updated = [...rightItems];
-                        updated[idx].text = e.target.value;
-                        setRightItems(updated);
-                      }}
-                      placeholder="Элемент"
-                      className="flex-1 text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <label className="cursor-pointer p-1.5 bg-white text-slate-400 hover:text-slate-600 rounded border border-slate-300">
-                      <ImageIcon className="w-3.5 h-3.5" />
+                  <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                        {idx + 1}
+                      </span>
+                      <div className="flex items-center space-x-1">
+                        <label className="cursor-pointer p-1 text-slate-400 hover:text-slate-600 rounded border border-slate-200" title="Картинка">
+                          <ImageIcon className="w-3 h-3" />
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => e.target.files?.[0] && handleMatchingImageUpload('right', idx, e.target.files[0])}
+                            className="hidden"
+                          />
+                        </label>
+                        {rightItems.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setRightItems(rightItems.filter((_, i) => i !== idx))}
+                            className="text-slate-400 hover:text-red-500 p-1"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {formMode === 'both' ? (
+                      <div className="space-y-1">
+                        <input
+                          type="text"
+                          value={item.text_ru ?? item.text ?? ''}
+                          onChange={(e) => {
+                            const updated = [...rightItems];
+                            updated[idx].text_ru = e.target.value;
+                            updated[idx].text = e.target.value;
+                            setRightItems(updated);
+                          }}
+                          placeholder={`Элемент ${idx + 1} (RU)`}
+                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        <input
+                          type="text"
+                          value={item.text_tg ?? ''}
+                          onChange={(e) => {
+                            const updated = [...rightItems];
+                            updated[idx].text_tg = e.target.value;
+                            setRightItems(updated);
+                          }}
+                          placeholder={`Элементи ${idx + 1} (TG)`}
+                          className="w-full text-xs p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                    ) : formMode === 'ru' ? (
                       <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => e.target.files?.[0] && handleMatchingImageUpload('right', idx, e.target.files[0])}
-                        className="hidden"
+                        type="text"
+                        value={item.text_ru ?? item.text ?? ''}
+                        onChange={(e) => {
+                          const updated = [...rightItems];
+                          updated[idx].text_ru = e.target.value;
+                          updated[idx].text = e.target.value;
+                          setRightItems(updated);
+                        }}
+                        placeholder={`Элемент ${idx + 1} (RU)`}
+                        className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
-                    </label>
-                    {rightItems.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => setRightItems(rightItems.filter((_, i) => i !== idx))}
-                        className="text-slate-400 hover:text-red-500 p-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                    ) : (
+                      <input
+                        type="text"
+                        value={item.text_tg ?? ''}
+                        onChange={(e) => {
+                          const updated = [...rightItems];
+                          updated[idx].text_tg = e.target.value;
+                          setRightItems(updated);
+                        }}
+                        placeholder={`Элементи ${idx + 1} (TG)`}
+                        className="w-full text-xs p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      />
+                    )}
+
+                    {item.image_url && (
+                      <div className="flex items-center space-x-1 pt-1">
+                        <img src={item.image_url} alt="" className="h-10 w-auto object-contain rounded border" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = [...rightItems];
+                            updated[idx].image_url = null;
+                            setRightItems(updated);
+                          }}
+                          className="text-[10px] text-red-500 hover:underline"
+                        >
+                          Удалить
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}
@@ -701,11 +1129,11 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           </div>
         )}
 
-        {/* ТИП: ОТКРЫТЫЙ */}
+        {/* 6. ТИП: ОТКРЫТЫЙ */}
         {type === 'open' && (
           <div className="pt-3 border-t border-slate-200 space-y-2">
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
-              Правильный числовой ответ (необязательно для генерации билетов)
+              Правильный числовой ответ (необязательно)
             </label>
             <input
               type="number"
