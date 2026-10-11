@@ -55,3 +55,4 @@ sample_template.xml
 !enable_public_read.sql
 !step1_unlock.sql
 !step2_lock.sql
+!close_public_read.sql
