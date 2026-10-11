@@ -1,13 +1,59 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Profile, UserRole, AuditLog } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
-import { Users, Shield, ShieldCheck, UserCheck, Activity, Loader2 } from 'lucide-react';
+import { Users, ShieldCheck, UserCheck, Activity, Loader2, UserPlus } from 'lucide-react';
 
 export const UserManagementView: React.FC = () => {
   const queryClient = useQueryClient();
   const { user: currentUser, isAdmin } = useAuth();
+
+  const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newFullName, setNewFullName] = useState('');
+  const [newRole, setNewRole] = useState<UserRole>('user');
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createSuccess, setCreateSuccess] = useState<string | null>(null);
+
+  // Создание нового аккаунта администратором
+  const createUserMutation = useMutation({
+    mutationFn: async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error('Сессия не найдена, войдите заново');
+
+      const { data, error } = await supabase.functions.invoke('admin-create-user', {
+        body: { email: newEmail.trim(), password: newPassword, fullName: newFullName.trim(), role: newRole },
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: (data) => {
+      setCreateError(null);
+      setCreateSuccess(`Аккаунт ${data.email} создан`);
+      setNewEmail('');
+      setNewPassword('');
+      setNewFullName('');
+      setNewRole('user');
+      queryClient.invalidateQueries({ queryKey: ['admin_profiles'] });
+      queryClient.invalidateQueries({ queryKey: ['admin_audit_logs'] });
+    },
+    onError: (err: Error) => {
+      setCreateSuccess(null);
+      setCreateError(err.message);
+    },
+  });
+
+  const handleCreateUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateError(null);
+    setCreateSuccess(null);
+    createUserMutation.mutate();
+  };
 
   // Загрузка пользователей
   const { data: profiles = [], isLoading: loadingProfiles } = useQuery({
@@ -75,6 +121,63 @@ export const UserManagementView: React.FC = () => {
             Назначение ролей «Преподаватель» (обычный пользователь) и «Администратор»
           </p>
         </div>
+
+        <form onSubmit={handleCreateUser} className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
+          <div className="text-sm font-semibold text-slate-800 flex items-center">
+            <UserPlus className="w-4 h-4 mr-2 text-blue-600" />
+            Создать новый аккаунт
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <input
+              type="email"
+              required
+              placeholder="Email"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+            />
+            <input
+              type="password"
+              required
+              minLength={6}
+              placeholder="Пароль (мин. 6 символов)"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+            />
+            <input
+              type="text"
+              placeholder="Имя (необязательно)"
+              value={newFullName}
+              onChange={(e) => setNewFullName(e.target.value)}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+            />
+            <select
+              value={newRole}
+              onChange={(e) => setNewRole(e.target.value as UserRole)}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+            >
+              <option value="user">Преподаватель</option>
+              <option value="admin">Администратор</option>
+            </select>
+          </div>
+
+          {createError && <div className="text-xs text-red-600">{createError}</div>}
+          {createSuccess && <div className="text-xs text-emerald-600">{createSuccess}</div>}
+
+          <button
+            type="submit"
+            disabled={createUserMutation.isPending}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm flex items-center space-x-2 disabled:opacity-50"
+          >
+            {createUserMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <UserPlus className="w-4 h-4" />
+            )}
+            <span>Создать аккаунт</span>
+          </button>
+        </form>
 
         {loadingProfiles ? (
           <div className="text-center py-6 text-slate-400 flex items-center justify-center">
