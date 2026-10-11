@@ -35,6 +35,8 @@ export const App: React.FC = () => {
     const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users'];
     return (validTabs.includes(saved as TabType)) ? (saved as TabType) : 'generator';
   });
+  const adminOnlyTabs: TabType[] = ['taxonomy', 'bulk_import', 'users'];
+  const currentTab: TabType = !isAdmin && adminOnlyTabs.includes(activeTab) ? 'generator' : activeTab;
 
   React.useEffect(() => {
     localStorage.setItem('examiner_active_tab', activeTab);
@@ -48,10 +50,10 @@ export const App: React.FC = () => {
   // Навигационные ссылки
   const navItems = [
     { id: 'questions', label: 'Банк вопросов', icon: FileQuestion },
-    { id: 'taxonomy', label: 'Предметы и темы', icon: Layers },
+    ...(isAdmin ? [{ id: 'taxonomy', label: 'Предметы и темы', icon: Layers }] : []),
     { id: 'generator', label: 'Генератор билетов', icon: Sparkles },
     { id: 'saved_tickets', label: 'Сохраненные билеты', icon: FileCheck2 },
-    { id: 'bulk_import', label: 'Массовый импорт', icon: Upload },
+    ...(isAdmin ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
     ...(isAdmin ? [{ id: 'users', label: 'Пользователи и аудит', icon: Users }] : []),
   ];
 
@@ -147,7 +149,7 @@ export const App: React.FC = () => {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-1 overflow-x-auto">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = activeTab === item.id;
+              const isActive = currentTab === item.id;
               return (
                 <button
                   key={item.id}
@@ -186,7 +188,7 @@ export const App: React.FC = () => {
             </div>
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = activeTab === item.id;
+              const isActive = currentTab === item.id;
               return (
                 <button
                   key={item.id}
@@ -211,7 +213,7 @@ export const App: React.FC = () => {
       {/* Основной контент */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Экран формы создания / редактирования вопроса */}
-        {isQuestionFormOpen ? (
+        {isQuestionFormOpen && isAdmin ? (
           <QuestionForm
             initialData={editingQuestion}
             onSuccess={() => {
@@ -225,19 +227,19 @@ export const App: React.FC = () => {
           />
         ) : (
           <>
-            {activeTab === 'questions' && (
+            {currentTab === 'questions' && (
               <QuestionList
                 onAddQuestion={handleAddQuestion}
                 onEditQuestion={handleEditQuestion}
               />
             )}
-            {activeTab === 'taxonomy' && <TaxonomyManager />}
-            {activeTab === 'generator' && <TicketGenerator />}
-            {activeTab === 'saved_tickets' && <SavedTicketsView />}
-            {activeTab === 'bulk_import' && (
+            {currentTab === 'taxonomy' && <TaxonomyManager />}
+            {currentTab === 'generator' && <TicketGenerator />}
+            {currentTab === 'saved_tickets' && <SavedTicketsView />}
+            {currentTab === 'bulk_import' && (
               <BulkImport onSuccess={() => setActiveTab('questions')} />
             )}
-            {activeTab === 'users' && <UserManagementView />}
+            {currentTab === 'users' && <UserManagementView />}
           </>
         )}
       </main>

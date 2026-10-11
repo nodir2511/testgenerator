@@ -171,15 +171,17 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onAddQuestion}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-sm flex items-center space-x-1 transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Добавить вопрос</span>
-          </button>
-        </div>
+        {isAdmin && (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onAddQuestion}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-sm flex items-center space-x-1 transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Добавить вопрос</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Панель фильтров */}
@@ -390,13 +392,15 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 </div>
 
                 <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => onEditQuestion(q)}
-                    className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                    title="Редактировать"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => onEditQuestion(q)}
+                      className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                      title="Редактировать"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                  )}
                   {isAdmin && (
                     <button
                       onClick={() => {
