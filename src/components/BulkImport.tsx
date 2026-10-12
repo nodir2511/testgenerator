@@ -37,7 +37,18 @@ interface ParsedRow {
   matchingText?: string;
   rawMatchingItems?: { side: 'left' | 'right'; text: string; image_url?: string | null; order_index: number }[];
   correctAnswer?: string;
+  section?: string;
   errors: string[];
+}
+
+function parseNumericAnswer(raw?: string): number | null {
+  if (!raw) return null;
+  const n = Number(raw.replace(',', '.').replace(/\s+/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function isCorrectLetter(answer: string | undefined, optionIndex: number): boolean {
+  return !!answer && answer.trim().toUpperCase() === 'ABCDEF'[optionIndex];
 }
 
 export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
@@ -51,6 +62,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [sectionFilter, setSectionFilter] = useState('');
 
   // Таксономия по умолчанию для импорта (сохраняется в localStorage)
   const [defaultSubjectId, setDefaultSubjectId] = useState(
@@ -198,6 +210,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     setIsProcessing(true);
     setGlobalError(null);
     setStatusMessage(null);
+    setSectionFilter('');
 
     const isDocx = file.name.endsWith('.docx');
     const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
@@ -234,6 +247,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               order_index: m.orderIndex,
             })) : undefined,
             correctAnswer: q.correctAnswer || '',
+            section: q.section || undefined,
             errors,
           };
         });
@@ -423,7 +437,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
             content: row.content,
             content_ru: row.content,
             image_url: row.imageUrl || null,
-            correct_numeric_answer: row.type === 'open' && row.correctAnswer ? Number(row.correctAnswer) : null,
+            correct_numeric_answer: row.type === 'open' ? parseNumericAnswer(row.correctAnswer) : null,
             created_by: user?.id,
             version: 1,
           })
@@ -440,6 +454,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               text: opt.text,
               text_ru: opt.text,
               image_url: opt.imageUrl || null,
+              is_correct: isCorrectLetter(row.correctAnswer, i),
               order_index: i + 1,
             }));
             await supabase.from('question_options').insert(optionRows);
@@ -449,6 +464,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               question_id: q.id,
               text: optText,
               text_ru: optText,
+              is_correct: isCorrectLetter(row.correctAnswer, i),
               order_index: i + 1,
             }));
             await supabase.from('question_options').insert(optionRows);
@@ -521,8 +537,10 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     },
   });
 
-  const validRows = parsedRows.filter(r => r.errors.length === 0);
-  const errorRowsCount = parsedRows.filter(r => r.errors.length > 0).length;
+  const sectionNames = Array.from(new Set(parsedRows.map(r => r.section).filter((x): x is string => !!x)));
+  const visibleRows = sectionFilter ? parsedRows.filter(r => r.section === sectionFilter) : parsedRows;
+  const validRows = visibleRows.filter(r => r.errors.length === 0);
+  const errorRowsCount = visibleRows.filter(r => r.errors.length > 0).length;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-w-5xl mx-auto my-6">
@@ -777,8 +795,26 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               </div>
             </div>
 
+            {sectionNames.length > 1 && (
+              <div className="flex items-center gap-2 text-xs">
+                <label className="font-semibold text-slate-600 shrink-0">Раздел документа:</label>
+                <select
+                  value={sectionFilter}
+                  onChange={(e) => setSectionFilter(e.target.value)}
+                  className="flex-1 min-w-0 text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Все разделы ({parsedRows.length} вопр.)</option>
+                  {sectionNames.map(name => (
+                    <option key={name} value={name}>
+                      {name} ({parsedRows.filter(r => r.section === name).length})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="max-h-96 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-xs">
-              {parsedRows.map((r, i) => (
+              {visibleRows.map((r, i) => (
                 <div key={i} className={`p-3 ${r.errors.length > 0 ? 'bg-red-50/50' : 'bg-white'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 space-y-1">
@@ -814,6 +850,9 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                           )}
                           {r.type === 'test' && !r.rawOptions && r.optionsText && (
                             <span>Варианты: {r.optionsText}</span>
+                          )}
+                          {r.type === 'test' && r.correctAnswer && (
+                            <div className="pt-0.5">Ответ: <strong className="text-slate-700">{r.correctAnswer}</strong></div>
                           )}
                           {r.type === 'matching' && r.rawMatchingItems && (
                             <span className="text-purple-700 font-medium">
