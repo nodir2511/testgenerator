@@ -91,11 +91,11 @@ function findMainSlash(s: string): number {
   for (let i = 0; i < s.length; i++) {
     if (s[i] === '(') depth++;
     else if (s[i] === ')') depth--;
-    else if (s[i] === '/' && depth === 0) {
+    else if (s[i] === '/' && depth === 0 && s[i - 1] !== '<') {
       return i;
     }
   }
-  return s.indexOf('/');
+  return -1;
 }
 
 function buildMathRuns(text: string): MathRun[] {
@@ -188,7 +188,7 @@ export function parseFormulaToDocxMath(text: string): DocxMath | null {
       const left = eqSides[0].trim();
       const right = eqSides[1].trim();
 
-      if (!left.includes('/') && right.includes('/')) {
+      if (findMainSlash(left) < 0 && findMainSlash(right) >= 0) {
         const slashIdx = findMainSlash(right);
         const num = stripOuterParens(right.slice(0, slashIdx));
         const den = stripOuterParens(right.slice(slashIdx + 1));
@@ -208,7 +208,7 @@ export function parseFormulaToDocxMath(text: string): DocxMath | null {
   }
 
   // 4. Одиночная дробь: (y-b)/k, P/(V·cos(φ)), (B·C)/D, F/m
-  if (text.includes('/')) {
+  if (findMainSlash(text) >= 0) {
     const slashIdx = findMainSlash(text);
     const num = stripOuterParens(text.slice(0, slashIdx));
     const den = stripOuterParens(text.slice(slashIdx + 1));

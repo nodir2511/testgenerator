@@ -195,11 +195,11 @@ function findMainSlash(s: string): number {
   for (let i = 0; i < s.length; i++) {
     if (s[i] === '(') depth++;
     else if (s[i] === ')') depth--;
-    else if (s[i] === '/' && depth === 0) {
+    else if (s[i] === '/' && depth === 0 && s[i - 1] !== '<') {
       return i;
     }
   }
-  return s.indexOf('/');
+  return -1;
 }
 
 interface FracInfo {
@@ -256,7 +256,7 @@ function extractFraction(expr: string): FracInfo | null {
     if (sides.length === 2) {
       const left = sides[0].trim();
       const right = sides[1].trim();
-      if (!left.includes('/') && right.includes('/')) {
+      if (findMainSlash(left) < 0 && findMainSlash(right) >= 0) {
         const slashIdx = findMainSlash(right);
         const num = stripOuterParens(right.slice(0, slashIdx));
         const den = stripOuterParens(right.slice(slashIdx + 1));
@@ -268,7 +268,7 @@ function extractFraction(expr: string): FracInfo | null {
   }
 
   // 4. Одиночная дробь: (B·C)/D, P/(V·cos(φ)), (y-b)/k, F/m
-  if (expr.includes('/')) {
+  if (findMainSlash(expr) >= 0) {
     const slashIdx = findMainSlash(expr);
     const num = stripOuterParens(expr.slice(0, slashIdx));
     const den = stripOuterParens(expr.slice(slashIdx + 1));
