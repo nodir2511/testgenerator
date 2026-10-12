@@ -64,15 +64,16 @@ interface State {
   step: 'subject' | 'chapters' | 'topics' | 'settings' | 'lang';
   subjectId?: string;
   chapterIds: string[];
-  topicIds: string[];
-  topicPage: number;
+  topicIds: string[]; // итоговый набор тем ([] = все темы выбранных глав)
+  topicSel: string[]; // отметки пользователя
+  topicCh: number; // индекс главы, темы которой выбираем
   settings: T.Settings;
   awaiting: null | 'test' | 'matching' | 'open' | 'tickets' | 'title';
   busyAt?: number;
 }
 
 const freshState = (settings?: T.Settings): State => ({
-  step: 'subject', chapterIds: [], topicIds: [], topicPage: 0,
+  step: 'subject', chapterIds: [], topicIds: [], topicSel: [], topicCh: 0,
   settings: settings ?? { ...T.DEFAULT_SETTINGS }, awaiting: null,
 });
 
@@ -152,15 +153,32 @@ async function screenChapters(chat: number, msgId: number | undefined, st: State
   if (!list.length) return show(chat, msgId, 'У предмета нет глав.');
   st.step = 'chapters';
   await saveState(chat, st);
-  return show(chat, msgId, 'Выберите главы (можно несколько):', T.kbChapters(list, st.chapterIds));
+  return show(chat, msgId, T.chaptersText(list, st.chapterIds), T.kbChapters(list, st.chapterIds));
 }
 
 async function screenTopics(chat: number, msgId: number | undefined, st: State) {
-  const list = await topicsOf(st.chapterIds);
+  const chs = await chaptersOf(st.subjectId!);
+  const ch = chs.find((c) => c.id === st.chapterIds[st.topicCh ?? 0]);
+  if (!ch) return screenChapters(chat, msgId, st);
+  const list = await topicsOf([ch.id]);
   st.step = 'topics';
   await saveState(chat, st);
-  const note = st.topicIds.length ? `Выбрано тем: ${st.topicIds.length}.` : 'Если ничего не выбрать — возьмутся все темы выбранных глав.';
-  return show(chat, msgId, `Выберите темы. ${note}`, T.kbTopics(list, st.topicIds, st.topicPage));
+  const last = (st.topicCh ?? 0) >= st.chapterIds.length - 1;
+  return show(chat, msgId, T.topicsText(ch.name, st.topicCh ?? 0, st.chapterIds.length, list, st.topicSel), T.kbTopics(list, st.topicSel, last));
+}
+
+// Итоговый набор тем: у главы без отметок берутся все её темы
+async function finalizeTopics(st: State) {
+  const all = await topicsOf(st.chapterIds);
+  const ids: string[] = [];
+  let any = false;
+  for (const chId of st.chapterIds) {
+    const mine = all.filter((t) => t.chapter_id === chId);
+    const sel = mine.filter((t) => st.topicSel.includes(t.id));
+    if (sel.length) any = true;
+    ids.push(...(sel.length ? sel : mine).map((t) => t.id));
+  }
+  st.topicIds = any ? ids : [];
 }
 
 async function screenSettings(chat: number, msgId: number | undefined, st: State) {
@@ -299,6 +317,24 @@ async function onMessage(m: any) {
     }
     return screenSettings(chat, undefined, st);
   }
+  if (st.step === 'chapters' || st.step === 'topics') {
+    const isCh = st.step === 'chapters';
+    const items: Array<{ id: string; name: string }> = isCh
+      ? await chaptersOf(st.subjectId!)
+      : await topicsOf([st.chapterIds[st.topicCh ?? 0]]);
+    const nums = T.parseNumbers(text, items.length);
+    if (nums === null) return send(chat, `Не понял. Отправьте номера, например 1-3, 5 — или нажмите кнопки. Допустимо от 1 до ${items.length}.`);
+    const ids = nums === 'all' ? items.map((i) => i.id) : nums.map((n) => items[n - 1].id);
+    if (isCh) {
+      st.chapterIds = ids;
+      await saveState(chat, st);
+      return screenChapters(chat, undefined, st);
+    }
+    const mine = items.map((i) => i.id);
+    // «все» в темах = ничего не отмечено = все темы главы
+    st.topicSel = [...st.topicSel.filter((id) => !mine.includes(id)), ...(nums === 'all' ? [] : ids)];
+    return screenTopics(chat, undefined, st);
+  }
   return send(chat, HELP);
 }
 
@@ -329,24 +365,35 @@ async function onCallback(cb: any) {
     else if (data.startsWith('C:')) { const c = list[+data.slice(2)]; if (c) st.chapterIds = T.toggle(st.chapterIds, c.id); }
     else if (data === 'CN') {
       if (!st.chapterIds.length) return send(chat, 'Выберите хотя бы одну главу.');
-      st.topicIds = []; st.topicPage = 0;
+      st.chapterIds = list.filter((c) => st.chapterIds.includes(c.id)).map((c) => c.id);
+      st.topicIds = []; st.topicSel = []; st.topicCh = 0;
       return screenTopics(chat, msgId, st);
     }
     await saveState(chat, st);
-    return show(chat, msgId, 'Выберите главы (можно несколько):', T.kbChapters(list, st.chapterIds));
+    return show(chat, msgId, T.chaptersText(list, st.chapterIds), T.kbChapters(list, st.chapterIds));
   }
   if (data === 'BC') return screenChapters(chat, msgId, st);
-  if (data.startsWith('T:') || data.startsWith('TP:') || data === 'TX') {
-    const list = await topicsOf(st.chapterIds);
-    if (data === 'TX') st.topicIds = [];
-    else if (data.startsWith('TP:')) st.topicPage = +data.slice(3);
-    else { const t = list[+data.slice(2)]; if (t) st.topicIds = T.toggle(st.topicIds, t.id); }
+  if (data.startsWith('T:') || data === 'TX' || data === 'TB' || data === 'TN' || data === 'BT') {
+    const cur = st.topicCh ?? 0;
+    const list = await topicsOf([st.chapterIds[cur]]);
+    if (data === 'TX') {
+      const mine = list.map((t) => t.id);
+      st.topicSel = st.topicSel.filter((id) => !mine.includes(id));
+    } else if (data.startsWith('T:')) {
+      const t = list[+data.slice(2)];
+      if (t) st.topicSel = T.toggle(st.topicSel, t.id);
+    } else if (data === 'TB') {
+      if (cur <= 0) return screenChapters(chat, msgId, st);
+      st.topicCh = cur - 1;
+    } else if (data === 'TN') {
+      if (cur < st.chapterIds.length - 1) st.topicCh = cur + 1;
+      else { await finalizeTopics(st); return screenSettings(chat, msgId, st); }
+    } else if (data === 'BT') {
+      st.topicCh = Math.max(0, st.chapterIds.length - 1);
+    }
     return screenTopics(chat, msgId, st);
   }
-  if (data === 'TN' || data === 'BS' || data === 'BT') {
-    if (data === 'BT') return screenTopics(chat, msgId, st);
-    return screenSettings(chat, msgId, st);
-  }
+  if (data === 'BS') return screenSettings(chat, msgId, st);
   if (data.startsWith('V:')) {
     st.awaiting = data.slice(2) as State['awaiting'];
     await saveState(chat, st);
