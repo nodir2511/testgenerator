@@ -208,9 +208,7 @@ async function generate(chat: number, msgId: number | undefined, st: State, user
   const pool = await loadPool(st);
   const fit = T.fitSettings(T.poolStats(pool), s);
   if (fit.error) return send(chat, `⚠️ ${fit.error}`, T.kbSettings(s));
-  if (fit.notes.length) await send(chat, `ℹ️ Вопросов не хватает, билеты составлены из того, что есть:
-• ${fit.notes.join('
-• ')}`);
+  if (fit.notes.length) await send(chat, `ℹ️ Вопросов не хватает, билеты составлены из того, что есть:\n• ${fit.notes.join('\n• ')}`);
 
   const tickets = T.buildTickets(pool, fit.settings);
   const title = s.title.trim() || 'Экзаменационные билеты';
@@ -412,9 +410,7 @@ async function onCallback(cb: any) {
     if (bad) return send(chat, `⚠️ ${bad}`);
     const fit = T.fitSettings(await countPool(st), st.settings);
     if (fit.error) return send(chat, `⚠️ ${fit.error}`);
-    if (fit.notes.length) await send(chat, `ℹ️ Вопросов не хватает — возьмём сколько есть:
-• ${fit.notes.join('
-• ')}`);
+    if (fit.notes.length) await send(chat, `ℹ️ Вопросов не хватает — возьмём сколько есть:\n• ${fit.notes.join('\n• ')}`);
     st.step = 'lang';
     await saveState(chat, st);
     return show(chat, msgId, 'На каком языке подготовить файлы?', T.kbLang());
