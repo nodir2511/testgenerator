@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Send, X, Loader2, Copy, Check } from 'lucide-react';
+import { Send, X, Loader2, Copy, Check, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 
@@ -18,11 +18,26 @@ export const TelegramLink: React.FC = () => {
   const { data: linked } = useQuery({
     queryKey: ['telegram_link', user?.id],
     enabled: Boolean(user?.id) && open,
+    // пока ждём активацию в боте — проверяем привязку каждые 3 секунды
+    refetchInterval: (q) => (code && q.state.data === false ? 3000 : false),
     queryFn: async () => {
       const { data } = await supabase.from('telegram_links').select('chat_id').eq('user_id', user!.id).maybeSingle();
       return Boolean(data);
     },
   });
+
+  // Имя бота: из настроек сборки, а если не задано — спрашиваем у сервера (Telegram getMe)
+  const { data: botName } = useQuery({
+    queryKey: ['telegram_bot_name'],
+    enabled: open && !BOT_USERNAME,
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async () => {
+      const { data } = await supabase.functions.invoke('send-to-telegram', { body: { action: 'bot' } });
+      return (data?.username as string | undefined) ?? null;
+    },
+  });
+  const botUsername = BOT_USERNAME || botName || undefined;
 
   const getCode = async () => {
     setBusy(true);
@@ -33,6 +48,15 @@ export const TelegramLink: React.FC = () => {
     else setCode(data as string);
   };
 
+  // Сразу при открытии: если аккаунт не привязан — готовим код и ссылку на бота
+  useEffect(() => {
+    if (open && linked === false && !code && !busy && !error) getCode();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, linked]);
+
+  useEffect(() => { if (!open) { setCode(null); setError(null); } }, [open]);
+  useEffect(() => { if (linked && code) setCode(null); }, [linked, code]);
+
   const unlink = async () => {
     if (!confirm('Отвязать Telegram от этого аккаунта?')) return;
     await supabase.from('telegram_links').delete().eq('user_id', user!.id);
@@ -40,6 +64,7 @@ export const TelegramLink: React.FC = () => {
   };
 
   const command = code ? `/start ${code}` : '';
+  const deepLink = code && botUsername ? `https://t.me/${botUsername}?start=${code}` : null;
 
   return (
     <>
@@ -67,11 +92,33 @@ export const TelegramLink: React.FC = () => {
               {linked ? '✅ Telegram привязан к вашему аккаунту' : 'Telegram пока не привязан'}
             </div>
 
+            {!code && busy && !linked && (
+              <div className="flex items-center text-sm text-slate-500"><Loader2 className="w-4 h-4 mr-2 animate-spin" />Готовлю ссылку для активации…</div>
+            )}
+
             {code ? (
-              <div className="space-y-2">
-                <p className="text-xs text-slate-500">
-                  {BOT_USERNAME ? <>Откройте <strong>@{BOT_USERNAME}</strong> и отправьте</> : 'Откройте бота и отправьте'} сообщение (код действует 10 минут):
-                </p>
+              <div className="space-y-3">
+                {deepLink && (
+                  <>
+                    <a
+                      href={deepLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-full px-4 py-2.5 bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-sm font-semibold flex items-center justify-center"
+                    >
+                      <ExternalLink className="w-4 h-4 mr-2" />Открыть бота и активировать
+                    </a>
+                    <p className="text-xs text-slate-500">
+                      В Telegram нажмите <strong>«Start / Запустить»</strong> — аккаунт привяжется автоматически (ссылка действует 10 минут).
+                    </p>
+                    <p className="text-[11px] text-slate-400">Если ссылка не открылась — отправьте боту вручную:</p>
+                  </>
+                )}
+                {!deepLink && (
+                  <p className="text-xs text-slate-500">
+                    {botUsername ? <>Откройте <strong>@{botUsername}</strong> и отправьте</> : 'Откройте бота и отправьте'} сообщение (код действует 10 минут):
+                  </p>
+                )}
                 <div className="flex items-center gap-2">
                   <code className="flex-1 bg-slate-100 rounded-lg px-3 py-2 text-sm font-mono">{command}</code>
                   <button

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { notifyError, describeError } from '../lib/errors';
+import { notifyError, notifyInfo, describeError } from '../lib/errors';
+import { fitSettings } from '../../supabase/functions/_shared/ticketing';
 import { Subject, Chapter, Topic, Question, TicketBatch, Ticket, TicketQuestion } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -18,7 +19,8 @@ import {
   ChevronDown,
   ChevronRight
 } from 'lucide-react';
-import { exportTicketsToDocx, exportSingleTicketDocx } from '../lib/docxExport';
+import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
+import { SendToTelegramButton } from './SendToTelegramButton';
 
 const getStorageJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -278,6 +280,12 @@ export const TicketGenerator: React.FC = () => {
     },
   });
 
+  // Состав билета с учётом того, что реально есть в выбранных темах
+  const fitted = fitSettings(
+    { total: poolStats?.total || 0, test: poolStats?.test || 0, matching: poolStats?.matching || 0, open: poolStats?.open || 0 },
+    { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }
+  );
+
   // Алгоритм параллельной генерации билетов
   const handleGenerate = async () => {
     setGenerationError(null);
@@ -288,26 +296,14 @@ export const TicketGenerator: React.FC = () => {
       if (testCount + matchingCount + openCount === 0) throw new Error('Задайте хотя бы один вопрос в билете');
       if (ticketCount < 1) throw new Error('Количество билетов должно быть не менее 1');
 
-      // 1. Проверка дефицита вопросов
-      const totalTestNeeded = testCount;
-      const totalMatchingNeeded = matchingCount;
-      const totalOpenNeeded = openCount;
-
-      if ((poolStats?.test || 0) < totalTestNeeded) {
-        throw new Error(
-          `Недостаточно тестовых вопросов! Требуется в билете: ${totalTestNeeded}, а в выбранных темах доступно: ${poolStats?.test || 0}`
-        );
-      }
-      if ((poolStats?.matching || 0) < totalMatchingNeeded) {
-        throw new Error(
-          `Недостаточно заданий на соответствие! Требуется: ${totalMatchingNeeded}, а доступно: ${poolStats?.matching || 0}`
-        );
-      }
-      if ((poolStats?.open || 0) < totalOpenNeeded) {
-        throw new Error(
-          `Недостаточно открытых вопросов! Требуется: ${totalOpenNeeded}, а доступно: ${poolStats?.open || 0}`
-        );
-      }
+      // 1. Если вопросов какого-то вида не хватает, берём сколько есть (ошибка — только если нет вообще никаких)
+      const fit = fitSettings(
+        { total: poolStats?.total || 0, test: poolStats?.test || 0, matching: poolStats?.matching || 0, open: poolStats?.open || 0 },
+        { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }
+      );
+      if (fit.error) throw new Error(fit.error);
+      if (fit.notes.length) notifyInfo(`Вопросов не хватает, билеты составлены из того, что есть. ${fit.notes.join('; ')}`);
+      const { testCount: useTest, matchingCount: useMatching, openCount: useOpen } = fit.settings;
 
       // 2. Загружаем все доступные вопросы пула с деталями для снимков
       const { data: allQuestionsRaw, error: qErr } = await fetchAllPages<any>(() => {
@@ -353,15 +349,15 @@ export const TicketGenerator: React.FC = () => {
 
         // Выбор тестовых
         const shuffledTests = shuffle(testPool);
-        ticketQuestions.push(...shuffledTests.slice(0, testCount));
+        ticketQuestions.push(...shuffledTests.slice(0, useTest));
 
         // Выбор соответствий
         const shuffledMatching = shuffle(matchingPool);
-        ticketQuestions.push(...shuffledMatching.slice(0, matchingCount));
+        ticketQuestions.push(...shuffledMatching.slice(0, useMatching));
 
         // Выбор открытых
         const shuffledOpen = shuffle(openPool);
-        ticketQuestions.push(...shuffledOpen.slice(0, openCount));
+        ticketQuestions.push(...shuffledOpen.slice(0, useOpen));
 
         ticketsData.push({
           ticketNumber: tNum,
@@ -379,9 +375,9 @@ export const TicketGenerator: React.FC = () => {
           generation_params: {
             chapter_ids: selectedChapterIds,
             topic_ids: selectedTopicIds,
-            test_count: testCount,
-            matching_count: matchingCount,
-            open_count: openCount,
+            test_count: useTest,
+            matching_count: useMatching,
+            open_count: useOpen,
             ticket_count: ticketCount,
             shuffle_options: shuffleOptions,
             shuffle_matching: shuffleMatching,
@@ -509,6 +505,21 @@ export const TicketGenerator: React.FC = () => {
     }
   };
 
+  // Тот же файл, но отправляется в Telegram владельца аккаунта
+  const telegramButton = generatedBatch?.tickets ? (
+    <SendToTelegramButton
+      title={generatedBatch.title}
+      batchId={generatedBatch.id}
+      ticketCount={generatedBatch.tickets.length}
+      build={(lang) => buildTicketsFile(
+        generatedBatch.title,
+        generatedBatch.tickets,
+        subjects.find(s => s.id === subjectId)?.name || 'Химия',
+        lang
+      )}
+    />
+  ) : null;
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       {/* Шапка генератора */}
@@ -549,6 +560,7 @@ export const TicketGenerator: React.FC = () => {
               <Download className="w-3.5 h-3.5" />
               <span>RU + TG</span>
             </button>
+            {telegramButton}
           </div>
         )}
       </div>
@@ -804,8 +816,17 @@ export const TicketGenerator: React.FC = () => {
                   className="w-full text-xs p-2 border border-blue-400 bg-blue-50/50 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-blue-900"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Будет создано {ticketCount} параллельных билетов по {testCount + matchingCount + openCount} вопросов
+                  Будет создано {ticketCount} параллельных билетов по {fitted.settings.testCount + fitted.settings.matchingCount + fitted.settings.openCount} вопросов
                 </p>
+                {fitted.notes.length > 0 && !fitted.error && (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
+                    Вопросов не хватает — билеты составятся из того, что есть:<br />
+                    {fitted.notes.map((n) => <span key={n} className="block">• {n}</span>)}
+                  </p>
+                )}
+                {fitted.error && poolStats && (
+                  <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg p-2 mt-2">{fitted.error}</p>
+                )}
               </div>
 
               {/* Настройки перемешивания (анти-списывание) */}
@@ -893,6 +914,7 @@ export const TicketGenerator: React.FC = () => {
                 <Printer className="w-3.5 h-3.5" />
                 <span>RU + TG</span>
               </button>
+              {telegramButton}
             </div>
           </div>
 

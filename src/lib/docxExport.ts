@@ -849,64 +849,65 @@ export async function buildSingleTicketBlob(
 }
 
 // Экспорт одного конкретного билета
-export async function exportSingleTicketDocx(
+type ExportTicket = { ticket_number: number; questions: Array<{ question_snapshot: any }> };
+export type ExportLanguage = 'ru' | 'tg' | 'both';
+export interface ExportFile { blob: Blob; fileName: string }
+
+// Файл одного варианта (.docx)
+export async function buildSingleTicketFile(
   examTitle: string,
-  ticket: { ticket_number: number; questions: Array<{ question_snapshot: any }> },
+  ticket: ExportTicket,
   subjectName: string = 'Химия',
   lang: 'ru' | 'tg' = 'ru'
-) {
+): Promise<ExportFile> {
   const isTg = lang === 'tg';
   const blob = await buildSingleTicketBlob(examTitle, ticket, subjectName, isTg);
   const fileName = isTg ? `Варианти ${ticket.ticket_number}.docx` : `Вариант ${ticket.ticket_number}.docx`;
-  saveAs(blob, fileName);
+  return { blob, fileName };
 }
 
-export type ExportLanguage = 'ru' | 'tg' | 'both';
+// Файл партии билетов: один .docx, если вариант один и язык один, иначе ZIP
+// (каждый вариант — отдельный .docx; для RU + TG — две папки)
+export async function buildTicketsFile(
+  examTitle: string,
+  tickets: ExportTicket[],
+  subjectName: string = 'Химия',
+  lang: ExportLanguage = 'ru'
+): Promise<ExportFile | null> {
+  if (!tickets || tickets.length === 0) return null;
+  if (tickets.length === 1 && lang !== 'both') return buildSingleTicketFile(examTitle, tickets[0], subjectName, lang);
 
-// Экспорт партии билетов (каждый вариант — отдельный файл .docx)
+  const zip = new JSZip();
+  for (const t of tickets) {
+    if (lang === 'ru' || lang === 'both') {
+      zip.file(`${lang === 'both' ? 'Русский/' : ''}Вариант ${t.ticket_number}.docx`, await buildSingleTicketBlob(examTitle, t, subjectName, false));
+    }
+    if (lang === 'tg' || lang === 'both') {
+      zip.file(`${lang === 'both' ? 'Тоҷикӣ/' : ''}Варианти ${t.ticket_number}.docx`, await buildSingleTicketBlob(examTitle, t, subjectName, true));
+    }
+  }
+  const suffix = lang === 'both' ? 'RU_TG' : lang.toUpperCase();
+  return { blob: await zip.generateAsync({ type: 'blob' }), fileName: `${examTitle}_${suffix}.zip` };
+}
+
+// Скачать один вариант
+export async function exportSingleTicketDocx(
+  examTitle: string,
+  ticket: ExportTicket,
+  subjectName: string = 'Химия',
+  lang: 'ru' | 'tg' = 'ru'
+) {
+  const file = await buildSingleTicketFile(examTitle, ticket, subjectName, lang);
+  saveAs(file.blob, file.fileName);
+}
+
+// Скачать партию билетов
 export async function exportTicketsToDocx(
   examTitle: string,
-  tickets: Array<{
-    ticket_number: number;
-    questions: Array<{ question_snapshot: any }>;
-  }>,
+  tickets: ExportTicket[],
   subjectName: string = 'Химия',
   lang: ExportLanguage = 'ru'
 ) {
-  if (!tickets || tickets.length === 0) return;
-
-  // Если в партии ровно 1 вариант и выбран 1 язык — сохраняем прямо отдельный .docx файл
-  if (tickets.length === 1 && lang !== 'both') {
-    await exportSingleTicketDocx(examTitle, tickets[0], subjectName, lang);
-    return;
-  }
-
-  const zip = new JSZip();
-
-  if (lang === 'ru') {
-    for (const t of tickets) {
-      const blob = await buildSingleTicketBlob(examTitle, t, subjectName, false);
-      zip.file(`Вариант ${t.ticket_number}.docx`, blob);
-    }
-    const zipBlob = await zip.generateAsync({ type: 'blob' });
-    saveAs(zipBlob, `${examTitle}_RU.zip`);
-  } else if (lang === 'tg') {
-    for (const t of tickets) {
-      const blob = await buildSingleTicketBlob(examTitle, t, subjectName, true);
-      zip.file(`Варианти ${t.ticket_number}.docx`, blob);
-    }
-    const zipBlob = await zip.generateAsync({ type: 'blob' });
-    saveAs(zipBlob, `${examTitle}_TG.zip`);
-  } else {
-    // RU + TG: формируются две раздельные папки с отдельными файлами
-    for (const t of tickets) {
-      const ruBlob = await buildSingleTicketBlob(examTitle, t, subjectName, false);
-      zip.file(`Русский/Вариант ${t.ticket_number}.docx`, ruBlob);
-
-      const tgBlob = await buildSingleTicketBlob(examTitle, t, subjectName, true);
-      zip.file(`Тоҷикӣ/Варианти ${t.ticket_number}.docx`, tgBlob);
-    }
-    const zipBlob = await zip.generateAsync({ type: 'blob' });
-    saveAs(zipBlob, `${examTitle}_RU_TG.zip`);
-  }
+  const file = await buildTicketsFile(examTitle, tickets, subjectName, lang);
+  if (file) saveAs(file.blob, file.fileName);
 }

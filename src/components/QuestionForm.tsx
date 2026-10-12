@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { notifyError, describeError } from '../lib/errors';
+import { notifyError, describeError, must } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { FormulaEditor } from './FormulaEditor';
@@ -314,7 +314,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
         // Пересохраняем опции тестов с сохранением двуязычия
         if (type === 'test') {
-          await supabase.from('question_options').delete().eq('question_id', initialData.id);
+          await must(supabase.from('question_options').delete().eq('question_id', initialData.id));
           const validOptions = options
             .filter(o => o.text_ru?.trim() || o.text_tg?.trim() || o.text?.trim() || o.image_url)
             .map((o, idx) => {
@@ -330,12 +330,12 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 order_index: idx + 1,
               };
             });
-          await supabase.from('question_options').insert(validOptions);
+          await must(supabase.from('question_options').insert(validOptions));
         }
 
         // Пересохраняем соответствия с сохранением двуязычия
         if (type === 'matching') {
-          await supabase.from('matching_items').delete().eq('question_id', initialData.id);
+          await must(supabase.from('matching_items').delete().eq('question_id', initialData.id));
           const allItems = [
             ...leftItems
               .filter(l => l.text_ru?.trim() || l.text_tg?.trim() || l.text?.trim() || l.image_url)
@@ -368,7 +368,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 };
               }),
           ];
-          await supabase.from('matching_items').insert(allItems);
+          await must(supabase.from('matching_items').insert(allItems));
         }
       } else {
         // Создание нового вопроса
@@ -409,7 +409,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 order_index: idx + 1,
               };
             });
-          await supabase.from('question_options').insert(validOptions);
+          await must(supabase.from('question_options').insert(validOptions));
         }
 
         if (type === 'matching') {
@@ -445,7 +445,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 };
               }),
           ];
-          await supabase.from('matching_items').insert(allItems);
+          await must(supabase.from('matching_items').insert(allItems));
         }
 
         // Запоминаем таксономию для следующего добавления
@@ -456,6 +456,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         localStorage.setItem('examiner_last_new_type', type);
       }
     },
+    meta: { success: initialData?.id ? 'Изменения вопроса сохранены в базе' : 'Новый вопрос добавлен в базу' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       onSuccess();

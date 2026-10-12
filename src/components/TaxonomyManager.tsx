@@ -112,6 +112,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
       const { error } = await supabase.from('subjects').insert({ name });
       if (error) throw error;
     },
+    meta: { action: 'Не удалось добавить предмет', success: 'Предмет добавлен в базу' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['subjects'] });
       setNewSubjectName('');
@@ -126,6 +127,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
         .insert({ subject_id: subjectId, name, order_index: order });
       if (error) throw error;
     },
+    meta: { action: 'Не удалось добавить главу', success: 'Глава добавлена в базу' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chapters', activeSubjectId] });
       setNewChapterName('');
@@ -140,6 +142,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
         .insert({ chapter_id: chapterId, name, order_index: order });
       if (error) throw error;
     },
+    meta: { action: 'Не удалось добавить тему', success: 'Тема добавлена в базу' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['topics', activeChapterId] });
       setNewTopicName('');
@@ -151,6 +154,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
       const { error } = await supabase.from('sources').insert({ name });
       if (error) throw error;
     },
+    meta: { action: 'Не удалось добавить источник', success: 'Источник добавлен в базу' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sources'] });
       setNewSourceName('');
@@ -168,7 +172,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
       if (error) throw error;
       assertRowsChanged(data, 'запись');
     },
-    meta: { action: 'Не удалось удалить запись' },
+    meta: { action: 'Не удалось удалить запись', success: 'Запись удалена из базы' },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: [variables.table] });
     },

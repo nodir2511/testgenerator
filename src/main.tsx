@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@ta
 import { AuthProvider } from './hooks/useAuth';
 import App from './App';
 import ErrorToaster from './components/ErrorToaster';
-import { notifyError } from './lib/errors';
+import { notifyError, notifySuccess } from './lib/errors';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -12,6 +12,10 @@ const queryClient = new QueryClient({
     onError: (error, query) => notifyError(error, (query.meta?.action as string) || 'Не удалось загрузить данные'),
   }),
   mutationCache: new MutationCache({
+    onSuccess: (_data, _vars, _ctx, mutation) => {
+      const msg = mutation.meta?.success;
+      if (typeof msg === 'string') notifySuccess(msg);
+    },
     onError: (error, _vars, _ctx, mutation) => notifyError(error, (mutation.meta?.action as string) || 'Не удалось сохранить изменения'),
   }),
   defaultOptions: {

@@ -76,3 +76,21 @@ export function describeError(err: unknown, action: string): string {
   const { reason, details } = explainError(err, action);
   return `${action}. ${reason}${details ? ` (${details})` : ''}`;
 }
+
+// Бросает ошибку, если запрос к базе вернул error (чтобы не сообщать об успехе, когда запись не сохранилась)
+export async function must(query: PromiseLike<{ error: unknown }>): Promise<void> {
+  const { error } = await query;
+  if (error) throw error;
+}
+
+// Всплывающее подтверждение «изменение внесено в базу» (подхватывает ErrorToaster)
+export const SUCCESS_EVENT = 'app:success';
+export function notifySuccess(message: string) {
+  window.dispatchEvent(new CustomEvent<string>(SUCCESS_EVENT, { detail: message }));
+}
+
+// Нейтральное уведомление (не ошибка): например, «вопросов не хватило, взято сколько есть»
+export const INFO_EVENT = 'app:info';
+export function notifyInfo(message: string) {
+  window.dispatchEvent(new CustomEvent<string>(INFO_EVENT, { detail: message }));
+}

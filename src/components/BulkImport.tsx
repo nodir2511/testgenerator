@@ -3,6 +3,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { must } from '../lib/errors';
 import { Subject, Chapter, Topic, Source, QuestionType } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { parseDocxFile } from '../lib/docxImport';
@@ -457,7 +458,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               is_correct: isCorrectLetter(row.correctAnswer, i),
               order_index: i + 1,
             }));
-            await supabase.from('question_options').insert(optionRows);
+            await must(supabase.from('question_options').insert(optionRows));
           } else if (row.optionsText) {
             const opts = row.optionsText.split(/[|;]/).map(s => s.trim()).filter(Boolean);
             const optionRows = opts.map((optText, i) => ({
@@ -467,7 +468,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               is_correct: isCorrectLetter(row.correctAnswer, i),
               order_index: i + 1,
             }));
-            await supabase.from('question_options').insert(optionRows);
+            await must(supabase.from('question_options').insert(optionRows));
           }
         }
 
@@ -482,7 +483,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               image_url: m.image_url || null,
               order_index: m.order_index,
             }));
-            await supabase.from('matching_items').insert(allItems);
+            await must(supabase.from('matching_items').insert(allItems));
           } else if (row.matchingText) {
             const [leftPart, rightPart] = row.matchingText.split('||');
             const leftItems = (leftPart || '').split(/[;]/).map(s => s.trim()).filter(Boolean);
@@ -504,11 +505,12 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 order_index: i + 1,
               })),
             ];
-            await supabase.from('matching_items').insert(allItems);
+            await must(supabase.from('matching_items').insert(allItems));
           }
         }
       }
     },
+    meta: { action: 'Не удалось выполнить импорт', success: 'Импорт завершён: вопросы добавлены в базу' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       queryClient.invalidateQueries({ queryKey: ['import_batches'] });
@@ -528,9 +530,10 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
 
   const revertBatchMutation = useMutation({
     mutationFn: async (batchId: string) => {
-      await supabase.from('questions').update({ is_deleted: true }).eq('batch_id', batchId);
-      await supabase.from('import_batches').update({ is_reverted: true }).eq('id', batchId);
+      await must(supabase.from('questions').update({ is_deleted: true }).eq('batch_id', batchId));
+      await must(supabase.from('import_batches').update({ is_reverted: true }).eq('id', batchId));
     },
+    meta: { action: 'Не удалось откатить импорт', success: 'Импорт отменён: вопросы партии удалены из базы' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       queryClient.invalidateQueries({ queryKey: ['import_batches'] });

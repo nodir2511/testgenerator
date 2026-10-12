@@ -4,7 +4,8 @@ import { supabase } from '../lib/supabase';
 import { assertRowsChanged, notifyError } from '../lib/errors';
 import { TicketBatch, Ticket } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
-import { exportTicketsToDocx, exportSingleTicketDocx } from '../lib/docxExport';
+import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
+import { SendToTelegramButton } from './SendToTelegramButton';
 import { 
   FileCheck2, 
   Download, 
@@ -55,7 +56,7 @@ export const SavedTicketsView: React.FC = () => {
       if (error) throw error;
       assertRowsChanged(data, 'партия билетов');
     },
-    meta: { action: 'Не удалось удалить партию билетов' },
+    meta: { action: 'Не удалось удалить партию билетов', success: 'Партия билетов удалена из базы' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
     },
@@ -177,6 +178,14 @@ export const SavedTicketsView: React.FC = () => {
                       )}
                       <span>RU + TG</span>
                     </button>
+
+                    <SendToTelegramButton
+                      compact
+                      title={batch.title}
+                      batchId={batch.id}
+                      ticketCount={tickets.length}
+                      build={(lang) => buildTicketsFile(batch.title, tickets, batch.subject?.name || 'Экзамен', lang)}
+                    />
 
                     <button
                       onClick={() => setExpandedBatchId(isExpanded ? null : batch.id)}

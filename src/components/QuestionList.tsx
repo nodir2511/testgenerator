@@ -144,12 +144,15 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   // Мягкое удаление вопроса
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('questions')
         .update({ is_deleted: true, deleted_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .select('id');
       if (error) throw error;
+      assertRowsChanged(data, 'вопрос');
     },
+    meta: { action: 'Не удалось удалить вопрос', success: 'Вопрос удалён из базы' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
     },

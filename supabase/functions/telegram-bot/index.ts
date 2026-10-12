@@ -206,10 +206,13 @@ async function generate(chat: number, msgId: number | undefined, st: State, user
   if (bad) return send(chat, `⚠️ ${bad}`, T.kbSettings(s));
 
   const pool = await loadPool(st);
-  const err = T.checkPool(T.poolStats(pool), s);
-  if (err) return send(chat, `⚠️ ${err}`, T.kbSettings(s));
+  const fit = T.fitSettings(T.poolStats(pool), s);
+  if (fit.error) return send(chat, `⚠️ ${fit.error}`, T.kbSettings(s));
+  if (fit.notes.length) await send(chat, `ℹ️ Вопросов не хватает, билеты составлены из того, что есть:
+• ${fit.notes.join('
+• ')}`);
 
-  const tickets = T.buildTickets(pool, s);
+  const tickets = T.buildTickets(pool, fit.settings);
   const title = s.title.trim() || 'Экзаменационные билеты';
   const subjectName = (await subjects()).find((x) => x.id === st.subjectId)?.name ?? 'Химия';
 
@@ -218,7 +221,7 @@ async function generate(chat: number, msgId: number | undefined, st: State, user
     title, subject_id: st.subjectId, created_by: user.id,
     generation_params: {
       chapter_ids: st.chapterIds, topic_ids: st.topicIds,
-      test_count: s.testCount, matching_count: s.matchingCount, open_count: s.openCount, ticket_count: s.ticketCount,
+      test_count: fit.settings.testCount, matching_count: fit.settings.matchingCount, open_count: fit.settings.openCount, ticket_count: s.ticketCount,
       shuffle_options: s.shuffleOptions, shuffle_matching: s.shuffleMatching, source: 'telegram',
     },
   }).select().single();
@@ -407,8 +410,11 @@ async function onCallback(cb: any) {
   if (data === 'SN') {
     const bad = T.checkSettings(st.settings);
     if (bad) return send(chat, `⚠️ ${bad}`);
-    const err = T.checkPool(await countPool(st), st.settings);
-    if (err) return send(chat, `⚠️ ${err}`);
+    const fit = T.fitSettings(await countPool(st), st.settings);
+    if (fit.error) return send(chat, `⚠️ ${fit.error}`);
+    if (fit.notes.length) await send(chat, `ℹ️ Вопросов не хватает — возьмём сколько есть:
+• ${fit.notes.join('
+• ')}`);
     st.step = 'lang';
     await saveState(chat, st);
     return show(chat, msgId, 'На каком языке подготовить файлы?', T.kbLang());

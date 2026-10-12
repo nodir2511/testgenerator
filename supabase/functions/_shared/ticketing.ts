@@ -53,17 +53,28 @@ export function checkSettings(s: Settings): string | null {
   return null;
 }
 
-export function checkPool(stats: ReturnType<typeof poolStats>, s: Settings): string | null {
-  if (stats.test < s.testCount) {
-    return `Недостаточно тестовых вопросов! Требуется в билете: ${s.testCount}, а в выбранных темах доступно: ${stats.test}`;
-  }
-  if (stats.matching < s.matchingCount) {
-    return `Недостаточно заданий на соответствие! Требуется: ${s.matchingCount}, а доступно: ${stats.matching}`;
-  }
-  if (stats.open < s.openCount) {
-    return `Недостаточно открытых вопросов! Требуется: ${s.openCount}, а доступно: ${stats.open}`;
-  }
-  return null;
+export type PoolStats = ReturnType<typeof poolStats>;
+
+// Подгоняет состав билета под то, что есть в выбранных темах: если вопросов какого-то
+// вида меньше, чем запрошено, берём сколько есть (в билет попадёт меньше вопросов этого вида).
+// error — только если подходящих вопросов нет вообще.
+export function fitSettings(stats: PoolStats, s: Settings): { settings: Settings; notes: string[]; error: string | null } {
+  const notes: string[] = [];
+  const fit = (want: number, have: number, label: string) => {
+    if (want <= have) return want;
+    notes.push(`${label}: в билете ${have} из ${want} (в выбранных темах их только ${have})`);
+    return have;
+  };
+  const testCount = fit(s.testCount, stats.test, 'Тестовые вопросы');
+  const matchingCount = fit(s.matchingCount, stats.matching, 'Задания на соответствие');
+  const openCount = fit(s.openCount, stats.open, 'Открытые вопросы');
+  const error = testCount + matchingCount + openCount === 0 ? 'В выбранных темах нет вопросов нужных видов' : null;
+  return { settings: { ...s, testCount, matchingCount, openCount }, notes, error };
+}
+
+// Ошибка только если составить билет вообще не из чего
+export function checkPool(stats: PoolStats, s: Settings): string | null {
+  return fitSettings(stats, s).error;
 }
 
 // Снимок вопроса для билета (тот же формат, что у сайта)

@@ -47,6 +47,7 @@ export const UserManagementView: React.FC = () => {
       if (data?.error) throw new Error(data.error);
       return data;
     },
+    meta: { success: 'Аккаунт создан и сохранён в базе' },
     onSuccess: (data) => {
       setCreateError(null);
       setCreateSuccess(`Аккаунт ${data.email} создан`);
@@ -98,6 +99,7 @@ export const UserManagementView: React.FC = () => {
       if (data?.error) throw new Error(data.error);
       return data;
     },
+    meta: { success: 'Данные пользователя обновлены в базе' },
     onSuccess: () => {
       setEditingId(null);
       setEditError(null);
@@ -139,11 +141,13 @@ export const UserManagementView: React.FC = () => {
   // Смена роли пользователя
   const changeRoleMutation = useMutation({
     mutationFn: async ({ userId, newRole }: { userId: string; newRole: UserRole }) => {
-      const { error } = await supabase
+      const { data: changed, error } = await supabase
         .from('profiles')
         .update({ role: newRole })
-        .eq('id', userId);
+        .eq('id', userId)
+        .select('id');
       if (error) throw error;
+      assertRowsChanged(changed, 'роль пользователя');
 
       await supabase.from('audit_logs').insert({
         user_id: currentUser?.id,
@@ -153,6 +157,7 @@ export const UserManagementView: React.FC = () => {
         details: { new_role: newRole },
       });
     },
+    meta: { action: 'Не удалось изменить роль', success: 'Роль пользователя изменена в базе' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin_profiles'] });
       queryClient.invalidateQueries({ queryKey: ['admin_audit_logs'] });
