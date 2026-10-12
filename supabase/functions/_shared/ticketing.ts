@@ -154,29 +154,59 @@ export function kbSubjects(subjects: Array<{ name: string }>): Kb {
   return subjects.map((s, i) => [{ text: clip(s.name), callback_data: `S:${i}` }]);
 }
 
+// Короткое имя: берём русскую часть «Рус / Тоҷикӣ»
+export const shortName = (s: string, n = 60) => clip((s.split(' / ')[0] || s).trim(), n);
+
+// Разбор «1-3, 5 8» или «все» -> номера (1-based), без дублей. null — не разобрать
+export function parseNumbers(text: string, max: number): number[] | 'all' | null {
+  const t = text.trim().toLowerCase();
+  if (/^(все|всё|all|ҳама)$/.test(t)) return 'all';
+  if (!/^[\d\s,;.\-–—]+$/.test(t)) return null;
+  const out = new Set<number>();
+  for (const part of t.split(/[\s,;.]+/).filter(Boolean)) {
+    const m = part.match(/^(\d+)(?:[-–—](\d+))?$/);
+    if (!m) return null;
+    const a = +m[1], z = m[2] ? +m[2] : a;
+    if (a < 1 || z > max || a > z) return null;
+    for (let i = a; i <= z; i++) out.add(i);
+  }
+  return out.size ? [...out].sort((x, y) => x - y) : null;
+}
+
+// Сетка кнопок-номеров (6 в ряд): нажатие переключает пункт
+function numGrid(count: number, isOn: (i: number) => boolean, prefix: string): Kb {
+  const btns: Btn[] = [];
+  for (let i = 0; i < count; i++) btns.push({ text: `${isOn(i) ? '✅' : ''}${i + 1}`, callback_data: `${prefix}:${i}` });
+  return chunk(btns, 6);
+}
+
+function numberedList(items: Array<{ id: string; name: string }>, selected: string[]): string {
+  return items.map((c, i) => `${selected.includes(c.id) ? '✅' : '▫️'} ${i + 1}. ${shortName(c.name)}`).join('\n');
+}
+
+export function chaptersText(chapters: Array<{ id: string; name: string }>, selected: string[]): string {
+  return `Выберите главы: нажимайте номера или отправьте текстом, например 1-3, 5 (или «все»).\n\n${numberedList(chapters, selected)}`;
+}
+
 export function kbChapters(chapters: Array<{ id: string; name: string }>, selected: string[]): Kb {
-  const rows: Kb = chapters.map((c, i) => [{ text: `${selected.includes(c.id) ? '✅' : '⬜'} ${clip(c.name)}`, callback_data: `C:${i}` }]);
-  rows.push([{ text: 'Выбрать все', callback_data: 'CA' }, { text: 'Сбросить', callback_data: 'CR' }]);
+  const rows = numGrid(chapters.length, (i) => selected.includes(chapters[i].id), 'C');
+  rows.push([{ text: 'Все главы', callback_data: 'CA' }, { text: 'Сбросить', callback_data: 'CR' }]);
   rows.push([{ text: 'Далее ▶', callback_data: 'CN' }]);
   return rows;
 }
 
-export const TOPIC_PAGE = 8;
+export function topicsText(chapterName: string, pos: number, total: number, topics: Array<{ id: string; name: string }>, selected: string[]): string {
+  const head = `${shortName(chapterName, 40)} — темы (глава ${pos + 1} из ${total})`;
+  if (!topics.length) return `${head}\n\nВ этой главе нет тем — будут взяты все вопросы главы.`;
+  const n = topics.filter((t) => selected.includes(t.id)).length;
+  const note = n ? `Выбрано: ${n} из ${topics.length}.` : 'Ничего не выбрано — возьмутся все темы главы.';
+  return `${head}\n${note}\nНажимайте номера или отправьте текстом, например 1-4, 7 (или «все»).\n\n${numberedList(topics, selected)}`;
+}
 
-export function kbTopics(topics: Array<{ id: string; name: string }>, selected: string[], page: number): Kb {
-  const pages = Math.max(1, Math.ceil(topics.length / TOPIC_PAGE));
-  const p = Math.min(Math.max(0, page), pages - 1);
-  const slice = topics.slice(p * TOPIC_PAGE, (p + 1) * TOPIC_PAGE);
-  const rows: Kb = slice.map((t, i) => [{ text: `${selected.includes(t.id) ? '✅' : '⬜'} ${clip(t.name)}`, callback_data: `T:${p * TOPIC_PAGE + i}` }]);
-  if (pages > 1) {
-    const nav: Btn[] = [];
-    if (p > 0) nav.push({ text: '◀', callback_data: `TP:${p - 1}` });
-    nav.push({ text: `${p + 1}/${pages}`, callback_data: 'NOOP' });
-    if (p < pages - 1) nav.push({ text: '▶', callback_data: `TP:${p + 1}` });
-    rows.push(nav);
-  }
-  rows.push([{ text: 'Все темы выбранных глав', callback_data: 'TX' }]);
-  rows.push([{ text: '◀ Главы', callback_data: 'BC' }, { text: 'Далее ▶', callback_data: 'TN' }]);
+export function kbTopics(topics: Array<{ id: string; name: string }>, selected: string[], isLast: boolean): Kb {
+  const rows = numGrid(topics.length, (i) => selected.includes(topics[i].id), 'T');
+  rows.push([{ text: 'Все темы главы', callback_data: 'TX' }]);
+  rows.push([{ text: '◀ Назад', callback_data: 'TB' }, { text: isLast ? 'Далее ▶' : 'След. глава ▶', callback_data: 'TN' }]);
   return rows;
 }
 
