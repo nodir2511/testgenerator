@@ -190,6 +190,18 @@ function stripOuterParens(s: string): string {
   return s;
 }
 
+function findMainSlash(s: string): number {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '(') depth++;
+    else if (s[i] === ')') depth--;
+    else if (s[i] === '/' && depth === 0) {
+      return i;
+    }
+  }
+  return s.indexOf('/');
+}
+
 interface FracInfo {
   prefix?: string;
   num?: string;
@@ -245,7 +257,7 @@ function extractFraction(expr: string): FracInfo | null {
       const left = sides[0].trim();
       const right = sides[1].trim();
       if (!left.includes('/') && right.includes('/')) {
-        const slashIdx = right.indexOf('/');
+        const slashIdx = findMainSlash(right);
         const num = stripOuterParens(right.slice(0, slashIdx));
         const den = stripOuterParens(right.slice(slashIdx + 1));
         if (num && den && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(num) && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(den)) {
@@ -257,7 +269,7 @@ function extractFraction(expr: string): FracInfo | null {
 
   // 4. Одиночная дробь: (B·C)/D, P/(V·cos(φ)), (y-b)/k, F/m
   if (expr.includes('/')) {
-    const slashIdx = expr.indexOf('/');
+    const slashIdx = findMainSlash(expr);
     const num = stripOuterParens(expr.slice(0, slashIdx));
     const den = stripOuterParens(expr.slice(slashIdx + 1));
     if (num && den && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(num) && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(den)) {

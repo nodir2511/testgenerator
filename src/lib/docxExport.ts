@@ -86,6 +86,18 @@ function stripOuterParens(s: string): string {
   return s;
 }
 
+function findMainSlash(s: string): number {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === '(') depth++;
+    else if (s[i] === ')') depth--;
+    else if (s[i] === '/' && depth === 0) {
+      return i;
+    }
+  }
+  return s.indexOf('/');
+}
+
 function buildMathRuns(text: string): MathRun[] {
   if (!text) return [];
   const runs: MathRun[] = [];
@@ -177,7 +189,7 @@ export function parseFormulaToDocxMath(text: string): DocxMath | null {
       const right = eqSides[1].trim();
 
       if (!left.includes('/') && right.includes('/')) {
-        const slashIdx = right.indexOf('/');
+        const slashIdx = findMainSlash(right);
         const num = stripOuterParens(right.slice(0, slashIdx));
         const den = stripOuterParens(right.slice(slashIdx + 1));
         if (num && den && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(num) && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(den)) {
@@ -197,7 +209,7 @@ export function parseFormulaToDocxMath(text: string): DocxMath | null {
 
   // 4. Одиночная дробь: (y-b)/k, P/(V·cos(φ)), (B·C)/D, F/m
   if (text.includes('/')) {
-    const slashIdx = text.indexOf('/');
+    const slashIdx = findMainSlash(text);
     const num = stripOuterParens(text.slice(0, slashIdx));
     const den = stripOuterParens(text.slice(slashIdx + 1));
     if (num && den && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(num) && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(den)) {

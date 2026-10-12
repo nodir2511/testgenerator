@@ -57,3 +57,4 @@ sample_template.xml
 !step2_lock.sql
 !close_public_read.sql
 !telegram_bot.sql
+supabase/.temp/
