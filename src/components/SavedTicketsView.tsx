@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { assertRowsChanged, notifyError } from '../lib/errors';
 import { TicketBatch, Ticket } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { exportTicketsToDocx, exportSingleTicketDocx } from '../lib/docxExport';
@@ -50,9 +51,11 @@ export const SavedTicketsView: React.FC = () => {
 
   const deleteBatchMutation = useMutation({
     mutationFn: async (batchId: string) => {
-      const { error } = await supabase.from('ticket_batches').delete().eq('id', batchId);
+      const { data, error } = await supabase.from('ticket_batches').delete().eq('id', batchId).select('id');
       if (error) throw error;
+      assertRowsChanged(data, 'партия билетов');
     },
+    meta: { action: 'Не удалось удалить партию билетов' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
     },
@@ -68,7 +71,7 @@ export const SavedTicketsView: React.FC = () => {
         lang
       );
     } catch (err: any) {
-      alert('Ошибка при экспорте в Word: ' + err.message);
+      notifyError(err, 'Ошибка при экспорте в Word');
     } finally {
       setExportingId(null);
     }

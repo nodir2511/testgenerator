@@ -17,6 +17,74 @@ export interface DocxParsedQuestion {
 /**
  * Очищает и преобразует XML Word-пробежки в текст с сохранением sub, sup, b, i
  */
+function decodeXml(s: string): string {
+  return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+}
+
+function parseSimpleOmml(xml: string): string {
+  let out = '';
+  const elemRegex = /<m:r\b[\s\S]*?<\/m:r>|<m:sSup\b[\s\S]*?<\/m:sSup>|<m:sSub\b[\s\S]*?<\/m:sSub>/g;
+  let m: RegExpExecArray | null;
+  let hasElem = false;
+
+  while ((m = elemRegex.exec(xml)) !== null) {
+    hasElem = true;
+    const el = m[0];
+    if (el.startsWith('<m:sSup')) {
+      const eMatch = el.match(/<m:e\b[\s\S]*?<\/m:e>/);
+      const supMatch = el.match(/<m:sup\b[\s\S]*?<\/m:sup>/);
+      const e = eMatch ? parseSimpleOmml(eMatch[0]) : '';
+      const sup = supMatch ? parseSimpleOmml(supMatch[0]) : '';
+      out += `${e}<sup>${sup}</sup>`;
+    } else if (el.startsWith('<m:sSub')) {
+      const eMatch = el.match(/<m:e\b[\s\S]*?<\/m:e>/);
+      const subMatch = el.match(/<m:sub\b[\s\S]*?<\/m:sub>/);
+      const e = eMatch ? parseSimpleOmml(eMatch[0]) : '';
+      const sub = subMatch ? parseSimpleOmml(subMatch[0]) : '';
+      out += `${e}<sub>${sub}</sub>`;
+    } else {
+      const tMatches = [...el.matchAll(/<m:t(?:\s[^>]*)?>([\s\S]*?)<\/m:t>/g)];
+      out += decodeXml(tMatches.map((tm) => tm[1]).join(''));
+    }
+  }
+
+  if (!hasElem) {
+    const tMatches = [...xml.matchAll(/<m:t(?:\s[^>]*)?>([\s\S]*?)<\/m:t>/g)];
+    out += decodeXml(tMatches.map((tm) => tm[1]).join(''));
+  }
+
+  return out;
+}
+
+function parseOmmlFragment(xml: string): string {
+  let out = '';
+  const fRegex = /<m:f\b[\s\S]*?<\/m:f>/g;
+  let lastIdx = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = fRegex.exec(xml)) !== null) {
+    out += parseSimpleOmml(xml.slice(lastIdx, m.index));
+    const fXml = m[0];
+    const numMatch = fXml.match(/<m:num\b[\s\S]*?<\/m:num>/);
+    const denMatch = fXml.match(/<m:den\b[\s\S]*?<\/m:den>/);
+
+    const num = numMatch ? parseOmmlFragment(numMatch[0].replace(/^<m:num[^>]*>/, '').replace(/<\/m:num>$/, '')) : '';
+    const den = denMatch ? parseOmmlFragment(denMatch[0].replace(/^<m:den[^>]*>/, '').replace(/<\/m:den>$/, '')) : '';
+
+    const cleanNum = num.trim().startsWith('(') && num.trim().endsWith(')') ? num.trim() : `(${num.trim()})`;
+    const cleanDen = den.trim().startsWith('(') && den.trim().endsWith(')') ? den.trim() : `(${den.trim()})`;
+
+    out += `${cleanNum}/${cleanDen}`;
+    lastIdx = m.index + m[0].length;
+  }
+
+  out += parseSimpleOmml(xml.slice(lastIdx));
+  return out;
+}
+
+/**
+ * Очищает и преобразует XML Word-пробежки в текст с сохранением sub, sup, b, i и дробей
+ */
 export function cleanXmlRunsToFormattedText(xml: string): string {
   if (!xml) return '';
 
@@ -29,6 +97,13 @@ export function cleanXmlRunsToFormattedText(xml: string): string {
   while ((match = rRegex.exec(xml)) !== null) {
     hasRuns = true;
     const rXml = match[0];
+
+    // Если это формула Word (OMML)
+    if (rXml.startsWith('<m:oMath')) {
+      result += parseOmmlFragment(rXml);
+      continue;
+    }
+
     const isSub = rXml.includes('w:val="subscript"') || rXml.includes('<m:sub>');
     const isSup = rXml.includes('w:val="superscript"') || rXml.includes('<m:sup>');
     const isBold = /<w:b(?:\s+w:val="(?:true|1)")?\s*\/>/.test(rXml);

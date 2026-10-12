@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { notifyError, describeError } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { FormulaEditor } from './FormulaEditor';
@@ -185,7 +186,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       const url = await uploadQuestionImage(file);
       setImageUrl(url);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Ошибка загрузки файла');
+      setErrorMsg(describeError(err, 'Ошибка загрузки файла'));
     } finally {
       setUploadingImage(false);
     }
@@ -205,7 +206,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             const url = await uploadQuestionImage(file);
             setImageUrl(url);
           } catch (err: any) {
-            setErrorMsg('Ошибка вставки картинки: ' + err.message);
+            setErrorMsg(describeError(err, 'Ошибка вставки картинки'));
           } finally {
             setUploadingImage(false);
           }
@@ -225,7 +226,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       updated[index].image_url = url;
       setOptions(updated);
     } catch (err: any) {
-      alert('Ошибка загрузки картинки: ' + err.message);
+      notifyError(err, 'Ошибка загрузки картинки');
     }
   };
 
@@ -245,7 +246,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         updated[index].image_url = url;
         setRightItems(updated);
       }
-    }).catch(err => alert(err.message));
+    }).catch(err => notifyError(err, 'Ошибка вставки картинки'));
   };
 
   // Сохранение вопроса (Create / Update)
@@ -460,7 +461,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       onSuccess();
     },
     onError: (err: any) => {
-      setErrorMsg(err.message || 'Ошибка сохранения вопроса');
+      setErrorMsg(describeError(err, 'Ошибка сохранения вопроса'));
     },
   });
 

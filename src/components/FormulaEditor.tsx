@@ -83,6 +83,14 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
         </button>
         <button
           type="button"
+          onClick={() => wrapSelection('(', ')/( )')}
+          title="Дробь (числитель)/(знаменатель)"
+          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center font-mono font-bold"
+        >
+          a/b
+        </button>
+        <button
+          type="button"
           onClick={() => wrapSelection('<b>', '</b>')}
           title="Полужирный"
           className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center"
@@ -163,11 +171,155 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
   );
 };
 
+const UNIT_RE = /(?:^|\s|\d)(?:км\/ч|км\/соат|м\/с[2²]?|г\/моль|Н\/м|кг\/м[3³]?|Дж\/кг|В\/м|А\/м|Ом\/м|об\/с|рад\/с)(?:$|\s|[.,;:!?])/i;
+
+function stripOuterParens(s: string): string {
+  if (!s) return '';
+  s = s.trim();
+  if (s.startsWith('(') && s.endsWith(')')) {
+    let depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')') {
+        depth--;
+        if (depth === 0 && i < s.length - 1) return s;
+      }
+    }
+    return s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+interface FracInfo {
+  prefix?: string;
+  num?: string;
+  den?: string;
+  suffix?: string;
+  isDouble?: boolean;
+  num1?: string;
+  den1?: string;
+  num2?: string;
+  den2?: string;
+}
+
+function extractFraction(expr: string): FracInfo | null {
+  if (!expr || UNIT_RE.test(expr)) return null;
+
+  // 1. Явная дробь \frac{num}{den} или <frac>num/den</frac>
+  const latexMatch = expr.match(/^(.*?)\\frac\{([^{}]+)\}\{([^{}]+)\}(.*)$/);
+  if (latexMatch) {
+    return {
+      prefix: latexMatch[1],
+      num: latexMatch[2],
+      den: latexMatch[3],
+      suffix: latexMatch[4]
+    };
+  }
+
+  const fracTag = expr.match(/^(.*?)<frac>([^\/]+)\/([^<]+)<\/frac>(.*)$/i);
+  if (fracTag) {
+    return {
+      prefix: fracTag[1],
+      num: fracTag[2],
+      den: fracTag[3],
+      suffix: fracTag[4]
+    };
+  }
+
+  // 2. Двойная дробь: A/B = C/D
+  const doubleMatch = expr.match(/^([A-Za-z0-9_]+)\/([A-Za-z0-9_]+)\s*=\s*([A-Za-z0-9_]+)\/([A-Za-z0-9_]+)$/);
+  if (doubleMatch) {
+    return {
+      isDouble: true,
+      num1: doubleMatch[1],
+      den1: doubleMatch[2],
+      num2: doubleMatch[3],
+      den2: doubleMatch[4]
+    };
+  }
+
+  // 3. Уравнение с дробью: I = cos(φ)/(P·V), A = (B·C)/D, x = (y-b)/k, a = F/m
+  if (expr.includes('=')) {
+    const sides = expr.split('=');
+    if (sides.length === 2) {
+      const left = sides[0].trim();
+      const right = sides[1].trim();
+      if (!left.includes('/') && right.includes('/')) {
+        const slashIdx = right.indexOf('/');
+        const num = stripOuterParens(right.slice(0, slashIdx));
+        const den = stripOuterParens(right.slice(slashIdx + 1));
+        if (num && den && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(num) && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(den)) {
+          return { prefix: left + ' = ', num, den, suffix: '' };
+        }
+      }
+    }
+  }
+
+  // 4. Одиночная дробь: (B·C)/D, P/(V·cos(φ)), (y-b)/k, F/m
+  if (expr.includes('/')) {
+    const slashIdx = expr.indexOf('/');
+    const num = stripOuterParens(expr.slice(0, slashIdx));
+    const den = stripOuterParens(expr.slice(slashIdx + 1));
+    if (num && den && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(num) && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(den)) {
+      return { num, den };
+    }
+  }
+
+  return null;
+}
+
 /**
- * Вспомогательный компонент для безопасного отображения текста с sub/sup тегами
+ * Вспомогательный компонент для безопасного отображения текста с sub/sup тегами и вертикальными математическими дробями
  */
 export const FormattedText: React.FC<{ text: string; className?: string }> = ({ text, className }) => {
-  // Простая и безопасная регулярная очистка и рендеринг тегов b, i, sub, sup
+  if (!text) return null;
+
+  // 1. Проверяем, является ли весь текст целиком формулой с дробью (варианты ответов, уравнения)
+  const frac = extractFraction(text);
+  if (frac) {
+    if (frac.isDouble) {
+      return (
+        <span className={`inline-flex items-center align-middle font-serif ${className || ''}`}>
+          <span className="inline-flex flex-col items-center mx-0.5 text-[0.8em] leading-tight">
+            <span className="border-b border-current px-1 pb-0.5 text-center"><FormattedText text={frac.num1 || ''} /></span>
+            <span className="px-1 pt-0.5 text-center"><FormattedText text={frac.den1 || ''} /></span>
+          </span>
+          <span className="mx-1">=</span>
+          <span className="inline-flex flex-col items-center mx-0.5 text-[0.8em] leading-tight">
+            <span className="border-b border-current px-1 pb-0.5 text-center"><FormattedText text={frac.num2 || ''} /></span>
+            <span className="px-1 pt-0.5 text-center"><FormattedText text={frac.den2 || ''} /></span>
+          </span>
+        </span>
+      );
+    }
+    return (
+      <span className={`inline-flex items-center align-middle font-serif ${className || ''}`}>
+        {frac.prefix && <span className="mr-0.5">{frac.prefix}</span>}
+        <span className="inline-flex flex-col items-center mx-0.5 text-[0.8em] leading-tight">
+          <span className="border-b border-current px-1 pb-0.5 text-center"><FormattedText text={frac.num || ''} /></span>
+          <span className="px-1 pt-0.5 text-center"><FormattedText text={frac.den || ''} /></span>
+        </span>
+        {frac.suffix && <span className="ml-0.5">{frac.suffix}</span>}
+      </span>
+    );
+  }
+
+  // 2. Если внутри текста содержится встроенная формула, например "Преобразуйте формулу A/B = C/D и выразите A:"
+  const formulaEmbed = text.match(/^(.*?\b(?:формулу|выражение)?\s*)([A-Za-z0-9_]+\/[A-Za-z0-9_]+\s*=\s*[A-Za-z0-9_]+\/[A-Za-z0-9_]+|[A-Za-zα-ωΑ-Ω0-9_\s]+\s*=\s*[^:;,]+?)(\s+(?:и выразите|найдите|какова|чему|согласно).*)$/i);
+  if (formulaEmbed) {
+    const [, before, formulaStr, after] = formulaEmbed;
+    if (extractFraction(formulaStr.trim())) {
+      return (
+        <span className={className}>
+          <FormattedText text={before} />
+          <FormattedText text={formulaStr.trim()} />
+          <FormattedText text={after} />
+        </span>
+      );
+    }
+  }
+
+  // 3. Обычная очистка и рендеринг тегов b, i, sub, sup
   const parts = text.split(/(<sub>.*?<\/sub>|<sup>.*?<\/sup>|<b>.*?<\/b>|<i>.*?<\/i>)/g);
 
   return (

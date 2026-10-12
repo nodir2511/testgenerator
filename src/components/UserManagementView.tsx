@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { assertRowsChanged } from '../lib/errors';
 import { Profile, UserRole, AuditLog } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { Users, ShieldCheck, UserCheck, Activity, Loader2, UserPlus, Pencil } from 'lucide-react';

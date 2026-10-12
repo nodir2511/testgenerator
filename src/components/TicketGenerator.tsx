@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { notifyError, describeError } from '../lib/errors';
 import { Subject, Chapter, Topic, Question, TicketBatch, Ticket, TicketQuestion } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -487,7 +488,7 @@ export const TicketGenerator: React.FC = () => {
 
       queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
     } catch (err: any) {
-      setGenerationError(err.message || 'Ошибка генерации билетов');
+      setGenerationError(describeError(err, 'Ошибка генерации билетов'));
     } finally {
       setIsGenerating(false);
     }
@@ -504,7 +505,7 @@ export const TicketGenerator: React.FC = () => {
         lang
       );
     } catch (err: any) {
-      alert('Ошибка экспорта в Word: ' + err.message);
+      notifyError(err, 'Ошибка экспорта в Word');
     }
   };
 

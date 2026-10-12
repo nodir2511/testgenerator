@@ -9,7 +9,11 @@ import {
   TableRow, 
   TableCell, 
   WidthType, 
-  BorderStyle 
+  BorderStyle,
+  Math as DocxMath,
+  MathFraction,
+  MathRun,
+  type ParagraphChild
 } from 'docx';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
@@ -62,16 +66,185 @@ async function fetchImageBuffer(url: string): Promise<Uint8Array | null> {
   }
 }
 
-// Парсер форматированного текста (sub, sup, b, i) с поддержкой жирности
+// Единицы измерения, которые не должны превращаться в вертикальные дроби
+const UNIT_RE = /(?:^|\s|\d)(?:км\/ч|км\/соат|м\/с[2²]?|г\/моль|Н\/м|кг\/м[3³]?|Дж\/кг|В\/м|А\/м|Ом\/м|об\/с|рад\/с)(?:$|\s|[.,;:!?])/i;
+
+function stripOuterParens(s: string): string {
+  if (!s) return '';
+  s = s.trim();
+  if (s.startsWith('(') && s.endsWith(')')) {
+    let depth = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')') {
+        depth--;
+        if (depth === 0 && i < s.length - 1) return s;
+      }
+    }
+    return s.slice(1, -1).trim();
+  }
+  return s;
+}
+
+function buildMathRuns(text: string): MathRun[] {
+  if (!text) return [];
+  const runs: MathRun[] = [];
+  const parts = text.split(/(<sub>.*?<\/sub>|<sup>.*?<\/sup>)/g);
+  for (const part of parts) {
+    if (!part) continue;
+    if (part.startsWith('<sub>') && part.endsWith('</sub>')) {
+      runs.push(new MathRun(part.replace(/<\/?sub>/g, '')));
+    } else if (part.startsWith('<sup>') && part.endsWith('</sup>')) {
+      runs.push(new MathRun(part.replace(/<\/?sup>/g, '')));
+    } else {
+      runs.push(new MathRun(part));
+    }
+  }
+  return runs.length > 0 ? runs : [new MathRun(text)];
+}
+
+function parseExplicitFrac(text: string): { num: string; den: string } | null {
+  const tagMatch = text.match(/<frac>([\s\S]*?)<\/frac>/i);
+  if (tagMatch) {
+    const inner = tagMatch[1];
+    const slashIdx = inner.indexOf('/');
+    if (slashIdx !== -1) {
+      return {
+        num: inner.slice(0, slashIdx).trim(),
+        den: inner.slice(slashIdx + 1).trim()
+      };
+    }
+  }
+  const latexMatch = text.match(/\\frac\{([^{}]+)\}\{([^{}]+)\}/);
+  if (latexMatch) {
+    return {
+      num: latexMatch[1].trim(),
+      den: latexMatch[2].trim()
+    };
+  }
+  return null;
+}
+
+/**
+ * Преобразует математическое выражение с дробью в объект формулы Word (DocxMath)
+ */
+export function parseFormulaToDocxMath(text: string): DocxMath | null {
+  if (!text || UNIT_RE.test(text)) return null;
+
+  // 1. Явные теги дроби: <frac>num/den</frac> или \frac{num}{den}
+  const expFrac = parseExplicitFrac(text);
+  if (expFrac) {
+    const isTag = text.includes('<frac>');
+    const startIdx = text.indexOf(isTag ? '<frac>' : '\\frac');
+    const endIdx = isTag 
+      ? text.indexOf('</frac>') + 7 
+      : text.indexOf('}', text.indexOf('}') + 1) + 1;
+    const before = text.slice(0, startIdx);
+    const after = text.slice(endIdx);
+    const children: any[] = [];
+    if (before) children.push(new MathRun(before));
+    children.push(new MathFraction({
+      numerator: buildMathRuns(expFrac.num),
+      denominator: buildMathRuns(expFrac.den)
+    }));
+    if (after) children.push(new MathRun(after));
+    return new DocxMath({ children });
+  }
+
+  // 2. Двойная дробь: A/B = C/D
+  const doubleMatch = text.match(/^([A-Za-z0-9_]+)\/([A-Za-z0-9_]+)\s*=\s*([A-Za-z0-9_]+)\/([A-Za-z0-9_]+)$/);
+  if (doubleMatch) {
+    return new DocxMath({
+      children: [
+        new MathFraction({
+          numerator: buildMathRuns(doubleMatch[1]),
+          denominator: buildMathRuns(doubleMatch[2])
+        }),
+        new MathRun(' = '),
+        new MathFraction({
+          numerator: buildMathRuns(doubleMatch[3]),
+          denominator: buildMathRuns(doubleMatch[4])
+        })
+      ]
+    });
+  }
+
+  // 3. Уравнение с дробью: I = cos(φ)/(P·V), A = (B·C)/D, x = (y-b)/k, a = F/m
+  if (text.includes('=')) {
+    const eqSides = text.split('=');
+    if (eqSides.length === 2) {
+      const left = eqSides[0].trim();
+      const right = eqSides[1].trim();
+
+      if (!left.includes('/') && right.includes('/')) {
+        const slashIdx = right.indexOf('/');
+        const num = stripOuterParens(right.slice(0, slashIdx));
+        const den = stripOuterParens(right.slice(slashIdx + 1));
+        if (num && den && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(num) && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(den)) {
+          return new DocxMath({
+            children: [
+              new MathRun(left + ' = '),
+              new MathFraction({
+                numerator: buildMathRuns(num),
+                denominator: buildMathRuns(den)
+              })
+            ]
+          });
+        }
+      }
+    }
+  }
+
+  // 4. Одиночная дробь: (y-b)/k, P/(V·cos(φ)), (B·C)/D, F/m
+  if (text.includes('/')) {
+    const slashIdx = text.indexOf('/');
+    const num = stripOuterParens(text.slice(0, slashIdx));
+    const den = stripOuterParens(text.slice(slashIdx + 1));
+    if (num && den && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(num) && !/[а-яА-ЯёЁғӣӯҳҷқ]{4,}/.test(den)) {
+      return new DocxMath({
+        children: [
+          new MathFraction({
+            numerator: buildMathRuns(num),
+            denominator: buildMathRuns(den)
+          })
+        ]
+      });
+    }
+  }
+
+  return null;
+}
+
+// Парсер форматированного текста (sub, sup, b, i) и формул с дробями
 export function parseFormattedTextRuns(
   text: string, 
   isItalic = false, 
   fontSize = 24, 
   isBold = false
-): TextRun[] {
+): ParagraphChild[] {
   if (!text) return [];
+
+  // 1. Если весь текст целиком является формулой с дробью (варианты ответов, уравнения)
+  const fullMath = parseFormulaToDocxMath(text);
+  if (fullMath) return [fullMath];
+
+  // 2. Если внутри текста вопроса содержится встроенная формула, например "Преобразуйте формулу A/B = C/D и выразите A:"
+  const formulaEmbed = text.match(/^(.*?\b(?:формулу|выражение)?\s*)([A-Za-z0-9_]+\/[A-Za-z0-9_]+\s*=\s*[A-Za-z0-9_]+\/[A-Za-z0-9_]+|[A-Za-zα-ωΑ-Ω0-9_\s]+\s*=\s*[^:;,]+?)(\s+(?:и выразите|найдите|какова|чему|согласно).*)$/i);
+  if (formulaEmbed) {
+    const [, before, formulaStr, after] = formulaEmbed;
+    const mathPart = parseFormulaToDocxMath(formulaStr.trim());
+    if (mathPart) {
+      return [
+        ...parseFormattedTextRuns(before, isItalic, fontSize, isBold),
+        mathPart,
+        ...parseFormattedTextRuns(after, isItalic, fontSize, isBold)
+      ];
+    }
+  }
+
+  // 3. Обычные пробежки с форматированием (sub, sup, b, i)
   const parts = text.split(/(<sub>.*?<\/sub>|<sup>.*?<\/sup>|<b>.*?<\/b>|<i>.*?<\/i>)/g);
-  const runs: TextRun[] = [];
+  const runs: ParagraphChild[] = [];
 
   parts.forEach((part) => {
     if (!part) return;

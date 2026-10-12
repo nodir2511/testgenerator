@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { assertRowsChanged } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { FormattedText } from './FormulaEditor';

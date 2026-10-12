@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { assertRowsChanged } from '../lib/errors';
 import { Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -159,12 +160,15 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
   // Удаление (мягкое)
   const softDeleteMutation = useMutation({
     mutationFn: async ({ table, id }: { table: string; id: string }) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from(table)
         .update({ is_deleted: true })
-        .eq('id', id);
+        .eq('id', id)
+        .select('id');
       if (error) throw error;
+      assertRowsChanged(data, 'запись');
     },
+    meta: { action: 'Не удалось удалить запись' },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: [variables.table] });
     },
