@@ -167,7 +167,7 @@ function paragraphStart(xml: string, pos: number): number {
 }
 
 // Номера через запятую; три и более подряд — диапазоном («1–4», «1, 3, 5–7»)
-function numberList(nums: number[], collapse: boolean): string {
+export function numberList(nums: number[], collapse: boolean): string {
   const s = [...new Set(nums)].sort((a, b) => a - b);
   if (!collapse) return s.join(', ');
   const parts: string[] = [];
@@ -179,6 +179,30 @@ function numberList(nums: number[], collapse: boolean): string {
     i = j + 1;
   }
   return parts.join(', ');
+}
+
+export interface SelectionChip { chapter: number; full: boolean; picked: number; total: number; topics: string }
+
+/** То же, что selectionInfo, но по главам — для карточек (чипы с долей выбранных тем) */
+export function selectionChips(
+  chapters: Array<{ id: string; order_index: number }>,
+  topics: Array<{ id: string; chapter_id: string; order_index: number }>,
+  chapterIds: string[],
+  topicIds: string[],
+): SelectionChip[] {
+  const picked = new Set(topicIds);
+  const out: SelectionChip[] = [];
+  for (const ch of [...chapters].sort((a, b) => a.order_index - b.order_index)) {
+    const all = topics.filter((t) => t.chapter_id === ch.id);
+    if (topicIds.length) {
+      const sel = all.filter((t) => picked.has(t.id));
+      if (!sel.length) continue;
+      out.push({ chapter: ch.order_index, full: sel.length === all.length, picked: sel.length, total: all.length, topics: numberList(sel.map((t) => t.order_index), true) });
+    } else if (!chapterIds.length || chapterIds.includes(ch.id)) {
+      out.push({ chapter: ch.order_index, full: true, picked: all.length, total: all.length, topics: '' });
+    }
+  }
+  return out;
 }
 
 /**

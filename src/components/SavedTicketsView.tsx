@@ -15,8 +15,27 @@ import {
   ChevronDown, 
   ChevronUp, 
   Loader2,
-  BookOpen
+  BookOpen,
+  User,
+  Layers,
+  ListChecks
 } from 'lucide-react';
+
+const plural = (n: number, one: string, few: string, many: string) => {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+};
+
+// Цветовой акцент карточки по предмету
+const subjectAccent = (name?: string) => {
+  const n = (name || '').toLowerCase();
+  if (n.includes('хим')) return { bar: 'bg-gradient-to-r from-sky-400 to-blue-600', pill: 'bg-blue-50 text-blue-700 border-blue-200' };
+  if (n.includes('физ')) return { bar: 'bg-gradient-to-r from-violet-400 to-purple-600', pill: 'bg-violet-50 text-violet-700 border-violet-200' };
+  if (n.includes('био')) return { bar: 'bg-gradient-to-r from-emerald-400 to-green-600', pill: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+  return { bar: 'bg-gradient-to-r from-slate-300 to-slate-500', pill: 'bg-slate-50 text-slate-700 border-slate-200' };
+};
 
 export const SavedTicketsView: React.FC = () => {
   const queryClient = useQueryClient();
@@ -130,43 +149,75 @@ export const SavedTicketsView: React.FC = () => {
           {batches.map((batch: any) => {
             const isExpanded = expandedBatchId === batch.id;
             const tickets = batch.tickets || [];
+            const chips = tickets[0]?.selection_info?.chips || [];
+            const accent = subjectAccent(batch.subject?.name);
 
             return (
               <div
                 key={batch.id}
                 className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition"
               >
-                <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white">
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <h3 className="font-bold text-slate-900 text-base">{batch.title}</h3>
+                <div className={`h-1 ${accent.bar}`} />
+                <div className="p-5 flex flex-col lg:flex-row lg:items-start justify-between gap-4 bg-white">
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-slate-900 text-lg leading-tight">{batch.title}</h3>
                       {batch.subject && (
-                        <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200">
+                        <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${accent.pill}`}>
                           {batch.subject.name}
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center space-x-3 text-xs text-slate-500 mt-1">
-                      <span className="flex items-center">
-                        <Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" />
-                        {new Date(batch.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 border border-slate-100">
+                        <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                        {new Date(batch.created_at).toLocaleString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </span>
                       {isOwner && (
-                        <span title={batch.creator?.email || ''}>
-                          Создал: <b className="text-slate-700">{batch.creator ? (batch.creator.full_name || batch.creator.email) : 'неизвестно'}</b>
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 border border-slate-100" title={batch.creator?.email || ''}>
+                          <User className="w-3.5 h-3.5 text-slate-400" />
+                          <b className="text-slate-700">{batch.creator ? (batch.creator.full_name || batch.creator.email) : 'неизвестно'}</b>
                         </span>
                       )}
-                      <span>Вариантов: {tickets.length}</span>
-                      {tickets[0] && <span>Вопросов в билете: {tickets[0].questions?.length}</span>}
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 border border-slate-100">
+                        <Layers className="w-3.5 h-3.5 text-slate-400" />
+                        <b className="text-slate-700">{tickets.length}</b> {plural(tickets.length, 'вариант', 'варианта', 'вариантов')}
+                      </span>
+                      {tickets[0] && (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 border border-slate-100">
+                          <ListChecks className="w-3.5 h-3.5 text-slate-400" />
+                          <b className="text-slate-700">{tickets[0].questions?.length}</b> в билете
+                        </span>
+                      )}
                     </div>
-                    {tickets[0]?.selection_info?.ru && (
-                      <div className="text-xs text-slate-500 mt-1">
-                        Темы экзамена: <b className="text-slate-700">{tickets[0].selection_info.ru}</b>
+
+                    {chips.length > 0 && (
+                      <div className="flex items-start gap-2">
+                        <span className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 pt-1.5 shrink-0">Охват</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {chips.map((c: any) => (
+                            <span
+                              key={c.chapter}
+                              className={`rounded-xl border px-2.5 py-1 text-xs ${c.full ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}
+                              title={c.full ? 'Глава взята полностью' : `Выбрано тем: ${c.picked} из ${c.total}`}
+                            >
+                              <span className="font-bold">Глава {c.chapter}</span>
+                              <span className="mx-1 opacity-50">·</span>
+                              {c.full ? 'полностью' : `${plural(c.picked, 'тема', 'темы', 'тем')} ${c.topics}`}
+                              {!c.full && c.total > 0 && (
+                                <span className="block mt-1 h-1 w-full rounded-full bg-amber-200/70 overflow-hidden">
+                                  <span className="block h-full bg-amber-500" style={{ width: `${Math.round((c.picked / c.total) * 100)}%` }} />
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5 lg:max-w-[22rem] lg:justify-end">
                     <button
                       onClick={() => handleExport(batch, 'ru')}
                       disabled={exportingId === `${batch.id}-ru`}

@@ -1,6 +1,6 @@
 import { saveAs } from 'file-saver';
 import { supabase } from './supabase';
-import { buildAnswerKeyDocx, keyKindOf, selectionInfo, type KeyTicket } from './answerKey';
+import { buildAnswerKeyDocx, keyKindOf, selectionInfo, selectionChips, type KeyTicket, type SelectionChip } from './answerKey';
 
 // Скачивание ключей ответов (Word по шаблону предмета) для созданных билетов.
 // Старые сохранённые билеты не хранят верные ответы в снимке — они подгружаются из банка вопросов.
@@ -61,7 +61,7 @@ export function hasKeyTemplate(subjectName: string): boolean {
 }
 
 // Какие главы и темы вошли в билеты — для шапки ключей; при ошибке шапка остаётся как в шаблоне
-export interface SelectionInfos { ru: string | null; tg: string | null }
+export interface SelectionInfos { ru: string | null; tg: string | null; chips?: SelectionChip[] }
 
 // Загрузчик с кэшем структуры предмета (главы и темы), чтобы не повторять запросы для партий одного предмета
 export function makeSelectionInfoLoader() {
@@ -84,7 +84,7 @@ export function makeSelectionInfoLoader() {
     const s = await structure(subjectId);
     if (!s) return none;
     const ch = params?.chapter_ids ?? [], tp = params?.topic_ids ?? [];
-    return { ru: selectionInfo(s.chapters, s.topics, ch, tp, 'ru'), tg: selectionInfo(s.chapters, s.topics, ch, tp, 'tg') };
+    return { ru: selectionInfo(s.chapters, s.topics, ch, tp, 'ru'), tg: selectionInfo(s.chapters, s.topics, ch, tp, 'tg'), chips: selectionChips(s.chapters, s.topics, ch, tp) };
   };
 }
 
