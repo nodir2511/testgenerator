@@ -176,35 +176,48 @@ export async function generateAndSend(opts: {
     if (lang === 'tg' || lang === 'both') files.push({ name: lang === 'both' ? `Тоҷикӣ/Варианти ${t.ticket_number}.docx` : `Варианти ${t.ticket_number}.docx`, data: await bytes(await buildSingleTicketBlob(title, t, subjectName, true)) });
   }
 
-  const caption = `${title}: ${s.ticketCount} шт. (${lang === 'both' ? 'RU + TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase())})`;
-  if (files.length === 1) {
-    await sendDocument(botToken, chat, files[0].data, files[0].name, caption);
-  } else {
-    const zip = new JSZip();
-    files.forEach((f) => zip.file(f.name, f.data));
-    const zbytes = await zip.generateAsync({ type: 'uint8array' });
-    const suffix = lang === 'both' ? 'RU_TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase());
-    await sendDocument(botToken, chat, zbytes, `${T.safeFileName(title)}_${suffix}.zip`, caption);
-  }
-
-  // Ключи ответов отдельным файлом (по шаблону предмета)
+  // Ключи ответов (по шаблону предмета): в архив, если отправляется архив, иначе отдельным файлом
   let missingAnswers = 0;
   let keySent = false;
+  let key: { data: Uint8Array; name: string; note: string } | null = null;
   const kind = keyKindOf(subjectName);
   if (kind) {
     try {
       const tpl = Uint8Array.from(atob(KEY_TEMPLATES[kind]), (c) => c.charCodeAt(0));
       const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped, infos.ru);
       missingAnswers = stats.missing;
-      const note = [
-        stats.missing ? `⚠️ В базе нет верного ответа у вопросов: ${stats.missing} — эти клетки в ключе пустые.` : '',
-        stats.overflow ? `В шаблоне не хватило места для вопросов: ${stats.overflow}.` : '',
-      ].filter(Boolean).join(' ');
-      await sendDocument(botToken, chat, kbytes, `Ключи – ${T.safeFileName(title)}.docx`, `Ключи ответов: ${title}${note ? '\n' + note : ''}`);
-      keySent = true;
+      key = {
+        data: kbytes,
+        name: `Ключи – ${T.safeFileName(title)}.docx`,
+        note: [
+          stats.missing ? `⚠️ В базе нет верного ответа у вопросов: ${stats.missing} — эти клетки в ключе пустые.` : '',
+          stats.overflow ? `В шаблоне не хватило места для вопросов: ${stats.overflow}.` : '',
+        ].filter(Boolean).join(' '),
+      };
     } catch (e) {
       console.error('answer key failed', e);
     }
+  }
+
+  const caption = `${title}: ${s.ticketCount} шт. (${lang === 'both' ? 'RU + TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase())})`;
+  if (files.length === 1) {
+    await sendDocument(botToken, chat, files[0].data, files[0].name, caption);
+    if (key) {
+      try {
+        await sendDocument(botToken, chat, key.data, key.name, `Ключи ответов: ${title}${key.note ? '\n' + key.note : ''}`);
+        keySent = true;
+      } catch (e) {
+        console.error('answer key send failed', e);
+      }
+    }
+  } else {
+    const zip = new JSZip();
+    files.forEach((f) => zip.file(f.name, f.data));
+    if (key) zip.file(key.name, key.data);
+    const zbytes = await zip.generateAsync({ type: 'uint8array' });
+    const suffix = lang === 'both' ? 'RU_TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase());
+    await sendDocument(botToken, chat, zbytes, `${T.safeFileName(title)}_${suffix}.zip`, `${caption}${key ? '\nВ архиве: ключи ответов.' : ''}${key?.note ? '\n' + key.note : ''}`);
+    keySent = Boolean(key);
   }
   return { missingAnswers, keySent };
   }
