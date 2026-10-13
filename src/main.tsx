@@ -27,13 +27,27 @@ const queryClient = new QueryClient({
   },
 });
 
-ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <App />
-        <ErrorToaster />
-      </AuthProvider>
-    </QueryClientProvider>
-  </React.StrictMode>
-);
+const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
+
+// /tg — Telegram Mini App: лёгкая страница без входа через Supabase Auth
+if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/tg/')) {
+  const TgApp = React.lazy(() => import('./tg/TgApp'));
+  root.render(
+    <React.StrictMode>
+      <React.Suspense fallback={null}>
+        <TgApp />
+      </React.Suspense>
+    </React.StrictMode>
+  );
+} else {
+  root.render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <App />
+          <ErrorToaster />
+        </AuthProvider>
+      </QueryClientProvider>
+    </React.StrictMode>
+  );
+}

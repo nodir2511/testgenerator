@@ -1,0 +1,404 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DEFAULT_SETTINGS, LIMITS, checkSettings, fitSettings, shortName } from '../../supabase/functions/_shared/ticketing';
+import './tg.css';
+
+// Telegram Mini App: сбор билетов. Данные и генерация — через Edge Function tg-app,
+// подлинность пользователя подтверждается подписью initData.
+
+interface Counts { test: number; matching: number; open: number }
+interface TopicRow { id: string; name: string; counts: Counts }
+interface ChapterRow { id: string; name: string; counts: Counts; topics: TopicRow[] }
+interface Subject { id: string; name: string }
+type Step = 'subject' | 'chapters' | 'topics' | 'counts' | 'final' | 'done';
+type Lang = 'ru' | 'tg' | 'both';
+
+interface WebApp {
+  initData: string;
+  ready(): void;
+  expand(): void;
+  close(): void;
+  HapticFeedback?: { impactOccurred(s: string): void; notificationOccurred(s: string): void };
+  MainButton: {
+    setText(t: string): void; show(): void; hide(): void; enable(): void; disable(): void;
+    showProgress(leaveActive?: boolean): void; hideProgress(): void;
+    onClick(cb: () => void): void; offClick(cb: () => void): void;
+  };
+  BackButton: { show(): void; hide(): void; onClick(cb: () => void): void; offClick(cb: () => void): void };
+  onEvent?(e: string, cb: () => void): void;
+}
+const wa = (): WebApp | undefined => (window as unknown as { Telegram?: { WebApp?: WebApp } }).Telegram?.WebApp;
+
+const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tg-app`;
+
+class ApiError extends Error {
+  constructor(public code: string, message: string) { super(message); }
+}
+
+async function api<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(FN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Tg-Init-Data': wa()?.initData ?? '' },
+      body: JSON.stringify({ action, ...payload }),
+    });
+  } catch {
+    throw new ApiError('network', 'Нет связи с сервером. Проверьте интернет и повторите.');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'error', data.message || data.error || `Ошибка ${res.status}`);
+  return data as T;
+}
+
+const total = (c: Counts) => c.test + c.matching + c.open;
+const sum = (items: Counts[]): Counts => items.reduce((a, c) => ({ test: a.test + c.test, matching: a.matching + c.matching, open: a.open + c.open }), { test: 0, matching: 0, open: 0 });
+const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+
+function loadTelegramScript(): Promise<void> {
+  if (wa()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const s = document.createElement('script');
+    s.src = 'https://telegram.org/js/telegram-web-app.js';
+    s.onload = () => resolve();
+    s.onerror = () => resolve();
+    document.head.appendChild(s);
+  });
+}
+
+export default function TgApp() {
+  const [ready, setReady] = useState(false);
+  const [fatal, setFatal] = useState<{ code: string; message: string } | null>(null);
+  const [name, setName] = useState('');
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [step, setStep] = useState<Step>('subject');
+  const [subject, setSubject] = useState<Subject | null>(null);
+  const [chapters, setChapters] = useState<ChapterRow[]>([]);
+  const [chapterIds, setChapterIds] = useState<string[]>([]);
+  const [topicSel, setTopicSel] = useState<string[]>([]);
+  const [nums, setNums] = useState({ test: '10', matching: '2', open: '3', tickets: '2' });
+  const [lang, setLang] = useState<Lang>('ru');
+  const [title, setTitle] = useState(DEFAULT_SETTINGS.title);
+  const [shuffleOptions, setShuffleOptions] = useState(true);
+  const [shuffleMatching, setShuffleMatching] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  // ---- загрузка ----
+  useEffect(() => {
+    (async () => {
+      await loadTelegramScript();
+      const app = wa();
+      app?.ready();
+      app?.expand();
+      if (!app?.initData) {
+        setFatal({ code: 'bad_init_data', message: 'Откройте это приложение из Telegram — через бота.' });
+        return;
+      }
+      try {
+        const me = await api<{ name: string; subjects: Subject[] }>('me');
+        setName(me.name);
+        setSubjects(me.subjects);
+        if (me.subjects.length === 1) await pickSubject(me.subjects[0], true);
+        setReady(true);
+      } catch (e) {
+        const err = e as ApiError;
+        setFatal({ code: err.code, message: err.message });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function pickSubject(s: Subject, auto = false) {
+    setBusy(true);
+    setError('');
+    try {
+      const { chapters: ch } = await api<{ chapters: ChapterRow[] }>('tree', { subjectId: s.id });
+      setSubject(s);
+      setChapters(ch);
+      setChapterIds([]);
+      setTopicSel([]);
+      setStep('chapters');
+    } catch (e) {
+      if (auto) throw e;
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---- расчёты ----
+  const selectedChapters = useMemo(() => chapters.filter((c) => chapterIds.includes(c.id)), [chapters, chapterIds]);
+
+  // Итоговый набор тем: у главы без отметок берутся все её темы; ни одной отметки — [] (все вопросы глав)
+  const topicIds = useMemo(() => {
+    const ids: string[] = [];
+    let any = false;
+    for (const ch of selectedChapters) {
+      const sel = ch.topics.filter((t) => topicSel.includes(t.id));
+      if (sel.length) any = true;
+      ids.push(...(sel.length ? sel : ch.topics).map((t) => t.id));
+    }
+    return any ? ids : [];
+  }, [selectedChapters, topicSel]);
+
+  const pool: Counts = useMemo(() => {
+    if (topicIds.length) return sum(selectedChapters.flatMap((c) => c.topics).filter((t) => topicIds.includes(t.id)).map((t) => t.counts));
+    return sum(selectedChapters.map((c) => c.counts));
+  }, [selectedChapters, topicIds]);
+
+  const settings = useMemo(() => ({
+    testCount: parseInt(nums.test, 10) || 0,
+    matchingCount: parseInt(nums.matching, 10) || 0,
+    openCount: parseInt(nums.open, 10) || 0,
+    ticketCount: parseInt(nums.tickets, 10) || 0,
+    shuffleOptions, shuffleMatching,
+    title: title.trim() || DEFAULT_SETTINGS.title,
+  }), [nums, shuffleOptions, shuffleMatching, title]);
+
+  const settingsError = checkSettings(settings);
+  const fit = useMemo(() => fitSettings({ total: total(pool), ...pool }, settings), [pool, settings]);
+
+  // ---- навигация ----
+  const back = useCallback(() => {
+    setError('');
+    setStep((s) => {
+      if (s === 'chapters') return subjects.length > 1 ? 'subject' : s;
+      if (s === 'topics') return 'chapters';
+      if (s === 'counts') return 'topics';
+      if (s === 'final') return 'counts';
+      return s;
+    });
+  }, [subjects.length]);
+
+  const submit = useCallback(async () => {
+    if (!subject) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api('generate', {
+        subjectId: subject.id, chapterIds, topicIds, lang,
+        settings,
+      });
+      wa()?.HapticFeedback?.notificationOccurred('success');
+      setStep('done');
+    } catch (e) {
+      wa()?.HapticFeedback?.notificationOccurred('error');
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [subject, chapterIds, topicIds, lang, settings]);
+
+  const next = useCallback(() => {
+    setError('');
+    if (step === 'chapters') {
+      if (!chapterIds.length) return setError('Выберите хотя бы одну главу');
+      setStep('topics');
+    } else if (step === 'topics') {
+      setStep('counts');
+    } else if (step === 'counts') {
+      if (settingsError) return setError(settingsError);
+      if (fit.error) return setError(fit.error);
+      setStep('final');
+    } else if (step === 'final') {
+      void submit();
+    } else if (step === 'done') {
+      wa()?.close();
+    }
+  }, [step, chapterIds.length, settingsError, fit.error, submit]);
+
+  // Кнопки Telegram: MainButton ведёт вперёд, BackButton — назад
+  const nextRef = useRef(next);
+  nextRef.current = next;
+  const backRef = useRef(back);
+  backRef.current = back;
+
+  useEffect(() => {
+    const app = wa();
+    if (!app) return;
+    const onMain = () => nextRef.current();
+    const onBack = () => backRef.current();
+    app.MainButton.onClick(onMain);
+    app.BackButton.onClick(onBack);
+    return () => {
+      app.MainButton.offClick(onMain);
+      app.BackButton.offClick(onBack);
+    };
+  }, []);
+
+  useEffect(() => {
+    const app = wa();
+    if (!app || !ready) return;
+    const labels: Partial<Record<Step, string>> = {
+      chapters: 'Далее', topics: 'Далее', counts: 'Далее', final: 'Создать и отправить', done: 'Закрыть',
+    };
+    const label = labels[step];
+    if (!label) app.MainButton.hide();
+    else {
+      app.MainButton.setText(label);
+      app.MainButton.show();
+      const blocked = (step === 'chapters' && !chapterIds.length) || (step === 'counts' && (!!settingsError || !!fit.error));
+      if (blocked || busy) app.MainButton.disable(); else app.MainButton.enable();
+    }
+    if (busy) app.MainButton.showProgress(true); else app.MainButton.hideProgress();
+    const canBack = (step === 'chapters' && subjects.length > 1) || step === 'topics' || step === 'counts' || step === 'final';
+    if (canBack) app.BackButton.show(); else app.BackButton.hide();
+  }, [step, ready, busy, chapterIds.length, settingsError, fit.error, subjects.length]);
+
+  // ---- экраны ----
+  if (fatal) {
+    return (
+      <Shell>
+        <div className="tg-card">
+          <h1>{fatal.code === 'not_linked' ? 'Нужна привязка' : 'Не удалось войти'}</h1>
+          <p>{fatal.message}</p>
+        </div>
+      </Shell>
+    );
+  }
+  if (!ready) return <Shell><p className="tg-hint">Загрузка…</p></Shell>;
+
+  const count = (c: Counts) => `${c.test} / ${c.matching} / ${c.open}`;
+
+  return (
+    <Shell>
+      {error && <div className="tg-error" role="alert">{error}</div>}
+
+      {step === 'subject' && (
+        <>
+          <h1>Предмет</h1>
+          <p className="tg-hint">{name ? `Вы вошли как ${name}.` : ''} Выберите предмет.</p>
+          {subjects.map((s) => (
+            <button key={s.id} className="tg-row" disabled={busy} onClick={() => pickSubject(s)}>
+              <span>{shortName(s.name, 80)}</span><span className="tg-chev">›</span>
+            </button>
+          ))}
+        </>
+      )}
+
+      {step === 'chapters' && (
+        <>
+          <h1>Главы</h1>
+          <p className="tg-hint">{shortName(subject?.name ?? '', 60)} · цифры: тесты / соответствия / открытые</p>
+          <div className="tg-actions">
+            <button className="tg-link" onClick={() => setChapterIds(chapters.map((c) => c.id))}>Все</button>
+            <button className="tg-link" onClick={() => setChapterIds([])}>Сбросить</button>
+          </div>
+          {chapters.map((c) => (
+            <label key={c.id} className={`tg-row tg-check ${chapterIds.includes(c.id) ? 'on' : ''}`}>
+              <input type="checkbox" checked={chapterIds.includes(c.id)} onChange={() => setChapterIds(toggle(chapterIds, c.id))} />
+              <span className="tg-grow">{shortName(c.name, 80)}</span>
+              <span className="tg-badge">{count(c.counts)}</span>
+            </label>
+          ))}
+        </>
+      )}
+
+      {step === 'topics' && (
+        <>
+          <h1>Темы</h1>
+          <p className="tg-hint">Ничего не отмечено в главе — берутся все её темы.</p>
+          {selectedChapters.map((c) => (
+            <section key={c.id}>
+              <h2>{shortName(c.name, 70)}</h2>
+              {c.topics.length === 0 && <p className="tg-hint">В главе нет тем — берутся все вопросы главы.</p>}
+              {c.topics.map((t) => (
+                <label key={t.id} className={`tg-row tg-check ${topicSel.includes(t.id) ? 'on' : ''}`}>
+                  <input type="checkbox" checked={topicSel.includes(t.id)} onChange={() => setTopicSel(toggle(topicSel, t.id))} />
+                  <span className="tg-grow">{shortName(t.name, 80)}</span>
+                  <span className="tg-badge">{count(t.counts)}</span>
+                </label>
+              ))}
+            </section>
+          ))}
+          <p className="tg-pool">В пуле: тестов {pool.test}, соответствий {pool.matching}, открытых {pool.open}</p>
+        </>
+      )}
+
+      {step === 'counts' && (
+        <>
+          <h1>Состав билета</h1>
+          <Stepper label="Тесты" value={nums.test} have={pool.test} max={LIMITS.perType} min={0} onChange={(v) => setNums({ ...nums, test: v })} />
+          <Stepper label="Соответствия" value={nums.matching} have={pool.matching} max={LIMITS.perType} min={0} onChange={(v) => setNums({ ...nums, matching: v })} />
+          <Stepper label="Открытые" value={nums.open} have={pool.open} max={LIMITS.perType} min={0} onChange={(v) => setNums({ ...nums, open: v })} />
+          <Stepper label="Вариантов (билетов)" value={nums.tickets} max={LIMITS.tickets} min={1} onChange={(v) => setNums({ ...nums, tickets: v })} />
+          {settingsError && <div className="tg-warn">{settingsError}</div>}
+          {!settingsError && fit.error && <div className="tg-warn">{fit.error}</div>}
+          {!settingsError && !fit.error && fit.notes.length > 0 && (
+            <div className="tg-warn">
+              Вопросов не хватает — возьмём сколько есть:
+              <ul>{fit.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+            </div>
+          )}
+        </>
+      )}
+
+      {step === 'final' && (
+        <>
+          <h1>Язык и параметры</h1>
+          <div className="tg-seg">
+            {([['ru', 'Русский'], ['tg', 'Тоҷикӣ'], ['both', 'Оба']] as Array<[Lang, string]>).map(([v, l]) => (
+              <button key={v} className={lang === v ? 'on' : ''} onClick={() => setLang(v)}>{l}</button>
+            ))}
+          </div>
+          <label className="tg-field">
+            <span>Название</span>
+            <input value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} />
+          </label>
+          <label className="tg-row tg-check">
+            <input type="checkbox" checked={shuffleOptions} onChange={(e) => setShuffleOptions(e.target.checked)} />
+            <span className="tg-grow">Перемешать варианты ответов</span>
+          </label>
+          <label className="tg-row tg-check">
+            <input type="checkbox" checked={shuffleMatching} onChange={(e) => setShuffleMatching(e.target.checked)} />
+            <span className="tg-grow">Перемешать соответствия</span>
+          </label>
+          <p className="tg-hint">
+            Тестов {fit.settings.testCount}, соответствий {fit.settings.matchingCount}, открытых {fit.settings.openCount} · билетов {settings.ticketCount}.
+            Файл придёт в чат с ботом.
+          </p>
+        </>
+      )}
+
+      {step === 'done' && (
+        <div className="tg-card">
+          <h1>Готовим файл ✅</h1>
+          <p>Билеты создаются. Файл придёт в чат с ботом через несколько секунд.</p>
+          <button className="tg-link" onClick={() => { setStep(subjects.length > 1 ? 'subject' : 'chapters'); }}>Создать ещё</button>
+        </div>
+      )}
+    </Shell>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    document.body.classList.add('tg-body');
+    return () => document.body.classList.remove('tg-body');
+  }, []);
+  return <main className="tg-app">{children}</main>;
+}
+
+function Stepper(p: { label: string; value: string; have?: number; min: number; max: number; onChange: (v: string) => void }) {
+  const n = parseInt(p.value, 10);
+  const set = (v: number) => p.onChange(String(Math.min(p.max, Math.max(p.min, v))));
+  const short = p.have !== undefined && Number.isFinite(n) && n > p.have;
+  return (
+    <div className="tg-step">
+      <div className="tg-step-head">
+        <span>{p.label}</span>
+        {p.have !== undefined && <span className={`tg-badge ${short ? 'warn' : ''}`}>В пуле: {p.have}</span>}
+      </div>
+      <div className="tg-stepper">
+        <button onClick={() => set((Number.isFinite(n) ? n : 0) - 1)} aria-label="Меньше">−</button>
+        <input
+          inputMode="numeric"
+          value={p.value}
+          onChange={(e) => p.onChange(e.target.value.replace(/\D/g, '').slice(0, 3))}
+          onBlur={() => set(Number.isFinite(n) ? n : p.min)}
+        />
+        <button onClick={() => set((Number.isFinite(n) ? n : 0) + 1)} aria-label="Больше">+</button>
+      </div>
+    </div>
+  );
+}

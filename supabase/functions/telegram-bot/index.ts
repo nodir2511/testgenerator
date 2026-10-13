@@ -11,14 +11,14 @@
 //          SUPABASE_SERVICE_ROLE_KEY задаёт сам Supabase).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import JSZip from 'npm:jszip@3';
-import { buildSingleTicketBlob } from '../_shared/docxExport.ts';
 import * as T from '../_shared/ticketing.ts';
+import { generateAndSend, linkedUser as linkedUserOf } from '../_shared/generate.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!;
 const WEBHOOK_SECRET = Deno.env.get('TELEGRAM_WEBHOOK_SECRET')!;
+const APP_URL = Deno.env.get('MINIAPP_URL') || 'https://testgenerator-3s51.vercel.app/tg';
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
@@ -49,16 +49,6 @@ async function show(chat: number, msgId: number | undefined, text: string, kb?: 
   await send(chat, text, kb);
 }
 
-async function sendDocument(chat: number, bytes: Uint8Array, filename: string, caption: string) {
-  const form = new FormData();
-  form.append('chat_id', String(chat));
-  form.append('caption', caption);
-  form.append('document', new Blob([bytes]), filename);
-  const res = await fetch(`${API}/sendDocument`, { method: 'POST', body: form });
-  const json = await res.json().catch(() => ({}));
-  if (!json.ok) throw new Error(`Не удалось отправить файл: ${json.description || res.status}`);
-}
-
 // ---------------- Сессии и пользователи ----------------
 interface State {
   step: 'subject' | 'chapters' | 'topics' | 'settings' | 'lang';
@@ -85,16 +75,7 @@ async function saveState(chat: number, st: State) {
   await sb.from('telegram_sessions').upsert({ chat_id: chat, state: st, updated_at: new Date().toISOString() });
 }
 
-async function linkedUser(chat: number) {
-  const { data: link } = await sb.from('telegram_links').select('user_id').eq('chat_id', chat).maybeSingle();
-  if (!link) return null;
-  // Заблокированный в Supabase аккаунт не должен пользоваться ботом
-  const { data: au } = await sb.auth.admin.getUserById(link.user_id);
-  const bannedUntil = (au?.user as { banned_until?: string | null } | undefined)?.banned_until;
-  if (!au?.user || (bannedUntil && new Date(bannedUntil).getTime() > Date.now())) return null;
-  const { data: profile } = await sb.from('profiles').select('id, full_name, email, role').eq('id', link.user_id).maybeSingle();
-  return profile ?? null;
-}
+const linkedUser = (chat: number) => linkedUserOf(sb, chat);
 
 // ---------------- Данные ----------------
 async function subjects() {
@@ -120,22 +101,6 @@ async function countPool(st: State) {
   };
   const [t, m, o] = await Promise.all(['test', 'matching', 'open'].map((ty) => base().eq('type', ty)));
   return { total: (t.count ?? 0) + (m.count ?? 0) + (o.count ?? 0), test: t.count ?? 0, matching: m.count ?? 0, open: o.count ?? 0 };
-}
-
-async function loadPool(st: State) {
-  const all: any[] = [];
-  for (let from = 0; ; from += 1000) {
-    let q = sb.from('questions')
-      .select('*, chapter:chapters(name, order_index), topic:topics(name, order_index), options:question_options(*), matching_items:matching_items(*)')
-      .eq('subject_id', st.subjectId!).eq('is_deleted', false).order('id');
-    if (st.topicIds.length) q = q.in('topic_id', st.topicIds);
-    else q = q.in('chapter_id', st.chapterIds);
-    const { data, error } = await q.range(from, from + 999);
-    if (error) throw error;
-    all.push(...(data ?? []));
-    if (!data || data.length < 1000) break;
-  }
-  return all;
 }
 
 // ---------------- Экраны ----------------
@@ -208,58 +173,15 @@ async function generate(chat: number, msgId: number | undefined, st: State, user
   const s = st.settings;
   const bad = T.checkSettings(s);
   if (bad) return send(chat, `⚠️ ${bad}`, T.kbSettings(s));
-
-  const pool = await loadPool(st);
-  const fit = T.fitSettings(T.poolStats(pool), s);
-  if (fit.error) return send(chat, `⚠️ ${fit.error}`, T.kbSettings(s));
-  if (fit.notes.length) await send(chat, `ℹ️ Вопросов не хватает, билеты составлены из того, что есть:\n• ${fit.notes.join('\n• ')}`);
-
-  const tickets = T.buildTickets(pool, fit.settings);
-  const title = s.title.trim() || 'Экзаменационные билеты';
-  const subjectName = (await subjects()).find((x) => x.id === st.subjectId)?.name ?? 'Химия';
-
-  // сохраняем партию, как это делает сайт
-  const { data: batch, error: bErr } = await sb.from('ticket_batches').insert({
-    title, subject_id: st.subjectId, created_by: user.id,
-    generation_params: {
-      chapter_ids: st.chapterIds, topic_ids: st.topicIds,
-      test_count: fit.settings.testCount, matching_count: fit.settings.matchingCount, open_count: fit.settings.openCount, ticket_count: s.ticketCount,
-      shuffle_options: s.shuffleOptions, shuffle_matching: s.shuffleMatching, source: 'telegram',
-    },
-  }).select().single();
-  if (bErr || !batch) throw bErr ?? new Error('Не удалось сохранить партию');
-
-  for (const t of tickets) {
-    const { data: ticket, error: tErr } = await sb.from('tickets').insert({ batch_id: batch.id, ticket_number: t.ticketNumber }).select().single();
-    if (tErr || !ticket) throw tErr ?? new Error('Не удалось сохранить билет');
-    const rows = t.questions.map((q: any) => ({ ticket_id: ticket.id, question_id: q.question_id, order_index: q.order_index, question_snapshot: q.question_snapshot }));
-    const { error: qErr } = await sb.from('ticket_questions').insert(rows);
-    if (qErr) throw qErr;
-  }
-
-  await sb.from('audit_logs').insert({
-    user_id: user.id, action: 'TELEGRAM_EXPORT', entity_type: 'ticket_batches', entity_id: batch.id,
-    details: { tickets: s.ticketCount, lang, chat_id: chat },
-  });
-
-  // файлы Word
-  const shaped = tickets.map((t) => ({ ticket_number: t.ticketNumber, questions: t.questions.map((q: any) => ({ question_snapshot: q.question_snapshot })) }));
-  const bytes = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
-  const files: Array<{ name: string; data: Uint8Array }> = [];
-  for (const t of shaped) {
-    if (lang === 'ru' || lang === 'both') files.push({ name: lang === 'both' ? `Русский/Вариант ${t.ticket_number}.docx` : `Вариант ${t.ticket_number}.docx`, data: await bytes(await buildSingleTicketBlob(title, t, subjectName, false)) });
-    if (lang === 'tg' || lang === 'both') files.push({ name: lang === 'both' ? `Тоҷикӣ/Варианти ${t.ticket_number}.docx` : `Варианти ${t.ticket_number}.docx`, data: await bytes(await buildSingleTicketBlob(title, t, subjectName, true)) });
-  }
-
-  const caption = `${title}: ${s.ticketCount} шт. (${lang === 'both' ? 'RU + TG' : lang.toUpperCase()})`;
-  if (files.length === 1) {
-    await sendDocument(chat, files[0].data, files[0].name, caption);
-  } else {
-    const zip = new JSZip();
-    files.forEach((f) => zip.file(f.name, f.data));
-    const zbytes = await zip.generateAsync({ type: 'uint8array' });
-    const suffix = lang === 'both' ? 'RU_TG' : lang.toUpperCase();
-    await sendDocument(chat, zbytes, `${T.safeFileName(title)}_${suffix}.zip`, caption);
+  try {
+    await generateAndSend({
+      sb, botToken: BOT_TOKEN, chat, user, lang, settings: s, source: 'telegram',
+      sel: { subjectId: st.subjectId!, chapterIds: st.chapterIds, topicIds: st.topicIds },
+      onNotes: async (notes) => { await send(chat, 'ℹ️ Вопросов не хватает, билеты составлены из того, что есть:\n• ' + notes.join('\n• ')); },
+    });
+  } catch (e) {
+    if (/нет вопросов нужных видов/.test((e as Error).message)) return send(chat, `⚠️ ${(e as Error).message}`, T.kbSettings(s));
+    throw e;
   }
   await send(chat, '✅ Готово. Новый набор: /ticket');
 }
@@ -297,6 +219,9 @@ async function onMessage(m: any) {
     return send(chat, 'Аккаунт отвязан.');
   }
   if (text === '/help') return send(chat, HELP);
+  if (text === '/app') {
+    return tg('sendMessage', { chat_id: chat, text: 'Откройте приложение, чтобы собрать билеты:', reply_markup: { inline_keyboard: [[{ text: '📝 Создать билеты', web_app: { url: APP_URL } }]] } });
+  }
   if (text === '/ticket' || text === '/new') {
     const old = await loadState(chat);
     await saveState(chat, freshState(old.settings));
