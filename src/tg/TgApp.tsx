@@ -337,7 +337,7 @@ export default function TgApp() {
           <button key={b.id} className="tg-row" disabled={busy} onClick={() => pickSubject(subjects.find((s) => s.id === b.subject_id)!, false, b)}>
             <span className="tg-grow">
               {shortName(b.title, 50)}
-              <span className="tg-sub">{new Date(b.created_at).toLocaleDateString('ru-RU')} · {b.generation_params.ticket_count ?? '?'} шт. · {shortName(b.subject?.name ?? '', 30)}</span>
+              <span className="tg-sub">{new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · {b.generation_params.ticket_count ?? '?'} шт. · {shortName(b.subject?.name ?? '', 30)}</span>
             </span>
             <span className="tg-chev">↻</span>
           </button>

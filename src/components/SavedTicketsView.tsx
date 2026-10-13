@@ -147,7 +147,7 @@ export const SavedTicketsView: React.FC = () => {
                     <div className="flex items-center space-x-3 text-xs text-slate-500 mt-1">
                       <span className="flex items-center">
                         <Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" />
-                        {new Date(batch.created_at).toLocaleDateString('ru-RU')}
+                        {new Date(batch.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </span>
                       <span>Вариантов: {tickets.length}</span>
                       {tickets[0] && <span>Вопросов в билете: {tickets[0].questions?.length}</span>}

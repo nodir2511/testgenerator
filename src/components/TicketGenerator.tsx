@@ -579,7 +579,7 @@ export const TicketGenerator: React.FC = () => {
               className="px-2.5 py-1 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 rounded-lg text-xs font-semibold text-slate-700 transition"
               title={`${b.subject?.name || ''} · ${b.generation_params?.ticket_count ?? '?'} вариантов`}
             >
-              {b.title} · {new Date(b.created_at).toLocaleDateString('ru-RU')}
+              {b.title} · {new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
             </button>
           ))}
         </div>
