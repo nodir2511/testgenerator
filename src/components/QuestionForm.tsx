@@ -40,6 +40,8 @@ interface MatchingItemState {
   text_ru?: string;
   text_tg?: string;
   image_url?: string | null;
+  /** Только для левой колонки: индекс подходящего элемента правой колонки (ответ) */
+  match?: number | null;
 }
 
 // Русское поле: если вопрос только на таджикском, base (= content) совпадает с таджикским текстом — в русское его не копируем
@@ -114,6 +116,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           text_ru: ruOf(m.text_ru, m.text, m.text_tg),
           text_tg: m.text_tg || '',
           image_url: m.image_url,
+          match: (() => {
+            const k = initialData.matching_items!.filter(x => x.side === 'right').findIndex(x => !!m.correct_match_id && x.id === m.correct_match_id);
+            return k >= 0 ? k : null;
+          })(),
         }))
       : [
           { side: 'left', text: '', text_ru: '', text_tg: '' },
@@ -282,6 +288,13 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         if (validLeft.length === 0 || validRight.length === 0) {
           throw new Error('Заполните элементы в обеих колонках задания на соответствие');
         }
+        const filledRight = (k: number | null | undefined) => k != null && !!rightItems[k] && !!(rightItems[k].text_ru?.trim() || rightItems[k].text_tg?.trim() || rightItems[k].text?.trim() || rightItems[k].image_url);
+        if (validLeft.some(l => !filledRight(l.match))) {
+          throw new Error('Укажите правильный ответ (номер из правой колонки) для каждого элемента левой колонки');
+        }
+        if (new Set(validLeft.map(l => l.match)).size !== validLeft.length) {
+          throw new Error('Два элемента левой колонки не могут иметь один и тот же ответ');
+        }
       }
 
       const numericVal = type === 'open' && correctNumeric.trim() !== '' ? Number(correctNumeric) : null;
@@ -322,6 +335,22 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         return [...leftItems.filter(filled).map(map('left')), ...rightItems.filter(filled).map(map('right'))];
       };
 
+      // Записывает ответы (correct_match_id) для только что вставленных элементов соответствия
+      const applyMatches = async (rows: any[]) => {
+        const filled = (x: MatchingItemState) => x.text_ru?.trim() || x.text_tg?.trim() || x.text?.trim() || x.image_url;
+        const lefts = leftItems.map((x, i) => ({ x, i })).filter(({ x }) => filled(x));
+        const rights = rightItems.map((x, i) => ({ x, i })).filter(({ x }) => filled(x));
+        for (let p = 0; p < lefts.length; p++) {
+          const k = lefts[p].x.match;
+          const rp = rights.findIndex(({ i }) => i === k);
+          if (rp < 0) continue;
+          const leftRow = rows.find(r => r.side === 'left' && r.order_index === p + 1);
+          const rightRow = rows.find(r => r.side === 'right' && r.order_index === rp + 1);
+          if (!leftRow || !rightRow) throw new Error('Не удалось сохранить ответы соответствия');
+          await must(supabase.from('matching_items').update({ correct_match_id: rightRow.id }).eq('id', leftRow.id));
+        }
+      };
+
       const questionFields = {
         subject_id: subjectId,
         chapter_id: chapterId,
@@ -341,13 +370,21 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         const oldOptionIds = (initialData.options || []).map(o => o.id);
         const oldItemIds = (initialData.matching_items || []).map(m => m.id);
 
-        const insertRows = async (table: 'question_options' | 'matching_items', rows: any[]): Promise<Array<{ id: string }>> => {
-          const { data, error } = await supabase.from(table).insert(rows).select('id');
+        const insertRows = async (table: 'question_options' | 'matching_items', rows: any[]): Promise<any[]> => {
+          const { data, error } = await supabase.from(table).insert(rows).select('*');
           if (error) throw error;
-          return data || [];
+          return (data || []) as any[];
         };
         const newOptions = type === 'test' ? await insertRows('question_options', buildOptionRows(initialData.id)) : [];
         const newItems = type === 'matching' ? await insertRows('matching_items', buildItemRows(initialData.id)) : [];
+        if (type === 'matching') {
+          try {
+            await applyMatches(newItems);
+          } catch (e) {
+            await supabase.from('matching_items').delete().in('id', newItems.map(x => x.id));
+            throw e;
+          }
+        }
         const dropNew = async () => {
           const o = newOptions;
           const m = newItems;
@@ -401,7 +438,11 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
         try {
           if (type === 'test') await must(supabase.from('question_options').insert(buildOptionRows(newQ.id)));
-          if (type === 'matching') await must(supabase.from('matching_items').insert(buildItemRows(newQ.id)));
+          if (type === 'matching') {
+            const { data: created, error: insErr } = await supabase.from('matching_items').insert(buildItemRows(newQ.id)).select('*');
+            if (insErr) throw insErr;
+            await applyMatches(created || []);
+          }
         } catch (childErr) {
           // Не оставляем вопрос без вариантов
           await supabase.from('questions').update({ is_deleted: true, deleted_at: new Date().toISOString() }).eq('id', newQ.id);
@@ -874,9 +915,28 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                   return (
                     <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
-                          {letter}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                            {letter}
+                          </span>
+                          <label className="flex items-center gap-1 text-[11px] text-slate-500">
+                            <span>ответ →</span>
+                            <select
+                              value={item.match ?? ''}
+                              onChange={(e) => {
+                                const updated = [...leftItems];
+                                updated[idx] = { ...updated[idx], match: e.target.value === '' ? null : Number(e.target.value) };
+                                setLeftItems(updated);
+                              }}
+                              className={`text-xs font-bold px-1.5 py-0.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 ${item.match == null ? 'border-red-300 bg-red-50 text-red-600' : 'border-emerald-300 bg-emerald-50 text-emerald-700'}`}
+                            >
+                              <option value="">—</option>
+                              {rightItems.map((_, k) => (
+                                <option key={k} value={k}>{k + 1}</option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
                         <div className="flex items-center space-x-1">
                           <label className="cursor-pointer p-1 text-slate-400 hover:text-slate-600 rounded border border-slate-200" title="Картинка">
                             <ImageIcon className="w-3 h-3" />
@@ -1006,7 +1066,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                         {rightItems.length > 1 && (
                           <button
                             type="button"
-                            onClick={() => setRightItems(rightItems.filter((_, i) => i !== idx))}
+                            onClick={() => {
+                              setRightItems(rightItems.filter((_, i) => i !== idx));
+                              setLeftItems(leftItems.map(l => ({ ...l, match: l.match == null ? null : l.match === idx ? null : l.match > idx ? l.match - 1 : l.match })));
+                            }}
                             className="text-slate-400 hover:text-red-500 p-1"
                           >
                             <Trash2 className="w-3 h-3" />
