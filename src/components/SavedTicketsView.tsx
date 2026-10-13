@@ -20,7 +20,7 @@ import {
 
 export const SavedTicketsView: React.FC = () => {
   const queryClient = useQueryClient();
-  const { isAdmin } = useAuth();
+  const { isAdmin, isOwner } = useAuth();
   const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
 
@@ -33,6 +33,7 @@ export const SavedTicketsView: React.FC = () => {
         .select(`
           *,
           subject:subjects(name),
+          creator:profiles!created_by(full_name, email),
           tickets:tickets(
             id,
             ticket_number,
@@ -149,6 +150,11 @@ export const SavedTicketsView: React.FC = () => {
                         <Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" />
                         {new Date(batch.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </span>
+                      {isOwner && (
+                        <span title={batch.creator?.email || ''}>
+                          Создал: <b className="text-slate-700">{batch.creator ? (batch.creator.full_name || batch.creator.email) : 'неизвестно'}</b>
+                        </span>
+                      )}
                       <span>Вариантов: {tickets.length}</span>
                       {tickets[0] && <span>Вопросов в билете: {tickets[0].questions?.length}</span>}
                     </div>

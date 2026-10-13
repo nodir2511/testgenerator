@@ -7,6 +7,8 @@ export interface Profile {
   email: string;
   full_name: string | null;
   role: UserRole;
+  /** Главный администратор: видит историю создания билетов всех пользователей */
+  is_owner?: boolean;
   created_at: string;
   updated_at: string;
 }

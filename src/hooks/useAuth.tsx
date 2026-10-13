@@ -9,6 +9,7 @@ interface AuthContextType {
   session: Session | null;
   isLoading: boolean;
   isAdmin: boolean;
+  isOwner: boolean;
   signIn: (email: string, pass: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, pass: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
@@ -119,6 +120,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const isAdmin = profile?.role === 'admin';
+  const isOwner = isAdmin && profile?.is_owner === true;
 
   return (
     <AuthContext.Provider
@@ -128,6 +130,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         session,
         isLoading,
         isAdmin,
+        isOwner,
         signIn,
         signUp,
         signOut,
