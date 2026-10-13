@@ -10,6 +10,7 @@ import {
   TableCell, 
   WidthType, 
   BorderStyle,
+  ShadingType,
   Math as DocxMath,
   MathFraction,
   MathRun,
@@ -87,14 +88,18 @@ const CELL_MARGINS = {
 const cellInnerPt = (twips: number) => (twips - CELL_MARGINS.left - CELL_MARGINS.right) / 20;
 
 // Стиль серой ячейки с номером вопроса
+// Серый фон задан у абзаца с номером, а не у ячейки: ячейка тянется на всю высоту строки
+// (длинный вопрос = много строк), абзац остаётся плашкой высотой в одну строку.
 const NUMBER_CELL_MARGINS = {
   top: 80,
-  bottom: 80,
-  left: 60,
-  right: 60,
+  bottom: 0,
+  left: 0,
+  right: 0,
 };
-const NUMBER_CELL_SHADING = {
-  fill: '595959', // Серый фон ячейки нумерации
+const NUMBER_SHADING = {
+  type: ShadingType.CLEAR,
+  color: 'auto',
+  fill: '595959', // Серый фон плашки нумерации
 };
 
 async function fetchImageBuffer(url: string): Promise<Uint8Array | null> {
@@ -228,12 +233,13 @@ export function parseFormattedTextRuns(
 function createNumberCell(qNumber: number): TableCell {
   return new TableCell({
     width: { size: 500, type: WidthType.DXA },
-    shading: NUMBER_CELL_SHADING,
     margins: NUMBER_CELL_MARGINS,
     borders: NO_CELL_BORDERS,
     children: [
       new Paragraph({
         alignment: AlignmentType.CENTER,
+        shading: NUMBER_SHADING,
+        spacing: { before: 40, after: 40 },
         children: [
           new TextRun({ 
             text: String(qNumber), 
