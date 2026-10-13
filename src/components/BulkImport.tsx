@@ -3,10 +3,12 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { must } from '../lib/errors';
+import { must, notifySuccess } from '../lib/errors';
 import { Subject, Chapter, Topic, Source, QuestionType } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { parseDocxFile } from '../lib/docxImport';
+import { pairBilingual } from '../lib/docxPair';
+import { uploadQuestionImage } from '../lib/imageCompression';
 import { FormattedText } from './FormulaEditor';
 import { 
   Upload, 
@@ -24,19 +26,26 @@ import {
   Layers
 } from 'lucide-react';
 
+type ImportLang = 'ru' | 'tg';
+
 interface ParsedRow {
   rowNum: number;
   type: QuestionType;
+  /** Язык, на котором написан content (и тексты вариантов); при contentTg — это русский */
+  lang?: ImportLang;
   content: string;
+  /** Таджикский текст (двуязычный импорт парой файлов) */
+  contentTg?: string;
+  warnings?: string[];
   imageUrl?: string | null;
   subjectName: string;
   chapterName: string;
   topicName: string;
   sourceName?: string;
   optionsText?: string;
-  rawOptions?: { text: string; imageUrl?: string | null }[];
+  rawOptions?: { text: string; textTg?: string; imageUrl?: string | null }[];
   matchingText?: string;
-  rawMatchingItems?: { side: 'left' | 'right'; text: string; image_url?: string | null; order_index: number }[];
+  rawMatchingItems?: { side: 'left' | 'right'; text: string; text_tg?: string; image_url?: string | null; order_index: number }[];
   correctAnswer?: string;
   section?: string;
   errors: string[];
@@ -44,9 +53,35 @@ interface ParsedRow {
 
 function parseNumericAnswer(raw?: string): number | null {
   if (!raw) return null;
-  const n = Number(raw.replace(',', '.').replace(/\s+/g, ''));
-  return Number.isFinite(n) ? n : null;
+  const t = raw.trim().replace(/[−–—]/g, '-').replace(/\*+$/, '').replace(/(\d)\s+(?=\d{3}(?:\D|$))/g, '$1');
+  const num = (x: string) => Number(x.replace(',', '.'));
+  const frac = t.match(/^(-?\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)/);
+  if (frac) {
+    const d = num(frac[2]);
+    if (d) return num(frac[1]) / d;
+  }
+  const m = t.match(/^-?\d+(?:[.,]\d+)?/);
+  if (!m) return null;
+  // «12,04·10²³» — число со степенью десяти: не подменяем его мантиссой
+  if (/^\s*[·x×*]\s*10/i.test(t.slice(m[0].length))) return null;
+  return num(m[0]);
 }
+
+// Предупреждение, если у открытого вопроса ответ указан, но числом не распознан
+function answerWarning(type: QuestionType, answer?: string): string[] {
+  return type === 'open' && answer && parseNumericAnswer(answer) === null
+    ? [`Ответ «${answer}» не распознан как число — вопрос сохранится без ответа`]
+    : [];
+}
+
+// Поля текста для базы по языку записи
+function langFields(lang: ImportLang | undefined, text: string, textTg?: string) {
+  if (textTg !== undefined) return { text, text_ru: text || null, text_tg: textTg || null };
+  return lang === 'tg' ? { text, text_ru: null, text_tg: text } : { text, text_ru: text, text_tg: null };
+}
+
+// Сравнение вопросов при защите от дублей: текст без тегов и лишних пробелов
+const normText = (x: string | null | undefined) => (x || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 
 function isCorrectLetter(answer: string | undefined, optionIndex: number): boolean {
   if (!answer) return false;
@@ -54,6 +89,13 @@ function isCorrectLetter(answer: string | undefined, optionIndex: number): boole
   const twin: Record<string, string> = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E' };
   const l = answer.trim().toUpperCase();
   return (twin[l] || l) === 'ABCDEF'[optionIndex];
+}
+
+interface ImportReport {
+  total: number;
+  inserted: number;
+  skipped: number;
+  failed: { rowNum: number; message: string }[];
 }
 
 export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
@@ -68,6 +110,14 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [sectionFilter, setSectionFilter] = useState('');
+  // Язык одного файла и режим «пара файлов» (русский + таджикский → двуязычные вопросы)
+  const [fileLang, setFileLang] = useState<ImportLang>('ru');
+  const [pairMode, setPairMode] = useState(false);
+  const [pairRu, setPairRu] = useState<File | null>(null);
+  const [pairTg, setPairTg] = useState<File | null>(null);
+  // Картинки из документов: временные blob-ссылки -> файлы (в хранилище попадают при импорте)
+  const imagesRef = React.useRef<Map<string, File>>(new Map());
+  const [importReport, setImportReport] = useState<ImportReport | null>(null);
 
   // Таксономия по умолчанию для импорта (сохраняется в localStorage)
   const [defaultSubjectId, setDefaultSubjectId] = useState(
@@ -192,6 +242,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
       processed.push({
         rowNum: idx + 1,
         type,
+        lang: fileLang,
+        warnings: answerWarning(type, correctAnswer),
         content,
         subjectName,
         chapterName,
@@ -216,6 +268,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     setGlobalError(null);
     setStatusMessage(null);
     setSectionFilter('');
+    setImportReport(null);
 
     const isDocx = file.name.endsWith('.docx');
     const isExcel = file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
@@ -223,11 +276,12 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     // 1. ИМПОРТ ИЗ WORD (.DOCX) С АВТОМАТИЧЕСКИМ ИЗВЛЕЧЕНИЕМ ИЗОБРАЖЕНИЙ
     if (isDocx) {
       try {
-        const docxQuestions = await parseDocxFile(file, (msg) => setStatusMessage(msg));
+        const parsed = await parseDocxFile(file, (msg) => setStatusMessage(msg));
+        parsed.images.forEach((f, url) => imagesRef.current.set(url, f));
         const { subjectName, chapterName, topicName } = getTaxonomyNames();
         const sourceName = file.name.replace(/\.[^/.]+$/, '');
 
-        const processed: ParsedRow[] = docxQuestions.map((q, idx) => {
+        const processed: ParsedRow[] = parsed.questions.map((q, idx) => {
           const errors: string[] = [];
           if (!q.content && !q.imageUrl) errors.push('Отсутствует текст и рисунок вопроса');
           if (q.type === 'test' && (!q.options || q.options.length < 2)) {
@@ -237,6 +291,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
           return {
             rowNum: idx + 1,
             type: q.type,
+            lang: fileLang,
+            warnings: answerWarning(q.type, q.correctAnswer),
             content: q.content,
             imageUrl: q.imageUrl || null,
             subjectName,
@@ -299,6 +355,69 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
           setIsProcessing(false);
         },
       });
+    }
+  };
+
+  // Пара файлов: русский и таджикский варианты одного документа -> двуязычные вопросы
+  const handleParsePair = async () => {
+    if (!pairRu || !pairTg) return;
+    setIsProcessing(true);
+    setGlobalError(null);
+    setStatusMessage(null);
+    setSectionFilter('');
+    setImportReport(null);
+    try {
+      setStatusMessage('Разбор русского файла...');
+      const ru = await parseDocxFile(pairRu, (m) => setStatusMessage('Русский файл: ' + m));
+      setStatusMessage('Разбор таджикского файла...');
+      const tg = await parseDocxFile(pairTg, (m) => setStatusMessage('Таджикский файл: ' + m));
+      ru.images.forEach((f, url) => imagesRef.current.set(url, f));
+      tg.images.forEach((f, url) => imagesRef.current.set(url, f));
+
+      const pairs = pairBilingual(ru.questions, tg.questions);
+      const unusedTg = tg.questions.length - pairs.filter(p => p.contentTg).length;
+      const { subjectName, chapterName, topicName } = getTaxonomyNames();
+      const sourceName = pairRu.name.replace(/\.[^/.]+$/, '');
+
+      const processed: ParsedRow[] = pairs.map((p, idx) => {
+        const errors = [...p.errors];
+        if (!p.content && !p.imageUrl) errors.push('Отсутствует текст и рисунок вопроса');
+        if (p.type === 'test' && !errors.length && (!p.options || p.options.length < 2)) errors.push('Меньше 2 вариантов ответа');
+        return {
+          rowNum: idx + 1,
+          type: p.type,
+          lang: 'ru' as ImportLang,
+          content: p.content,
+          contentTg: p.contentTg,
+          imageUrl: p.imageUrl || null,
+          warnings: [...p.warnings, ...answerWarning(p.type, p.correctAnswer)],
+          subjectName,
+          chapterName,
+          topicName,
+          sourceName,
+          optionsText: p.options ? p.options.map(o => o.text).join(' | ') : '',
+          rawOptions: p.options?.map(o => ({ text: o.text, textTg: o.textTg, imageUrl: o.imageUrl })),
+          rawMatchingItems: p.matchingItems?.map(m => ({
+            side: m.side,
+            text: m.text,
+            text_tg: m.textTg,
+            image_url: m.imageUrl || null,
+            order_index: m.orderIndex,
+          })),
+          correctAnswer: p.correctAnswer || '',
+          section: p.section || undefined,
+          errors,
+        };
+      });
+      setParsedRows(processed);
+      if (unusedTg > 0) {
+        setGlobalError(`Внимание: в таджикском файле ${unusedTg} вопр. не нашли пары в русском — они не будут импортированы.`);
+      }
+    } catch (err: any) {
+      setGlobalError('Ошибка разбора пары файлов: ' + (err.message || String(err)));
+    } finally {
+      setIsProcessing(false);
+      setStatusMessage(null);
     }
   };
 
@@ -376,10 +495,13 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     XLSX.writeFile(wb, 'shablon_voprosov.xlsx');
   };
 
-  // Сохранение проверенной партии в базу данных Supabase
+  // Сохранение проверенной партии в базу данных Supabase.
+  // Каждая строка сохраняется независимо: ошибка одной не останавливает остальные и попадает в отчёт.
+  // Уже имеющиеся в теме вопросы (тот же текст и варианты) пропускаются — повторный запуск не плодит дубли.
   const importMutation = useMutation({
-    mutationFn: async (rowsToImport: ParsedRow[]) => {
-      // 1. Создаем запись партии
+    mutationFn: async (rowsToImport: ParsedRow[]): Promise<ImportReport> => {
+      const report: ImportReport = { total: rowsToImport.length, inserted: 0, skipped: 0, failed: [] };
+
       const { data: batch, error: bErr } = await supabase
         .from('import_batches')
         .insert({
@@ -389,136 +511,233 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         })
         .select()
         .single();
-
       if (bErr || !batch) throw bErr;
 
-      // Кэши справочников для быстрого разрешения ID
-      let localSubjects = [...subjects];
-      let localChapters = [...chapters];
-      let localTopics = [...topics];
-      let localSources = [...sources];
+      const localSubjects = [...subjects];
+      const localChapters = [...chapters];
+      const localTopics = [...topics];
+      const localSources = [...sources];
 
-      for (const row of rowsToImport) {
-        // Предмет
-        let subj = localSubjects.find(s => s.name.toLowerCase() === row.subjectName.toLowerCase());
-        if (!subj) {
-          const { data: newS } = await supabase.from('subjects').insert({ name: row.subjectName }).select().single();
-          if (newS) { subj = newS; localSubjects.push(newS); }
+      // Картинки загружаем в хранилище только сейчас (и каждую один раз)
+      const uploaded = new Map<string, string>();
+      const resolveImage = async (url?: string | null): Promise<string | null> => {
+        if (!url) return null;
+        if (!url.startsWith('blob:')) return url;
+        const cached = uploaded.get(url);
+        if (cached) return cached;
+        const file = imagesRef.current.get(url);
+        if (!file) throw new Error('Рисунок документа потерян — разберите файл заново');
+        const publicUrl = await uploadQuestionImage(file);
+        uploaded.set(url, publicUrl);
+        return publicUrl;
+      };
+
+      // Отпечатки уже имеющихся в теме вопросов
+      const fingerprints = new Map<string, Set<string>>();
+      const fingerprint = (content: string, opts: string[], items: string[]) =>
+        [normText(content), opts.map(normText).join('|'), items.map(normText).join('|')].join('#');
+      const loadFingerprints = async (topicId: string): Promise<Set<string>> => {
+        const known = fingerprints.get(topicId);
+        if (known) return known;
+        const set = new Set<string>();
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await supabase
+            .from('questions')
+            .select('id, content, options:question_options(text, order_index), matching_items:matching_items(text, side, order_index)')
+            .eq('topic_id', topicId)
+            .eq('is_deleted', false)
+            .order('id')
+            .range(from, from + 999);
+          if (error) throw error;
+          for (const q of (data || []) as any[]) {
+            const opts = [...(q.options || [])].sort((x, y) => x.order_index - y.order_index).map(o => o.text);
+            const items = [...(q.matching_items || [])]
+              .sort((x, y) => (x.side === y.side ? x.order_index - y.order_index : x.side < y.side ? -1 : 1))
+              .map(m => m.text);
+            set.add(fingerprint(q.content, opts, items));
+          }
+          if (!data || data.length < 1000) break;
         }
+        fingerprints.set(topicId, set);
+        return set;
+      };
 
-        // Глава
-        let chap = localChapters.find(c => c.subject_id === subj?.id && c.name.toLowerCase() === row.chapterName.toLowerCase());
-        if (!chap && subj) {
-          const { data: newC } = await supabase.from('chapters').insert({ subject_id: subj.id, name: row.chapterName }).select().single();
-          if (newC) { chap = newC; localChapters.push(newC); }
-        }
+      const createTaxonomy = async <T,>(what: string, req: PromiseLike<{ data: T | null; error: any }>): Promise<T> => {
+        const { data, error } = await req;
+        if (error || !data) throw new Error(`не удалось создать ${what}: ${error?.message || 'нет прав'}`);
+        return data;
+      };
 
-        // Тема
-        let top = localTopics.find(t => t.chapter_id === chap?.id && t.name.toLowerCase() === row.topicName.toLowerCase());
-        if (!top && chap) {
-          const { data: newT } = await supabase.from('topics').insert({ chapter_id: chap.id, name: row.topicName }).select().single();
-          if (newT) { top = newT; localTopics.push(newT); }
-        }
+      interface Prepared {
+        row: ParsedRow;
+        topicId: string;
+        key: string;
+        question: Record<string, unknown>;
+        options: Record<string, unknown>[];
+        items: Record<string, unknown>[];
+      }
 
-        // Источник
-        let src = row.sourceName ? localSources.find(s => s.name.toLowerCase() === row.sourceName!.toLowerCase()) : null;
+      // Разбираем строку: раздел, источник, рисунки, строки вопроса/вариантов
+      const prepare = async (row: ParsedRow): Promise<Prepared | null> => {
+        const subj: Subject =
+          localSubjects.find(s => s.name.toLowerCase() === row.subjectName.toLowerCase()) ||
+          (await createTaxonomy<Subject>('предмет', supabase.from('subjects').insert({ name: row.subjectName }).select().single()).then(x => { localSubjects.push(x); return x; }));
+        const chap: Chapter =
+          localChapters.find(c => c.subject_id === subj.id && c.name.toLowerCase() === row.chapterName.toLowerCase()) ||
+          (await createTaxonomy<Chapter>('главу', supabase.from('chapters').insert({ subject_id: subj.id, name: row.chapterName }).select().single()).then(x => { localChapters.push(x); return x; }));
+        const top: Topic =
+          localTopics.find(t => t.chapter_id === chap.id && t.name.toLowerCase() === row.topicName.toLowerCase()) ||
+          (await createTaxonomy<Topic>('тему', supabase.from('topics').insert({ chapter_id: chap.id, name: row.topicName }).select().single()).then(x => { localTopics.push(x); return x; }));
+        let src: Source | undefined = row.sourceName ? localSources.find(s => s.name.toLowerCase() === row.sourceName!.toLowerCase()) : undefined;
         if (row.sourceName && !src) {
-          const { data: newSrc } = await supabase.from('sources').insert({ name: row.sourceName }).select().single();
-          if (newSrc) { src = newSrc; localSources.push(newSrc); }
+          src = await createTaxonomy<Source>('источник', supabase.from('sources').insert({ name: row.sourceName }).select().single());
+          localSources.push(src);
         }
 
-        if (!subj || !chap || !top) continue;
+        // Тексты вариантов/элементов в порядке документа
+        let optionDefs: { text: string; textTg?: string; imageUrl?: string | null }[] = [];
+        if (row.type === 'test') {
+          optionDefs = row.rawOptions && row.rawOptions.length > 0
+            ? row.rawOptions
+            : (row.optionsText || '').split(/[|;]/).map(t => t.trim()).filter(Boolean).map(t => ({ text: t }));
+        }
+        let itemDefs: { side: 'left' | 'right'; text: string; text_tg?: string; image_url?: string | null; order_index: number }[] = [];
+        if (row.type === 'matching') {
+          if (row.rawMatchingItems && row.rawMatchingItems.length > 0) {
+            itemDefs = row.rawMatchingItems;
+          } else if (row.matchingText) {
+            const [leftPart, rightPart] = row.matchingText.split('||');
+            const split = (x?: string) => (x || '').split(';').map(t => t.trim()).filter(Boolean);
+            itemDefs = [
+              ...split(leftPart).map((l, i) => ({ side: 'left' as const, text: l.replace(/^[А-ЯA-Z]:\s*/i, ''), order_index: i + 1 })),
+              ...split(rightPart).map((r, i) => ({ side: 'right' as const, text: r.replace(/^[0-9]+:\s*/, ''), order_index: i + 1 })),
+            ];
+          }
+        }
 
-        // Вставляем вопрос с сохранением картинки
-        const { data: q, error: qErr } = await supabase
-          .from('questions')
-          .insert({
+        const set = await loadFingerprints(top.id);
+        const key = fingerprint(
+          row.content,
+          optionDefs.map(o => o.text),
+          [...itemDefs].sort((x, y) => (x.side === y.side ? x.order_index - y.order_index : x.side < y.side ? -1 : 1)).map(m => m.text)
+        );
+        if (set.has(key)) return null; // дубль
+
+        const bilingual = row.contentTg !== undefined;
+        const lang: ImportLang = row.lang || 'ru';
+        const imageUrl = await resolveImage(row.imageUrl);
+        const optionRows: Record<string, unknown>[] = [];
+        for (let i = 0; i < optionDefs.length; i++) {
+          const o = optionDefs[i];
+          optionRows.push({
+            ...langFields(lang, o.text, bilingual ? (o.textTg ?? '') : undefined),
+            image_url: await resolveImage(o.imageUrl),
+            is_correct: isCorrectLetter(row.correctAnswer, i),
+            order_index: i + 1,
+          });
+        }
+        const itemRows: Record<string, unknown>[] = [];
+        for (const m of itemDefs) {
+          itemRows.push({
+            side: m.side,
+            ...langFields(lang, m.text, bilingual ? (m.text_tg ?? '') : undefined),
+            image_url: await resolveImage(m.image_url),
+            order_index: m.order_index,
+          });
+        }
+
+        return {
+          row,
+          topicId: top.id,
+          key,
+          question: {
             batch_id: batch.id,
             subject_id: subj.id,
             chapter_id: chap.id,
             topic_id: top.id,
             source_id: src?.id || null,
             type: row.type,
-            content: row.content,
-            content_ru: row.content,
-            image_url: row.imageUrl || null,
+            content: row.content || row.contentTg || '',
+            content_ru: lang === 'tg' && !bilingual ? null : row.content || null,
+            content_tg: bilingual ? row.contentTg || null : lang === 'tg' ? row.content : null,
+            image_url: imageUrl,
             correct_numeric_answer: row.type === 'open' ? parseNumericAnswer(row.correctAnswer) : null,
             created_by: user?.id,
             version: 1,
-          })
-          .select()
-          .single();
+          },
+          options: optionRows,
+          items: itemRows,
+        };
+      };
 
-        if (qErr || !q) continue;
-
-        // Вставляем варианты тестового вопроса
-        if (row.type === 'test') {
-          if (row.rawOptions && row.rawOptions.length > 0) {
-            const optionRows = row.rawOptions.map((opt, i) => ({
-              question_id: q.id,
-              text: opt.text,
-              text_ru: opt.text,
-              image_url: opt.imageUrl || null,
-              is_correct: isCorrectLetter(row.correctAnswer, i),
-              order_index: i + 1,
-            }));
-            await must(supabase.from('question_options').insert(optionRows));
-          } else if (row.optionsText) {
-            const opts = row.optionsText.split(/[|;]/).map(s => s.trim()).filter(Boolean);
-            const optionRows = opts.map((optText, i) => ({
-              question_id: q.id,
-              text: optText,
-              text_ru: optText,
-              is_correct: isCorrectLetter(row.correctAnswer, i),
-              order_index: i + 1,
-            }));
-            await must(supabase.from('question_options').insert(optionRows));
+      // Пишем пачку вопросов одним запросом; при любой ошибке откатываем пачку и повторяем по одному
+      const writeChunk = async (chunk: Prepared[]): Promise<void> => {
+        const { data: ins, error } = await supabase.from('questions').insert(chunk.map(c => c.question)).select('id');
+        let ids: string[] = [];
+        try {
+          if (error || !ins || ins.length !== chunk.length) throw error || new Error('база вернула не все строки');
+          ids = ins.map((x: any) => x.id);
+          const opts = chunk.flatMap((c, i) => c.options.map(o => ({ ...o, question_id: ids[i] })));
+          const items = chunk.flatMap((c, i) => c.items.map(o => ({ ...o, question_id: ids[i] })));
+          if (opts.length) await must(supabase.from('question_options').insert(opts));
+          if (items.length) await must(supabase.from('matching_items').insert(items));
+        } catch (e: any) {
+          const toDrop = ids.length ? ids : (ins || []).map((x: any) => x.id);
+          if (toDrop.length) {
+            await supabase.from('questions').update({ is_deleted: true, deleted_at: new Date().toISOString() }).in('id', toDrop);
           }
+          if (chunk.length === 1) throw e;
+          for (const one of chunk) await writeChunk([one]).catch((err: any) => {
+            report.failed.push({ rowNum: one.row.rowNum, message: err?.message || String(err) });
+          });
+          return;
         }
+        chunk.forEach(c => fingerprints.get(c.topicId)?.add(c.key));
+        report.inserted += chunk.length;
+      };
 
-        // Вставляем элементы задания на соответствие
-        if (row.type === 'matching') {
-          if (row.rawMatchingItems && row.rawMatchingItems.length > 0) {
-            const allItems = row.rawMatchingItems.map((m) => ({
-              question_id: q.id,
-              side: m.side,
-              text: m.text,
-              text_ru: m.text,
-              image_url: m.image_url || null,
-              order_index: m.order_index,
-            }));
-            await must(supabase.from('matching_items').insert(allItems));
-          } else if (row.matchingText) {
-            const [leftPart, rightPart] = row.matchingText.split('||');
-            const leftItems = (leftPart || '').split(/[;]/).map(s => s.trim()).filter(Boolean);
-            const rightItems = (rightPart || '').split(/[;]/).map(s => s.trim()).filter(Boolean);
+      const pending: Prepared[] = [];
+      const flush = async () => {
+        const chunk = pending.splice(0, pending.length);
+        if (chunk.length) {
+          await writeChunk(chunk).catch((err: any) => {
+            report.failed.push({ rowNum: chunk[0].row.rowNum, message: err?.message || String(err) });
+          });
+        }
+      };
 
-            const allItems = [
-              ...leftItems.map((l, i) => ({
-                question_id: q.id,
-                side: 'left' as const,
-                text: l.replace(/^[А-ЯA-Z]:\s*/i, ''),
-                text_ru: l.replace(/^[А-ЯA-Z]:\s*/i, ''),
-                order_index: i + 1,
-              })),
-              ...rightItems.map((r, i) => ({
-                question_id: q.id,
-                side: 'right' as const,
-                text: r.replace(/^[0-9]+:\s*/, ''),
-                text_ru: r.replace(/^[0-9]+:\s*/, ''),
-                order_index: i + 1,
-              })),
-            ];
-            await must(supabase.from('matching_items').insert(allItems));
-          }
+      for (const row of rowsToImport) {
+        try {
+          const prepared = await prepare(row);
+          if (!prepared) { report.skipped++; continue; }
+          // Одинаковые строки внутри самого файла тоже считаем дублями
+          if (pending.some(p => p.key === prepared.key && p.topicId === prepared.topicId)) { report.skipped++; continue; }
+          pending.push(prepared);
+          if (pending.length >= 50) await flush();
+        } catch (e: any) {
+          report.failed.push({ rowNum: row.rowNum, message: e?.message || String(e) });
         }
       }
+      await flush();
+
+      await supabase.from('import_batches').update({ items_count: report.inserted }).eq('id', batch.id);
+      return report;
     },
-    meta: { action: 'Не удалось выполнить импорт', success: 'Импорт завершён: вопросы добавлены в базу' },
-    onSuccess: () => {
+    meta: { action: 'Не удалось выполнить импорт' },
+    onSuccess: (report) => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       queryClient.invalidateQueries({ queryKey: ['import_batches'] });
-      onSuccess();
+      queryClient.invalidateQueries({ queryKey: ['pool_stats'] });
+      queryClient.invalidateQueries({ queryKey: ['all_chapters'] });
+      queryClient.invalidateQueries({ queryKey: ['all_topics'] });
+      setImportReport(report);
+      if (report.failed.length === 0 && report.skipped === 0) {
+        notifySuccess(`Импорт завершён: добавлено вопросов — ${report.inserted}`);
+        onSuccess();
+      } else {
+        // Есть пропуски или ошибки — остаёмся на странице, показываем отчёт
+        setParsedRows([]);
+      }
     },
   });
 
@@ -548,6 +767,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const visibleRows = sectionFilter ? parsedRows.filter(r => r.section === sectionFilter) : parsedRows;
   const validRows = visibleRows.filter(r => r.errors.length === 0);
   const errorRowsCount = visibleRows.filter(r => r.errors.length > 0).length;
+  const warningRowsCount = visibleRows.filter(r => r.errors.length === 0 && (r.warnings?.length || 0) > 0).length;
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-w-5xl mx-auto my-6">
@@ -677,6 +897,72 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
 
         {/* Вкладка 1: Файл (Word / Excel / CSV) */}
         {activeTab === 'file' && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+              <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setPairMode(false)}
+                  className={`px-3 py-1.5 font-semibold ${!pairMode ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                >
+                  Один файл
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPairMode(true)}
+                  className={`px-3 py-1.5 font-semibold border-l border-slate-300 ${pairMode ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                >
+                  Пара файлов: русский + таджикский
+                </button>
+              </div>
+              {!pairMode && (
+                <label className="flex items-center gap-2 text-slate-600">
+                  <span className="font-semibold">Язык файла:</span>
+                  <select
+                    value={fileLang}
+                    onChange={(e) => setFileLang(e.target.value as ImportLang)}
+                    className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ru">Русский</option>
+                    <option value="tg">Таджикский</option>
+                  </select>
+                </label>
+              )}
+            </div>
+
+            {pairMode ? (
+              <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5 space-y-4">
+                <p className="text-xs text-slate-600">
+                  Загрузите два варианта одного документа Word. Вопросы сопоставляются по разделу (§) и номеру,
+                  варианты ответов — по ключу ответов и по формулам/числам (порядок вариантов в файлах разный).
+                  Получатся двуязычные вопросы; несовпадения будут показаны в предпросмотре.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {([['Русский файл (.docx)', pairRu, setPairRu], ['Таджикский файл (.docx)', pairTg, setPairTg]] as const).map(([label, file, setFile]) => (
+                    <label key={label} className="block text-xs font-semibold text-slate-600 space-y-1">
+                      <span>{label}</span>
+                      <input
+                        type="file"
+                        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        onChange={(e) => setFile(e.target.files?.[0] || null)}
+                        disabled={isProcessing}
+                        className="block w-full text-xs file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:font-semibold"
+                      />
+                      {file && <span className="block text-[11px] text-slate-400 truncate">{file.name}</span>}
+                    </label>
+                  ))}
+                </div>
+                <button
+                  onClick={handleParsePair}
+                  disabled={!pairRu || !pairTg || isProcessing}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold disabled:opacity-50 flex items-center space-x-1.5"
+                >
+                  {isProcessing && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <span>Распознать пару и сопоставить</span>
+                </button>
+                {isProcessing && statusMessage && <p className="text-xs text-blue-600 font-medium">{statusMessage}</p>}
+              </div>
+            ) : (
           <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center bg-slate-50 hover:bg-slate-100/60 transition cursor-pointer relative">
             <input
               type="file"
@@ -708,6 +994,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                   Картинки из файлов Word (.docx) извлекаются, сжимаются и прикрепляются к вопросам автоматически!
                 </p>
               </>
+            )}
+          </div>
             )}
           </div>
         )}
@@ -768,6 +1056,32 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
           </div>
         )}
 
+        {/* Итог последнего импорта */}
+        {importReport && activeTab !== 'history' && (
+          <div className={`p-4 rounded-xl border text-xs space-y-2 ${importReport.failed.length ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="font-bold text-slate-900">
+                Итог импорта: добавлено {importReport.inserted} из {importReport.total}
+                {importReport.skipped > 0 && <> • пропущено как дубли: {importReport.skipped}</>}
+                {importReport.failed.length > 0 && <> • не удалось: <span className="text-red-600">{importReport.failed.length}</span></>}
+              </div>
+              <button onClick={() => setImportReport(null)} className="text-slate-400 hover:text-slate-700" title="Закрыть">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {importReport.skipped > 0 && (
+              <p className="text-slate-600">Дубли — вопросы с тем же текстом и вариантами, которые уже есть в этой теме. Повторный запуск импорта безопасен.</p>
+            )}
+            {importReport.failed.length > 0 && (
+              <ul className="max-h-40 overflow-y-auto space-y-0.5 text-red-700">
+                {importReport.failed.map((f, i) => (
+                  <li key={i}>№ {f.rowNum}: {f.message}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
         {/* Предпросмотр распознанных строк */}
         {parsedRows.length > 0 && activeTab !== 'history' && (
           <div className="space-y-4 pt-4 border-t border-slate-200">
@@ -777,6 +1091,9 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 <p className="text-xs text-slate-500">
                   Готово к импорту: <span className="font-bold text-emerald-600">{validRows.length}</span> • 
                   Ошибок: <span className="font-bold text-red-600">{errorRowsCount}</span>
+                  {warningRowsCount > 0 && (
+                    <> • С предупреждениями: <span className="font-bold text-amber-600">{warningRowsCount}</span></>
+                  )}
                 </p>
               </div>
 
@@ -834,8 +1151,17 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                         </span>
                         <div className="font-semibold text-slate-800 leading-snug">
                           <FormattedText text={r.content} />
+                          {r.lang === 'tg' && r.contentTg === undefined && (
+                            <span className="ml-2 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">ТЖ</span>
+                          )}
                         </div>
                       </div>
+                      {r.contentTg && (
+                        <div className="pl-8 text-slate-600 leading-snug">
+                          <span className="mr-1.5 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">ТЖ</span>
+                          <FormattedText text={r.contentTg} />
+                        </div>
+                      )}
 
                       {r.errors.length > 0 ? (
                         <div className="mt-1 text-red-600 text-[11px] flex items-center space-x-1">
@@ -850,6 +1176,9 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                                 <span key={oIdx} className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700">
                                   <strong className="mr-1">{['A', 'B', 'C', 'D', 'E'][oIdx] || String(oIdx + 1)})</strong>
                                   <FormattedText text={opt.text} />
+                                  {opt.textTg && opt.textTg !== opt.text && (
+                                    <span className="ml-1 text-slate-400">/ <FormattedText text={opt.textTg} /></span>
+                                  )}
                                   {opt.imageUrl && <ImageIcon className="w-3 h-3 text-blue-500 ml-1 inline" />}
                                 </span>
                               ))}
@@ -869,6 +1198,12 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                           {r.type === 'open' && (
                             <span>Ответ: <strong className="text-slate-700">{r.correctAnswer || 'не указан'}</strong></span>
                           )}
+                        </div>
+                      )}
+                      {r.errors.length === 0 && r.warnings && r.warnings.length > 0 && (
+                        <div className="mt-1 text-amber-700 text-[11px] flex items-start space-x-1">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+                          <span>{r.warnings.join('; ')}</span>
                         </div>
                       )}
                     </div>

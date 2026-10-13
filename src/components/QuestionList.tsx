@@ -173,6 +173,11 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const totalCount = data?.totalCount || 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
+  // После удаления последнего вопроса на странице возвращаемся на последнюю существующую
+  React.useEffect(() => {
+    if (data && page > 0 && page >= totalPages) setPage(Math.max(0, totalPages - 1));
+  }, [data, page, totalPages]);
+
   return (
     <div className="space-y-6">
       {/* Верхняя панель: Заголовок, поиск и кнопка добавления */}

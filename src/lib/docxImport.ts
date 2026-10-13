@@ -1,18 +1,23 @@
 import JSZip from 'jszip';
-import { uploadQuestionImage } from './imageCompression';
 import { DocxParsedQuestion, parseDocumentXml } from './docxParse';
 
 export type { DocxParsedQuestion } from './docxParse';
 export { cleanXmlRunsToFormattedText } from './docxParse';
 
+export interface ParsedDocx {
+  questions: DocxParsedQuestion[];
+  /** Картинки документа: временная ссылка blob: -> файл. В хранилище они попадают только при импорте. */
+  images: Map<string, File>;
+}
+
 /**
- * Парсит файл Word (.docx), извлекает медиафайлы, загружает их в Supabase Storage
+ * Парсит файл Word (.docx), достаёт картинки (в браузере, без загрузки в хранилище)
  * и формирует список структурированных вопросов.
  */
 export async function parseDocxFile(
   file: File,
   onProgress?: (msg: string) => void
-): Promise<DocxParsedQuestion[]> {
+): Promise<ParsedDocx> {
   onProgress?.('Чтение файла Word...');
   const arrayBuffer = await file.arrayBuffer();
   const zip = await JSZip.loadAsync(arrayBuffer);
@@ -30,12 +35,13 @@ export async function parseDocxFile(
     }
   }
 
-  // 2. Находим все изображения, загружаем их в Supabase Storage и получаем публичные ссылки
+  // 2. Находим все изображения и готовим для них временные ссылки (загрузка в хранилище — при импорте)
   const rIdToPublicUrl: Record<string, string> = {};
+  const images = new Map<string, File>();
   const mediaEntries = Object.keys(zip.files).filter((k) => k.startsWith('word/media/'));
 
   if (mediaEntries.length > 0) {
-    onProgress?.(`Найдено ${mediaEntries.length} изображений. Оптимизация и загрузка в базу...`);
+    onProgress?.(`Найдено изображений: ${mediaEntries.length}`);
 
     // Создаем обратное сопоставление target -> rId
     const targetToRId: Record<string, string[]> = {};
@@ -54,7 +60,8 @@ export async function parseDocxFile(
         const filename = mediaPath.split('/').pop() || 'image.png';
         const imgFile = new File([blob], filename, { type: blob.type || 'image/png' });
 
-        const publicUrl = await uploadQuestionImage(imgFile);
+        const publicUrl = URL.createObjectURL(imgFile);
+        images.set(publicUrl, imgFile);
 
         const subPath = mediaPath.replace(/^word\//, '');
         const rIds = targetToRId[subPath] || [];
@@ -62,7 +69,7 @@ export async function parseDocxFile(
           rIdToPublicUrl[rId] = publicUrl;
         }
       } catch (err) {
-        console.warn(`Не удалось загрузить изображение ${mediaPath} в Supabase:`, err);
+        console.warn(`Не удалось прочитать изображение ${mediaPath}:`, err);
       }
     }
   }
@@ -79,5 +86,5 @@ export async function parseDocxFile(
   const questions = parseDocumentXml(docXml, rIdToPublicUrl);
 
   onProgress?.(`Успешно распознано вопросов: ${questions.length}`);
-  return questions;
+  return { questions, images };
 }
