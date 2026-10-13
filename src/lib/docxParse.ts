@@ -6,6 +6,8 @@ export interface DocxParsedQuestion {
   content: string;
   imageUrl?: string | null;
   options?: { text: string; imageUrl?: string | null }[];
+  /** Служебное: буквы-маркеры вариантов как в документе (для сопоставления с буквой в ключе) */
+  markers?: string[];
   matchingItems?: { side: 'left' | 'right'; text: string; imageUrl?: string | null; orderIndex: number }[];
   correctAnswer?: string;
   section?: string;
@@ -334,9 +336,9 @@ function parseTicketTables(tables: Cell[][][]): DocxParsedQuestion[] {
     );
 
     // 1. Проверяем, является ли вопрос открытым (содержит "Ответ:" или "Ҷавоб:")
-    const isOpen = contentCells.some((c) =>
-      /(?:^|[>\s])(Ответ|Ҷавоб|Ответ:|Ҷавоб:)/i.test(plainOf(c.text))
-    );
+    // Ячейка начинается со слова «Ответ»; строка «D) Нет правильного ответа» — это вариант, а не ответ
+    const ANSWER_CELL_RE = /^\s*(?:Ответ|Ҷавоб)\s*[:.]?/i;
+    const isOpen = contentCells.some((c) => ANSWER_CELL_RE.test(plainOf(c.text)));
 
     // 2. Проверяем, задание ли это на соответствие (колонки A/B/C/D и 1/2/3/4/5)
     const hasMatchingPattern = remainingRows.some((r) => {
@@ -348,9 +350,7 @@ function parseTicketTables(tables: Cell[][][]): DocxParsedQuestion[] {
     });
 
     if (isOpen) {
-      const ansCell = contentCells.find((c) =>
-        /(?:^|[>\s])(Ответ|Ҷавоб)/i.test(plainOf(c.text))
-      );
+      const ansCell = contentCells.find((c) => ANSWER_CELL_RE.test(plainOf(c.text)));
       const rawAns = ansCell
         ? plainOf(ansCell.text).replace(/^(?:Ответ|Ҷавоб)\s*:?\s*/i, '').trim()
         : '';
@@ -516,11 +516,20 @@ interface Section {
   keys: Map<number, string>[];
 }
 
-function normalizeAnswer(raw: string, hasOptions: boolean): string {
+// Кириллические двойники латинских букв приводим к латинице; Б, Г, Д остаются как есть
+const CYR_TWIN: Record<string, string> = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E' };
+const canonLetter = (l: string) => CYR_TWIN[l.toUpperCase()] || l.toUpperCase();
+
+function normalizeAnswer(raw: string, hasOptions: boolean, markers?: string[]): string {
   const a = raw.trim();
   if (hasOptions) {
-    const letter = a.charAt(0).toUpperCase();
-    const idx = OPTION_LETTERS.findIndex((v) => v.includes(letter));
+    const letter = canonLetter(a.charAt(0));
+    // Варианты размечены буквами документа (например, А Б В Г): ответ ищем среди них, и буква = позиция
+    if (markers && markers.length) {
+      const pos = markers.map(canonLetter).indexOf(letter);
+      if (pos >= 0) return 'ABCDEF'[pos];
+    }
+    const idx = OPTION_LETTERS.findIndex((v) => v.map(canonLetter).includes(letter));
     return idx >= 0 ? OPTION_LETTERS[idx][0] : a;
   }
   return a.replace(/\*+$/, '').replace(/\s+/g, '').replace(',', '.');
@@ -644,6 +653,7 @@ function parseListFormat(
           text: text.replace(/^[A-FА-Е][.)]\s*/i, '').trim(),
           imageUrl: pImgUrl,
         });
+        (cur.markers = cur.markers || []).push(single[1]);
         contOk = true;
         continue;
       }
@@ -679,7 +689,8 @@ function parseListFormat(
         // В ключе буква, а вариантов в документе нет: это тест с потерянными вариантами, не открытый вопрос
         const isTest = hasOptions || (raw !== undefined && /^[A-FА-Е]$/i.test(raw.trim()));
         q.type = isTest ? 'test' : 'open';
-        if (raw !== undefined) q.correctAnswer = normalizeAnswer(raw, isTest);
+        if (raw !== undefined) q.correctAnswer = normalizeAnswer(raw, isTest, q.markers);
+        delete q.markers;
         if (!isTest) delete q.options;
         q.section = sec.title;
         q.sectionNum = id;

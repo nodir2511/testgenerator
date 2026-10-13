@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Bold, Italic, Subscript, Superscript } from 'lucide-react';
-import { splitFractions, hasFraction, type MathNode } from '../lib/fractions';
+import { splitFractions, hasFraction, newFmtState, tokenizeFormatted, type MathNode, type FmtState, type FmtToken } from '../lib/fractions';
 
 interface FormulaEditorProps {
   value: string;
@@ -179,13 +179,14 @@ export const FormattedText: React.FC<{ text: string; className?: string }> = ({ 
   if (!text) return null;
   const nodes = splitFractions(text);
   if (hasFraction(nodes)) {
-    return <span className={className}>{nodes.map((n, idx) => <MathNodeView key={idx} node={n} />)}</span>;
+    const state = newFmtState();
+    return <span className={className}>{nodes.map((n, idx) => <MathNodeView key={idx} node={n} state={state} />)}</span>;
   }
   return <InlineTags text={text} className={className} />;
 };
 
-const MathNodeView: React.FC<{ node: MathNode }> = ({ node }) => {
-  if (typeof node === 'string') return <InlineTags text={node} />;
+const MathNodeView: React.FC<{ node: MathNode; state?: FmtState }> = ({ node, state }) => {
+  if (typeof node === 'string') return <InlineTags text={node} state={state} />;
   return (
     <span className="inline-flex flex-col items-center align-middle mx-0.5 text-[0.85em] leading-tight">
       <span className="border-b border-current px-1 pb-0.5 text-center">{node.num.map((n, i) => <MathNodeView key={i} node={n} />)}</span>
@@ -194,27 +195,17 @@ const MathNodeView: React.FC<{ node: MathNode }> = ({ node }) => {
   );
 };
 
-const InlineTags: React.FC<{ text: string; className?: string }> = ({ text, className }) => {
-  // Обычный текст с тегами b, i, sub, sup
-  const parts = text.split(/(<sub>.*?<\/sub>|<sup>.*?<\/sup>|<b>.*?<\/b>|<i>.*?<\/i>)/g);
+const renderTokens = (tokens: FmtToken[]) =>
+  tokens.map((t, idx) => {
+    let el: React.ReactNode = t.text;
+    if (t.sub) el = <sub className="font-semibold">{el}</sub>;
+    if (t.sup) el = <sup className="font-semibold">{el}</sup>;
+    if (t.b) el = <strong>{el}</strong>;
+    if (t.i) el = <em>{el}</em>;
+    return <React.Fragment key={idx}>{el}</React.Fragment>;
+  });
 
-  return (
-    <span className={className}>
-      {parts.map((part, idx) => {
-        if (part.startsWith('<sub>') && part.endsWith('</sub>')) {
-          return <sub key={idx} className="font-semibold">{part.replace(/<\/?sub>/g, '')}</sub>;
-        }
-        if (part.startsWith('<sup>') && part.endsWith('</sup>')) {
-          return <sup key={idx} className="font-semibold">{part.replace(/<\/?sup>/g, '')}</sup>;
-        }
-        if (part.startsWith('<b>') && part.endsWith('</b>')) {
-          return <strong key={idx}>{part.replace(/<\/?b>/g, '')}</strong>;
-        }
-        if (part.startsWith('<i>') && part.endsWith('</i>')) {
-          return <em key={idx}>{part.replace(/<\/?i>/g, '')}</em>;
-        }
-        return <React.Fragment key={idx}>{part}</React.Fragment>;
-      })}
-    </span>
-  );
-};
+// Обычный текст с тегами b, i, sub, sup (вложенные теги поддерживаются)
+const InlineTags: React.FC<{ text: string; className?: string; state?: FmtState }> = ({ text, className, state }) => (
+  <span className={className}>{renderTokens(tokenizeFormatted(text, state || newFmtState()))}</span>
+);

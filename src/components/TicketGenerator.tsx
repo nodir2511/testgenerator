@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo, describeError } from '../lib/errors';
-import { fitSettings, pickParallel } from '../../supabase/functions/_shared/ticketing';
+import { fitSettings, pickParallel, poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
 import { Subject, Chapter, Topic, Question, TicketBatch, Ticket, TicketQuestion } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -21,6 +21,9 @@ import {
 } from 'lucide-react';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
+
+// На сайте лимит на число вариантов мягче, чем у бота (бот работает внутри Edge Function с ограничением по времени)
+const SITE_LIMITS = { ...LIMITS, tickets: 50 };
 
 const getStorageJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -125,6 +128,7 @@ export const TicketGenerator: React.FC = () => {
         localStorage.setItem('examiner_tg_generated_batch', JSON.stringify(generatedBatch));
       } catch (e) {
         console.warn('Не удалось сохранить generatedBatch в localStorage', e);
+        try { localStorage.removeItem('examiner_tg_generated_batch'); } catch { /* ignore */ }
       }
     } else {
       localStorage.removeItem('examiner_tg_generated_batch');
@@ -162,6 +166,7 @@ export const TicketGenerator: React.FC = () => {
   // 3. Все темы предмета (для древовидного раскрытия по главам)
   const { data: allTopics = [] } = useQuery({
     queryKey: ['topics_for_generation', subjectId, chapters],
+    staleTime: 0,
     enabled: Boolean(subjectId && chapters.length > 0),
     queryFn: async () => {
       const chIds = chapters.map(c => c.id);
@@ -257,6 +262,7 @@ export const TicketGenerator: React.FC = () => {
   // 4. Подсчет доступного пула вопросов для проверки дефицита
   const { data: poolStats } = useQuery({
     queryKey: ['pool_stats', subjectId, selectedChapterIds, selectedTopicIds],
+    staleTime: 0,
     enabled: Boolean(subjectId),
     queryFn: async () => {
       const { data } = await fetchAllPages<any>(() => {
@@ -296,16 +302,10 @@ export const TicketGenerator: React.FC = () => {
       if (testCount + matchingCount + openCount === 0) throw new Error('Задайте хотя бы один вопрос в билете');
       if (ticketCount < 1) throw new Error('Количество билетов должно быть не менее 1');
 
-      // 1. Если вопросов какого-то вида не хватает, берём сколько есть (ошибка — только если нет вообще никаких)
-      const fit = fitSettings(
-        { total: poolStats?.total || 0, test: poolStats?.test || 0, matching: poolStats?.matching || 0, open: poolStats?.open || 0 },
-        { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }
-      );
-      if (fit.error) throw new Error(fit.error);
-      if (fit.notes.length) notifyInfo(`Вопросов не хватает, билеты составлены из того, что есть. ${fit.notes.join('; ')}`);
-      const { testCount: useTest, matchingCount: useMatching, openCount: useOpen } = fit.settings;
+      const limitErr = checkSettings({ testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }, SITE_LIMITS);
+      if (limitErr) throw new Error(limitErr);
 
-      // 2. Загружаем все доступные вопросы пула с деталями для снимков
+      // 1. Загружаем все доступные вопросы пула с деталями для снимков
       const { data: allQuestionsRaw, error: qErr } = await fetchAllPages<any>(() => {
         let query = supabase
           .from('questions')
@@ -324,15 +324,14 @@ export const TicketGenerator: React.FC = () => {
       });
       if (qErr || !allQuestionsRaw) throw qErr || new Error('Ошибка загрузки вопросов');
 
-      // Вспомогательная функция случайного перемешивания (Fisher-Yates)
-      const shuffle = <T,>(arr: T[]): T[] => {
-        const copy = [...arr];
-        for (let i = copy.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [copy[i], copy[j]] = [copy[j], copy[i]];
-        }
-        return copy;
-      };
+      // 2. Если вопросов какого-то вида не хватает, берём сколько есть (считаем по реально загруженным вопросам)
+      const fit = fitSettings(
+        calcPoolStats(allQuestionsRaw),
+        { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }
+      );
+      if (fit.error) throw new Error(fit.error);
+      if (fit.notes.length) notifyInfo(`Вопросов не хватает, билеты составлены из того, что есть. ${fit.notes.join('; ')}`);
+      const { testCount: useTest, matchingCount: useMatching, openCount: useOpen } = fit.settings;
 
       // 3. Формирование параллельных билетов (см. pickParallel): позиция в билете берётся
       // из одной темы во всех билетах, соседними вопросами сборника, темы — поровну,
@@ -345,7 +344,8 @@ export const TicketGenerator: React.FC = () => {
         ticketsData.push({ ticketNumber: k + 1, questions: [...tests[k], ...matchings[k], ...opens[k]] });
       }
 
-      // 4. Сохранение партии билетов в базу данных
+      // 4. Сохранение партии: партия, все билеты одним запросом, все вопросы билетов пачками.
+      // Любая ошибка — партия удаляется (если прав на удаление нет, остаётся пустая — об этом сообщим).
       const { data: batch, error: bErr } = await supabase
         .from('ticket_batches')
         .insert({
@@ -366,95 +366,50 @@ export const TicketGenerator: React.FC = () => {
         .select()
         .single();
 
-      if (bErr || !batch) throw bErr;
+      if (bErr || !batch) throw bErr || new Error('Не удалось создать партию билетов');
 
-      const createdTicketsWithQuestions = [];
-
-      // Сохраняем каждый билет и его неизменяемые снимки
-      for (const t of ticketsData) {
-        const { data: savedTicket, error: tErr } = await supabase
+      let createdTicketsWithQuestions: any[] = [];
+      try {
+        const { data: savedTickets, error: tErr } = await supabase
           .from('tickets')
-          .insert({
-            batch_id: batch.id,
-            ticket_number: t.ticketNumber,
-          })
-          .select()
-          .single();
+          .insert(ticketsData.map(t => ({ batch_id: batch.id, ticket_number: t.ticketNumber })))
+          .select();
+        if (tErr || !savedTickets || savedTickets.length !== ticketsData.length) {
+          throw tErr || new Error('Не все билеты были сохранены');
+        }
+        const idByNumber = new Map<number, any>(savedTickets.map((x: any) => [x.ticket_number, x]));
 
-        if (tErr || !savedTicket) throw tErr;
-
-        const ticketQuestionRows = t.questions.map((q, idx) => {
-          // Перемешивание вариантов ответов (A, B, C, D)
-          let snapshotOptions = q.options;
-          if (q.type === 'test' && q.options && q.options.length > 0) {
-            const optsToUse = shuffleOptions ? shuffle([...q.options]) : [...q.options];
-            snapshotOptions = optsToUse.map((o, oIdx) => ({
-              id: o.id,
-              text: o.text,
-              text_ru: (o as any).text_ru || o.text,
-              text_tg: (o as any).text_tg || (o as any).text_ru || o.text,
-              image_url: o.image_url,
-              order_index: oIdx + 1,
-            }));
-          }
-
-          // Перемешивание правой стороны соответствия (1, 2, 3, 4, 5)
-          let snapshotMatching = q.matching_items;
-          if (q.type === 'matching' && q.matching_items && q.matching_items.length > 0) {
-            const leftItems = q.matching_items.filter(m => m.side === 'left');
-            const rightItems = q.matching_items.filter(m => m.side === 'right');
-            const sortedLeft = [...leftItems].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
-            const rightToUse = shuffleMatching ? shuffle([...rightItems]) : [...rightItems];
-
-            const processedLeft = sortedLeft.map((m, mIdx) => ({
-              id: m.id,
-              side: m.side,
-              text: m.text,
-              text_ru: (m as any).text_ru || m.text,
-              text_tg: (m as any).text_tg || (m as any).text_ru || m.text,
-              image_url: m.image_url,
-              order_index: mIdx + 1,
-            }));
-
-            const processedRight = rightToUse.map((m, mIdx) => ({
-              id: m.id,
-              side: m.side,
-              text: m.text,
-              text_ru: (m as any).text_ru || m.text,
-              text_tg: (m as any).text_tg || (m as any).text_ru || m.text,
-              image_url: m.image_url,
-              order_index: mIdx + 1,
-            }));
-
-            snapshotMatching = [...processedLeft, ...processedRight];
-          }
-
-          return {
-            ticket_id: savedTicket.id,
+        const snapOpts = { shuffleOptions, shuffleMatching };
+        const allRows: any[] = [];
+        const perTicket = new Map<number, any[]>();
+        for (const t of ticketsData) {
+          const saved = idByNumber.get(t.ticketNumber);
+          if (!saved) throw new Error('Не все билеты были сохранены');
+          const rows = t.questions.map((q, idx) => ({
+            ticket_id: saved.id,
             question_id: q.id,
             order_index: idx + 1,
-            question_snapshot: {
-              id: q.id,
-              type: q.type,
-              content: q.content,
-              content_ru: (q as any).content_ru || q.content,
-              content_tg: (q as any).content_tg || (q as any).content_ru || q.content,
-              image_url: q.image_url,
-              correct_numeric_answer: q.correct_numeric_answer,
-              chapter_name: (q.chapter as any)?.name,
-              topic_name: (q.topic as any)?.name,
-              options: snapshotOptions,
-              matching_items: snapshotMatching,
-            },
-          };
-        });
+            question_snapshot: toSnapshot(q, snapOpts),
+          }));
+          perTicket.set(t.ticketNumber, rows);
+          allRows.push(...rows);
+        }
 
-        await supabase.from('ticket_questions').insert(ticketQuestionRows);
+        for (let i = 0; i < allRows.length; i += 200) {
+          const { error: qiErr } = await supabase.from('ticket_questions').insert(allRows.slice(i, i + 200));
+          if (qiErr) throw qiErr;
+        }
 
-        createdTicketsWithQuestions.push({
-          ...savedTicket,
-          questions: ticketQuestionRows,
-        });
+        createdTicketsWithQuestions = ticketsData.map(t => ({
+          ...idByNumber.get(t.ticketNumber),
+          questions: perTicket.get(t.ticketNumber),
+        }));
+      } catch (saveErr: any) {
+        const { error: delErr } = await supabase.from('ticket_batches').delete().eq('id', batch.id);
+        if (delErr) {
+          notifyInfo('Билеты не сохранились полностью, а удалить недосозданную партию не удалось — попросите администратора удалить её в «Сохранённых».');
+        }
+        throw saveErr;
       }
 
       setGeneratedBatch({
@@ -477,7 +432,7 @@ export const TicketGenerator: React.FC = () => {
       await exportTicketsToDocx(
         generatedBatch.title,
         generatedBatch.tickets,
-        subjects.find(s => s.id === subjectId)?.name || 'Химия',
+        subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия',
         lang
       );
     } catch (err: any) {
@@ -494,7 +449,7 @@ export const TicketGenerator: React.FC = () => {
       build={(lang) => buildTicketsFile(
         generatedBatch.title,
         generatedBatch.tickets,
-        subjects.find(s => s.id === subjectId)?.name || 'Химия',
+        subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия',
         lang
       )}
     />
@@ -790,9 +745,9 @@ export const TicketGenerator: React.FC = () => {
                 <input
                   type="number"
                   min="1"
-                  max="50"
+                  max={SITE_LIMITS.tickets}
                   value={ticketCount}
-                  onChange={(e) => setTicketCount(Math.max(1, parseInt(e.target.value) || 1))}
+                  onChange={(e) => setTicketCount(Math.min(SITE_LIMITS.tickets, Math.max(1, parseInt(e.target.value) || 1)))}
                   className="w-full text-xs p-2 border border-blue-400 bg-blue-50/50 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-blue-900"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
@@ -906,14 +861,14 @@ export const TicketGenerator: React.FC = () => {
                   <div className="flex items-center space-x-1.5">
                     <span className="text-xs font-normal text-slate-500 mr-1">Вопросов: {t.questions.length}</span>
                     <button
-                      onClick={() => exportSingleTicketDocx(batchTitle, t, subjects.find(s => s.id === subjectId)?.name || 'Химия', 'ru')}
+                      onClick={() => exportSingleTicketDocx(generatedBatch?.title || batchTitle, t, subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия', 'ru')}
                       className="px-2 py-0.5 text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded border border-blue-200 transition"
                       title="Скачать Вариант на русском"
                     >
                       RU (.docx)
                     </button>
                     <button
-                      onClick={() => exportSingleTicketDocx(batchTitle, t, subjects.find(s => s.id === subjectId)?.name || 'Химия', 'tg')}
+                      onClick={() => exportSingleTicketDocx(generatedBatch?.title || batchTitle, t, subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия', 'tg')}
                       className="px-2 py-0.5 text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded border border-emerald-200 transition"
                       title="Скачать Вариант на таджикском"
                     >

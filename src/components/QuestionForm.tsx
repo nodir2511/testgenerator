@@ -42,6 +42,10 @@ interface MatchingItemState {
   image_url?: string | null;
 }
 
+// Русское поле: если вопрос только на таджикском, base (= content) совпадает с таджикским текстом — в русское его не копируем
+const ruOf = (ru?: string | null, base?: string | null, tg?: string | null): string =>
+  ru || (base && base !== tg ? base : '') || '';
+
 export const QuestionForm: React.FC<QuestionFormProps> = ({
   initialData,
   onSuccess,
@@ -71,7 +75,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   );
 
   // Текст вопроса на двух языках
-  const [contentRu, setContentRu] = useState(initialData?.content_ru || initialData?.content || '');
+  const [contentRu, setContentRu] = useState(ruOf(initialData?.content_ru, initialData?.content, initialData?.content_tg));
   const [contentTg, setContentTg] = useState(initialData?.content_tg || '');
   const [imageUrl, setImageUrl] = useState<string | null>(initialData?.image_url || null);
 
@@ -86,8 +90,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     initialData?.options && initialData.options.length > 0
       ? initialData.options.map(o => ({
           id: o.id,
-          text: o.text_ru || o.text || '',
-          text_ru: o.text_ru || o.text || '',
+          text: ruOf(o.text_ru, o.text, o.text_tg),
+          text_ru: ruOf(o.text_ru, o.text, o.text_tg),
           text_tg: o.text_tg || '',
           image_url: o.image_url,
           is_correct: o.is_correct || false,
@@ -106,8 +110,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       ? initialData.matching_items.filter(m => m.side === 'left').map(m => ({
           id: m.id,
           side: 'left',
-          text: m.text_ru || m.text || '',
-          text_ru: m.text_ru || m.text || '',
+          text: ruOf(m.text_ru, m.text, m.text_tg),
+          text_ru: ruOf(m.text_ru, m.text, m.text_tg),
           text_tg: m.text_tg || '',
           image_url: m.image_url,
         }))
@@ -124,8 +128,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       ? initialData.matching_items.filter(m => m.side === 'right').map(m => ({
           id: m.id,
           side: 'right',
-          text: m.text_ru || m.text || '',
-          text_ru: m.text_ru || m.text || '',
+          text: ruOf(m.text_ru, m.text, m.text_tg),
+          text_ru: ruOf(m.text_ru, m.text, m.text_tg),
           text_tg: m.text_tg || '',
           image_url: m.image_url,
         }))
@@ -283,169 +287,125 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       const numericVal = type === 'open' && correctNumeric.trim() !== '' ? Number(correctNumeric) : null;
       const primaryContent = contentRu.trim() || contentTg.trim();
 
+      const buildOptionRows = (qid: string) =>
+        options
+          .filter(o => o.text_ru?.trim() || o.text_tg?.trim() || o.text?.trim() || o.image_url)
+          .map((o, idx) => {
+            const rText = (o.text_ru || o.text || '').trim();
+            const tText = (o.text_tg || '').trim();
+            return {
+              question_id: qid,
+              text: rText || tText,
+              text_ru: rText || null,
+              text_tg: tText || null,
+              image_url: o.image_url,
+              is_correct: o.is_correct || false,
+              order_index: idx + 1,
+            };
+          });
+
+      const buildItemRows = (qid: string) => {
+        const map = (side: 'left' | 'right') => (x: MatchingItemState, idx: number) => {
+          const rText = (x.text_ru || x.text || '').trim();
+          const tText = (x.text_tg || '').trim();
+          return {
+            question_id: qid,
+            side,
+            text: rText || tText,
+            text_ru: rText || null,
+            text_tg: tText || null,
+            image_url: x.image_url,
+            order_index: idx + 1,
+          };
+        };
+        const filled = (x: MatchingItemState) => x.text_ru?.trim() || x.text_tg?.trim() || x.text?.trim() || x.image_url;
+        return [...leftItems.filter(filled).map(map('left')), ...rightItems.filter(filled).map(map('right'))];
+      };
+
+      const questionFields = {
+        subject_id: subjectId,
+        chapter_id: chapterId,
+        topic_id: topicId,
+        source_id: sourceId || null,
+        type,
+        content: primaryContent,
+        content_ru: contentRu.trim() || null,
+        content_tg: contentTg.trim() || null,
+        image_url: imageUrl,
+        correct_numeric_answer: numericVal,
+      };
+
       if (initialData?.id) {
-        // Обновление существующего вопроса
+        // Обновление существующего вопроса. Порядок защищает от потери данных при сбое связи:
+        // 1) вставляем новые варианты, 2) обновляем вопрос (проверка версии), 3) только потом удаляем старые.
+        const oldOptionIds = (initialData.options || []).map(o => o.id);
+        const oldItemIds = (initialData.matching_items || []).map(m => m.id);
+
+        const insertRows = async (table: 'question_options' | 'matching_items', rows: any[]): Promise<Array<{ id: string }>> => {
+          const { data, error } = await supabase.from(table).insert(rows).select('id');
+          if (error) throw error;
+          return data || [];
+        };
+        const newOptions = type === 'test' ? await insertRows('question_options', buildOptionRows(initialData.id)) : [];
+        const newItems = type === 'matching' ? await insertRows('matching_items', buildItemRows(initialData.id)) : [];
+        const dropNew = async () => {
+          const o = newOptions;
+          const m = newItems;
+          if (o.length) await supabase.from('question_options').delete().in('id', o.map(x => x.id));
+          if (m.length) await supabase.from('matching_items').delete().in('id', m.map(x => x.id));
+        };
+
         const { data: updatedQuestion, error: qErr } = await supabase
           .from('questions')
-          .update({
-            subject_id: subjectId,
-            chapter_id: chapterId,
-            topic_id: topicId,
-            source_id: sourceId || null,
-            type,
-            content: primaryContent,
-            content_ru: contentRu.trim() || null,
-            content_tg: contentTg.trim() || null,
-            image_url: imageUrl,
-            correct_numeric_answer: numericVal,
-            updated_by: user?.id,
-            version: initialData.version + 1,
-          })
+          .update({ ...questionFields, updated_by: user?.id, version: initialData.version + 1 })
           .eq('id', initialData.id)
           .eq('version', initialData.version)
           .select()
           .single();
 
         if (qErr || !updatedQuestion) {
+          await dropNew();
+          if (qErr && qErr.code !== 'PGRST116') throw qErr;
           throw new Error(
             'Конфликт одновременного редактирования! Вопрос был изменен другим пользователем. Обновите страницу.'
           );
         }
 
-        // Пересохраняем опции тестов с сохранением двуязычия
-        if (type === 'test') {
-          await must(supabase.from('question_options').delete().eq('question_id', initialData.id));
-          const validOptions = options
-            .filter(o => o.text_ru?.trim() || o.text_tg?.trim() || o.text?.trim() || o.image_url)
-            .map((o, idx) => {
-              const rText = (o.text_ru || o.text || '').trim();
-              const tText = (o.text_tg || '').trim();
-              return {
-                question_id: initialData.id,
-                text: rText || tText,
-                text_ru: rText || null,
-                text_tg: tText || null,
-                image_url: o.image_url,
-                is_correct: o.is_correct || false,
-                order_index: idx + 1,
-              };
-            });
-          await must(supabase.from('question_options').insert(validOptions));
-        }
-
-        // Пересохраняем соответствия с сохранением двуязычия
-        if (type === 'matching') {
-          await must(supabase.from('matching_items').delete().eq('question_id', initialData.id));
-          const allItems = [
-            ...leftItems
-              .filter(l => l.text_ru?.trim() || l.text_tg?.trim() || l.text?.trim() || l.image_url)
-              .map((l, idx) => {
-                const rText = (l.text_ru || l.text || '').trim();
-                const tText = (l.text_tg || '').trim();
-                return {
-                  question_id: initialData.id,
-                  side: 'left' as const,
-                  text: rText || tText,
-                  text_ru: rText || null,
-                  text_tg: tText || null,
-                  image_url: l.image_url,
-                  order_index: idx + 1,
-                };
-              }),
-            ...rightItems
-              .filter(r => r.text_ru?.trim() || r.text_tg?.trim() || r.text?.trim() || r.image_url)
-              .map((r, idx) => {
-                const rText = (r.text_ru || r.text || '').trim();
-                const tText = (r.text_tg || '').trim();
-                return {
-                  question_id: initialData.id,
-                  side: 'right' as const,
-                  text: rText || tText,
-                  text_ru: rText || null,
-                  text_tg: tText || null,
-                  image_url: r.image_url,
-                  order_index: idx + 1,
-                };
-              }),
-          ];
-          await must(supabase.from('matching_items').insert(allItems));
+        // Старые варианты и элементы (и оставшиеся от прежнего типа вопроса) удаляем в последнюю очередь
+        try {
+          const oldOpts = type === 'test' ? oldOptionIds : null;
+          const oldMatch = type === 'matching' ? oldItemIds : null;
+          if (type === 'test') {
+            if (oldOpts && oldOpts.length) await must(supabase.from('question_options').delete().in('id', oldOpts));
+            await must(supabase.from('matching_items').delete().eq('question_id', initialData.id));
+          } else if (type === 'matching') {
+            if (oldMatch && oldMatch.length) await must(supabase.from('matching_items').delete().in('id', oldMatch));
+            await must(supabase.from('question_options').delete().eq('question_id', initialData.id));
+          } else {
+            await must(supabase.from('question_options').delete().eq('question_id', initialData.id));
+            await must(supabase.from('matching_items').delete().eq('question_id', initialData.id));
+          }
+        } catch (cleanupErr) {
+          await dropNew();
+          throw new Error('Вопрос сохранён, но варианты не обновились (ошибка связи). Обновите страницу и сохраните ещё раз.');
         }
       } else {
         // Создание нового вопроса
         const { data: newQ, error: qErr } = await supabase
           .from('questions')
-          .insert({
-            subject_id: subjectId,
-            chapter_id: chapterId,
-            topic_id: topicId,
-            source_id: sourceId || null,
-            type,
-            content: primaryContent,
-            content_ru: contentRu.trim() || null,
-            content_tg: contentTg.trim() || null,
-            image_url: imageUrl,
-            correct_numeric_answer: numericVal,
-            created_by: user?.id,
-            version: 1,
-          })
+          .insert({ ...questionFields, created_by: user?.id, version: 1 })
           .select()
           .single();
 
         if (qErr || !newQ) throw qErr;
 
-        if (type === 'test') {
-          const validOptions = options
-            .filter(o => o.text_ru?.trim() || o.text_tg?.trim() || o.text?.trim() || o.image_url)
-            .map((o, idx) => {
-              const rText = (o.text_ru || o.text || '').trim();
-              const tText = (o.text_tg || '').trim();
-              return {
-                question_id: newQ.id,
-                text: rText || tText,
-                text_ru: rText || null,
-                text_tg: tText || null,
-                image_url: o.image_url,
-                is_correct: o.is_correct || false,
-                order_index: idx + 1,
-              };
-            });
-          await must(supabase.from('question_options').insert(validOptions));
-        }
-
-        if (type === 'matching') {
-          const allItems = [
-            ...leftItems
-              .filter(l => l.text_ru?.trim() || l.text_tg?.trim() || l.text?.trim() || l.image_url)
-              .map((l, idx) => {
-                const rText = (l.text_ru || l.text || '').trim();
-                const tText = (l.text_tg || '').trim();
-                return {
-                  question_id: newQ.id,
-                  side: 'left' as const,
-                  text: rText || tText,
-                  text_ru: rText || null,
-                  text_tg: tText || null,
-                  image_url: l.image_url,
-                  order_index: idx + 1,
-                };
-              }),
-            ...rightItems
-              .filter(r => r.text_ru?.trim() || r.text_tg?.trim() || r.text?.trim() || r.image_url)
-              .map((r, idx) => {
-                const rText = (r.text_ru || r.text || '').trim();
-                const tText = (r.text_tg || '').trim();
-                return {
-                  question_id: newQ.id,
-                  side: 'right' as const,
-                  text: rText || tText,
-                  text_ru: rText || null,
-                  text_tg: tText || null,
-                  image_url: r.image_url,
-                  order_index: idx + 1,
-                };
-              }),
-          ];
-          await must(supabase.from('matching_items').insert(allItems));
+        try {
+          if (type === 'test') await must(supabase.from('question_options').insert(buildOptionRows(newQ.id)));
+          if (type === 'matching') await must(supabase.from('matching_items').insert(buildItemRows(newQ.id)));
+        } catch (childErr) {
+          // Не оставляем вопрос без вариантов
+          await supabase.from('questions').update({ is_deleted: true, deleted_at: new Date().toISOString() }).eq('id', newQ.id);
+          throw childErr;
         }
 
         // Запоминаем таксономию для следующего добавления

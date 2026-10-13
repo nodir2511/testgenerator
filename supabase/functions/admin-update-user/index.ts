@@ -95,6 +95,11 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Сменили пароль — привязанные Telegram-чаты отключаем (пользователь привяжет заново с новой сессии)
+    if (changed.includes('password')) {
+      await adminClient.from('telegram_links').delete().eq('user_id', userId);
+    }
+
     await adminClient.from('audit_logs').insert({
       user_id: callerAuth.user.id,
       action: 'UPDATE_USER',

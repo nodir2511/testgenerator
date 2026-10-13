@@ -49,7 +49,11 @@ function parseNumericAnswer(raw?: string): number | null {
 }
 
 function isCorrectLetter(answer: string | undefined, optionIndex: number): boolean {
-  return !!answer && answer.trim().toUpperCase() === 'ABCDEF'[optionIndex];
+  if (!answer) return false;
+  // Допускаем кириллические двойники латинских букв (А, В, С, Е)
+  const twin: Record<string, string> = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E' };
+  const l = answer.trim().toUpperCase();
+  return (twin[l] || l) === 'ABCDEF'[optionIndex];
 }
 
 export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {

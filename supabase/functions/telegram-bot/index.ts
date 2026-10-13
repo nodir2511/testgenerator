@@ -88,6 +88,10 @@ async function saveState(chat: number, st: State) {
 async function linkedUser(chat: number) {
   const { data: link } = await sb.from('telegram_links').select('user_id').eq('chat_id', chat).maybeSingle();
   if (!link) return null;
+  // Заблокированный в Supabase аккаунт не должен пользоваться ботом
+  const { data: au } = await sb.auth.admin.getUserById(link.user_id);
+  const bannedUntil = (au?.user as { banned_until?: string | null } | undefined)?.banned_until;
+  if (!au?.user || (bannedUntil && new Date(bannedUntil).getTime() > Date.now())) return null;
   const { data: profile } = await sb.from('profiles').select('id, full_name, email, role').eq('id', link.user_id).maybeSingle();
   return profile ?? null;
 }

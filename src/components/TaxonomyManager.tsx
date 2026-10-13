@@ -161,7 +161,17 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
     },
   });
 
-  // Удаление (мягкое)
+  // Сколько живых вопросов будет удалено вместе с темой/главой
+  const countActiveQuestions = async (column: 'topic_id' | 'chapter_id', id: string): Promise<number> => {
+    const { count } = await supabase
+      .from('questions')
+      .select('id', { count: 'exact', head: true })
+      .eq(column, id)
+      .eq('is_deleted', false);
+    return count || 0;
+  };
+
+  // Удаление (мягкое). Тема/глава забирает с собой свои вопросы (и темы главы), чтобы они не попадали в билеты
   const softDeleteMutation = useMutation({
     mutationFn: async ({ table, id }: { table: string; id: string }) => {
       const { data, error } = await supabase
@@ -171,10 +181,34 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
         .select('id');
       if (error) throw error;
       assertRowsChanged(data, 'запись');
+
+      const now = new Date().toISOString();
+      const dropQuestions = async (column: 'topic_id' | 'chapter_id') => {
+        const { error: qErr } = await supabase
+          .from('questions')
+          .update({ is_deleted: true, deleted_at: now })
+          .eq(column, id)
+          .eq('is_deleted', false);
+        if (qErr) throw qErr;
+      };
+      if (table === 'topics') await dropQuestions('topic_id');
+      if (table === 'chapters') {
+        const { error: tErr } = await supabase.from('topics').update({ is_deleted: true }).eq('chapter_id', id).eq('is_deleted', false);
+        if (tErr) throw tErr;
+        await dropQuestions('chapter_id');
+      }
     },
     meta: { action: 'Не удалось удалить запись', success: 'Запись удалена из базы' },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: [variables.table] });
+      // Справочники и вопросы, закэшированные в других разделах (генератор, импорт, банк вопросов)
+      for (const key of ['questions', 'pool_stats', 'topics_for_generation', 'chapters', 'topics', 'all_chapters', 'all_topics']) {
+        queryClient.invalidateQueries({ queryKey: [key] });
+      }
+      // Сохранённые в браузере выбор темы/главы мог указывать на удалённую запись
+      for (const k of ['examiner_last_new_chapter_id', 'examiner_last_new_topic_id']) {
+        try { if (localStorage.getItem(k) === variables.id) localStorage.removeItem(k); } catch { /* ignore */ }
+      }
     },
   });
 
@@ -314,9 +348,10 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                       {isAdmin && (
                         <button
                           type="button"
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
-                            if (confirm(`Удалить главу "${ch.name}"?`)) {
+                            const n = await countActiveQuestions('chapter_id', ch.id);
+                            if (confirm(`Удалить главу "${ch.name}"${n ? ` вместе с её темами и вопросами (${n})` : ''}?`)) {
                               softDeleteMutation.mutate({ table: 'chapters', id: ch.id });
                             }
                           }}
@@ -394,8 +429,9 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                         {isAdmin && (
                           <button
                             type="button"
-                            onClick={() => {
-                              if (confirm(`Удалить тему "${tp.name}"?`)) {
+                            onClick={async () => {
+                              const n = await countActiveQuestions('topic_id', tp.id);
+                              if (confirm(`Удалить тему "${tp.name}"${n ? ` вместе с её вопросами (${n})` : ''}?`)) {
                                 softDeleteMutation.mutate({ table: 'topics', id: tp.id });
                               }
                             }}

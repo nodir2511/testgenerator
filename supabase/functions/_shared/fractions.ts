@@ -173,3 +173,30 @@ export function splitFractions(text: string): MathNode[] {
 }
 
 export const hasFraction = (nodes: MathNode[]) => nodes.some((n) => typeof n !== 'string');
+
+// ---- Вложенное форматирование (b, i, sub, sup) ----
+export interface FmtState { b: number; i: number; sub: number; sup: number }
+export interface FmtToken { text: string; b: boolean; i: boolean; sub: boolean; sup: boolean }
+export const newFmtState = (): FmtState => ({ b: 0, i: 0, sub: 0, sup: 0 });
+
+// Режет текст по тегам <b> <i> <sub> <sup> (в том числе вложенным) на куски с одинаковым оформлением.
+// state переносится между вызовами: так тег, открытый до дроби, продолжает действовать после неё.
+// Лишние закрывающие теги игнорируются, незакрытые действуют до конца.
+export function tokenizeFormatted(text: string, state: FmtState): FmtToken[] {
+  const out: FmtToken[] = [];
+  const re = /<(\/?)(b|i|sub|sup)>/g;
+  let last = 0;
+  const push = (t: string) => {
+    if (t) out.push({ text: t, b: state.b > 0, i: state.i > 0, sub: state.sub > 0, sup: state.sup > 0 });
+  };
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    push(text.slice(last, m.index));
+    const k = m[2] as keyof FmtState;
+    if (m[1]) state[k] = Math.max(0, state[k] - 1);
+    else state[k]++;
+    last = m.index + m[0].length;
+  }
+  push(text.slice(last));
+  return out;
+}

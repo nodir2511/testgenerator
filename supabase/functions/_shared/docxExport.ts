@@ -21,7 +21,7 @@ import {
   type MathComponent,
   type ParagraphChild
 } from 'npm:docx@9';
-import { splitFractions, type MathNode } from './fractions.ts';
+import { splitFractions, type MathNode, newFmtState, tokenizeFormatted } from './fractions.ts';
 
 // Рамки таблицы невидимы (BorderStyle.NONE)
 const NO_TABLE_BORDERS = {
@@ -69,6 +69,45 @@ async function fetchImageBuffer(url: string): Promise<Uint8Array | null> {
     console.warn('Не удалось загрузить изображение для Word:', url, err);
     return null;
   }
+}
+
+// Размеры картинки из заголовка (WebP/PNG/JPEG), чтобы не растягивать её под фиксированную рамку
+function imageSize(b: Uint8Array): { w: number; h: number } | null {
+  const u16 = (o: number) => (b[o] << 8) | b[o + 1];
+  const u32 = (o: number) => ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
+  const ascii = (o: number, n: number) => String.fromCharCode(...b.slice(o, o + n));
+  try {
+    if (b.length > 24 && b[0] === 0x89 && ascii(1, 3) === 'PNG') return { w: u32(16), h: u32(20) };
+    if (b.length > 30 && ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') {
+      const kind = ascii(12, 4);
+      if (kind === 'VP8 ') return { w: (b[26] | (b[27] << 8)) & 0x3fff, h: (b[28] | (b[29] << 8)) & 0x3fff };
+      if (kind === 'VP8L') {
+        const bits = b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24);
+        return { w: (bits & 0x3fff) + 1, h: ((bits >>> 14) & 0x3fff) + 1 };
+      }
+      if (kind === 'VP8X') return { w: (b[24] | (b[25] << 8) | (b[26] << 16)) + 1, h: (b[27] | (b[28] << 8) | (b[29] << 16)) + 1 };
+    }
+    if (b[0] === 0xff && b[1] === 0xd8) {
+      let o = 2;
+      while (o + 9 < b.length) {
+        if (b[o] !== 0xff) { o++; continue; }
+        const m = b[o + 1];
+        if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { h: u16(o + 5), w: u16(o + 7) };
+        o += 2 + u16(o + 2);
+      }
+    }
+  } catch {
+    /* неизвестный формат */
+  }
+  return null;
+}
+
+// Вписывает картинку в рамку maxW×maxH с сохранением пропорций (без увеличения сверх рамки)
+function fitImage(data: Uint8Array, maxW: number, maxH: number): { width: number; height: number } {
+  const sz = imageSize(data);
+  if (!sz || !sz.w || !sz.h) return { width: maxW, height: maxH };
+  const k = Math.min(maxW / sz.w, maxH / sz.h, 1);
+  return { width: Math.max(1, Math.round(sz.w * k)), height: Math.max(1, Math.round(sz.h * k)) };
 }
 
 // Текст внутри формулы Word: индексы <sub>/<sup> превращаются в настоящие индексы формулы
@@ -124,76 +163,27 @@ export function parseFormattedTextRuns(
 ): ParagraphChild[] {
   if (!text) return [];
   const out: ParagraphChild[] = [];
+  const state = newFmtState(); // оформление переносится через дроби: <i>v = s/t</i>
   for (const node of splitFractions(text)) {
-    if (typeof node === 'string') out.push(...parseTextRuns(node, isItalic, fontSize, isBold));
-    else out.push(new DocxMath({ children: [buildMathFraction(node)] }));
+    if (typeof node === 'string') {
+      for (const t of tokenizeFormatted(node, state)) {
+        out.push(
+          new TextRun({
+            text: t.text,
+            font: 'Times New Roman',
+            size: fontSize,
+            bold: isBold || t.b,
+            italics: isItalic || t.i,
+            subScript: t.sub || undefined,
+            superScript: t.sup || undefined,
+          })
+        );
+      }
+    } else {
+      out.push(new DocxMath({ children: [buildMathFraction(node)] }));
+    }
   }
   return out;
-}
-
-function parseTextRuns(text: string, isItalic: boolean, fontSize: number, isBold: boolean): ParagraphChild[] {
-  const parts = text.split(/(<sub>.*?<\/sub>|<sup>.*?<\/sup>|<b>.*?<\/b>|<i>.*?<\/i>)/g);
-  const runs: ParagraphChild[] = [];
-
-  parts.forEach((part) => {
-    if (!part) return;
-
-    if (part.startsWith('<sub>') && part.endsWith('</sub>')) {
-      runs.push(
-        new TextRun({
-          text: part.replace(/<\/?sub>/g, ''),
-          subScript: true,
-          font: 'Times New Roman',
-          size: fontSize,
-          italics: isItalic,
-          bold: isBold,
-        })
-      );
-    } else if (part.startsWith('<sup>') && part.endsWith('</sup>')) {
-      runs.push(
-        new TextRun({
-          text: part.replace(/<\/?sup>/g, ''),
-          superScript: true,
-          font: 'Times New Roman',
-          size: fontSize,
-          italics: isItalic,
-          bold: isBold,
-        })
-      );
-    } else if (part.startsWith('<b>') && part.endsWith('</b>')) {
-      runs.push(
-        new TextRun({
-          text: part.replace(/<\/?b>/g, ''),
-          bold: true,
-          font: 'Times New Roman',
-          size: fontSize,
-          italics: isItalic,
-        })
-      );
-    } else if (part.startsWith('<i>') && part.endsWith('</i>')) {
-      runs.push(
-        new TextRun({
-          text: part.replace(/<\/?i>/g, ''),
-          italics: true,
-          bold: isBold,
-          font: 'Times New Roman',
-          size: fontSize,
-        })
-      );
-    } else {
-      runs.push(
-        new TextRun({
-          text: part,
-          font: 'Times New Roman',
-          size: fontSize,
-          italics: isItalic,
-          bold: isBold,
-        })
-      );
-    }
-  });
-
-  return runs;
 }
 
 function cleanTextLength(text: string): number {
@@ -287,7 +277,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                 children: [
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
-                    children: [new ImageRun({ data: imgBuffer, transformation: { width: 300, height: 160 }, type: 'png' })],
+                    children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 300, 160), type: 'png' })],
                   }),
                 ],
               }),
@@ -360,7 +350,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                 children: [
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
-                    children: [new ImageRun({ data: imgBuffer, transformation: { width: 300, height: 160 }, type: 'png' })],
+                    children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 300, 160), type: 'png' })],
                   }),
                 ],
               }),
@@ -392,7 +382,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                 ...(optImgBuffers[0] ? [
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
-                    children: [new ImageRun({ data: optImgBuffers[0]!, transformation: { width: 140, height: 95 }, type: 'png' })],
+                    children: [new ImageRun({ data: optImgBuffers[0]!, transformation: fitImage(optImgBuffers[0]!, 140, 95), type: 'png' })],
                   }),
                 ] : []),
               ],
@@ -411,7 +401,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                 ...(optImgBuffers[1] ? [
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
-                    children: [new ImageRun({ data: optImgBuffers[1]!, transformation: { width: 140, height: 95 }, type: 'png' })],
+                    children: [new ImageRun({ data: optImgBuffers[1]!, transformation: fitImage(optImgBuffers[1]!, 140, 95), type: 'png' })],
                   }),
                 ] : []),
               ],
@@ -443,7 +433,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                 ...(optImgBuffers[2] ? [
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
-                    children: [new ImageRun({ data: optImgBuffers[2]!, transformation: { width: 140, height: 95 }, type: 'png' })],
+                    children: [new ImageRun({ data: optImgBuffers[2]!, transformation: fitImage(optImgBuffers[2]!, 140, 95), type: 'png' })],
                   }),
                 ] : []),
               ],
@@ -462,7 +452,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                 ...(optImgBuffers[3] ? [
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
-                    children: [new ImageRun({ data: optImgBuffers[3]!, transformation: { width: 140, height: 95 }, type: 'png' })],
+                    children: [new ImageRun({ data: optImgBuffers[3]!, transformation: fitImage(optImgBuffers[3]!, 140, 95), type: 'png' })],
                   }),
                 ] : []),
               ],
@@ -508,7 +498,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                 children: [
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
-                    children: [new ImageRun({ data: imgBuffer, transformation: { width: 300, height: 160 }, type: 'png' })],
+                    children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 300, 160), type: 'png' })],
                   }),
                 ],
               }),
@@ -539,7 +529,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                   ...(optImgBuffers[i] ? [
                     new Paragraph({
                       alignment: AlignmentType.CENTER,
-                      children: [new ImageRun({ data: optImgBuffers[i]!, transformation: { width: 180, height: 110 }, type: 'png' })],
+                      children: [new ImageRun({ data: optImgBuffers[i]!, transformation: fitImage(optImgBuffers[i]!, 180, 110), type: 'png' })],
                     }),
                   ] : []),
                 ],
@@ -607,7 +597,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
               children: [
                 new Paragraph({
                   alignment: AlignmentType.CENTER,
-                  children: [new ImageRun({ data: imgBuffer, transformation: { width: 300, height: 160 }, type: 'png' })],
+                  children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 300, 160), type: 'png' })],
                 }),
               ],
             }),
@@ -637,7 +627,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
           leftParas.push(
             new Paragraph({
               alignment: AlignmentType.CENTER,
-              children: [new ImageRun({ data: leftImgBuffers[rowIdx]!, transformation: { width: 130, height: 85 }, type: 'png' })],
+              children: [new ImageRun({ data: leftImgBuffers[rowIdx]!, transformation: fitImage(leftImgBuffers[rowIdx]!, 130, 85), type: 'png' })],
             })
           );
         }
@@ -661,7 +651,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
           rightParas.push(
             new Paragraph({
               alignment: AlignmentType.CENTER,
-              children: [new ImageRun({ data: rightImgBuffers[rowIdx]!, transformation: { width: 130, height: 85 }, type: 'png' })],
+              children: [new ImageRun({ data: rightImgBuffers[rowIdx]!, transformation: fitImage(rightImgBuffers[rowIdx]!, 130, 85), type: 'png' })],
             })
           );
         }
@@ -729,7 +719,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
             children: [
               new Paragraph({
                 alignment: AlignmentType.CENTER,
-                children: [new ImageRun({ data: imgBuffer, transformation: { width: 300, height: 160 }, type: 'png' })],
+                children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 300, 160), type: 'png' })],
               }),
             ],
           }),

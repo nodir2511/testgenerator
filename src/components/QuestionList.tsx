@@ -132,7 +132,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         if (filterTopicId) query = query.eq('topic_id', filterTopicId);
         if (filterType !== 'all') query = query.eq('type', filterType);
         if (searchQuery.trim()) {
-          query = query.or(`content.ilike.%${searchQuery.trim()}%,content_tg.ilike.%${searchQuery.trim()}%`);
+          // Значение берём в кавычки и экранируем: запятые, скобки, % и _ в запросе не ломают фильтр
+          const like = '%' + searchQuery.trim().replace(/[\\%_]/g, '\\$&') + '%';
+          const quoted = '"' + like.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+          query = query.or(`content.ilike.${quoted},content_ru.ilike.${quoted},content_tg.ilike.${quoted}`);
         }
         return query;
       };

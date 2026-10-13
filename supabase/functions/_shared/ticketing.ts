@@ -43,13 +43,13 @@ export function poolStats(all: Array<{ type: string }>) {
   };
 }
 
-export function checkSettings(s: Settings): string | null {
+export function checkSettings(s: Settings, limits: { perType: number; tickets: number } = LIMITS): string | null {
   if (s.testCount + s.matchingCount + s.openCount === 0) return 'Задайте хотя бы один вопрос в билете';
   if (s.ticketCount < 1) return 'Количество билетов должно быть не менее 1';
-  if (s.testCount > LIMITS.perType || s.matchingCount > LIMITS.perType || s.openCount > LIMITS.perType) {
-    return `Не больше ${LIMITS.perType} вопросов каждого типа в билете`;
+  if (s.testCount > limits.perType || s.matchingCount > limits.perType || s.openCount > limits.perType) {
+    return `Не больше ${limits.perType} вопросов каждого типа в билете`;
   }
-  if (s.ticketCount > LIMITS.tickets) return `Не больше ${LIMITS.tickets} билетов за один раз`;
+  if (s.ticketCount > limits.tickets) return `Не больше ${limits.tickets} билетов за один раз`;
   return null;
 }
 
@@ -148,17 +148,24 @@ function randomComposition(total: number, parts: number, rnd: Rnd): number[] {
  * Параллельный подбор вопросов одного вида для ticketCount билетов.
  * Возвращает матрицу [билет][позиция] -> вопрос.
  *
- * - Позиции делятся между темами поровну (по кругу, тема со «сдачей» выбирается случайно).
- * - Позиция j во всех билетах берётся из одной и той же темы, причём из соседних вопросов:
- *   билет 1 — вопрос №35 темы, билет 2 — №36, билет 3 — №37 и т.д.
- * - Пока вопросов хватает, ни один вопрос не повторяется ни внутри билета, ни между билетами;
- *   когда пул исчерпан, начинается новый круг по тем же вопросам.
+ * Основной режим (в темах хватает вопросов, чтобы раздать всем билетам разные):
+ * - позиции делятся между темами поровну (по кругу, лишняя позиция достаётся случайной теме);
+ * - позиция j во всех билетах берётся из одной темы соседними вопросами:
+ *   билет 1 — вопрос №35, билет 2 — №36, билет 3 — №37 и т.д.;
+ * - ни один вопрос не повторяется ни внутри билета, ни между билетами.
+ *
+ * Запасной режим (тем слишком мало вопросов для основного):
+ * весь пул по порядку сборника, позиции — равномерно разнесённые «полосы» соседних вопросов,
+ * билет k берёт k-й вопрос полосы. Внутри билета повторов нет никогда; между билетами вопросы
+ * повторяются только когда пул исчерпан (и тогда используются все вопросы пула).
  */
 export function pickParallel(pool: any[], count: number, ticketCount: number, rnd: Rnd = Math.random): any[][] {
-  const tickets: any[][] = Array.from({ length: ticketCount }, () => []);
-  if (count <= 0 || pool.length === 0) return tickets;
+  const T = ticketCount;
+  const tickets: any[][] = Array.from({ length: T }, () => []);
+  const P = Math.min(count, pool.length);
+  if (P <= 0 || T <= 0) return tickets;
 
-  // Группировка по темам с сохранением порядка сборника
+  // Группировка по темам, темы — по порядку глав и параграфов, вопросы — по порядку сборника
   const byTopic = new Map<string, any[]>();
   for (const q of pool) {
     const key = q.topic_id || '—';
@@ -168,61 +175,48 @@ export function pickParallel(pool: any[], count: number, ticketCount: number, rn
   const topics = [...byTopic.entries()].map(([id, list]) => {
     const sorted = [...list].sort(compareInTopic);
     const f = sorted[0];
-    return {
-      id,
-      list: sorted,
-      chapterOrder: f?.chapter?.order_index ?? 0,
-      topicOrder: f?.topic?.order_index ?? 0,
-      slots: 0,
-    };
-  });
+    return { id, list: sorted, chapterOrder: f?.chapter?.order_index ?? 0, topicOrder: f?.topic?.order_index ?? 0, slots: 0 };
+  }).sort((a, b) => a.chapterOrder - b.chapterOrder || a.topicOrder - b.topicOrder || (a.id < b.id ? -1 : 1));
 
-  // Раздаём позиции по кругу: сначала только темам, где хватает вопросов на все билеты
-  // без повторов, затем (если позиций всё ещё больше) — любым темам, лишь бы внутри билета не было дублей
-  const order = shuffle(topics, rnd);
-  let left = Math.min(count, pool.length);
-  for (const capOf of [(n: number) => Math.floor(n / ticketCount), (n: number) => n]) {
-    let progress = true;
-    while (left > 0 && progress) {
-      progress = false;
-      for (const t of order) {
-        if (left === 0) break;
-        if (t.slots < capOf(t.list.length)) {
-          t.slots++;
-          left--;
-          progress = true;
-        }
+  const capacity = topics.reduce((sum, t) => sum + Math.floor(t.list.length / T), 0);
+
+  if (capacity < P) {
+    // Запасной режим
+    const W = topics.flatMap((t) => t.list);
+    const n = W.length;
+    const r = randInt(n, rnd);
+    for (let j = 0; j < P; j++) {
+      const off = r + Math.floor((j * n) / P); // равномерно по кругу; соседние полосы не короче n/P
+      for (let k = 0; k < T; k++) tickets[k].push(W[(off + k) % n]);
+    }
+    return tickets;
+  }
+
+  // Основной режим: позиции — темам по кругу, начиная со случайной темы
+  const start = randInt(topics.length, rnd);
+  const order = [...topics.slice(start), ...topics.slice(0, start)];
+  let left = P;
+  let progress = true;
+  while (left > 0 && progress) {
+    progress = false;
+    for (const t of order) {
+      if (left === 0) break;
+      if (t.slots < Math.floor(t.list.length / T)) {
+        t.slots++;
+        left--;
+        progress = true;
       }
     }
   }
 
-  // Темы в билете идут в порядке глав и параграфов
-  const used = topics
-    .filter((t) => t.slots > 0)
-    .sort((a, b) => a.chapterOrder - b.chapterOrder || a.topicOrder - b.topicOrder || (a.id < b.id ? -1 : 1));
-
-  for (const t of used) {
-    const n = t.list.length;
-    const s = t.slots;
-    // Каждой позиции — «полоса» соседних вопросов: билет k берёт k-й вопрос полосы.
-    // Хватает вопросов — полосы длиной ticketCount со случайными промежутками между ними;
-    // не хватает — тема делится на s полос целиком, и билеты идут по полосе по кругу
-    let lengths: number[];
-    let gaps: number[];
-    if (s * ticketCount <= n) {
-      lengths = new Array(s).fill(ticketCount);
-      gaps = randomComposition(n - s * ticketCount, s + 1, rnd);
-    } else {
-      lengths = new Array(s).fill(Math.floor(n / s));
-      for (const j of shuffle([...Array(s).keys()], rnd).slice(0, n % s)) lengths[j]++;
-      gaps = new Array(s + 1).fill(0);
-    }
+  for (const t of topics) {
+    if (t.slots === 0) continue;
+    // Полосы длиной T со случайными промежутками между ними
+    const gaps = randomComposition(t.list.length - t.slots * T, t.slots + 1, rnd);
     let pos = gaps[0];
-    for (let j = 0; j < s; j++) {
-      for (let k = 0; k < ticketCount; k++) {
-        tickets[k].push(t.list[pos + (k % lengths[j])]);
-      }
-      pos += lengths[j] + gaps[j + 1];
+    for (let j = 0; j < t.slots; j++) {
+      for (let k = 0; k < T; k++) tickets[k].push(t.list[pos + k]);
+      pos += T + gaps[j + 1];
     }
   }
   return tickets;
