@@ -1,3 +1,6 @@
 {
-  "rewrites": [{ "source": "/tg/:path*", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/tg", "destination": "/index.html" },
+    { "source": "/tg/(.*)", "destination": "/index.html" }
+  ]
 }
