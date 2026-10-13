@@ -587,6 +587,15 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                                 </>
                               )}
                             </div>
+                            {(() => {
+                              const rights = q.matching_items!.filter(r => r.side === 'right').sort((x, y) => x.order_index - y.order_index);
+                              const k = rights.findIndex(r => !!m.correct_match_id && r.id === m.correct_match_id);
+                              return k >= 0 ? (
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold text-[11px] shadow-sm" title="Правильный ответ">→ {k + 1}</span>
+                              ) : (
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-600 font-semibold text-[10px]" title="Ответ не задан">нет ответа</span>
+                              );
+                            })()}
                             {m.image_url && (
                               <img
                                 src={m.image_url}
