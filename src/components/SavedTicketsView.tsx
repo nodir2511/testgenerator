@@ -159,6 +159,11 @@ export const SavedTicketsView: React.FC = () => {
                       <span>Вариантов: {tickets.length}</span>
                       {tickets[0] && <span>Вопросов в билете: {tickets[0].questions?.length}</span>}
                     </div>
+                    {tickets[0]?.selection_info?.ru && (
+                      <div className="text-xs text-slate-500 mt-1">
+                        Темы экзамена: <b className="text-slate-700">{tickets[0].selection_info.ru}</b>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5">
