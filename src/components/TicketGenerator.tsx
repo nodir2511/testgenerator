@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo, describeError } from '../lib/errors';
-import { fitSettings } from '../../supabase/functions/_shared/ticketing';
+import { fitSettings, pickParallel } from '../../supabase/functions/_shared/ticketing';
 import { Subject, Chapter, Topic, Question, TicketBatch, Ticket, TicketQuestion } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -311,8 +311,8 @@ export const TicketGenerator: React.FC = () => {
           .from('questions')
           .select(`
             *,
-            chapter:chapters(name),
-            topic:topics(name),
+            chapter:chapters(name, order_index),
+            topic:topics(name, order_index),
             options:question_options(*),
             matching_items:matching_items(*)
           `)
@@ -324,10 +324,6 @@ export const TicketGenerator: React.FC = () => {
       });
       if (qErr || !allQuestionsRaw) throw qErr || new Error('Ошибка загрузки вопросов');
 
-      const testPool = allQuestionsRaw.filter(q => q.type === 'test');
-      const matchingPool = allQuestionsRaw.filter(q => q.type === 'matching');
-      const openPool = allQuestionsRaw.filter(q => q.type === 'open');
-
       // Вспомогательная функция случайного перемешивания (Fisher-Yates)
       const shuffle = <T,>(arr: T[]): T[] => {
         const copy = [...arr];
@@ -338,31 +334,15 @@ export const TicketGenerator: React.FC = () => {
         return copy;
       };
 
-      // 3. Формирование параллельных билетов
-      // Для каждого билета k выбираем вопросы так, чтобы:
-      // - внутри билета не было повторов;
-      // - если возможно, между параллельными билетами вопросы не пересекались, или распределялись равномерно.
+      // 3. Формирование параллельных билетов (см. pickParallel): позиция в билете берётся
+      // из одной темы во всех билетах, соседними вопросами сборника, темы — поровну,
+      // без повторов, пока хватает вопросов
+      const tests = pickParallel(allQuestionsRaw.filter(q => q.type === 'test'), useTest, ticketCount);
+      const matchings = pickParallel(allQuestionsRaw.filter(q => q.type === 'matching'), useMatching, ticketCount);
+      const opens = pickParallel(allQuestionsRaw.filter(q => q.type === 'open'), useOpen, ticketCount);
       const ticketsData: Array<{ ticketNumber: number; questions: Question[] }> = [];
-
-      for (let tNum = 1; tNum <= ticketCount; tNum++) {
-        const ticketQuestions: Question[] = [];
-
-        // Выбор тестовых
-        const shuffledTests = shuffle(testPool);
-        ticketQuestions.push(...shuffledTests.slice(0, useTest));
-
-        // Выбор соответствий
-        const shuffledMatching = shuffle(matchingPool);
-        ticketQuestions.push(...shuffledMatching.slice(0, useMatching));
-
-        // Выбор открытых
-        const shuffledOpen = shuffle(openPool);
-        ticketQuestions.push(...shuffledOpen.slice(0, useOpen));
-
-        ticketsData.push({
-          ticketNumber: tNum,
-          questions: ticketQuestions,
-        });
+      for (let k = 0; k < ticketCount; k++) {
+        ticketsData.push({ ticketNumber: k + 1, questions: [...tests[k], ...matchings[k], ...opens[k]] });
       }
 
       // 4. Сохранение партии билетов в базу данных

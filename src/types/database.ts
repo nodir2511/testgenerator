@@ -83,6 +83,7 @@ export interface Question {
   content_tg?: string | null;
   image_url?: string | null;
   correct_numeric_answer?: number | null;
+  seq?: number | null;
   version: number;
   is_deleted: boolean;
   deleted_at?: string | null;

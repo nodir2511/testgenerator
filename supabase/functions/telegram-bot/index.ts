@@ -122,7 +122,7 @@ async function loadPool(st: State) {
   const all: any[] = [];
   for (let from = 0; ; from += 1000) {
     let q = sb.from('questions')
-      .select('*, chapter:chapters(name), topic:topics(name), options:question_options(*), matching_items:matching_items(*)')
+      .select('*, chapter:chapters(name, order_index), topic:topics(name, order_index), options:question_options(*), matching_items:matching_items(*)')
       .eq('subject_id', st.subjectId!).eq('is_deleted', false).order('id');
     if (st.topicIds.length) q = q.in('topic_id', st.topicIds);
     else q = q.in('chapter_id', st.chapterIds);
