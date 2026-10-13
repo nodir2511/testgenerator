@@ -66,7 +66,7 @@ export const SavedTicketsView: React.FC = () => {
   const handleKey = async (batch: any) => {
     try {
       setExportingId(`${batch.id}-key`);
-      const stats = await exportAnswerKey(batch.title, batch.tickets || [], batch.subject?.name || '');
+      const stats = await exportAnswerKey(batch.title, batch.tickets || [], batch.subject?.name || '', { subjectId: batch.subject_id, params: batch.generation_params });
       if (stats.missing) notifyError(new Error(`В базе нет верного ответа у вопросов: ${stats.missing} — клетки в ключе пустые.`), 'Ключи готовы, но не полные');
     } catch (err: any) {
       notifyError(err, 'Ошибка при создании ключей');

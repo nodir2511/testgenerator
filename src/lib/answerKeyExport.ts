@@ -1,6 +1,6 @@
 import { saveAs } from 'file-saver';
 import { supabase } from './supabase';
-import { buildAnswerKeyDocx, keyKindOf, type KeyTicket } from './answerKey';
+import { buildAnswerKeyDocx, keyKindOf, selectionInfo, type KeyTicket } from './answerKey';
 
 // Скачивание ключей ответов (Word по шаблону предмета) для созданных билетов.
 // Старые сохранённые билеты не хранят верные ответы в снимке — они подгружаются из банка вопросов.
@@ -60,14 +60,32 @@ export function hasKeyTemplate(subjectName: string): boolean {
   return keyKindOf(subjectName) !== null;
 }
 
-export async function exportAnswerKey(title: string, tickets: KeyTicket[], subjectName: string): Promise<{ missing: number; overflow: number }> {
+// Какие главы и темы вошли в билеты — для шапки ключей; при ошибке шапка остаётся как в шаблоне
+async function loadSelectionInfo(subjectId: string, params: any): Promise<string | null> {
+  try {
+    const chapters = await supabase.from('chapters').select('id, order_index').eq('subject_id', subjectId).eq('is_deleted', false);
+    if (chapters.error || !chapters.data?.length) return null;
+    const topics = await supabase.from('topics').select('id, chapter_id, order_index').in('chapter_id', chapters.data.map((c: any) => c.id)).eq('is_deleted', false);
+    if (topics.error) return null;
+    return selectionInfo(chapters.data, topics.data ?? [], params?.chapter_ids ?? [], params?.topic_ids ?? []);
+  } catch {
+    return null;
+  }
+}
+
+export async function exportAnswerKey(
+  title: string, tickets: KeyTicket[], subjectName: string,
+  /** Предмет и выбор глав/тем партии (subject_id + generation_params) — для шапки ключей */
+  selection?: { subjectId?: string | null; params?: any },
+): Promise<{ missing: number; overflow: number }> {
   const kind = keyKindOf(subjectName);
   if (!kind) throw new Error('Для этого предмета нет шаблона ключей');
   const res = await fetch(`/key-templates/${kind}.docx`);
   if (!res.ok) throw new Error('Не удалось загрузить шаблон ключей');
   const template = await res.arrayBuffer();
   const sorted = [...tickets].sort((a, b) => a.ticket_number - b.ticket_number);
-  const { bytes, stats } = await buildAnswerKeyDocx(template, await enrich(sorted));
+  const info = selection?.subjectId ? await loadSelectionInfo(selection.subjectId, selection.params) : null;
+  const { bytes, stats } = await buildAnswerKeyDocx(template, await enrich(sorted), info);
   const safe = title.replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 80) || 'Билеты';
   saveAs(new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), `Ключи – ${safe}.docx`);
   return stats;

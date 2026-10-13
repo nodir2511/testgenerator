@@ -166,11 +166,86 @@ function paragraphStart(xml: string, pos: number): number {
   return -1;
 }
 
+// Номера через запятую; три и более подряд — диапазоном («1–4», «1, 3, 5–7»)
+function numberList(nums: number[], collapse: boolean): string {
+  const s = [...new Set(nums)].sort((a, b) => a - b);
+  if (!collapse) return s.join(', ');
+  const parts: string[] = [];
+  for (let i = 0; i < s.length; ) {
+    let j = i;
+    while (j + 1 < s.length && s[j + 1] === s[j] + 1) j++;
+    if (j - i >= 2) parts.push(`${s[i]}–${s[j]}`);
+    else for (let k = i; k <= j; k++) parts.push(String(s[k]));
+    i = j + 1;
+  }
+  return parts.join(', ');
+}
+
+/**
+ * Какие главы и темы вошли в билеты: «Главы 1, 2, 3 — полностью; глава 4 — темы 1–4».
+ * Выбор: темы (если заданы), иначе главы, иначе весь предмет.
+ */
+export function selectionInfo(
+  chapters: Array<{ id: string; order_index: number }>,
+  topics: Array<{ id: string; chapter_id: string; order_index: number }>,
+  chapterIds: string[],
+  topicIds: string[],
+): string | null {
+  const picked = new Set(topicIds);
+  const full: number[] = [];
+  const partial: Array<{ n: number; nums: number[] }> = [];
+  for (const ch of [...chapters].sort((a, b) => a.order_index - b.order_index)) {
+    const all = topics.filter((t) => t.chapter_id === ch.id);
+    if (topicIds.length) {
+      const sel = all.filter((t) => picked.has(t.id));
+      if (!sel.length) continue;
+      if (sel.length === all.length) full.push(ch.order_index);
+      else partial.push({ n: ch.order_index, nums: sel.map((t) => t.order_index) });
+    } else if (!chapterIds.length || chapterIds.includes(ch.id)) {
+      full.push(ch.order_index);
+    }
+  }
+  const parts: string[] = [];
+  if (full.length) parts.push(`${full.length > 1 ? 'главы' : 'глава'} ${numberList(full, false)} — полностью`);
+  for (const p of partial) parts.push(`глава ${p.n} — ${p.nums.length > 1 ? 'темы' : 'тема'} ${numberList(p.nums, true)}`);
+  if (!parts.length) return null;
+  const text = parts.join('; ');
+  return text[0].toUpperCase() + text.slice(1);
+}
+
+// Шапка шаблона («ҶАВОБИ ДУРУСТИ / саволу … – А.5») заменяется на два свои текста
+function setParagraphText(xml: string, marker: string, text: string, size?: number): string {
+  const at = xml.indexOf(marker);
+  if (at < 0) return xml;
+  const ps = paragraphStart(xml, at);
+  const pe = xml.indexOf('</w:p>', at) + 6;
+  let para = xml.slice(ps, pe);
+  const runs = para.match(/<w:r[ >][\s\S]*?<\/w:r>/g) || [];
+  const run0 = runs[0];
+  if (!run0) return xml;
+  let first = run0.replace(/<w:t(?:\s[^>]*)?>[^<]*<\/w:t>/, () => `<w:t xml:space="preserve">${esc(text)}</w:t>`);
+  if (size) first = first.replace(/<w:sz w:val="\d+"\/>/, `<w:sz w:val="${size}"/>`).replace(/<w:szCs w:val="\d+"\/>/, `<w:szCs w:val="${size}"/>`);
+  para = para.replace(run0, () => first);
+  for (const r of runs.slice(1)) para = para.replace(r, () => '');
+  return xml.slice(0, ps) + para + xml.slice(pe);
+}
+
 export async function buildAnswerKeyDocx(
   templateBytes: Uint8Array | ArrayBuffer,
   tickets: KeyTicket[],
+  /** Что вошло в билеты (selectionInfo); если задано, заменяет заголовок в шапке шаблона */
+  info?: string | null,
 ): Promise<{ bytes: Uint8Array; stats: KeyStats }> {
   const zip = await JSZip.loadAsync(templateBytes);
+  if (info) {
+    for (const name of Object.keys(zip.files).filter((n) => /^word\/header\d*\.xml$/.test(n))) {
+      let h = await zip.file(name)!.async('string');
+      if (!h.includes('ДУРУСТИ')) continue;
+      h = setParagraphText(h, 'ДУРУСТИ', 'ВКЛЮЧЕНО В БИЛЕТЫ');
+      h = setParagraphText(h, 'саволу', info, 24);
+      zip.file(name, h);
+    }
+  }
   const xml = await zip.file('word/document.xml')!.async('string');
   const bodyAt = xml.indexOf('<w:body>') + '<w:body>'.length;
   const sectAt = xml.lastIndexOf('<w:sectPr');

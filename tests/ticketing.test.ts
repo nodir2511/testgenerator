@@ -4,7 +4,7 @@ import JSZip from 'jszip';
 import {
   TG_LIMITS, buildTickets, checkSettings, fitSettings, parseCount, parseNumbers, pickParallel, poolStats, toSnapshot, DEFAULT_SETTINGS,
 } from '../supabase/functions/_shared/ticketing';
-import { buildAnswerKeyDocx, keyKindOf, matchingAnswer, openAnswer, testAnswer } from '../src/lib/answerKey';
+import { buildAnswerKeyDocx, keyKindOf, matchingAnswer, openAnswer, selectionInfo, testAnswer } from '../src/lib/answerKey';
 
 // Детерминированный генератор случайных чисел — тесты воспроизводимы
 function rng(seed: number) {
@@ -261,6 +261,34 @@ describe('ключи ответов', () => {
     expect(keyKindOf('Химия')).toBe('chem');
     expect(keyKindOf('Физика / Физика')).toBe('phys');
     expect(keyKindOf('История')).toBeNull();
+  });
+
+  it('описание выбора: главы полностью и темы неполных глав', () => {
+    const chapters = [1, 2, 3, 4, 5].map((n) => ({ id: 'c' + n, order_index: n }));
+    const topics = chapters.flatMap((c) => [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ id: `${c.id}t${n}`, chapter_id: c.id, order_index: n })));
+    const ids = (c: number, ns: number[]) => ns.map((n) => `c${c}t${n}`);
+    const full = (c: number) => ids(c, [1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(selectionInfo(chapters, topics, ['c1', 'c2', 'c3'], [])).toBe('Главы 1, 2, 3 — полностью');
+    expect(selectionInfo(chapters, topics, [], [...full(1), ...full(2), ...full(3), ...ids(4, [1, 2, 3, 4])]))
+      .toBe('Главы 1, 2, 3 — полностью; глава 4 — темы 1–4');
+    expect(selectionInfo(chapters, topics, [], ids(5, [1, 3, 5, 6, 7]))).toBe('Глава 5 — темы 1, 3, 5–7');
+    expect(selectionInfo(chapters, topics, [], ids(2, [4]))).toBe('Глава 2 — тема 4');
+    expect(selectionInfo(chapters.slice(0, 2), topics, [], [])).toBe('Главы 1, 2 — полностью');
+  });
+
+  it('шапка ключей: «ҶАВОБИ ДУРУСТИ …» заменяется на то, что вошло в билеты', async () => {
+    for (const kind of ['bio', 'chem', 'phys', 'taj']) {
+      const tpl = fs.readFileSync(`templates/key/${kind}.docx`);
+      const { bytes } = await buildAnswerKeyDocx(tpl, [{ ticket_number: 1, questions: [] }], 'Главы 1, 2, 3 — полностью; глава 4 — темы 1–4');
+      const zip = await JSZip.loadAsync(bytes);
+      const h = await zip.file('word/header1.xml')!.async('string');
+      const text = (h.match(/<w:t[^>]*>[^<]*<\/w:t>/g) || []).map((x) => x.replace(/<[^>]+>/g, '')).join('|');
+      expect(text).toContain('ВКЛЮЧЕНО В БИЛЕТЫ');
+      expect(text).toContain('Главы 1, 2, 3 — полностью; глава 4 — темы 1–4');
+      expect(text).not.toContain('ДУРУСТИ');
+      expect(text).not.toContain('А.5');
+      expect(text).toContain('Repetitor');
+    }
   });
 
   it('шаблон химии заполняется: по странице на вариант, ответы в нужных клетках', async () => {

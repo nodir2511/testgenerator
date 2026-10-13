@@ -490,7 +490,9 @@ export const TicketGenerator: React.FC = () => {
   const handleExportKey = async () => {
     if (!generatedBatch || !generatedBatch.tickets) return;
     try {
-      const stats = await exportAnswerKey(generatedBatch.title, generatedBatch.tickets, generatedSubjectName);
+      const stats = await exportAnswerKey(generatedBatch.title, generatedBatch.tickets, generatedSubjectName, {
+        subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params,
+      });
       if (stats.missing) notifyError(new Error(`В базе нет верного ответа у вопросов: ${stats.missing} — клетки в ключе пустые.`), 'Ключи готовы, но не полные');
     } catch (err: any) {
       notifyError(err, 'Ошибка при создании ключей');

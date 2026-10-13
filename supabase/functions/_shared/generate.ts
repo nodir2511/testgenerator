@@ -3,7 +3,7 @@
 
 import JSZip from 'npm:jszip@3';
 import { buildSingleTicketBlob } from './docxExport.ts';
-import { buildAnswerKeyDocx, keyKindOf } from './answerKey.ts';
+import { buildAnswerKeyDocx, keyKindOf, selectionInfo } from './answerKey.ts';
 import { KEY_TEMPLATES } from './keyTemplates.ts';
 import * as T from './ticketing.ts';
 
@@ -178,7 +178,15 @@ export async function generateAndSend(opts: {
   if (kind) {
     try {
       const tpl = Uint8Array.from(atob(KEY_TEMPLATES[kind]), (c) => c.charCodeAt(0));
-      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped);
+      let info: string | null = null;
+      try {
+        const { data: chs } = await sb.from('chapters').select('id, order_index').eq('subject_id', sel.subjectId).eq('is_deleted', false);
+        const { data: tps } = await sb.from('topics').select('id, chapter_id, order_index').in('chapter_id', (chs ?? []).map((c: any) => c.id)).eq('is_deleted', false);
+        info = selectionInfo(chs ?? [], tps ?? [], sel.chapterIds, sel.topicIds);
+      } catch (e) {
+        console.error('selection info failed', e);
+      }
+      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped, info);
       missingAnswers = stats.missing;
       const note = [
         stats.missing ? `⚠️ В базе нет верного ответа у вопросов: ${stats.missing} — эти клетки в ключе пустые.` : '',
