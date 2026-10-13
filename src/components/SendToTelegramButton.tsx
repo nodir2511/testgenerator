@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Send, Loader2, Check, ChevronDown } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { notifyError } from '../lib/errors';
@@ -51,12 +52,35 @@ export const SendToTelegramButton: React.FC<Props> = ({ build, title, batchId, t
   const [sending, setSending] = useState<ExportLanguage | null>(null);
   const [sent, setSent] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+
+  // Меню рисуется поверх страницы (портал, fixed), чтобы его не обрезала карточка с overflow-hidden
+  const toggle = () => {
+    if (!open && ref.current) {
+      const r = ref.current.getBoundingClientRect();
+      const menuH = LANGS.length * 32 + 12;
+      const top = r.bottom + 4 + menuH > window.innerHeight ? Math.max(8, r.top - 4 - menuH) : r.bottom + 4;
+      setPos({ top, right: Math.max(8, window.innerWidth - r.right) });
+    }
+    setOpen((v) => !v);
+  };
 
   useEffect(() => {
     if (!open) return;
-    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const close = (e: MouseEvent) => {
+      const n = e.target as Node;
+      if (!ref.current?.contains(n) && !menuRef.current?.contains(n)) setOpen(false);
+    };
+    const hide = () => setOpen(false);
     document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
+    window.addEventListener('scroll', hide, true);
+    window.addEventListener('resize', hide);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('resize', hide);
+    };
   }, [open]);
 
   const send = async (lang: ExportLanguage) => {
@@ -80,7 +104,7 @@ export const SendToTelegramButton: React.FC<Props> = ({ build, title, batchId, t
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         disabled={Boolean(sending)}
         className={`${pad} bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-xs font-bold shadow-sm flex items-center space-x-1 transition disabled:opacity-60`}
         title="Отправить файл в ваш Telegram через бота (вместо скачивания)"
@@ -89,8 +113,12 @@ export const SendToTelegramButton: React.FC<Props> = ({ build, title, batchId, t
         <span>{sending ? 'Отправка…' : sent ? 'Отправлено' : 'В Telegram'}</span>
         {!sending && !sent && <ChevronDown className="w-3 h-3 opacity-80" />}
       </button>
-      {open && (
-        <div className="absolute right-0 mt-1 z-20 w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1">
+      {open && pos && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: 'fixed', top: pos.top, right: pos.right }}
+          className="z-[100] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1"
+        >
           {LANGS.map((l) => (
             <button
               key={l.lang}
@@ -100,7 +128,8 @@ export const SendToTelegramButton: React.FC<Props> = ({ build, title, batchId, t
               {l.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
