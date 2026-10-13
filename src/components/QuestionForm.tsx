@@ -571,7 +571,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <span>🌐 Двойной (RU + TG)</span>
+              <span>🌐 Двойной (RU + TJ)</span>
             </button>
             <button
               type="button"
@@ -774,7 +774,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-semibold text-emerald-600 uppercase mb-0.5">Тоҷикӣ (TG)</label>
+                          <label className="block text-[10px] font-semibold text-emerald-600 uppercase mb-0.5">Тоҷикӣ (TJ)</label>
                           <input
                             type="text"
                             value={opt.text_tg ?? ''}
@@ -783,7 +783,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                               updated[idx].text_tg = e.target.value;
                               setOptions(updated);
                             }}
-                            placeholder={`Варианти ${optLetter} (TG)`}
+                            placeholder={`Варианти ${optLetter} (TJ)`}
                             className="w-full text-xs p-2 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
                           />
                         </div>
@@ -813,7 +813,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             updated[idx].text_tg = e.target.value;
                             setOptions(updated);
                           }}
-                          placeholder={`Варианти ${optLetter} (TG)`}
+                          placeholder={`Варианти ${optLetter} (TJ)`}
                           className="w-full text-xs p-2 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
                         />
                       </div>
@@ -921,7 +921,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                               updated[idx].text_tg = e.target.value;
                               setLeftItems(updated);
                             }}
-                            placeholder={`Элементи ${letter} (TG)`}
+                            placeholder={`Элементи ${letter} (TJ)`}
                             className="w-full text-xs p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
                           />
                         </div>
@@ -947,7 +947,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             updated[idx].text_tg = e.target.value;
                             setLeftItems(updated);
                           }}
-                          placeholder={`Элементи ${letter} (TG)`}
+                          placeholder={`Элементи ${letter} (TJ)`}
                           className="w-full text-xs p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       )}
@@ -1037,7 +1037,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             updated[idx].text_tg = e.target.value;
                             setRightItems(updated);
                           }}
-                          placeholder={`Элементи ${idx + 1} (TG)`}
+                          placeholder={`Элементи ${idx + 1} (TJ)`}
                           className="w-full text-xs p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
@@ -1063,7 +1063,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                           updated[idx].text_tg = e.target.value;
                           setRightItems(updated);
                         }}
-                        placeholder={`Элементи ${idx + 1} (TG)`}
+                        placeholder={`Элементи ${idx + 1} (TJ)`}
                         className="w-full text-xs p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
                       />
                     )}

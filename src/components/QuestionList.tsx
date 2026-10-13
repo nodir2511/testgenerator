@@ -346,7 +346,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                RU + TG (Параллельно)
+                RU + TJ (Параллельно)
               </button>
             </div>
           </div>

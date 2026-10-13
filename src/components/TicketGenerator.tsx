@@ -20,7 +20,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
-import { exportAnswerKey, hasKeyTemplate, withSelectionInfo } from '../lib/answerKeyExport';
+import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo } from '../lib/answerKeyExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
 
 // Администратору на сайте можно до 50 вариантов; обычным пользователям — те же лимиты, что в Telegram (их же проверяет база)
@@ -475,11 +475,13 @@ export const TicketGenerator: React.FC = () => {
   const handleExportWord = async (lang: 'ru' | 'tg' | 'both') => {
     if (!generatedBatch || !generatedBatch.tickets) return;
     try {
+      const subj = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия';
       await exportTicketsToDocx(
         generatedBatch.title,
         generatedBatch.tickets,
-        subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия',
-        lang
+        subj,
+        lang,
+        await keyArchiveExtras(generatedBatch.title, generatedBatch.tickets, subj, { subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params }, lang)
       );
     } catch (err: any) {
       notifyError(err, 'Ошибка экспорта в Word');
@@ -505,12 +507,16 @@ export const TicketGenerator: React.FC = () => {
       title={generatedBatch.title}
       batchId={generatedBatch.id}
       ticketCount={generatedBatch.tickets.length}
-      build={(lang) => buildTicketsFile(
-        generatedBatch.title,
-        generatedBatch.tickets,
-        subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия',
-        lang
-      )}
+      build={async (lang) => {
+        const subj = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия';
+        return buildTicketsFile(
+          generatedBatch.title,
+          generatedBatch.tickets,
+          subj,
+          lang,
+          await keyArchiveExtras(generatedBatch.title, generatedBatch.tickets, subj, { subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params }, lang)
+        );
+      }}
     />
   ) : null;
 
@@ -549,10 +555,10 @@ export const TicketGenerator: React.FC = () => {
             <button
               onClick={() => handleExportWord('both')}
               className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow flex items-center space-x-1 transition"
-              title="Скачать двуязычные билеты (RU + TG)"
+              title="Скачать двуязычные билеты (RU + TJ)"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>RU + TG</span>
+              <span>RU + TJ</span>
             </button>
             {hasKeyTemplate(generatedSubjectName) && (
               <button
@@ -937,7 +943,7 @@ export const TicketGenerator: React.FC = () => {
                 className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1 shadow-sm transition"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>RU + TG</span>
+                <span>RU + TJ</span>
               </button>
               {telegramButton}
             </div>
@@ -962,7 +968,7 @@ export const TicketGenerator: React.FC = () => {
                       className="px-2 py-0.5 text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded border border-emerald-200 transition"
                       title="Скачать Вариант на таджикском"
                     >
-                      TG (.docx)
+                      TJ (.docx)
                     </button>
                   </div>
                 </div>

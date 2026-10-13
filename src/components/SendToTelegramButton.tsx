@@ -8,9 +8,9 @@ import type { ExportFile, ExportLanguage } from '../lib/docxExport';
 const LANGS: Array<{ lang: ExportLanguage; label: string }> = [
   { lang: 'ru', label: 'Русский' },
   { lang: 'tg', label: 'Тоҷикӣ' },
-  { lang: 'both', label: 'RU + TG' },
+  { lang: 'both', label: 'RU + TJ' },
 ];
-const LANG_CAPTION: Record<ExportLanguage, string> = { ru: 'RU', tg: 'TG', both: 'RU + TG' };
+const LANG_CAPTION: Record<ExportLanguage, string> = { ru: 'RU', tg: 'TJ', both: 'RU + TJ' };
 
 // Текст ошибки из ответа Edge Function ({ error: '...' })
 async function functionErrorMessage(error: unknown): Promise<string> {

@@ -916,7 +916,9 @@ export async function buildTicketsFile(
   examTitle: string,
   tickets: ExportTicket[],
   subjectName: string = 'Химия',
-  lang: ExportLanguage = 'ru'
+  lang: ExportLanguage = 'ru',
+  /** Дополнительные файлы в корень ZIP (например, ключи ответов) */
+  extraFiles: Array<{ name: string; blob: Blob }> = []
 ): Promise<ExportFile | null> {
   if (!tickets || tickets.length === 0) return null;
   if (tickets.length === 1 && lang !== 'both') return buildSingleTicketFile(examTitle, tickets[0], subjectName, lang);
@@ -930,7 +932,8 @@ export async function buildTicketsFile(
       zip.file(`${lang === 'both' ? 'Тоҷикӣ/' : ''}Варианти ${t.ticket_number}.docx`, await buildSingleTicketBlob(examTitle, t, subjectName, true));
     }
   }
-  const suffix = lang === 'both' ? 'RU_TG' : lang.toUpperCase();
+  for (const e of extraFiles) zip.file(e.name, e.blob);
+  const suffix = lang === 'both' ? 'RU_TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase());
   return { blob: await zip.generateAsync({ type: 'blob' }), fileName: `${examTitle}_${suffix}.zip` };
 }
 
@@ -950,8 +953,9 @@ export async function exportTicketsToDocx(
   examTitle: string,
   tickets: ExportTicket[],
   subjectName: string = 'Химия',
-  lang: ExportLanguage = 'ru'
+  lang: ExportLanguage = 'ru',
+  extraFiles: Array<{ name: string; blob: Blob }> = []
 ) {
-  const file = await buildTicketsFile(examTitle, tickets, subjectName, lang);
+  const file = await buildTicketsFile(examTitle, tickets, subjectName, lang, extraFiles);
   if (file) saveAs(file.blob, file.fileName);
 }

@@ -101,11 +101,10 @@ async function loadSelectionInfo(subjectId: string, params: any): Promise<string
   return (await makeSelectionInfoLoader()(subjectId, params)).ru;
 }
 
-export async function exportAnswerKey(
-  title: string, tickets: KeyTicket[], subjectName: string,
-  /** Предмет и выбор глав/тем партии (subject_id + generation_params) — для шапки ключей */
-  selection?: { subjectId?: string | null; params?: any },
-): Promise<{ missing: number; overflow: number }> {
+export interface KeyFile { blob: Blob; fileName: string; stats: { missing: number; overflow: number } }
+type KeySelection = { subjectId?: string | null; params?: any };
+
+export async function buildAnswerKeyFile(title: string, tickets: KeyTicket[], subjectName: string, selection?: KeySelection): Promise<KeyFile> {
   const kind = keyKindOf(subjectName);
   if (!kind) throw new Error('Для этого предмета нет шаблона ключей');
   const res = await fetch(`/key-templates/${kind}.docx`);
@@ -115,6 +114,33 @@ export async function exportAnswerKey(
   const info = selection?.subjectId ? await loadSelectionInfo(selection.subjectId, selection.params) : null;
   const { bytes, stats } = await buildAnswerKeyDocx(template, await enrich(sorted), info);
   const safe = title.replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 80) || 'Билеты';
-  saveAs(new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), `Ключи – ${safe}.docx`);
-  return stats;
+  return {
+    blob: new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+    fileName: `Ключи – ${safe}.docx`,
+    stats,
+  };
+}
+
+export async function exportAnswerKey(
+  title: string, tickets: KeyTicket[], subjectName: string,
+  /** Предмет и выбор глав/тем партии (subject_id + generation_params) — для шапки ключей */
+  selection?: KeySelection,
+): Promise<{ missing: number; overflow: number }> {
+  const file = await buildAnswerKeyFile(title, tickets, subjectName, selection);
+  saveAs(file.blob, file.fileName);
+  return file.stats;
+}
+
+/** Ключи для архива «RU + TJ»: кладутся в тот же ZIP; для других языков и предметов без шаблона — пусто */
+export async function keyArchiveExtras(
+  title: string, tickets: KeyTicket[], subjectName: string, selection: KeySelection | undefined, lang: string,
+): Promise<Array<{ name: string; blob: Blob }>> {
+  if (lang !== 'both' || !hasKeyTemplate(subjectName)) return [];
+  try {
+    const f = await buildAnswerKeyFile(title, tickets, subjectName, selection);
+    return [{ name: f.fileName, blob: f.blob }];
+  } catch (e) {
+    console.warn('Ключи не добавлены в архив', e);
+    return [];
+  }
 }

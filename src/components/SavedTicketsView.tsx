@@ -5,7 +5,7 @@ import { assertRowsChanged, notifyError } from '../lib/errors';
 import { TicketBatch, Ticket } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
-import { exportAnswerKey, hasKeyTemplate, makeSelectionInfoLoader, withSelectionInfo } from '../lib/answerKeyExport';
+import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, makeSelectionInfoLoader, withSelectionInfo } from '../lib/answerKeyExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
 import { 
   FileCheck2, 
@@ -88,7 +88,8 @@ export const SavedTicketsView: React.FC = () => {
         batch.title,
         batch.tickets || [],
         batch.subject?.name || 'Экзамен',
-        lang
+        lang,
+        await keyArchiveExtras(batch.title, batch.tickets || [], batch.subject?.name || '', { subjectId: batch.subject_id, params: batch.generation_params }, lang)
       );
     } catch (err: any) {
       notifyError(err, 'Ошибка при экспорте в Word');
@@ -193,14 +194,14 @@ export const SavedTicketsView: React.FC = () => {
                       onClick={() => handleExport(batch, 'both')}
                       disabled={exportingId === `${batch.id}-both`}
                       className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-semibold flex items-center space-x-1 shadow-sm transition disabled:opacity-50"
-                      title="Экспорт двуязычных вариантов (RU + TG)"
+                      title="Экспорт двуязычных вариантов (RU + TJ)"
                     >
                       {exportingId === `${batch.id}-both` ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : (
                         <Download className="w-3.5 h-3.5" />
                       )}
-                      <span>RU + TG</span>
+                      <span>RU + TJ</span>
                     </button>
 
                     {hasKeyTemplate(batch.subject?.name || '') && (
@@ -220,7 +221,10 @@ export const SavedTicketsView: React.FC = () => {
                       title={batch.title}
                       batchId={batch.id}
                       ticketCount={tickets.length}
-                      build={(lang) => buildTicketsFile(batch.title, tickets, batch.subject?.name || 'Экзамен', lang)}
+                      build={async (lang) => buildTicketsFile(
+                        batch.title, tickets, batch.subject?.name || 'Экзамен', lang,
+                        await keyArchiveExtras(batch.title, tickets, batch.subject?.name || '', { subjectId: batch.subject_id, params: batch.generation_params }, lang)
+                      )}
                     />
 
                     <button
@@ -269,7 +273,7 @@ export const SavedTicketsView: React.FC = () => {
                                 className="px-2 py-0.5 text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded border border-emerald-200 transition"
                                 title="Скачать этот вариант на таджикском"
                               >
-                                TG (.docx)
+                                TJ (.docx)
                               </button>
                             </div>
                           </div>

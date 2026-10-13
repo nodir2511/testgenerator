@@ -4,7 +4,7 @@ import JSZip from 'jszip';
 import {
   TG_LIMITS, buildTickets, checkSettings, fitSettings, parseCount, parseNumbers, pickParallel, poolStats, toSnapshot, DEFAULT_SETTINGS,
 } from '../supabase/functions/_shared/ticketing';
-import { buildSingleTicketBlob } from '../src/lib/docxExport';
+import { buildSingleTicketBlob, buildTicketsFile } from '../src/lib/docxExport';
 import { buildAnswerKeyDocx, keyKindOf, matchingAnswer, openAnswer, selectionInfo, testAnswer } from '../src/lib/answerKey';
 
 // Детерминированный генератор случайных чисел — тесты воспроизводимы
@@ -294,6 +294,19 @@ describe('ключи ответов', () => {
     const blob = await buildSingleTicketBlob('Экзамен', { ticket_number: 1, questions: [] }, 'Химия', false);
     const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
     expect(xml).not.toContain('Включено');
+  });
+
+  it('архив «RU + TJ»: варианты обоих языков и ключи в одном ZIP', async () => {
+    const tickets = [1, 2].map((n) => ({ ticket_number: n, questions: [] }));
+    const key = { name: 'Ключи – Экзамен.docx', blob: new Blob(['x']) };
+    const file = await buildTicketsFile('Экзамен', tickets, 'Химия', 'both', [key]);
+    expect(file!.fileName).toBe('Экзамен_RU_TJ.zip');
+    const names = Object.keys((await JSZip.loadAsync(await file!.blob.arrayBuffer())).files).sort();
+    expect(names).toContain('Ключи – Экзамен.docx');
+    expect(names).toContain('Русский/Вариант 2.docx');
+    expect(names).toContain('Тоҷикӣ/Варианти 1.docx');
+    const tj = await buildTicketsFile('Экзамен', tickets, 'Химия', 'tg');
+    expect(tj!.fileName).toBe('Экзамен_TJ.zip');
   });
 
   it('шапка ключей: «ҶАВОБИ ДУРУСТИ …» заменяется на то, что вошло в билеты', async () => {
