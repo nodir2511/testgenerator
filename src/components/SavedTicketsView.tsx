@@ -5,7 +5,7 @@ import { assertRowsChanged, notifyError } from '../lib/errors';
 import { TicketBatch, Ticket } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
-import { exportAnswerKey, hasKeyTemplate } from '../lib/answerKeyExport';
+import { exportAnswerKey, hasKeyTemplate, makeSelectionInfoLoader, withSelectionInfo } from '../lib/answerKeyExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
 import { 
   FileCheck2, 
@@ -47,7 +47,12 @@ export const SavedTicketsView: React.FC = () => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data || [];
+      // Каждому билету — описание выбранных глав и тем (печатается в шапке варианта)
+      const load = makeSelectionInfoLoader();
+      return Promise.all((data || []).map(async (b: any) => ({
+        ...b,
+        tickets: await withSelectionInfo(b.tickets || [], b.subject_id, b.generation_params, load),
+      })));
     },
   });
 

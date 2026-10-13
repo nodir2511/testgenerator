@@ -63,6 +63,21 @@ export async function loadPool(sb: any, sel: Selection) {
   return all;
 }
 
+// Какие главы и темы выбраны (для шапки вариантов и ключей); при ошибке — без описания
+async function loadSelectionInfos(sb: any, sel: Selection): Promise<{ ru: string | null; tg: string | null }> {
+  try {
+    const { data: chs } = await sb.from('chapters').select('id, order_index').eq('subject_id', sel.subjectId).eq('is_deleted', false);
+    const { data: tps } = await sb.from('topics').select('id, chapter_id, order_index').in('chapter_id', (chs ?? []).map((c: any) => c.id)).eq('is_deleted', false);
+    return {
+      ru: selectionInfo(chs ?? [], tps ?? [], sel.chapterIds, sel.topicIds, 'ru'),
+      tg: selectionInfo(chs ?? [], tps ?? [], sel.chapterIds, sel.topicIds, 'tg'),
+    };
+  } catch (e) {
+    console.error('selection info failed', e);
+    return { ru: null, tg: null };
+  }
+}
+
 // Все вопросы глав, в которых что-то выбрано: нужны, чтобы посчитать охват главы
 export async function loadChapterTotals(sb: any, subjectId: string, pool: any[]): Promise<T.ChapterTotals> {
   const ids = [...new Set(pool.map((q) => q.chapter_id).filter(Boolean))];
@@ -152,7 +167,8 @@ export async function generateAndSend(opts: {
     details: { tickets: s.ticketCount, lang, chat_id: chat, source },
   });
 
-  const shaped = tickets.map((t) => ({ ticket_number: t.ticketNumber, questions: t.questions.map((q: any) => ({ question_snapshot: q.question_snapshot })) }));
+  const infos = await loadSelectionInfos(sb, sel);
+  const shaped = tickets.map((t) => ({ ticket_number: t.ticketNumber, selection_info: infos, questions: t.questions.map((q: any) => ({ question_snapshot: q.question_snapshot })) }));
   const bytes = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
   const files: Array<{ name: string; data: Uint8Array }> = [];
   for (const t of shaped) {
@@ -178,15 +194,7 @@ export async function generateAndSend(opts: {
   if (kind) {
     try {
       const tpl = Uint8Array.from(atob(KEY_TEMPLATES[kind]), (c) => c.charCodeAt(0));
-      let info: string | null = null;
-      try {
-        const { data: chs } = await sb.from('chapters').select('id, order_index').eq('subject_id', sel.subjectId).eq('is_deleted', false);
-        const { data: tps } = await sb.from('topics').select('id, chapter_id, order_index').in('chapter_id', (chs ?? []).map((c: any) => c.id)).eq('is_deleted', false);
-        info = selectionInfo(chs ?? [], tps ?? [], sel.chapterIds, sel.topicIds);
-      } catch (e) {
-        console.error('selection info failed', e);
-      }
-      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped, info);
+      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped, infos.ru);
       missingAnswers = stats.missing;
       const note = [
         stats.missing ? `⚠️ В базе нет верного ответа у вопросов: ${stats.missing} — эти клетки в ключе пустые.` : '',

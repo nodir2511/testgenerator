@@ -802,10 +802,12 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
 // Построение Blob для одного отдельного варианта (билета)
 export async function buildSingleTicketBlob(
   examTitle: string,
-  ticket: { ticket_number: number; questions: Array<{ question_snapshot: any }> },
+  ticket: { ticket_number: number; questions: Array<{ question_snapshot: any }>; selection_info?: { ru?: string | null; tg?: string | null } },
   subjectName: string = 'Химия',
   isTg: boolean
 ): Promise<Blob> {
+  // Какие главы и темы вошли в билеты (одинаково на каждом варианте)
+  const selInfo = isTg ? ticket.selection_info?.tg : ticket.selection_info?.ru;
   const docChildren: any[] = [];
   const headerVariant = isTg ? `Варианти ${ticket.ticket_number}` : `Вариант ${ticket.ticket_number}`;
   const headerSubject = isTg ? `Фан: ${subjectName}` : `Предмет: ${subjectName}`;
@@ -836,6 +838,14 @@ export async function buildSingleTicketBlob(
         }),
       ],
     }),
+    ...(selInfo ? [new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 140 },
+      children: [
+        new TextRun({ text: isTg ? 'Дохил шудааст: ' : 'Включено: ', bold: true, font: 'Times New Roman', size: 22, color: '555555' }),
+        new TextRun({ text: selInfo, font: 'Times New Roman', size: 22, color: '555555' }),
+      ],
+    })] : []),
     new Paragraph({
       spacing: { after: 180 },
       border: {

@@ -61,16 +61,44 @@ export function hasKeyTemplate(subjectName: string): boolean {
 }
 
 // Какие главы и темы вошли в билеты — для шапки ключей; при ошибке шапка остаётся как в шаблоне
+export interface SelectionInfos { ru: string | null; tg: string | null }
+
+// Загрузчик с кэшем структуры предмета (главы и темы), чтобы не повторять запросы для партий одного предмета
+export function makeSelectionInfoLoader() {
+  const cache = new Map<string, Promise<{ chapters: any[]; topics: any[] } | null>>();
+  const structure = (subjectId: string) => {
+    if (!cache.has(subjectId)) {
+      cache.set(subjectId, (async () => {
+        const chapters = await supabase.from('chapters').select('id, order_index').eq('subject_id', subjectId).eq('is_deleted', false);
+        if (chapters.error || !chapters.data?.length) return null;
+        const topics = await supabase.from('topics').select('id, chapter_id, order_index').in('chapter_id', chapters.data.map((c: any) => c.id)).eq('is_deleted', false);
+        if (topics.error) return null;
+        return { chapters: chapters.data, topics: topics.data ?? [] };
+      })().catch(() => null));
+    }
+    return cache.get(subjectId)!;
+  };
+  return async (subjectId: string | null | undefined, params: any): Promise<SelectionInfos> => {
+    const none = { ru: null, tg: null };
+    if (!subjectId) return none;
+    const s = await structure(subjectId);
+    if (!s) return none;
+    const ch = params?.chapter_ids ?? [], tp = params?.topic_ids ?? [];
+    return { ru: selectionInfo(s.chapters, s.topics, ch, tp, 'ru'), tg: selectionInfo(s.chapters, s.topics, ch, tp, 'tg') };
+  };
+}
+
+/** Добавляет каждому билету описание выбранных глав и тем (печатается в шапке варианта) */
+export async function withSelectionInfo<T extends { ticket_number: number }>(
+  tickets: T[], subjectId: string | null | undefined, params: any,
+  load: (subjectId: string | null | undefined, params: any) => Promise<SelectionInfos> = makeSelectionInfoLoader(),
+): Promise<Array<T & { selection_info: SelectionInfos }>> {
+  const info = await load(subjectId, params);
+  return tickets.map((t) => ({ ...t, selection_info: info }));
+}
+
 async function loadSelectionInfo(subjectId: string, params: any): Promise<string | null> {
-  try {
-    const chapters = await supabase.from('chapters').select('id, order_index').eq('subject_id', subjectId).eq('is_deleted', false);
-    if (chapters.error || !chapters.data?.length) return null;
-    const topics = await supabase.from('topics').select('id, chapter_id, order_index').in('chapter_id', chapters.data.map((c: any) => c.id)).eq('is_deleted', false);
-    if (topics.error) return null;
-    return selectionInfo(chapters.data, topics.data ?? [], params?.chapter_ids ?? [], params?.topic_ids ?? []);
-  } catch {
-    return null;
-  }
+  return (await makeSelectionInfoLoader()(subjectId, params)).ru;
 }
 
 export async function exportAnswerKey(

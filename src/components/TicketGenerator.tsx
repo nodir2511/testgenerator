@@ -20,7 +20,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
-import { exportAnswerKey, hasKeyTemplate } from '../lib/answerKeyExport';
+import { exportAnswerKey, hasKeyTemplate, withSelectionInfo } from '../lib/answerKeyExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
 
 // Администратору на сайте можно до 50 вариантов; обычным пользователям — те же лимиты, что в Telegram (их же проверяет база)
@@ -428,7 +428,7 @@ export const TicketGenerator: React.FC = () => {
 
       setGeneratedBatch({
         ...batch,
-        tickets: createdTicketsWithQuestions,
+        tickets: await withSelectionInfo(createdTicketsWithQuestions, batch.subject_id, batch.generation_params),
       });
 
       queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });

@@ -190,6 +190,7 @@ export function selectionInfo(
   topics: Array<{ id: string; chapter_id: string; order_index: number }>,
   chapterIds: string[],
   topicIds: string[],
+  lang: 'ru' | 'tg' = 'ru',
 ): string | null {
   const picked = new Set(topicIds);
   const full: number[] = [];
@@ -205,12 +206,20 @@ export function selectionInfo(
       full.push(ch.order_index);
     }
   }
+  const tg = lang === 'tg';
   const parts: string[] = [];
-  if (full.length) parts.push(`${full.length > 1 ? 'главы' : 'глава'} ${numberList(full, false)} — полностью`);
-  for (const p of partial) parts.push(`глава ${p.n} — ${p.nums.length > 1 ? 'темы' : 'тема'} ${numberList(p.nums, true)}`);
+  if (full.length) {
+    const n = numberList(full, false);
+    parts.push(tg ? `${full.length > 1 ? 'бобҳои' : 'боби'} ${n} — пурра` : `${full.length > 1 ? 'главы' : 'глава'} ${n} — полностью`);
+  }
+  for (const p of partial) {
+    const n = numberList(p.nums, true);
+    const many = p.nums.length > 1;
+    parts.push(tg ? `боби ${p.n} — ${many ? 'мавзӯъҳои' : 'мавзӯи'} ${n}` : `глава ${p.n} — ${many ? 'темы' : 'тема'} ${n}`);
+  }
   if (!parts.length) return null;
   const text = parts.join('; ');
-  return text[0].toUpperCase() + text.slice(1);
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 // Шапка шаблона («ҶАВОБИ ДУРУСТИ / саволу … – А.5») заменяется на два свои текста

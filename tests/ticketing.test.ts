@@ -4,6 +4,7 @@ import JSZip from 'jszip';
 import {
   TG_LIMITS, buildTickets, checkSettings, fitSettings, parseCount, parseNumbers, pickParallel, poolStats, toSnapshot, DEFAULT_SETTINGS,
 } from '../supabase/functions/_shared/ticketing';
+import { buildSingleTicketBlob } from '../src/lib/docxExport';
 import { buildAnswerKeyDocx, keyKindOf, matchingAnswer, openAnswer, selectionInfo, testAnswer } from '../src/lib/answerKey';
 
 // Детерминированный генератор случайных чисел — тесты воспроизводимы
@@ -274,6 +275,25 @@ describe('ключи ответов', () => {
     expect(selectionInfo(chapters, topics, [], ids(5, [1, 3, 5, 6, 7]))).toBe('Глава 5 — темы 1, 3, 5–7');
     expect(selectionInfo(chapters, topics, [], ids(2, [4]))).toBe('Глава 2 — тема 4');
     expect(selectionInfo(chapters.slice(0, 2), topics, [], [])).toBe('Главы 1, 2 — полностью');
+  });
+
+  it('вариант билета: под шапкой печатаются главы и темы (рус. и тадж.)', async () => {
+    const chapters = [1, 2, 3, 4].map((n) => ({ id: 'c' + n, order_index: n }));
+    const topics = chapters.flatMap((c) => [1, 2, 3, 4, 5].map((n) => ({ id: `${c.id}t${n}`, chapter_id: c.id, order_index: n })));
+    const picked = [...topics.filter((t) => t.chapter_id !== 'c4'), ...topics.filter((t) => t.chapter_id === 'c4' && t.order_index <= 4)].map((t) => t.id);
+    const info = { ru: selectionInfo(chapters, topics, [], picked, 'ru'), tg: selectionInfo(chapters, topics, [], picked, 'tg') };
+    expect(info.tg).toBe('Бобҳои 1, 2, 3 — пурра; боби 4 — мавзӯъҳои 1–4');
+    const textOf = async (isTg: boolean) => {
+      const blob = await buildSingleTicketBlob('Экзамен', { ticket_number: 1, questions: [], selection_info: info }, 'Химия', isTg);
+      const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
+      return (xml.match(/<w:t[^>]*>[^<]*<\/w:t>/g) || []).map((x) => x.replace(/<[^>]+>/g, '')).join('|');
+    };
+    expect(await textOf(false)).toContain('Включено: |Главы 1, 2, 3 — полностью; глава 4 — темы 1–4');
+    expect(await textOf(true)).toContain('Дохил шудааст: |Бобҳои 1, 2, 3 — пурра; боби 4 — мавзӯъҳои 1–4');
+    // без описания строки нет
+    const blob = await buildSingleTicketBlob('Экзамен', { ticket_number: 1, questions: [] }, 'Химия', false);
+    const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
+    expect(xml).not.toContain('Включено');
   });
 
   it('шапка ключей: «ҶАВОБИ ДУРУСТИ …» заменяется на то, что вошло в билеты', async () => {
