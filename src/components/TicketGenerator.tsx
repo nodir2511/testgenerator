@@ -668,7 +668,7 @@ export const TicketGenerator: React.FC = () => {
             </div>
 
             {/* Список глав в виде раскрывающегося аккордеона */}
-            <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
               {chapters.map(ch => {
                 const chTopics = allTopics.filter(t => t.chapter_id === ch.id);
                 const chSelectedTopics = chTopics.filter(t => selectedTopicIds.includes(t.id));
@@ -737,7 +737,7 @@ export const TicketGenerator: React.FC = () => {
 
                     {/* Раскрывающийся список тем главы */}
                     {isExpanded && (
-                      <div className="p-2.5 bg-white border-t border-slate-100 space-y-1 max-h-60 overflow-y-auto">
+                      <div className="p-2.5 bg-white border-t border-slate-100 space-y-1">
                         {chTopics.length === 0 ? (
                           <div className="text-xs text-slate-400 italic p-2">В этой главе пока нет тем</div>
                         ) : (
