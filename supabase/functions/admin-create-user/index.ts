@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
 
     const { data: callerProfile, error: callerProfileError } = await callerClient
       .from('profiles')
-      .select('role')
+      .select('role, is_owner')
       .eq('id', callerAuth.user.id)
       .single();
 
@@ -53,7 +53,14 @@ Deno.serve(async (req) => {
     const email = String(body.email ?? '').trim();
     const password = String(body.password ?? '');
     const fullName = String(body.fullName ?? '').trim();
-    const role = body.role === 'admin' ? 'admin' : 'user';
+    const ROLES = ['user', 'admin', 'subject_teacher', 'subject_admin'];
+    const role = ROLES.includes(body.role) ? String(body.role) : 'user';
+    const bySubject = role === 'subject_teacher' || role === 'subject_admin';
+    const subjectIds: string[] = Array.isArray(body.subjectIds) ? body.subjectIds.filter((x: unknown) => typeof x === 'string') : [];
+    if (bySubject) {
+      if (!callerProfile.is_owner) return json({ error: 'Роли по предметам назначает только главный администратор' }, 403);
+      if (!subjectIds.length) return json({ error: 'Выберите хотя бы один предмет' }, 400);
+    }
 
     if (!email || !password || password.length < 6) {
       return json({ error: 'Укажите email и пароль (не менее 6 символов)' }, 400);
@@ -75,8 +82,11 @@ Deno.serve(async (req) => {
 
     // Триггер on_auth_user_created уже создаёт профиль с ролью 'user' по умолчанию.
     // Если админ запросил роль 'admin' — проставляем её отдельно.
-    if (role === 'admin') {
-      await adminClient.from('profiles').update({ role: 'admin' }).eq('id', created.user.id);
+    if (role !== 'user') {
+      await adminClient.from('profiles').update({ role }).eq('id', created.user.id);
+    }
+    if (bySubject) {
+      await adminClient.from('user_subjects').insert(subjectIds.map((subject_id) => ({ user_id: created.user.id, subject_id })));
     }
 
     await adminClient.from('audit_logs').insert({
@@ -84,7 +94,7 @@ Deno.serve(async (req) => {
       action: 'CREATE_USER',
       entity_type: 'profiles',
       entity_id: created.user.id,
-      details: { email, role },
+      details: { email, role, subjectIds },
     });
 
     return json({ id: created.user.id, email: created.user.email, role });

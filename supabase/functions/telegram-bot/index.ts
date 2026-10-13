@@ -12,7 +12,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
-import { generateAndSend, limitsFor, linkedUser as linkedUserOf } from '../_shared/generate.ts';
+import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser as linkedUserOf } from '../_shared/generate.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -78,9 +78,10 @@ async function saveState(chat: number, st: State) {
 const linkedUser = (chat: number) => linkedUserOf(sb, chat);
 
 // ---------------- Данные ----------------
-async function subjects() {
+async function subjects(user: { id: string; role?: string }) {
   const { data } = await sb.from('subjects').select('id, name').eq('is_deleted', false).order('name');
-  return data ?? [];
+  const allowed = await allowedSubjectIds(sb, user);
+  return (data ?? []).filter((s: any) => !allowed || allowed.includes(s.id));
 }
 async function chaptersOf(subjectId: string) {
   const { data } = await sb.from('chapters').select('id, name').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
@@ -105,7 +106,8 @@ async function countPool(st: State) {
 
 // ---------------- Экраны ----------------
 async function screenSubjects(chat: number, msgId?: number) {
-  const list = await subjects();
+  const user = await linkedUser(chat);
+  const list = user ? await subjects(user) : [];
   if (!list.length) return show(chat, msgId, 'В базе нет предметов.');
   const st = await loadState(chat);
   if (list.length === 1) {
@@ -154,7 +156,8 @@ async function screenSettings(chat: number, msgId: number | undefined, st: State
   st.step = 'settings';
   st.awaiting = null;
   await saveState(chat, st);
-  const subj = (await subjects()).find((s) => s.id === st.subjectId)?.name ?? '';
+  const me = await linkedUser(chat);
+  const subj = (me ? await subjects(me) : []).find((s) => s.id === st.subjectId)?.name ?? '';
   const chs = (await chaptersOf(st.subjectId!)).filter((c) => st.chapterIds.includes(c.id)).map((c) => c.name);
   const stats = await countPool(st);
   return show(chat, msgId, T.settingsText(subj, chs, st.topicIds.length, st.settings, stats), T.kbSettings(st.settings));
@@ -282,7 +285,7 @@ async function onCallback(cb: any) {
   if (data === 'NOOP') return;
 
   if (data.startsWith('S:')) {
-    const list = await subjects();
+    const list = await subjects(user);
     const s = list[+data.slice(2)];
     if (!s) return;
     st.subjectId = s.id; st.chapterIds = []; st.topicIds = [];

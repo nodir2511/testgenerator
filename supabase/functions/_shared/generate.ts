@@ -26,6 +26,13 @@ export async function linkedUser(sb: any, chat: number) {
   return profile ?? null;
 }
 
+// Предметы, назначенные пользователю с ролью «по предметам»; null — доступны все
+export async function allowedSubjectIds(sb: any, user: { id: string; role?: string }): Promise<string[] | null> {
+  if (user.role !== 'subject_teacher' && user.role !== 'subject_admin') return null;
+  const { data } = await sb.from('user_subjects').select('subject_id').eq('user_id', user.id);
+  return (data ?? []).map((r: any) => r.subject_id);
+}
+
 // Лимиты Telegram: администраторы работают с обычными лимитами сайта
 export type Limits = { perType: number; tickets: number; total?: number; perDay: number };
 export function limitsFor(user: { role?: string }): Limits {
@@ -116,6 +123,8 @@ export async function generateAndSend(opts: {
   onNotes?: (notes: string[]) => Promise<void>;
 }): Promise<{ missingAnswers: number; keySent: boolean }> {
   const { sb, botToken, chat, user, sel, settings: s, lang, source } = opts;
+  const allowed = await allowedSubjectIds(sb, user);
+  if (allowed && !allowed.includes(sel.subjectId)) throw new Error('Этот предмет вам не назначен');
   const bad = T.checkSettings(s, limitsFor(user));
   if (bad) throw new Error(bad);
   const dayErr = await dailyLimitError(sb, user);

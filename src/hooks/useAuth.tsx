@@ -8,8 +8,16 @@ interface AuthContextType {
   profile: Profile | null;
   session: Session | null;
   isLoading: boolean;
+  /** Полный администратор (все предметы) */
   isAdmin: boolean;
+  /** Главный администратор */
   isOwner: boolean;
+  /** Администратор любого уровня (полный или по предметам) */
+  isStaff: boolean;
+  /** Назначенные предметы для ролей «по предметам»; null — доступны все */
+  subjectIds: string[] | null;
+  /** Можно ли редактировать содержимое предмета */
+  canManage: (subjectId: string | null | undefined) => boolean;
   signIn: (email: string, pass: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, pass: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
@@ -23,6 +31,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [assigned, setAssigned] = useState<string[]>([]);
 
   const fetchProfile = async (userId: string) => {
     try {
@@ -85,6 +94,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  // Предметы, назначенные пользователю с ролью «по предметам»
+  useEffect(() => {
+    const role = profile?.role;
+    if (!user || (role !== 'subject_teacher' && role !== 'subject_admin')) {
+      setAssigned([]);
+      return;
+    }
+    supabase.from('user_subjects').select('subject_id').eq('user_id', user.id).then(({ data }) => {
+      setAssigned((data || []).map((r: any) => r.subject_id));
+    });
+  }, [user?.id, profile?.role]);
+
   const signIn = async (email: string, pass: string) => {
     setIsLoading(true);
     const { error } = await supabase.auth.signInWithPassword({
@@ -121,6 +142,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isAdmin = profile?.role === 'admin';
   const isOwner = isAdmin && profile?.is_owner === true;
+  const isSubjectAdmin = profile?.role === 'subject_admin';
+  const bySubject = isSubjectAdmin || profile?.role === 'subject_teacher';
+  const isStaff = isAdmin || isSubjectAdmin;
+  const subjectIds = bySubject ? assigned : null;
+  const canManage = (subjectId: string | null | undefined) => isAdmin || (isSubjectAdmin && !!subjectId && assigned.includes(subjectId));
 
   return (
     <AuthContext.Provider
@@ -131,6 +157,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         isAdmin,
         isOwner,
+        isStaff,
+        subjectIds,
+        canManage,
         signIn,
         signUp,
         signOut,

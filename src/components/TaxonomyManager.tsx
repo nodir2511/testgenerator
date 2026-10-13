@@ -26,7 +26,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
   selectedSubjectId,
 }) => {
   const queryClient = useQueryClient();
-  const { isAdmin } = useAuth();
+  const { isAdmin, canManage } = useAuth();
 
   const [activeSubjectId, setActiveSubjectId] = useState<string>(selectedSubjectId || '');
   const [activeChapterId, setActiveChapterId] = useState<string>('');
@@ -227,7 +227,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
             </p>
           </div>
 
-          <form
+          {isAdmin && <form
             onSubmit={(e) => {
               e.preventDefault();
               if (newSubjectName.trim()) addSubjectMutation.mutate(newSubjectName.trim());
@@ -249,7 +249,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
               <Plus className="w-3.5 h-3.5" />
               Добавить
             </button>
-          </form>
+          </form>}
         </div>
 
         {/* Список вкладок предметов */}
@@ -345,7 +345,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                       <span className="truncate">{ch.name}</span>
                     </div>
                     <div className="flex items-center space-x-1 shrink-0">
-                      {isAdmin && (
+                      {canManage(activeSubjectId) && (
                         <button
                           type="button"
                           onClick={async (e) => {
@@ -426,7 +426,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                           <span className="text-slate-400 font-mono text-[10px]">{idx + 1}.</span>
                           <span className="truncate">{tp.name}</span>
                         </div>
-                        {isAdmin && (
+                        {canManage(activeSubjectId) && (
                           <button
                             type="button"
                             onClick={async () => {

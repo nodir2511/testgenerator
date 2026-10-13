@@ -2,9 +2,38 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { assertRowsChanged } from '../lib/errors';
-import { Profile, UserRole, AuditLog } from '../types/database';
+import { Profile, UserRole, AuditLog, ROLE_LABELS } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
-import { Users, ShieldCheck, UserCheck, Activity, Loader2, UserPlus, Pencil } from 'lucide-react';
+import { Users, ShieldCheck, UserCheck, Activity, Loader2, UserPlus, Pencil, Trash2, BookMarked } from 'lucide-react';
+
+const SUBJECT_ROLES: UserRole[] = ['subject_teacher', 'subject_admin'];
+const isSubjectRole = (r: UserRole) => SUBJECT_ROLES.includes(r);
+
+// Выбор предметов для ролей «по предметам»
+const SubjectPicker: React.FC<{
+  subjects: Array<{ id: string; name: string }>;
+  value: string[];
+  onChange: (v: string[]) => void;
+}> = ({ subjects, value, onChange }) => (
+  <div className="flex flex-wrap gap-1.5">
+    {subjects.map((sub) => {
+      const on = value.includes(sub.id);
+      return (
+        <button
+          key={sub.id}
+          type="button"
+          onClick={() => onChange(on ? value.filter((x) => x !== sub.id) : [...value, sub.id])}
+          className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${
+            on ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          {on ? '✓ ' : ''}
+          {sub.name}
+        </button>
+      );
+    })}
+  </div>
+);
 
 // supabase-js скрывает тело ответа при 4xx/5xx — достаём сообщение функции сами
 async function functionErrorMessage(error: unknown): Promise<string> {
@@ -22,12 +51,13 @@ async function functionErrorMessage(error: unknown): Promise<string> {
 
 export const UserManagementView: React.FC = () => {
   const queryClient = useQueryClient();
-  const { user: currentUser, isAdmin } = useAuth();
+  const { user: currentUser, isAdmin, isOwner } = useAuth();
 
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newFullName, setNewFullName] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('user');
+  const [newSubjectIds, setNewSubjectIds] = useState<string[]>([]);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
 
@@ -39,7 +69,13 @@ export const UserManagementView: React.FC = () => {
       if (!accessToken) throw new Error('Сессия не найдена, войдите заново');
 
       const { data, error } = await supabase.functions.invoke('admin-create-user', {
-        body: { email: newEmail.trim(), password: newPassword, fullName: newFullName.trim(), role: newRole },
+        body: {
+          email: newEmail.trim(),
+          password: newPassword,
+          fullName: newFullName.trim(),
+          role: newRole,
+          subjectIds: isSubjectRole(newRole) ? newSubjectIds : [],
+        },
         headers: { Authorization: `Bearer ${accessToken}` },
       });
 
@@ -55,7 +91,9 @@ export const UserManagementView: React.FC = () => {
       setNewPassword('');
       setNewFullName('');
       setNewRole('user');
+      setNewSubjectIds([]);
       queryClient.invalidateQueries({ queryKey: ['admin_profiles'] });
+      queryClient.invalidateQueries({ queryKey: ['admin_user_subjects'] });
       queryClient.invalidateQueries({ queryKey: ['admin_audit_logs'] });
     },
     onError: (err: Error) => {
@@ -127,6 +165,27 @@ export const UserManagementView: React.FC = () => {
     },
   });
 
+  // Предметы и назначение предметов пользователям
+  const { data: allSubjects = [] } = useQuery({
+    queryKey: ['admin_subject_list'],
+    enabled: isAdmin,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('subjects').select('id, name').eq('is_deleted', false).order('name');
+      if (error) throw error;
+      return (data || []) as Array<{ id: string; name: string }>;
+    },
+  });
+  const { data: assignments = [] } = useQuery({
+    queryKey: ['admin_user_subjects'],
+    enabled: isAdmin,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('user_subjects').select('user_id, subject_id');
+      if (error) throw error;
+      return (data || []) as Array<{ user_id: string; subject_id: string }>;
+    },
+  });
+  const subjectsOf = (userId: string) => assignments.filter((a) => a.user_id === userId).map((a) => a.subject_id);
+
   // Загрузка журнала аудита
   const { data: logs = [], isLoading: loadingLogs } = useQuery({
     queryKey: ['admin_audit_logs'],
@@ -138,7 +197,7 @@ export const UserManagementView: React.FC = () => {
     },
   });
 
-  // Смена роли пользователя
+  // Смена роли пользователя (преподаватель <-> администратор)
   const changeRoleMutation = useMutation({
     mutationFn: async ({ userId, newRole }: { userId: string; newRole: UserRole }) => {
       const { data: changed, error } = await supabase
@@ -164,6 +223,66 @@ export const UserManagementView: React.FC = () => {
     },
   });
 
+  // Роль и предметы (только главный админ)
+  const [rolesEditId, setRolesEditId] = useState<string | null>(null);
+  const [rolesEditRole, setRolesEditRole] = useState<UserRole>('user');
+  const [rolesEditSubjects, setRolesEditSubjects] = useState<string[]>([]);
+  const startRolesEdit = (p: Profile) => {
+    setRolesEditId(p.id);
+    setRolesEditRole(p.role);
+    setRolesEditSubjects(subjectsOf(p.id));
+  };
+  const saveRolesMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      if (isSubjectRole(rolesEditRole) && !rolesEditSubjects.length) throw new Error('Выберите хотя бы один предмет');
+      const { data: changed, error } = await supabase.from('profiles').update({ role: rolesEditRole }).eq('id', userId).select('id');
+      if (error) throw error;
+      assertRowsChanged(changed, 'роль пользователя');
+      const del = await supabase.from('user_subjects').delete().eq('user_id', userId);
+      if (del.error) throw del.error;
+      if (isSubjectRole(rolesEditRole)) {
+        const ins = await supabase.from('user_subjects').insert(rolesEditSubjects.map((subject_id) => ({ user_id: userId, subject_id })));
+        if (ins.error) throw ins.error;
+      }
+      await supabase.from('audit_logs').insert({
+        user_id: currentUser?.id,
+        action: 'CHANGE_USER_ROLE',
+        entity_type: 'profiles',
+        entity_id: userId,
+        details: { new_role: rolesEditRole, subject_ids: rolesEditSubjects },
+      });
+    },
+    meta: { action: 'Не удалось сохранить роль и предметы', success: 'Роль и предметы сохранены в базе' },
+    onSuccess: () => {
+      setRolesEditId(null);
+      queryClient.invalidateQueries({ queryKey: ['admin_profiles'] });
+      queryClient.invalidateQueries({ queryKey: ['admin_user_subjects'] });
+      queryClient.invalidateQueries({ queryKey: ['admin_audit_logs'] });
+    },
+  });
+
+  // Удаление пользователя (только главный админ)
+  const deleteUserMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) throw new Error('Сессия не найдена, войдите заново');
+      const { data, error } = await supabase.functions.invoke('admin-delete-user', {
+        body: { userId },
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (error) throw new Error(await functionErrorMessage(error));
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    meta: { action: 'Не удалось удалить пользователя', success: 'Пользователь удалён' },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin_profiles'] });
+      queryClient.invalidateQueries({ queryKey: ['admin_user_subjects'] });
+      queryClient.invalidateQueries({ queryKey: ['admin_audit_logs'] });
+    },
+  });
+
   if (!isAdmin) {
     return (
       <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-sm text-slate-500">
@@ -182,7 +301,8 @@ export const UserManagementView: React.FC = () => {
             Управление пользователями и ролями
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Назначение ролей «Преподаватель» (обычный пользователь) и «Администратор»
+            Роли: преподаватель, администратор и роли по предметам (доступ только к назначенным предметам).
+            Роли по предметам и удаление пользователей — только у главного админа.
           </p>
         </div>
 
@@ -221,10 +341,18 @@ export const UserManagementView: React.FC = () => {
               onChange={(e) => setNewRole(e.target.value as UserRole)}
               className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
             >
-              <option value="user">Преподаватель</option>
-              <option value="admin">Администратор</option>
+              <option value="user">{ROLE_LABELS.user}</option>
+              <option value="admin">{ROLE_LABELS.admin}</option>
+              {isOwner && <option value="subject_teacher">{ROLE_LABELS.subject_teacher}</option>}
+              {isOwner && <option value="subject_admin">{ROLE_LABELS.subject_admin}</option>}
             </select>
           </div>
+          {isSubjectRole(newRole) && (
+            <div className="space-y-1.5">
+              <div className="text-xs font-semibold text-slate-600">Доступные предметы</div>
+              <SubjectPicker subjects={allSubjects} value={newSubjectIds} onChange={setNewSubjectIds} />
+            </div>
+          )}
 
           {createError && <div className="text-xs text-red-600">{createError}</div>}
           {createSuccess && <div className="text-xs text-emerald-600">{createSuccess}</div>}
@@ -256,17 +384,31 @@ export const UserManagementView: React.FC = () => {
                   <div className="font-semibold text-slate-900 text-sm flex items-center space-x-2">
                     <span>{p.full_name || p.email}</span>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                      p.role === 'admin' ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-slate-100 text-slate-700'
+                      p.role === 'admin' || p.role === 'subject_admin' ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-slate-100 text-slate-700'
                     }`}>
-                      {p.role === 'admin' ? 'Администратор' : 'Преподаватель'}
+                      {p.is_owner ? 'Главный админ' : ROLE_LABELS[p.role]}
                     </span>
                   </div>
+                  {isSubjectRole(p.role) && (
+                    <div className="flex flex-wrap items-center gap-1 mt-1">
+                      <BookMarked className="w-3 h-3 text-emerald-600" />
+                      {subjectsOf(p.id).length === 0 ? (
+                        <span className="text-[11px] text-red-500">предметы не назначены</span>
+                      ) : (
+                        subjectsOf(p.id).map((sid) => (
+                          <span key={sid} className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-semibold">
+                            {allSubjects.find((x) => x.id === sid)?.name ?? '—'}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  )}
                   <div className="text-[11px] text-slate-400 mt-0.5">
                     Email: {p.email} • Зарегистрирован: {new Date(p.created_at).toLocaleDateString('ru-RU')}
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                   <button
                     onClick={() => (editingId === p.id ? setEditingId(null) : startEdit(p))}
                     className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-lg font-semibold flex items-center space-x-1"
@@ -274,7 +416,7 @@ export const UserManagementView: React.FC = () => {
                     <Pencil className="w-3.5 h-3.5" />
                     <span>Изменить</span>
                   </button>
-                  {p.role === 'user' ? (
+                  {p.role === 'user' && (
                     <button
                       onClick={() => changeRoleMutation.mutate({ userId: p.id, newRole: 'admin' })}
                       disabled={changeRoleMutation.isPending}
@@ -283,7 +425,8 @@ export const UserManagementView: React.FC = () => {
                       <ShieldCheck className="w-3.5 h-3.5" />
                       <span>Сделать админом</span>
                     </button>
-                  ) : (
+                  )}
+                  {p.role === 'admin' && (
                     <button
                       onClick={() => changeRoleMutation.mutate({ userId: p.id, newRole: 'user' })}
                       disabled={p.id === currentUser?.id || changeRoleMutation.isPending}
@@ -293,8 +436,67 @@ export const UserManagementView: React.FC = () => {
                       <span>Сделать преподавателем</span>
                     </button>
                   )}
+                  {isOwner && !p.is_owner && (
+                    <button
+                      onClick={() => (rolesEditId === p.id ? setRolesEditId(null) : startRolesEdit(p))}
+                      className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-semibold flex items-center space-x-1"
+                    >
+                      <BookMarked className="w-3.5 h-3.5" />
+                      <span>Роль и предметы</span>
+                    </button>
+                  )}
+                  {isOwner && !p.is_owner && p.id !== currentUser?.id && (
+                    <button
+                      onClick={() => {
+                        if (confirm(`Удалить пользователя ${p.full_name || p.email}? Его вопросы и билеты останутся, войти он больше не сможет.`)) {
+                          deleteUserMutation.mutate(p.id);
+                        }
+                      }}
+                      disabled={deleteUserMutation.isPending}
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-40"
+                      title="Удалить пользователя"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
+              {rolesEditId === p.id && (
+                <div className="px-4 pb-4 space-y-3">
+                  <select
+                    value={rolesEditRole}
+                    onChange={(e) => setRolesEditRole(e.target.value as UserRole)}
+                    className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                  >
+                    {(Object.keys(ROLE_LABELS) as UserRole[]).map((role) => (
+                      <option key={role} value={role}>{ROLE_LABELS[role]}</option>
+                    ))}
+                  </select>
+                  {isSubjectRole(rolesEditRole) && (
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-semibold text-slate-600">Доступные предметы</div>
+                      <SubjectPicker subjects={allSubjects} value={rolesEditSubjects} onChange={setRolesEditSubjects} />
+                    </div>
+                  )}
+                  <div className="flex space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => saveRolesMutation.mutate(p.id)}
+                      disabled={saveRolesMutation.isPending}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-sm disabled:opacity-50"
+                    >
+                      Сохранить
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRolesEditId(null)}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-sm"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
+              )}
               {editingId === p.id && (
                 <form
                   onSubmit={(e) => {

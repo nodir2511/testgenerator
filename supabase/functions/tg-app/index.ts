@@ -11,7 +11,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
-import { generateAndSend, limitsFor, linkedUser, type Limits } from '../_shared/generate.ts';
+import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser, type Limits } from '../_shared/generate.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -66,9 +66,10 @@ const bump = (c: Counts, type: string) => {
   if (type === 'test' || type === 'matching' || type === 'open') c[type]++;
 };
 
-async function subjectList() {
+async function subjectList(user: { id: string; role?: string }) {
   const { data } = await sb.from('subjects').select('id, name').eq('is_deleted', false).order('name');
-  return data ?? [];
+  const allowed = await allowedSubjectIds(sb, user);
+  return (data ?? []).filter((s: any) => !allowed || allowed.includes(s.id));
 }
 
 // Главы и темы предмета с числом вопросов каждого вида
@@ -158,7 +159,7 @@ Deno.serve(async (req) => {
 
     switch (body?.action) {
       case 'me':
-        return json({ name: user.full_name || user.email, subjects: await subjectList(), limits: limitsFor(user) });
+        return json({ name: user.full_name || user.email, subjects: await subjectList(user), limits: limitsFor(user) });
       case 'history': {
         const { data } = await sb.from('ticket_batches').select('id, title, created_at, subject_id, generation_params, subject:subjects(name)')
           .eq('created_by', user.id).order('created_at', { ascending: false }).limit(8);
@@ -166,6 +167,8 @@ Deno.serve(async (req) => {
       }
       case 'tree': {
         if (typeof body.subjectId !== 'string') return json({ error: 'Не выбран предмет' }, 400);
+        const allowed = await allowedSubjectIds(sb, user);
+        if (allowed && !allowed.includes(body.subjectId)) return json({ error: 'Этот предмет вам не назначен' }, 403);
         return json({ chapters: await tree(body.subjectId) });
       }
       case 'generate': {

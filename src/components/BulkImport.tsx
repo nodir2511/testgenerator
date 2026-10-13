@@ -100,7 +100,7 @@ interface ImportReport {
 
 export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
   const queryClient = useQueryClient();
-  const { user, isAdmin } = useAuth();
+  const { user, isStaff: isAdmin } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'file' | 'text' | 'history'>('file');
   const [pastedText, setPastedText] = useState('');

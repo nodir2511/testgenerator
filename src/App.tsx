@@ -12,7 +12,7 @@ const UserManagementView = lazy(() => import('./components/UserManagementView').
 const StatsView = lazy(() => import('./components/StatsView').then((m) => ({ default: m.StatsView })));
 import { AuthModal } from './components/AuthModal';
 import { TelegramLink } from './components/TelegramLink';
-import { Question } from './types/database';
+import { Question, ROLE_LABELS } from './types/database';
 import { 
   BookOpen, 
   Layers, 
@@ -34,14 +34,15 @@ import {
 type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats';
 
 export const App: React.FC = () => {
-  const { user, profile, isAdmin, signOut, isLoading } = useAuth();
+  const { user, profile, isAdmin, isOwner, isStaff, signOut, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const saved = localStorage.getItem('examiner_active_tab');
     const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats'];
     return (validTabs.includes(saved as TabType)) ? (saved as TabType) : 'generator';
   });
-  const adminOnlyTabs: TabType[] = ['taxonomy', 'bulk_import', 'users', 'stats'];
-  const currentTab: TabType = !isAdmin && adminOnlyTabs.includes(activeTab) ? 'generator' : activeTab;
+  const adminOnlyTabs: TabType[] = ['users', 'stats'];
+  const staffOnlyTabs: TabType[] = ['taxonomy', 'bulk_import'];
+  const currentTab: TabType = (!isAdmin && adminOnlyTabs.includes(activeTab)) || (!isStaff && staffOnlyTabs.includes(activeTab)) ? 'generator' : activeTab;
 
   React.useEffect(() => {
     localStorage.setItem('examiner_active_tab', activeTab);
@@ -63,10 +64,10 @@ export const App: React.FC = () => {
   // Навигационные ссылки
   const navItems = [
     { id: 'questions', label: 'Банк вопросов', icon: FileQuestion },
-    ...(isAdmin ? [{ id: 'taxonomy', label: 'Предметы и темы', icon: Layers }] : []),
+    ...(isStaff ? [{ id: 'taxonomy', label: 'Предметы и темы', icon: Layers }] : []),
     { id: 'generator', label: 'Генератор билетов', icon: Sparkles },
     { id: 'saved_tickets', label: 'Сохраненные билеты', icon: FileCheck2 },
-    ...(isAdmin ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
+    ...(isStaff ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
     ...(isAdmin ? [{ id: 'users', label: 'Пользователи и аудит', icon: Users }] : []),
     ...(isAdmin ? [{ id: 'stats', label: 'Статистика', icon: BarChart3 }] : []),
   ];
@@ -128,12 +129,12 @@ export const App: React.FC = () => {
                   {profile?.full_name || user.email?.split('@')[0]}
                 </div>
                 <div className="text-[10px] text-slate-500 flex items-center font-semibold">
-                  {isAdmin ? (
+                  {isStaff ? (
                     <span className="text-amber-700 flex items-center">
-                      <ShieldCheck className="w-3 h-3 mr-0.5" /> Главный админ
+                      <ShieldCheck className="w-3 h-3 mr-0.5" /> {isOwner ? 'Главный админ' : ROLE_LABELS[profile?.role ?? 'admin']}
                     </span>
                   ) : (
-                    'Преподаватель'
+                    ROLE_LABELS[profile?.role ?? 'user']
                   )}
                 </div>
               </div>
@@ -192,7 +193,7 @@ export const App: React.FC = () => {
             <div className="p-3 bg-slate-50 rounded-xl mb-3 flex items-center justify-between">
               <div>
                 <div className="font-bold text-xs text-slate-900">{profile?.full_name || user.email}</div>
-                <div className="text-[10px] text-slate-500">{isAdmin ? 'Администратор' : 'Преподаватель'}</div>
+                <div className="text-[10px] text-slate-500">{ROLE_LABELS[profile?.role ?? 'user']}</div>
               </div>
               <button
                 onClick={() => signOut()}
@@ -229,7 +230,7 @@ export const App: React.FC = () => {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-blue-600 animate-spin" /></div>}>
         {/* Экран формы создания / редактирования вопроса */}
-        {isQuestionFormOpen && isAdmin ? (
+        {isQuestionFormOpen && isStaff ? (
           <QuestionForm
             initialData={editingQuestion}
             onSuccess={() => {

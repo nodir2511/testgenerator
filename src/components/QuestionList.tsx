@@ -34,7 +34,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   onEditQuestion,
 }) => {
   const queryClient = useQueryClient();
-  const { isAdmin } = useAuth();
+  const { isStaff, canManage } = useAuth();
 
   // Фильтры (с сохранением в localStorage)
   const [filterSubjectId, setFilterSubjectId] = useState(() => localStorage.getItem('examiner_ql_subject_id') || '');
@@ -214,7 +214,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           </p>
         </div>
 
-        {isAdmin && (
+        {isStaff && (
           <div className="flex items-center gap-3">
             <button
               onClick={onAddQuestion}
@@ -441,7 +441,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 </div>
 
                 <div className="flex items-center space-x-2">
-                  {isAdmin && (
+                  {canManage(q.subject_id) && (
                     <button
                       onClick={() => onEditQuestion(q)}
                       className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
@@ -450,7 +450,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                       <Edit3 className="w-4 h-4" />
                     </button>
                   )}
-                  {isAdmin && (
+                  {canManage(q.subject_id) && (
                     <button
                       onClick={() => {
                         if (confirm('Вы уверены, что хотите удалить этот вопрос?')) {
