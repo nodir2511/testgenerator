@@ -20,6 +20,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
+import { exportAnswerKey, hasKeyTemplate } from '../lib/answerKeyExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
 
 // На сайте лимит на число вариантов мягче, чем у бота (бот работает внутри Edge Function с ограничением по времени)
@@ -440,6 +441,17 @@ export const TicketGenerator: React.FC = () => {
     }
   };
 
+  const generatedSubjectName = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || '';
+  const handleExportKey = async () => {
+    if (!generatedBatch || !generatedBatch.tickets) return;
+    try {
+      const stats = await exportAnswerKey(generatedBatch.title, generatedBatch.tickets, generatedSubjectName);
+      if (stats.missing) notifyError(new Error(`В базе нет верного ответа у вопросов: ${stats.missing} — клетки в ключе пустые.`), 'Ключи готовы, но не полные');
+    } catch (err: any) {
+      notifyError(err, 'Ошибка при создании ключей');
+    }
+  };
+
   // Тот же файл, но отправляется в Telegram владельца аккаунта
   const telegramButton = generatedBatch?.tickets ? (
     <SendToTelegramButton
@@ -495,6 +507,16 @@ export const TicketGenerator: React.FC = () => {
               <Download className="w-3.5 h-3.5" />
               <span>RU + TG</span>
             </button>
+            {hasKeyTemplate(generatedSubjectName) && (
+              <button
+                onClick={handleExportKey}
+                className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow flex items-center space-x-1 transition"
+                title="Ключи ответов по шаблону (Word)"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Ключи (.docx)</span>
+              </button>
+            )}
             {telegramButton}
           </div>
         )}

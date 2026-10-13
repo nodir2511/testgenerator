@@ -5,6 +5,7 @@ import { assertRowsChanged, notifyError } from '../lib/errors';
 import { TicketBatch, Ticket } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
+import { exportAnswerKey, hasKeyTemplate } from '../lib/answerKeyExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
 import { 
   FileCheck2, 
@@ -61,6 +62,18 @@ export const SavedTicketsView: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
     },
   });
+
+  const handleKey = async (batch: any) => {
+    try {
+      setExportingId(`${batch.id}-key`);
+      const stats = await exportAnswerKey(batch.title, batch.tickets || [], batch.subject?.name || '');
+      if (stats.missing) notifyError(new Error(`В базе нет верного ответа у вопросов: ${stats.missing} — клетки в ключе пустые.`), 'Ключи готовы, но не полные');
+    } catch (err: any) {
+      notifyError(err, 'Ошибка при создании ключей');
+    } finally {
+      setExportingId(null);
+    }
+  };
 
   const handleExport = async (batch: any, lang: 'ru' | 'tg' | 'both' = 'ru') => {
     try {
@@ -178,6 +191,18 @@ export const SavedTicketsView: React.FC = () => {
                       )}
                       <span>RU + TG</span>
                     </button>
+
+                    {hasKeyTemplate(batch.subject?.name || '') && (
+                      <button
+                        onClick={() => handleKey(batch)}
+                        disabled={exportingId === `${batch.id}-key`}
+                        className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold flex items-center space-x-1 shadow-sm transition disabled:opacity-50"
+                        title="Ключи ответов по шаблону (Word)"
+                      >
+                        {exportingId === `${batch.id}-key` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                        <span>Ключи</span>
+                      </button>
+                    )}
 
                     <SendToTelegramButton
                       compact

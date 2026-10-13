@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { isSupabaseConfigured } from './lib/supabase';
-import { TaxonomyManager } from './components/TaxonomyManager';
-import { QuestionList } from './components/QuestionList';
-import { QuestionForm } from './components/QuestionForm';
-import { TicketGenerator } from './components/TicketGenerator';
-import { SavedTicketsView } from './components/SavedTicketsView';
-import { BulkImport } from './components/BulkImport';
-import { UserManagementView } from './components/UserManagementView';
+// Тяжёлые разделы грузятся по требованию — сайт открывается быстрее
+const TaxonomyManager = lazy(() => import('./components/TaxonomyManager').then((m) => ({ default: m.TaxonomyManager })));
+const QuestionList = lazy(() => import('./components/QuestionList').then((m) => ({ default: m.QuestionList })));
+const QuestionForm = lazy(() => import('./components/QuestionForm').then((m) => ({ default: m.QuestionForm })));
+const TicketGenerator = lazy(() => import('./components/TicketGenerator').then((m) => ({ default: m.TicketGenerator })));
+const SavedTicketsView = lazy(() => import('./components/SavedTicketsView').then((m) => ({ default: m.SavedTicketsView })));
+const BulkImport = lazy(() => import('./components/BulkImport').then((m) => ({ default: m.BulkImport })));
+const UserManagementView = lazy(() => import('./components/UserManagementView').then((m) => ({ default: m.UserManagementView })));
+const StatsView = lazy(() => import('./components/StatsView').then((m) => ({ default: m.StatsView })));
 import { AuthModal } from './components/AuthModal';
 import { TelegramLink } from './components/TelegramLink';
 import { Question } from './types/database';
@@ -22,22 +24,23 @@ import {
   ShieldCheck,
   User as UserIcon,
   Menu,
+  BarChart3,
   X,
   FileQuestion,
   Loader2,
   CheckCircle2
 } from 'lucide-react';
 
-type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users';
+type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats';
 
 export const App: React.FC = () => {
   const { user, profile, isAdmin, signOut, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const saved = localStorage.getItem('examiner_active_tab');
-    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users'];
+    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats'];
     return (validTabs.includes(saved as TabType)) ? (saved as TabType) : 'generator';
   });
-  const adminOnlyTabs: TabType[] = ['taxonomy', 'bulk_import', 'users'];
+  const adminOnlyTabs: TabType[] = ['taxonomy', 'bulk_import', 'users', 'stats'];
   const currentTab: TabType = !isAdmin && adminOnlyTabs.includes(activeTab) ? 'generator' : activeTab;
 
   React.useEffect(() => {
@@ -65,6 +68,7 @@ export const App: React.FC = () => {
     { id: 'saved_tickets', label: 'Сохраненные билеты', icon: FileCheck2 },
     ...(isAdmin ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
     ...(isAdmin ? [{ id: 'users', label: 'Пользователи и аудит', icon: Users }] : []),
+    ...(isAdmin ? [{ id: 'stats', label: 'Статистика', icon: BarChart3 }] : []),
   ];
 
   const handleAddQuestion = () => {
@@ -223,6 +227,7 @@ export const App: React.FC = () => {
 
       {/* Основной контент */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-blue-600 animate-spin" /></div>}>
         {/* Экран формы создания / редактирования вопроса */}
         {isQuestionFormOpen && isAdmin ? (
           <QuestionForm
@@ -252,8 +257,10 @@ export const App: React.FC = () => {
               <BulkImport onSuccess={() => setActiveTab('questions')} />
             )}
             {currentTab === 'users' && <UserManagementView />}
+            {currentTab === 'stats' && <StatsView />}
           </>
         )}
+        </Suspense>
       </main>
 
       {/* Подтверждение сохранения */}

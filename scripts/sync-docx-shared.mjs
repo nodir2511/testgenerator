@@ -21,3 +21,8 @@ fs.writeFileSync('supabase/functions/_shared/docxExport.ts', out);
 const fractions = '// АВТОГЕНЕРАЦИЯ: scripts/sync-docx-shared.mjs. Не редактируйте вручную — правьте src/lib/fractions.ts.\n' + fs.readFileSync('src/lib/fractions.ts', 'utf-8');
 fs.writeFileSync('supabase/functions/_shared/fractions.ts', fractions);
 console.log('synced', out.length, '+', fractions.length, 'bytes');
+
+// Ключи ответов (общий код сайта и Edge Functions)
+const key = fs.readFileSync('src/lib/answerKey.ts', 'utf-8').replace("from 'jszip';", "from 'npm:jszip@3';");
+fs.writeFileSync('supabase/functions/_shared/answerKey.ts', '// @ts-nocheck\n// АВТОГЕНЕРАЦИЯ: scripts/sync-docx-shared.mjs. Не редактируйте вручную — правьте src/lib/answerKey.ts.\n' + key);
+console.log('synced answerKey');

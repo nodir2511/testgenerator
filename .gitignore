@@ -58,3 +58,8 @@ sample_template.xml
 !close_public_read.sql
 !telegram_bot.sql
 supabase/.temp/
+
+# Шаблоны ключей ответов и SQL приложения (исключения из правил выше)
+!templates/key/*.docx
+!public/key-templates/*.docx
+!supabase/sql/*.sql

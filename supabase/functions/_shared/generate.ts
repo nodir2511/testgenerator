@@ -3,6 +3,8 @@
 
 import JSZip from 'npm:jszip@3';
 import { buildSingleTicketBlob } from './docxExport.ts';
+import { buildAnswerKeyDocx, keyKindOf } from './answerKey.ts';
+import { KEY_TEMPLATES } from './keyTemplates.ts';
 import * as T from './ticketing.ts';
 
 export type Lang = 'ru' | 'tg' | 'both';
@@ -22,6 +24,27 @@ export async function linkedUser(sb: any, chat: number) {
   if (!au?.user || (bannedUntil && new Date(bannedUntil).getTime() > Date.now())) return null;
   const { data: profile } = await sb.from('profiles').select('id, full_name, email, role').eq('id', link.user_id).maybeSingle();
   return profile ?? null;
+}
+
+// Лимиты Telegram: администраторы работают с обычными лимитами сайта
+export type Limits = { perType: number; tickets: number; total?: number; perDay: number };
+export function limitsFor(user: { role?: string }): Limits {
+  return user.role === 'admin' ? { ...T.LIMITS, perDay: Infinity } : { ...T.TG_LIMITS };
+}
+
+// Начало текущих суток по времени Таджикистана (UTC+5)
+function dayStartIso(): string {
+  const shift = 5 * 3600 * 1000;
+  const local = Date.now() + shift;
+  return new Date(local - (local % 86400000) - shift).toISOString();
+}
+
+async function dailyLimitError(sb: any, user: { id: string; role?: string }): Promise<string | null> {
+  const perDay = limitsFor(user).perDay;
+  if (!Number.isFinite(perDay)) return null;
+  const { count } = await sb.from('ticket_batches').select('*', { count: 'exact', head: true })
+    .eq('created_by', user.id).gte('created_at', dayStartIso()).in('generation_params->>source', ['telegram', 'telegram-app']);
+  return (count ?? 0) >= perDay ? `Дневной лимит исчерпан: ${perDay} генераций в сутки. Попробуйте завтра.` : null;
 }
 
 export async function loadPool(sb: any, sel: Selection) {
@@ -54,17 +77,30 @@ export async function generateAndSend(opts: {
   sb: any;
   botToken: string;
   chat: number;
-  user: { id: string };
+  user: { id: string; role?: string };
   sel: Selection;
   settings: T.Settings;
   lang: Lang;
   source: 'telegram' | 'telegram-app';
   /** Вызывается, если вопросов не хватает и состав билета урезан */
   onNotes?: (notes: string[]) => Promise<void>;
-}) {
+}): Promise<{ missingAnswers: number; keySent: boolean }> {
   const { sb, botToken, chat, user, sel, settings: s, lang, source } = opts;
-  const bad = T.checkSettings(s);
+  const bad = T.checkSettings(s, limitsFor(user));
   if (bad) throw new Error(bad);
+  const dayErr = await dailyLimitError(sb, user);
+  if (dayErr) throw new Error(dayErr);
+
+  // Одна генерация на пользователя одновременно (защита от двойного нажатия)
+  const { data: gotLock } = await sb.rpc('acquire_generation_lock', { p_user: user.id, p_ttl_seconds: 180 });
+  if (gotLock === false) throw new Error('Предыдущая генерация ещё выполняется. Подождите минуту.');
+  try {
+    return await run();
+  } finally {
+    await sb.from('generation_locks').delete().eq('user_id', user.id);
+  }
+
+  async function run() {
 
   const pool = await loadPool(sb, sel);
   const fit = T.fitSettings(T.poolStats(pool), s);
@@ -81,7 +117,8 @@ export async function generateAndSend(opts: {
     generation_params: {
       chapter_ids: sel.chapterIds, topic_ids: sel.topicIds,
       test_count: fit.settings.testCount, matching_count: fit.settings.matchingCount, open_count: fit.settings.openCount, ticket_count: s.ticketCount,
-      shuffle_options: s.shuffleOptions, shuffle_matching: s.shuffleMatching, source,
+      shuffle_options: s.shuffleOptions, shuffle_matching: s.shuffleMatching, source, lang,
+      requested: { test: s.testCount, matching: s.matchingCount, open: s.openCount },
     },
   }).select().single();
   if (bErr || !batch) throw bErr ?? new Error('Не удалось сохранить партию');
@@ -116,5 +153,27 @@ export async function generateAndSend(opts: {
     const zbytes = await zip.generateAsync({ type: 'uint8array' });
     const suffix = lang === 'both' ? 'RU_TG' : lang.toUpperCase();
     await sendDocument(botToken, chat, zbytes, `${T.safeFileName(title)}_${suffix}.zip`, caption);
+  }
+
+  // Ключи ответов отдельным файлом (по шаблону предмета)
+  let missingAnswers = 0;
+  let keySent = false;
+  const kind = keyKindOf(subjectName);
+  if (kind) {
+    try {
+      const tpl = Uint8Array.from(atob(KEY_TEMPLATES[kind]), (c) => c.charCodeAt(0));
+      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped);
+      missingAnswers = stats.missing;
+      const note = [
+        stats.missing ? `⚠️ В базе нет верного ответа у вопросов: ${stats.missing} — эти клетки в ключе пустые.` : '',
+        stats.overflow ? `В шаблоне не хватило места для вопросов: ${stats.overflow}.` : '',
+      ].filter(Boolean).join(' ');
+      await sendDocument(botToken, chat, kbytes, `Ключи – ${T.safeFileName(title)}.docx`, `Ключи ответов: ${title}${note ? '\n' + note : ''}`);
+      keySent = true;
+    } catch (e) {
+      console.error('answer key failed', e);
+    }
+  }
+  return { missingAnswers, keySent };
   }
 }

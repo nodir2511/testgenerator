@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DEFAULT_SETTINGS, LIMITS, checkSettings, fitSettings, shortName } from '../../supabase/functions/_shared/ticketing';
+import { DEFAULT_SETTINGS, TG_LIMITS, checkSettings, fitSettings, shortName } from '../../supabase/functions/_shared/ticketing';
 import './tg.css';
 
 // Telegram Mini App: сбор билетов. Данные и генерация — через Edge Function tg-app,
@@ -9,6 +9,18 @@ interface Counts { test: number; matching: number; open: number }
 interface TopicRow { id: string; name: string; counts: Counts }
 interface ChapterRow { id: string; name: string; counts: Counts; topics: TopicRow[] }
 interface Subject { id: string; name: string }
+interface Limits { perType: number; tickets: number; total?: number; perDay: number | null }
+interface HistoryBatch {
+  id: string; title: string; created_at: string; subject_id: string;
+  generation_params: {
+    chapter_ids?: string[]; topic_ids?: string[]; ticket_count?: number;
+    test_count?: number; matching_count?: number; open_count?: number;
+    requested?: { test: number; matching: number; open: number };
+    shuffle_options?: boolean; shuffle_matching?: boolean; lang?: Lang;
+  };
+  subject?: { name: string } | null;
+}
+interface Result { missingAnswers: number; keySent: boolean }
 type Step = 'subject' | 'chapters' | 'topics' | 'counts' | 'final' | 'done';
 type Lang = 'ru' | 'tg' | 'both';
 
@@ -25,6 +37,10 @@ interface WebApp {
   };
   BackButton: { show(): void; hide(): void; onClick(cb: () => void): void; offClick(cb: () => void): void };
   onEvent?(e: string, cb: () => void): void;
+  CloudStorage?: {
+    getItem(key: string, cb: (err: unknown, value?: string) => void): void;
+    setItem(key: string, value: string, cb?: (err: unknown) => void): void;
+  };
 }
 const wa = (): WebApp | undefined => (window as unknown as { Telegram?: { WebApp?: WebApp } }).Telegram?.WebApp;
 
@@ -54,6 +70,29 @@ const total = (c: Counts) => c.test + c.matching + c.open;
 const sum = (items: Counts[]): Counts => items.reduce((a, c) => ({ test: a.test + c.test, matching: a.matching + c.matching, open: a.open + c.open }), { test: 0, matching: 0, open: 0 });
 const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
+// Последние настройки: облако Telegram (между устройствами), запасной вариант — localStorage
+const PREFS_KEY = 'tg_prefs_v1';
+interface Prefs { nums: { test: string; matching: string; open: string; tickets: string }; lang: Lang; title: string; shuffleOptions: boolean; shuffleMatching: boolean }
+
+async function loadPrefs(): Promise<Partial<Prefs>> {
+  let raw: string | null = null;
+  const cs = wa()?.CloudStorage;
+  if (cs) {
+    raw = await new Promise<string | null>((resolve) => {
+      const t = setTimeout(() => resolve(null), 1500);
+      try { cs.getItem(PREFS_KEY, (e, v) => { clearTimeout(t); resolve(e ? null : v || null); }); } catch { clearTimeout(t); resolve(null); }
+    });
+  }
+  if (!raw) { try { raw = localStorage.getItem(PREFS_KEY); } catch { /* недоступно */ } }
+  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+}
+
+function savePrefs(p: Prefs) {
+  const raw = JSON.stringify(p);
+  try { wa()?.CloudStorage?.setItem(PREFS_KEY, raw); } catch { /* ignore */ }
+  try { localStorage.setItem(PREFS_KEY, raw); } catch { /* ignore */ }
+}
+
 function loadTelegramScript(): Promise<void> {
   if (wa()) return Promise.resolve();
   return new Promise((resolve) => {
@@ -82,6 +121,9 @@ export default function TgApp() {
   const [shuffleMatching, setShuffleMatching] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [limits, setLimits] = useState<Limits>({ ...TG_LIMITS });
+  const [history, setHistory] = useState<HistoryBatch[]>([]);
+  const [result, setResult] = useState<Result | null>(null);
 
   // ---- загрузка ----
   useEffect(() => {
@@ -95,9 +137,18 @@ export default function TgApp() {
         return;
       }
       try {
-        const me = await api<{ name: string; subjects: Subject[] }>('me');
+        const me = await api<{ name: string; subjects: Subject[]; limits: Limits }>('me');
         setName(me.name);
         setSubjects(me.subjects);
+        // Админ без дневного лимита: perDay приходит как null (Infinity в JSON)
+        setLimits({ ...me.limits, perDay: me.limits.perDay ?? null, total: me.limits.total ?? undefined });
+        const prefs = await loadPrefs();
+        if (prefs.nums) setNums((cur) => ({ ...cur, ...prefs.nums }));
+        if (prefs.lang) setLang(prefs.lang);
+        if (prefs.title) setTitle(prefs.title);
+        if (typeof prefs.shuffleOptions === 'boolean') setShuffleOptions(prefs.shuffleOptions);
+        if (typeof prefs.shuffleMatching === 'boolean') setShuffleMatching(prefs.shuffleMatching);
+        api<{ batches: HistoryBatch[] }>('history').then((h) => setHistory(h.batches)).catch(() => {});
         if (me.subjects.length === 1) await pickSubject(me.subjects[0], true);
         setReady(true);
       } catch (e) {
@@ -108,16 +159,32 @@ export default function TgApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function pickSubject(s: Subject, auto = false) {
+  async function pickSubject(s: Subject, auto = false, preset?: HistoryBatch) {
     setBusy(true);
     setError('');
     try {
       const { chapters: ch } = await api<{ chapters: ChapterRow[] }>('tree', { subjectId: s.id });
       setSubject(s);
       setChapters(ch);
-      setChapterIds([]);
-      setTopicSel([]);
-      setStep('chapters');
+      if (preset) {
+        // «Повторить»: те же главы, темы и настройки
+        const p = preset.generation_params;
+        const known = new Set(ch.flatMap((c) => c.topics.map((t) => t.id)));
+        const chIds = (p.chapter_ids ?? []).filter((id) => ch.some((c) => c.id === id));
+        const r = p.requested ?? { test: p.test_count ?? 0, matching: p.matching_count ?? 0, open: p.open_count ?? 0 };
+        setChapterIds(chIds);
+        setTopicSel((p.topic_ids ?? []).filter((id) => known.has(id)));
+        setNums({ test: String(r.test), matching: String(r.matching), open: String(r.open), tickets: String(p.ticket_count ?? 2) });
+        setTitle(preset.title || DEFAULT_SETTINGS.title);
+        if (p.lang) setLang(p.lang);
+        if (typeof p.shuffle_options === 'boolean') setShuffleOptions(p.shuffle_options);
+        if (typeof p.shuffle_matching === 'boolean') setShuffleMatching(p.shuffle_matching);
+        setStep(chIds.length ? 'counts' : 'chapters');
+      } else {
+        setChapterIds([]);
+        setTopicSel([]);
+        setStep('chapters');
+      }
     } catch (e) {
       if (auto) throw e;
       setError((e as Error).message);
@@ -155,7 +222,7 @@ export default function TgApp() {
     title: title.trim() || DEFAULT_SETTINGS.title,
   }), [nums, shuffleOptions, shuffleMatching, title]);
 
-  const settingsError = checkSettings(settings);
+  const settingsError = checkSettings(settings, limits);
   const fit = useMemo(() => fitSettings({ total: total(pool), ...pool }, settings), [pool, settings]);
 
   // ---- навигация ----
@@ -175,11 +242,13 @@ export default function TgApp() {
     setBusy(true);
     setError('');
     try {
-      await api('generate', {
+      const r = await api<Result>('generate', {
         subjectId: subject.id, chapterIds, topicIds, lang,
         settings,
       });
       wa()?.HapticFeedback?.notificationOccurred('success');
+      savePrefs({ nums, lang, title, shuffleOptions, shuffleMatching });
+      setResult(r);
       setStep('done');
     } catch (e) {
       wa()?.HapticFeedback?.notificationOccurred('error');
@@ -187,7 +256,7 @@ export default function TgApp() {
     } finally {
       setBusy(false);
     }
-  }, [subject, chapterIds, topicIds, lang, settings]);
+  }, [subject, chapterIds, topicIds, lang, settings, nums, title, shuffleOptions, shuffleMatching]);
 
   const next = useCallback(() => {
     setError('');
@@ -258,6 +327,25 @@ export default function TgApp() {
   }
   if (!ready) return <Shell><p className="tg-hint">Загрузка…</p></Shell>;
 
+  function Recent() {
+    const items = history.filter((b) => subjects.some((s) => s.id === b.subject_id)).slice(0, 4);
+    if (!items.length) return null;
+    return (
+      <section>
+        <h2>Повторить прошлый набор</h2>
+        {items.map((b) => (
+          <button key={b.id} className="tg-row" disabled={busy} onClick={() => pickSubject(subjects.find((s) => s.id === b.subject_id)!, false, b)}>
+            <span className="tg-grow">
+              {shortName(b.title, 50)}
+              <span className="tg-sub">{new Date(b.created_at).toLocaleDateString('ru-RU')} · {b.generation_params.ticket_count ?? '?'} шт. · {shortName(b.subject?.name ?? '', 30)}</span>
+            </span>
+            <span className="tg-chev">↻</span>
+          </button>
+        ))}
+      </section>
+    );
+  }
+
   const count = (c: Counts) => `${c.test} / ${c.matching} / ${c.open}`;
 
   return (
@@ -268,6 +356,7 @@ export default function TgApp() {
         <>
           <h1>Предмет</h1>
           <p className="tg-hint">{name ? `Вы вошли как ${name}.` : ''} Выберите предмет.</p>
+          <Recent />
           {subjects.map((s) => (
             <button key={s.id} className="tg-row" disabled={busy} onClick={() => pickSubject(s)}>
               <span>{shortName(s.name, 80)}</span><span className="tg-chev">›</span>
@@ -280,6 +369,7 @@ export default function TgApp() {
         <>
           <h1>Главы</h1>
           <p className="tg-hint">{shortName(subject?.name ?? '', 60)} · цифры: тесты / соответствия / открытые</p>
+          <Recent />
           <div className="tg-actions">
             <button className="tg-link" onClick={() => setChapterIds(chapters.map((c) => c.id))}>Все</button>
             <button className="tg-link" onClick={() => setChapterIds([])}>Сбросить</button>
@@ -324,10 +414,11 @@ export default function TgApp() {
       {step === 'counts' && (
         <>
           <h1>Состав билета</h1>
-          <Stepper label="Тесты" value={nums.test} have={pool.test} max={LIMITS.perType} min={0} onChange={(v) => setNums({ ...nums, test: v })} />
-          <Stepper label="Соответствия" value={nums.matching} have={pool.matching} max={LIMITS.perType} min={0} onChange={(v) => setNums({ ...nums, matching: v })} />
-          <Stepper label="Открытые" value={nums.open} have={pool.open} max={LIMITS.perType} min={0} onChange={(v) => setNums({ ...nums, open: v })} />
-          <Stepper label="Вариантов (билетов)" value={nums.tickets} max={LIMITS.tickets} min={1} onChange={(v) => setNums({ ...nums, tickets: v })} />
+          <Stepper label="Тесты" value={nums.test} have={pool.test} max={limits.perType} min={0} onChange={(v) => setNums({ ...nums, test: v })} />
+          <Stepper label="Соответствия" value={nums.matching} have={pool.matching} max={limits.perType} min={0} onChange={(v) => setNums({ ...nums, matching: v })} />
+          <Stepper label="Открытые" value={nums.open} have={pool.open} max={limits.perType} min={0} onChange={(v) => setNums({ ...nums, open: v })} />
+          <Stepper label="Вариантов (билетов)" value={nums.tickets} max={limits.tickets} min={1} onChange={(v) => setNums({ ...nums, tickets: v })} />
+          <p className="tg-hint">Лимиты: до {limits.tickets} вариантов за раз{limits.total ? `, до ${limits.total} вопросов в билете` : ''}.</p>
           {settingsError && <div className="tg-warn">{settingsError}</div>}
           {!settingsError && fit.error && <div className="tg-warn">{fit.error}</div>}
           {!settingsError && !fit.error && fit.notes.length > 0 && (
@@ -361,16 +452,19 @@ export default function TgApp() {
           </label>
           <p className="tg-hint">
             Тестов {fit.settings.testCount}, соответствий {fit.settings.matchingCount}, открытых {fit.settings.openCount} · билетов {settings.ticketCount}.
-            Файл придёт в чат с ботом.
+            Файл придёт в чат с ботом.{limits.perDay ? ` Лимит: ${limits.perDay} генераций в сутки.` : ''}
           </p>
         </>
       )}
 
       {step === 'done' && (
         <div className="tg-card">
-          <h1>Готовим файл ✅</h1>
-          <p>Билеты создаются. Файл придёт в чат с ботом через несколько секунд.</p>
-          <button className="tg-link" onClick={() => { setStep(subjects.length > 1 ? 'subject' : 'chapters'); }}>Создать ещё</button>
+          <h1>✅ Отправлено в чат</h1>
+          <p>Файл с билетами {result?.keySent ? 'и ключи ответов ' : ''}пришли в чат с ботом.</p>
+          {!!result?.missingAnswers && (
+            <div className="tg-warn">В базе нет верного ответа у вопросов: {result.missingAnswers}. В ключах эти клетки пустые.</div>
+          )}
+          <button className="tg-link" onClick={() => { setResult(null); setStep(subjects.length > 1 ? 'subject' : 'chapters'); }}>Создать ещё</button>
         </div>
       )}
     </Shell>

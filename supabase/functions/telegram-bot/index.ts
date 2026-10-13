@@ -12,7 +12,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
-import { generateAndSend, linkedUser as linkedUserOf } from '../_shared/generate.ts';
+import { generateAndSend, limitsFor, linkedUser as linkedUserOf } from '../_shared/generate.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -160,18 +160,18 @@ async function screenSettings(chat: number, msgId: number | undefined, st: State
   return show(chat, msgId, T.settingsText(subj, chs, st.topicIds.length, st.settings, stats), T.kbSettings(st.settings));
 }
 
-const PROMPTS: Record<string, string> = {
-  test: 'Сколько тестовых вопросов в билете? Отправьте число (0–100).',
-  matching: 'Сколько заданий на соответствие в билете? Отправьте число (0–100).',
-  open: 'Сколько открытых вопросов в билете? Отправьте число (0–100).',
-  tickets: `Сколько билетов (вариантов) создать? Отправьте число (1–${T.LIMITS.tickets}).`,
+const prompts = (lim: { perType: number; tickets: number }): Record<string, string> => ({
+  test: `Сколько тестовых вопросов в билете? Отправьте число (0–${lim.perType}).`,
+  matching: `Сколько заданий на соответствие в билете? Отправьте число (0–${lim.perType}).`,
+  open: `Сколько открытых вопросов в билете? Отправьте число (0–${lim.perType}).`,
   title: 'Отправьте название билетов (до 100 символов).',
-};
+  tickets: `Сколько билетов (вариантов) создать? Отправьте число (1–${lim.tickets}).`,
+});
 
 // ---------------- Генерация ----------------
 async function generate(chat: number, msgId: number | undefined, st: State, user: any, lang: 'ru' | 'tg' | 'both') {
   const s = st.settings;
-  const bad = T.checkSettings(s);
+  const bad = T.checkSettings(s, limitsFor(user));
   if (bad) return send(chat, `⚠️ ${bad}`, T.kbSettings(s));
   try {
     await generateAndSend({
@@ -187,7 +187,7 @@ async function generate(chat: number, msgId: number | undefined, st: State, user
 }
 
 // ---------------- Обработка апдейтов ----------------
-const HELP = 'Команды:\n/ticket — создать билеты\n/unlink — отвязать аккаунт\n/help — помощь';
+const HELP = 'Команды:\n/app — открыть приложение (удобнее всего)\n/ticket — создать билеты в чате\n/unlink — отвязать аккаунт\n/help — помощь';
 
 async function onMessage(m: any) {
   const chat: number = m.chat.id;
@@ -237,7 +237,7 @@ async function onMessage(m: any) {
       if (!t) return send(chat, 'Название не может быть пустым.');
       st.settings.title = t;
     } else {
-      const max = a === 'tickets' ? T.LIMITS.tickets : T.LIMITS.perType;
+      const max = a === 'tickets' ? limitsFor(user).tickets : limitsFor(user).perType;
       const n = T.parseCount(text, max, a === 'tickets' ? 1 : 0);
       if (n === null) return send(chat, `Нужно целое число от ${a === 'tickets' ? 1 : 0} до ${max}.`);
       if (a === 'test') st.settings.testCount = n;
@@ -327,7 +327,7 @@ async function onCallback(cb: any) {
   if (data.startsWith('V:')) {
     st.awaiting = data.slice(2) as State['awaiting'];
     await saveState(chat, st);
-    return send(chat, PROMPTS[st.awaiting!]);
+    return send(chat, prompts(limitsFor(user))[st.awaiting!]);
   }
   if (data === 'O:opt' || data === 'O:mat') {
     if (data === 'O:opt') st.settings.shuffleOptions = !st.settings.shuffleOptions;
@@ -335,7 +335,7 @@ async function onCallback(cb: any) {
     return screenSettings(chat, msgId, st);
   }
   if (data === 'SN') {
-    const bad = T.checkSettings(st.settings);
+    const bad = T.checkSettings(st.settings, limitsFor(user));
     if (bad) return send(chat, `⚠️ ${bad}`);
     const fit = T.fitSettings(await countPool(st), st.settings);
     if (fit.error) return send(chat, `⚠️ ${fit.error}`);

@@ -23,6 +23,9 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export const LIMITS = { perType: 100, tickets: 20 };
 
+// Ограничения для Telegram (бот и Mini App): билетов за раз, вопросов в одном билете, генераций в сутки
+export const TG_LIMITS = { perType: 50, tickets: 4, total: 50, perDay: 10 };
+
 export type Rnd = () => number;
 
 export function shuffle<T>(arr: T[], rnd: Rnd = Math.random): T[] {
@@ -43,12 +46,13 @@ export function poolStats(all: Array<{ type: string }>) {
   };
 }
 
-export function checkSettings(s: Settings, limits: { perType: number; tickets: number } = LIMITS): string | null {
+export function checkSettings(s: Settings, limits: { perType: number; tickets: number; total?: number } = LIMITS): string | null {
   if (s.testCount + s.matchingCount + s.openCount === 0) return 'Задайте хотя бы один вопрос в билете';
   if (s.ticketCount < 1) return 'Количество билетов должно быть не менее 1';
   if (s.testCount > limits.perType || s.matchingCount > limits.perType || s.openCount > limits.perType) {
     return `Не больше ${limits.perType} вопросов каждого типа в билете`;
   }
+  if (limits.total && s.testCount + s.matchingCount + s.openCount > limits.total) return `Не больше ${limits.total} вопросов в одном билете`;
   if (s.ticketCount > limits.tickets) return `Не больше ${limits.tickets} билетов за один раз`;
   return null;
 }
@@ -89,6 +93,7 @@ export function toSnapshot(q: any, s: Pick<Settings, 'shuffleOptions' | 'shuffle
       text_ru: o.text_ru || o.text,
       text_tg: o.text_tg || o.text_ru || o.text,
       image_url: o.image_url,
+      is_correct: !!o.is_correct,
       order_index: i + 1,
     }));
   }
@@ -104,6 +109,7 @@ export function toSnapshot(q: any, s: Pick<Settings, 'shuffleOptions' | 'shuffle
       text_ru: m.text_ru || m.text,
       text_tg: m.text_tg || m.text_ru || m.text,
       image_url: m.image_url,
+      correct_match_id: m.correct_match_id ?? null,
       order_index: i + 1,
     });
     matching = [...left.map(mapItem), ...rightUsed.map(mapItem)];

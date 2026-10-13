@@ -11,7 +11,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
-import { generateAndSend, linkedUser } from '../_shared/generate.ts';
+import { generateAndSend, limitsFor, linkedUser, type Limits } from '../_shared/generate.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -107,7 +107,7 @@ const isIds = (v: unknown, max: number): v is string[] =>
 const bool = (v: unknown, d: boolean) => (typeof v === 'boolean' ? v : d);
 const int = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) ? v : NaN);
 
-function parseGenerate(b: any): { error: string } | { subjectId: string; chapterIds: string[]; topicIds: string[]; settings: T.Settings; lang: 'ru' | 'tg' | 'both' } {
+function parseGenerate(b: any, limits: Limits): { error: string } | { subjectId: string; chapterIds: string[]; topicIds: string[]; settings: T.Settings; lang: 'ru' | 'tg' | 'both' } {
   if (typeof b.subjectId !== 'string' || !b.subjectId) return { error: 'Не выбран предмет' };
   if (!isIds(b.chapterIds, 500) || !b.chapterIds.length) return { error: 'Выберите хотя бы одну главу' };
   const topicIds = b.topicIds === undefined ? [] : b.topicIds;
@@ -125,7 +125,7 @@ function parseGenerate(b: any): { error: string } | { subjectId: string; chapter
   if ([settings.testCount, settings.matchingCount, settings.openCount, settings.ticketCount].some((n) => Number.isNaN(n) || n < 0)) {
     return { error: 'Некорректное число вопросов или билетов' };
   }
-  const bad = T.checkSettings(settings);
+  const bad = T.checkSettings(settings, limits);
   if (bad) return { error: bad };
   if (b.lang !== 'ru' && b.lang !== 'tg' && b.lang !== 'both') return { error: 'Выберите язык' };
   return { subjectId: b.subjectId, chapterIds: b.chapterIds, topicIds, settings, lang: b.lang };
@@ -158,28 +158,33 @@ Deno.serve(async (req) => {
 
     switch (body?.action) {
       case 'me':
-        return json({ name: user.full_name || user.email, subjects: await subjectList() });
+        return json({ name: user.full_name || user.email, subjects: await subjectList(), limits: limitsFor(user) });
+      case 'history': {
+        const { data } = await sb.from('ticket_batches').select('id, title, created_at, subject_id, generation_params, subject:subjects(name)')
+          .eq('created_by', user.id).order('created_at', { ascending: false }).limit(8);
+        return json({ batches: data ?? [] });
+      }
       case 'tree': {
         if (typeof body.subjectId !== 'string') return json({ error: 'Не выбран предмет' }, 400);
         return json({ chapters: await tree(body.subjectId) });
       }
       case 'generate': {
-        const p = parseGenerate(body);
+        const limits = limitsFor(user);
+        const p = parseGenerate(body, limits);
         if ('error' in p) return json({ error: p.error }, 400);
         const chat = tgUser.id;
-        const work = generateAndSend({
-          sb, botToken: BOT_TOKEN, chat, user, lang: p.lang, settings: p.settings, source: 'telegram-app',
-          sel: { subjectId: p.subjectId, chapterIds: p.chapterIds, topicIds: p.topicIds },
-          onNotes: (notes) => tgSend(chat, `ℹ️ Вопросов не хватает, билеты составлены из того, что есть:\n• ${notes.join('\n• ')}`),
-        }).then(() => undefined).catch(async (e) => {
+        // Ждём, пока файл уйдёт в чат: приложение показывает итог (успех или причину ошибки)
+        try {
+          const r = await generateAndSend({
+            sb, botToken: BOT_TOKEN, chat, user, lang: p.lang, settings: p.settings, source: 'telegram-app',
+            sel: { subjectId: p.subjectId, chapterIds: p.chapterIds, topicIds: p.topicIds },
+            onNotes: (notes) => tgSend(chat, `ℹ️ Вопросов не хватает, билеты составлены из того, что есть:\n• ${notes.join('\n• ')}`),
+          });
+          return json({ ok: true, missingAnswers: r.missingAnswers, keySent: r.keySent });
+        } catch (e) {
           console.error('tg-app generate failed', e);
-          await tgSend(chat, `❌ Не удалось создать билеты: ${(e as Error).message || e}`);
-        });
-        // Файл формируется в фоне и приходит в чат; приложение сразу получает ответ
-        // @ts-ignore EdgeRuntime есть в среде Supabase
-        if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(work);
-        else await work;
-        return json({ ok: true });
+          return json({ error: (e as Error).message || 'Не удалось создать билеты' }, 422);
+        }
       }
       default:
         return json({ error: 'Неизвестное действие' }, 400);
