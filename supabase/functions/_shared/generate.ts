@@ -43,7 +43,7 @@ async function dailyLimitError(sb: any, user: { id: string; role?: string }): Pr
   const perDay = limitsFor(user).perDay;
   if (!Number.isFinite(perDay)) return null;
   const { count } = await sb.from('ticket_batches').select('*', { count: 'exact', head: true })
-    .eq('created_by', user.id).gte('created_at', dayStartIso()).in('generation_params->>source', ['telegram', 'telegram-app']);
+    .eq('created_by', user.id).gte('created_at', dayStartIso());
   return (count ?? 0) >= perDay ? `Дневной лимит исчерпан: ${perDay} генераций в сутки. Попробуйте завтра.` : null;
 }
 

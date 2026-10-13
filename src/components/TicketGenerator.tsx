@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo, describeError } from '../lib/errors';
-import { fitSettings, pickParallel, poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
+import { fitSettings, pickParallel, poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS, TG_LIMITS } from '../../supabase/functions/_shared/ticketing';
 import { Subject, Chapter, Topic, Question, TicketBatch, Ticket, TicketQuestion } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -23,8 +23,8 @@ import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '.
 import { exportAnswerKey, hasKeyTemplate } from '../lib/answerKeyExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
 
-// На сайте лимит на число вариантов мягче, чем у бота (бот работает внутри Edge Function с ограничением по времени)
-const SITE_LIMITS = { ...LIMITS, tickets: 50 };
+// Администратору на сайте можно до 50 вариантов; обычным пользователям — те же лимиты, что в Telegram (их же проверяет база)
+const ADMIN_SITE_LIMITS = { ...LIMITS, tickets: 50 };
 
 const getStorageJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -63,7 +63,9 @@ async function fetchAllPages<T>(build: () => any): Promise<{ data: T[] | null; e
 
 export const TicketGenerator: React.FC = () => {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
+  const limits = isAdmin ? ADMIN_SITE_LIMITS : TG_LIMITS;
+  const generatingRef = React.useRef(false);
 
   // Параметры конфигурации билета (сохраняются при перезагрузке)
   const [subjectId, setSubjectId] = useState<string>(() => getStorageString('examiner_tg_subject_id', ''));
@@ -295,6 +297,8 @@ export const TicketGenerator: React.FC = () => {
 
   // Алгоритм параллельной генерации билетов
   const handleGenerate = async () => {
+    if (generatingRef.current) return; // защита от двойного нажатия
+    generatingRef.current = true;
     setGenerationError(null);
     setIsGenerating(true);
 
@@ -303,7 +307,7 @@ export const TicketGenerator: React.FC = () => {
       if (testCount + matchingCount + openCount === 0) throw new Error('Задайте хотя бы один вопрос в билете');
       if (ticketCount < 1) throw new Error('Количество билетов должно быть не менее 1');
 
-      const limitErr = checkSettings({ testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }, SITE_LIMITS);
+      const limitErr = checkSettings({ testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }, limits);
       if (limitErr) throw new Error(limitErr);
 
       // 1. Загружаем все доступные вопросы пула с деталями для снимков
@@ -362,6 +366,8 @@ export const TicketGenerator: React.FC = () => {
             ticket_count: ticketCount,
             shuffle_options: shuffleOptions,
             shuffle_matching: shuffleMatching,
+            requested: { test: testCount, matching: matchingCount, open: openCount },
+            source: 'site',
           },
         })
         .select()
@@ -419,11 +425,43 @@ export const TicketGenerator: React.FC = () => {
       });
 
       queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
+      queryClient.invalidateQueries({ queryKey: ['recent_batches'] });
     } catch (err: any) {
       setGenerationError(describeError(err, 'Ошибка генерации билетов'));
     } finally {
+      generatingRef.current = false;
       setIsGenerating(false);
     }
+  };
+
+  // Последние наборы пользователя — чтобы повторить с теми же настройками
+  const { data: recentBatches = [] } = useQuery({
+    queryKey: ['recent_batches', user?.id],
+    enabled: Boolean(user?.id),
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('ticket_batches')
+        .select('id, title, created_at, subject_id, generation_params, subject:subjects(name)')
+        .eq('created_by', user!.id)
+        .order('created_at', { ascending: false })
+        .limit(4);
+      return (data || []) as any[];
+    },
+  });
+
+  const repeatBatch = (b: any) => {
+    const p = b.generation_params || {};
+    const r = p.requested ?? { test: p.test_count ?? 0, matching: p.matching_count ?? 0, open: p.open_count ?? 0 };
+    setSubjectId(b.subject_id);
+    setSelectedChapterIds(p.chapter_ids ?? []);
+    setSelectedTopicIds(p.topic_ids ?? []);
+    setTestCount(Math.min(limits.perType, r.test));
+    setMatchingCount(Math.min(limits.perType, r.matching));
+    setOpenCount(Math.min(limits.perType, r.open));
+    setTicketCount(Math.min(limits.tickets, Math.max(1, p.ticket_count ?? 1)));
+    if (typeof p.shuffle_options === 'boolean') setShuffleOptions(p.shuffle_options);
+    if (typeof p.shuffle_matching === 'boolean') setShuffleMatching(p.shuffle_matching);
+    setBatchTitle(b.title || 'Экзаменационные билеты');
   };
 
   // Экспорт созданных билетов в Word на выбранном языке
@@ -521,6 +559,22 @@ export const TicketGenerator: React.FC = () => {
           </div>
         )}
       </div>
+
+      {recentBatches.length > 0 && (
+        <div className="bg-white px-4 py-3 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-slate-500">Повторить прошлый набор:</span>
+          {recentBatches.map((b) => (
+            <button
+              key={b.id}
+              onClick={() => repeatBatch(b)}
+              className="px-2.5 py-1 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 rounded-lg text-xs font-semibold text-slate-700 transition"
+              title={`${b.subject?.name || ''} · ${b.generation_params?.ticket_count ?? '?'} вариантов`}
+            >
+              {b.title} · {new Date(b.created_at).toLocaleDateString('ru-RU')}
+            </button>
+          ))}
+        </div>
+      )}
 
       {generationError && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-3 text-xs text-red-700">
@@ -727,7 +781,7 @@ export const TicketGenerator: React.FC = () => {
                   type="number"
                   min="0"
                   value={testCount}
-                  onChange={(e) => setTestCount(Math.max(0, parseInt(e.target.value) || 0))}
+                  onChange={(e) => setTestCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
                   className="w-full text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
                 />
               </div>
@@ -741,7 +795,7 @@ export const TicketGenerator: React.FC = () => {
                   type="number"
                   min="0"
                   value={matchingCount}
-                  onChange={(e) => setMatchingCount(Math.max(0, parseInt(e.target.value) || 0))}
+                  onChange={(e) => setMatchingCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
                   className="w-full text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
                 />
               </div>
@@ -755,7 +809,7 @@ export const TicketGenerator: React.FC = () => {
                   type="number"
                   min="0"
                   value={openCount}
-                  onChange={(e) => setOpenCount(Math.max(0, parseInt(e.target.value) || 0))}
+                  onChange={(e) => setOpenCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
                   className="w-full text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
                 />
               </div>
@@ -767,11 +821,16 @@ export const TicketGenerator: React.FC = () => {
                 <input
                   type="number"
                   min="1"
-                  max={SITE_LIMITS.tickets}
+                  max={limits.tickets}
                   value={ticketCount}
-                  onChange={(e) => setTicketCount(Math.min(SITE_LIMITS.tickets, Math.max(1, parseInt(e.target.value) || 1)))}
+                  onChange={(e) => setTicketCount(Math.min(limits.tickets, Math.max(1, parseInt(e.target.value) || 1)))}
                   className="w-full text-xs p-2 border border-blue-400 bg-blue-50/50 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-blue-900"
                 />
+                {!isAdmin && (
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Лимиты: до {limits.tickets} вариантов за раз, до {TG_LIMITS.total} вопросов в билете, до {TG_LIMITS.perDay} наборов в сутки.
+                  </p>
+                )}
                 <p className="text-[11px] text-slate-400 mt-1">
                   Будет создано {ticketCount} параллельных билетов по {fitted.settings.testCount + fitted.settings.matchingCount + fitted.settings.openCount} вопросов
                 </p>

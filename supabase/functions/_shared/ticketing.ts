@@ -23,7 +23,8 @@ export const DEFAULT_SETTINGS: Settings = {
 
 export const LIMITS = { perType: 100, tickets: 20 };
 
-// Ограничения для Telegram (бот и Mini App): билетов за раз, вопросов в одном билете, генераций в сутки
+// Ограничения для обычных пользователей (сайт, бот и Mini App): билетов за раз, вопросов в одном билете, наборов в сутки.
+// Администраторы не ограничены. На стороне базы то же проверяет триггер enforce_generation_limits.
 export const TG_LIMITS = { perType: 50, tickets: 4, total: 50, perDay: 10 };
 
 export type Rnd = () => number;
