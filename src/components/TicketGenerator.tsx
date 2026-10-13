@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo, describeError } from '../lib/errors';
-import { fitSettings, pickParallel, poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS, TG_LIMITS } from '../../supabase/functions/_shared/ticketing';
+import { fitSettings, pickParallel, chapterTotals, totalsOf,poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS, TG_LIMITS } from '../../supabase/functions/_shared/ticketing';
 import { Subject, Chapter, Topic, Question, TicketBatch, Ticket, TicketQuestion } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -341,9 +341,16 @@ export const TicketGenerator: React.FC = () => {
       // 3. Формирование параллельных билетов (см. pickParallel): позиция в билете берётся
       // из одной темы во всех билетах, соседними вопросами сборника, темы — поровну,
       // без повторов, пока хватает вопросов
-      const tests = pickParallel(allQuestionsRaw.filter(q => q.type === 'test'), useTest, ticketCount);
-      const matchings = pickParallel(allQuestionsRaw.filter(q => q.type === 'matching'), useMatching, ticketCount);
-      const opens = pickParallel(allQuestionsRaw.filter(q => q.type === 'open'), useOpen, ticketCount);
+      // Охват глав: сколько вопросов главы выбрано от всех её вопросов (неполный выбор уменьшает долю главы)
+      const chapterIds = Array.from(new Set(allQuestionsRaw.map(q => q.chapter_id).filter(Boolean)));
+      const { data: totalRows, error: totErr } = await fetchAllPages<any>(() =>
+        supabase.from('questions').select('chapter_id, type').eq('subject_id', subjectId).eq('is_deleted', false).in('chapter_id', chapterIds)
+      );
+      if (totErr) throw totErr;
+      const totals = chapterTotals(totalRows || []);
+      const tests = pickParallel(allQuestionsRaw.filter(q => q.type === 'test'), useTest, ticketCount, Math.random, totalsOf(totals, 'test'));
+      const matchings = pickParallel(allQuestionsRaw.filter(q => q.type === 'matching'), useMatching, ticketCount, Math.random, totalsOf(totals, 'matching'));
+      const opens = pickParallel(allQuestionsRaw.filter(q => q.type === 'open'), useOpen, ticketCount, Math.random, totalsOf(totals, 'open'));
       const ticketsData: Array<{ ticketNumber: number; questions: Question[] }> = [];
       for (let k = 0; k < ticketCount; k++) {
         ticketsData.push({ ticketNumber: k + 1, questions: [...tests[k], ...matchings[k], ...opens[k]] });

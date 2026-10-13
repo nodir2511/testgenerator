@@ -63,6 +63,21 @@ export async function loadPool(sb: any, sel: Selection) {
   return all;
 }
 
+// Все вопросы глав, в которых что-то выбрано: нужны, чтобы посчитать охват главы
+export async function loadChapterTotals(sb: any, subjectId: string, pool: any[]): Promise<T.ChapterTotals> {
+  const ids = [...new Set(pool.map((q) => q.chapter_id).filter(Boolean))];
+  if (!ids.length) return {};
+  const rows: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb.from('questions').select('chapter_id, type')
+      .eq('subject_id', subjectId).eq('is_deleted', false).in('chapter_id', ids).order('id').range(from, from + 999);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return T.chapterTotals(rows);
+}
+
 async function sendDocument(botToken: string, chat: number, bytes: Uint8Array, filename: string, caption: string) {
   const form = new FormData();
   form.append('chat_id', String(chat));
@@ -107,7 +122,8 @@ export async function generateAndSend(opts: {
   if (fit.error) throw new Error(fit.error);
   if (fit.notes.length && opts.onNotes) await opts.onNotes(fit.notes);
 
-  const tickets = T.buildTickets(pool, fit.settings);
+  const totals = await loadChapterTotals(sb, sel.subjectId, pool);
+  const tickets = T.buildTickets(pool, fit.settings, Math.random, totals);
   const title = s.title.trim() || 'Экзаменационные билеты';
   const { data: subj } = await sb.from('subjects').select('name').eq('id', sel.subjectId).maybeSingle();
   const subjectName = subj?.name ?? 'Химия';

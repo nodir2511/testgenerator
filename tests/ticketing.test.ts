@@ -42,8 +42,8 @@ describe('pickParallel', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('позиции делятся между темами поровну', () => {
-    const pool = makePool('test', 4, 30);
+  it('малая глава, темы одинакового размера: позиции делятся поровну', () => {
+    const pool = makePool('test', 4, 20); // 80 вопросов < LARGE_CHAPTER
     const [first] = pickParallel(pool, 8, 2, rng(2));
     const perTopic = new Map<string, number>();
     first.forEach((q) => perTopic.set(q.topic_id, (perTopic.get(q.topic_id) ?? 0) + 1));
@@ -80,16 +80,54 @@ describe('pickParallel', () => {
     }
   });
 
-  it('внутри главы позиции идут пропорционально размеру тем', () => {
-    const pool = chapterPool([[90, 10]]);
+  it('малая глава: каждой теме хотя бы одна позиция, остальное пропорционально размеру', () => {
+    const pool = chapterPool([[45, 5]]); // 50 вопросов < LARGE_CHAPTER
     let big = 0, small = 0;
     for (let seed = 1; seed <= 30; seed++) {
       const [first] = pickParallel(pool, 10, 2, rng(seed));
-      big += first.filter((q) => q.topic_id === 'c0t0').length;
-      small += first.filter((q) => q.topic_id === 'c0t1').length;
+      const b = first.filter((q) => q.topic_id === 'c0t0').length;
+      const s = first.filter((q) => q.topic_id === 'c0t1').length;
+      expect(s).toBeGreaterThanOrEqual(1);
+      expect(b + s).toBe(10);
+      big += b; small += s;
     }
-    expect(big).toBe(270);
-    expect(small).toBe(30);
+    expect(big).toBeGreaterThan(small * 3);
+  });
+
+  it('большая глава (от 100 вопросов): темы выпадают случайно, но каждая выбранная тема представлена', () => {
+    const pool = chapterPool([[400, 300, 200, 100]]); // 1000 вопросов
+    const hits = new Map<string, number>();
+    for (let seed = 1; seed <= 50; seed++) {
+      const [first] = pickParallel(pool, 12, 2, rng(seed));
+      expect(first).toHaveLength(12);
+      const per = countBy(first, 'topic_id');
+      for (let t = 0; t < 4; t++) expect(per.get(`c0t${t}`) ?? 0).toBeGreaterThanOrEqual(1);
+      per.forEach((n, k) => hits.set(k, (hits.get(k) ?? 0) + n));
+    }
+    // шансы пропорциональны числу вопросов, но состав меняется от запуска к запуску
+    expect(hits.get('c0t0')!).toBeGreaterThan(hits.get('c0t3')!);
+  });
+
+  it('охват главы: неполно выбранная глава получает пропорционально меньшую долю', () => {
+    // глава 0 выбрана на 25% (20 из 80), главы 1 и 2 — полностью
+    const pool = chapterPool([[20], [80], [80]]);
+    const totals = { ch0: 80, ch1: 80, ch2: 80 };
+    let c0 = 0, c1 = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const [first] = pickParallel(pool, 18, 2, rng(seed), totals);
+      const per = countBy(first, 'chapter_id');
+      c0 += per.get('ch0') ?? 0; c1 += per.get('ch1') ?? 0;
+    }
+    // веса 0,25 : 1 : 1 → глава 0 получает ~1/9 позиций (≈2 из 18), главы 1 и 2 — по ~8
+    expect(c0 / 40).toBeGreaterThan(1.5);
+    expect(c0 / 40).toBeLessThan(2.6);
+    expect(c1 / 40).toBeGreaterThan(7);
+  });
+
+  it('без итогов по главам охват считается полным (поровну)', () => {
+    const pool = chapterPool([[20], [80], [80]]);
+    const [first] = pickParallel(pool, 18, 2, rng(11));
+    expect([...countBy(first, 'chapter_id').values()]).toEqual([6, 6, 6]);
   });
 
   it('доля главы без места уходит другим, повторов нет', () => {

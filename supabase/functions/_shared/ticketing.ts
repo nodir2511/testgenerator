@@ -183,13 +183,51 @@ function allocateProportional(quota: number, items: Array<{ w: number; cap: numb
   return alloc;
 }
 
+// Глава с таким числом выбранных вопросов (одного вида) и больше выбирается случайно по всему пулу
+export const LARGE_CHAPTER = 100;
+
+// Позиции главы по темам. Сначала каждой теме по одной (если квоты хватает на все; иначе — случайным
+// темам, шанс пропорционален размеру), остальное: в большой главе — случайно по вопросам пула
+// (тема выпадает с шансом, пропорциональным числу её вопросов), в малой — пропорционально размеру.
+function allocateInChapter(quota: number, items: Array<{ w: number; cap: number }>, large: boolean, rnd: Rnd): number[] {
+  const alloc = items.map(() => 0);
+  const eligible = items.map((_, i) => i).filter((i) => items[i].cap > 0);
+  if (quota >= eligible.length) {
+    eligible.forEach((i) => { alloc[i] = 1; });
+  } else {
+    const keyed = eligible.map((i) => ({ i, k: Math.pow(rnd() || 1e-12, 1 / items[i].w) })).sort((a, b) => b.k - a.k);
+    keyed.slice(0, quota).forEach(({ i }) => { alloc[i] = 1; });
+  }
+  let remaining = quota - alloc.reduce((a, b) => a + b, 0);
+  if (remaining <= 0) return alloc;
+  if (large) {
+    while (remaining > 0) {
+      const open = items.map((_, i) => i).filter((i) => alloc[i] < items[i].cap);
+      if (open.length === 0) break;
+      let r = rnd() * open.reduce((s, i) => s + items[i].w, 0);
+      let pick = open[open.length - 1];
+      for (const i of open) {
+        r -= items[i].w;
+        if (r < 0) { pick = i; break; }
+      }
+      alloc[pick]++;
+      remaining--;
+    }
+    return alloc;
+  }
+  const rest = allocateProportional(remaining, items.map((it, i) => ({ w: it.w, cap: it.cap - alloc[i] })), rnd);
+  return alloc.map((a, i) => a + rest[i]);
+}
+
 /**
  * Параллельный подбор вопросов одного вида для ticketCount билетов.
  * Возвращает матрицу [билет][позиция] -> вопрос.
  *
  * Основной режим (в темах хватает вопросов, чтобы раздать всем билетам разные):
- * - позиции делятся между главами поровну (лишние — случайным главам), внутри главы — между
- *   темами пропорционально числу вопросов;
+ * - позиции делятся между главами пропорционально охвату (выбранные / все вопросы главы; при
+ *   полном выборе — поровну); внутри большой главы (от LARGE_CHAPTER вопросов) вопросы берутся
+ *   случайно из всего пула главы, в малой — темы делят позиции пропорционально размеру; каждой
+ *   выбранной теме достаётся хотя бы одна позиция, если квоты главы хватает;
  * - позиция j во всех билетах берётся из одной темы соседними вопросами:
  *   билет 1 — вопрос №35, билет 2 — №36, билет 3 — №37 и т.д.;
  * - ни один вопрос не повторяется ни внутри билета, ни между билетами.
@@ -199,7 +237,11 @@ function allocateProportional(quota: number, items: Array<{ w: number; cap: numb
  * билет k берёт k-й вопрос полосы. Внутри билета повторов нет никогда; между билетами вопросы
  * повторяются только когда пул исчерпан (и тогда используются все вопросы пула).
  */
-export function pickParallel(pool: any[], count: number, ticketCount: number, rnd: Rnd = Math.random): any[][] {
+export function pickParallel(
+  pool: any[], count: number, ticketCount: number, rnd: Rnd = Math.random,
+  /** Все вопросы этого вида в каждой главе (chapter_id → число); без него охват глав считается равным */
+  totals?: Record<string, number>,
+): any[][] {
   const T = ticketCount;
   const tickets: any[][] = Array.from({ length: T }, () => []);
   const P = Math.min(count, pool.length);
@@ -232,9 +274,13 @@ export function pickParallel(pool: any[], count: number, ticketCount: number, rn
     return tickets;
   }
 
-  // Основной режим. 1) позиции делятся между главами поровну (лишние — случайным главам;
-  // если в главе вопросов не хватает, её доля уходит остальным). 2) внутри главы позиции
-  // делятся между темами пропорционально числу вопросов (потолок темы — floor(вопросов / T)).
+  // Основной режим.
+  // 1) Позиции делятся между главами пропорционально охвату главы (выбранные вопросы / все вопросы
+  //    главы этого вида); при полном выборе охват 100% у всех и деление поровну. Если в главе
+  //    вопросов не хватает, её доля уходит остальным.
+  // 2) Внутри главы: в большой главе (от LARGE_CHAPTER вопросов) вопросы берутся случайно из всего
+  //    пула главы, в малой — темы делят позиции пропорционально размеру. В обоих случаях каждой теме
+  //    даётся хотя бы одна позиция, если квота главы позволяет. Потолок темы — floor(вопросов / T).
   const chapters = new Map<string, typeof topics>();
   for (const t of topics) {
     const f = t.list[0];
@@ -242,34 +288,26 @@ export function pickParallel(pool: any[], count: number, ticketCount: number, rn
     if (!chapters.has(key)) chapters.set(key, []);
     chapters.get(key)!.push(t);
   }
-  const chList = [...chapters.values()].map((ts) => ({
-    topics: ts,
-    cap: ts.reduce((sum, t) => sum + Math.floor(t.list.length / T), 0),
-    quota: 0,
-  })).filter((c) => c.cap > 0);
-  const start = randInt(chList.length, rnd);
-  const order = [...chList.slice(start), ...chList.slice(0, start)];
-  let left = P;
-  let progress = true;
-  while (left > 0 && progress) {
-    progress = false;
-    for (const c of order) {
-      if (left === 0) break;
-      if (c.quota < c.cap) {
-        c.quota++;
-        left--;
-        progress = true;
-      }
-    }
-  }
-  for (const c of chList) {
-    const alloc = allocateProportional(
-      c.quota,
+  const chList = [...chapters.entries()].map(([key, ts]) => {
+    const size = ts.reduce((sum, t) => sum + t.list.length, 0);
+    const total = totals?.[key];
+    return {
+      topics: ts,
+      size,
+      w: total && total > 0 ? Math.min(1, size / total) : 1,
+      cap: ts.reduce((sum, t) => sum + Math.floor(t.list.length / T), 0),
+    };
+  }).filter((c) => c.cap > 0);
+  const quotas = allocateProportional(P, chList.map((c) => ({ w: c.w, cap: c.cap })), rnd);
+  chList.forEach((c, ci) => {
+    const alloc = allocateInChapter(
+      quotas[ci],
       c.topics.map((t) => ({ w: t.list.length, cap: Math.floor(t.list.length / T) })),
+      c.size >= LARGE_CHAPTER,
       rnd,
     );
     c.topics.forEach((t, i) => { t.slots = alloc[i]; });
-  }
+  });
 
   for (const t of topics) {
     if (t.slots === 0) continue;
@@ -284,11 +322,26 @@ export function pickParallel(pool: any[], count: number, ticketCount: number, rn
   return tickets;
 }
 
-export function buildTickets(pool: any[], s: Settings, rnd: Rnd = Math.random) {
+export type ChapterTotals = Record<string, { test: number; matching: number; open: number }>;
+
+/** Считает все вопросы по главам и видам из строк { chapter_id, type } */
+export function chapterTotals(rows: Array<{ chapter_id: string; type: string }>): ChapterTotals {
+  const out: ChapterTotals = {};
+  for (const r of rows) {
+    const c = (out[r.chapter_id] ??= { test: 0, matching: 0, open: 0 });
+    if (r.type === 'test' || r.type === 'matching' || r.type === 'open') c[r.type]++;
+  }
+  return out;
+}
+
+export const totalsOf = (t: ChapterTotals | undefined, type: 'test' | 'matching' | 'open') =>
+  t ? Object.fromEntries(Object.entries(t).map(([k, v]) => [k, v[type]])) : undefined;
+
+export function buildTickets(pool: any[], s: Settings, rnd: Rnd = Math.random, totals?: ChapterTotals) {
   const T = s.ticketCount;
-  const tests = pickParallel(pool.filter((q) => q.type === 'test'), s.testCount, T, rnd);
-  const matching = pickParallel(pool.filter((q) => q.type === 'matching'), s.matchingCount, T, rnd);
-  const open = pickParallel(pool.filter((q) => q.type === 'open'), s.openCount, T, rnd);
+  const tests = pickParallel(pool.filter((q) => q.type === 'test'), s.testCount, T, rnd, totalsOf(totals, 'test'));
+  const matching = pickParallel(pool.filter((q) => q.type === 'matching'), s.matchingCount, T, rnd, totalsOf(totals, 'matching'));
+  const open = pickParallel(pool.filter((q) => q.type === 'open'), s.openCount, T, rnd, totalsOf(totals, 'open'));
   const out: Array<{ ticketNumber: number; questions: any[] }> = [];
   for (let k = 0; k < T; k++) {
     const qs = [...tests[k], ...matching[k], ...open[k]];
