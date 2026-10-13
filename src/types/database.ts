@@ -84,6 +84,7 @@ export interface Question {
   image_url?: string | null;
   correct_numeric_answer?: number | null;
   seq?: number | null;
+  num?: number | null;
   version: number;
   is_deleted: boolean;
   deleted_at?: string | null;

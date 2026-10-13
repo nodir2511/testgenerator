@@ -109,29 +109,37 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const { data, isLoading } = useQuery({
     queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, searchQuery, page],
     queryFn: async () => {
-      let query = supabase
-        .from('questions')
-        .select(`
-          *,
-          chapter:chapters(name),
-          topic:topics(name),
-          source:sources(name),
-          options:question_options(*),
-          matching_items:matching_items(*)
-        `, { count: 'exact' })
-        .eq('is_deleted', false)
-        .order('created_at', { ascending: false })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      const build = (byNum: boolean) => {
+        let query = supabase
+          .from('questions')
+          .select(`
+            *,
+            chapter:chapters(name),
+            topic:topics(name),
+            source:sources(name),
+            options:question_options(*),
+            matching_items:matching_items(*)
+          `, { count: 'exact' })
+          .eq('is_deleted', false);
+        // В выбранной теме — по номерам вопросов, иначе — новые сверху
+        query = byNum
+          ? query.order('num', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
+          : query.order('created_at', { ascending: false });
+        query = query.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-      if (filterSubjectId) query = query.eq('subject_id', filterSubjectId);
-      if (filterChapterId) query = query.eq('chapter_id', filterChapterId);
-      if (filterTopicId) query = query.eq('topic_id', filterTopicId);
-      if (filterType !== 'all') query = query.eq('type', filterType);
-      if (searchQuery.trim()) {
-        query = query.or(`content.ilike.%${searchQuery.trim()}%,content_tg.ilike.%${searchQuery.trim()}%`);
-      }
+        if (filterSubjectId) query = query.eq('subject_id', filterSubjectId);
+        if (filterChapterId) query = query.eq('chapter_id', filterChapterId);
+        if (filterTopicId) query = query.eq('topic_id', filterTopicId);
+        if (filterType !== 'all') query = query.eq('type', filterType);
+        if (searchQuery.trim()) {
+          query = query.or(`content.ilike.%${searchQuery.trim()}%,content_tg.ilike.%${searchQuery.trim()}%`);
+        }
+        return query;
+      };
 
-      const { data, count, error } = await query;
+      let { data, count, error } = await build(Boolean(filterTopicId));
+      // Колонки num ещё нет (не выполнен question_order.sql) — сортируем по дате
+      if (error && error.code === '42703' && filterTopicId) ({ data, count, error } = await build(false));
       if (error) throw error;
       return {
         questions: (data || []) as Question[],
@@ -375,6 +383,12 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   }`}>
                     {q.type === 'test' ? 'Тест' : q.type === 'matching' ? 'Соответствие' : 'Открытый'}
                   </span>
+
+                  {q.num != null && (
+                    <span className="text-xs font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded" title="Номер вопроса в теме">
+                      № {q.num}
+                    </span>
+                  )}
 
                   {q.chapter && (
                     <span className="text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded">

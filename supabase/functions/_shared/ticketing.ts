@@ -123,9 +123,11 @@ export function toSnapshot(q: any, s: Pick<Settings, 'shuffleOptions' | 'shuffle
   };
 }
 
-// Порядок вопросов внутри темы — как в исходном сборнике: seq (номер вставки),
-// затем дата создания и id (если колонки seq ещё нет).
+// Порядок вопросов внутри темы — как в исходном сборнике: num (номер в теме),
+// затем seq (порядок вставки), дата создания и id (если этих колонок ещё нет).
 function compareInTopic(a: any, b: any): number {
+  const na = a.num ?? null, nb = b.num ?? null;
+  if (na !== null && nb !== null && na !== nb) return Number(na) - Number(nb);
   const sa = a.seq ?? null, sb = b.seq ?? null;
   if (sa !== null && sb !== null && sa !== sb) return Number(sa) - Number(sb);
   const ca = a.created_at || '', cb = b.created_at || '';
