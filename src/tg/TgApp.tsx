@@ -301,6 +301,12 @@ export default function TgApp() {
           {selectedChapters.map((c) => (
             <section key={c.id}>
               <h2>{shortName(c.name, 70)}</h2>
+              {c.topics.length > 0 && (
+                <div className="tg-actions">
+                  <button className="tg-link" onClick={() => setTopicSel([...topicSel.filter((id) => !c.topics.some((t) => t.id === id)), ...c.topics.map((t) => t.id)])}>Выбрать все</button>
+                  <button className="tg-link" onClick={() => setTopicSel(topicSel.filter((id) => !c.topics.some((t) => t.id === id)))}>Снять выделение</button>
+                </div>
+              )}
               {c.topics.length === 0 && <p className="tg-hint">В главе нет тем — берутся все вопросы главы.</p>}
               {c.topics.map((t) => (
                 <label key={t.id} className={`tg-row tg-check ${topicSel.includes(t.id) ? 'on' : ''}`}>
