@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { assertRowsChanged } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic } from '../types/database';
@@ -42,7 +42,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const [filterTopicId, setFilterTopicId] = useState(() => localStorage.getItem('examiner_ql_topic_id') || '');
   const [filterType, setFilterType] = useState<string>(() => localStorage.getItem('examiner_ql_type') || 'all');
   const [searchQuery, setSearchQuery] = useState('');
+  // page — первая показанная страница, extra — сколько страниц подгружено ниже кнопкой «Показать ещё»
   const [page, setPage] = useState(0);
+  const [extra, setExtra] = useState(0);
+  const [jumpTo, setJumpTo] = useState('');
   const [displayLang, setDisplayLang] = useState<'ru' | 'tg' | 'both'>(
     () => (localStorage.getItem('examiner_ql_display_lang') as 'ru' | 'tg' | 'both') || 'ru'
   );
@@ -105,10 +108,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
     },
   });
 
-  // Запрос списка вопросов с фильтрацией на сервере
-  const { data, isLoading } = useQuery({
-    queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, searchQuery, page],
-    queryFn: async () => {
+  // Запрос одной страницы вопросов с фильтрацией на сервере
+  const fetchPage = async (pageNo: number) => {
       const build = (byNum: boolean) => {
         let query = supabase
           .from('questions')
@@ -125,7 +126,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         query = byNum
           ? query.order('num', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
           : query.order('created_at', { ascending: false });
-        query = query.range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+        query = query.range(pageNo * PAGE_SIZE, (pageNo + 1) * PAGE_SIZE - 1);
 
         if (filterSubjectId) query = query.eq('subject_id', filterSubjectId);
         if (filterChapterId) query = query.eq('chapter_id', filterChapterId);
@@ -148,9 +149,18 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         questions: (data || []) as Question[],
         totalCount: count || 0,
       };
-    },
-    placeholderData: keepPreviousData,
+  };
+
+  const shownPages = Array.from({ length: extra + 1 }, (_, i) => page + i);
+  const pageResults = useQueries({
+    queries: shownPages.map((p) => ({
+      queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, searchQuery, p],
+      queryFn: () => fetchPage(p),
+    })),
   });
+  const data = pageResults[0]?.data;
+  const isLoading = pageResults[0]?.isLoading ?? true;
+  const loadingMore = pageResults.slice(1).some((r) => r.isLoading);
 
   // Мягкое удаление вопроса
   const deleteMutation = useMutation({
@@ -169,14 +179,26 @@ export const QuestionList: React.FC<QuestionListProps> = ({
     },
   });
 
-  const questions = data?.questions || [];
+  const questions = pageResults.flatMap((r) => r.data?.questions || []);
   const totalCount = data?.totalCount || 0;
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
   // После удаления последнего вопроса на странице возвращаемся на последнюю существующую
   React.useEffect(() => {
-    if (data && page > 0 && page >= totalPages) setPage(Math.max(0, totalPages - 1));
+    if (data && page > 0 && page >= totalPages) { setPage(Math.max(0, totalPages - 1)); setExtra(0); }
   }, [data, page, totalPages]);
+
+  const lastShown = page + extra;
+  const goToPage = (p: number) => {
+    setPage(Math.min(Math.max(0, p), Math.max(0, totalPages - 1)));
+    setExtra(0);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  const submitJump = () => {
+    const n = parseInt(jumpTo, 10);
+    if (Number.isFinite(n) && n >= 1) goToPage(n - 1);
+    setJumpTo('');
+  };
 
   return (
     <div className="space-y-6">
@@ -221,7 +243,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
-                setPage(0);
+                setPage(0); setExtra(0);
               }}
               placeholder="Поиск по тексту..."
               className="w-full text-xs pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -235,7 +257,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterSubjectId(e.target.value);
               setFilterChapterId('');
               setFilterTopicId('');
-              setPage(0);
+              setPage(0); setExtra(0);
             }}
             className="text-xs px-2.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
@@ -250,7 +272,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             onChange={(e) => {
               setFilterChapterId(e.target.value);
               setFilterTopicId('');
-              setPage(0);
+              setPage(0); setExtra(0);
             }}
             className="text-xs px-2.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
           >
@@ -264,7 +286,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             value={filterTopicId}
             onChange={(e) => {
               setFilterTopicId(e.target.value);
-              setPage(0);
+              setPage(0); setExtra(0);
             }}
             className="text-xs px-2.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
           >
@@ -277,7 +299,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             value={filterType}
             onChange={(e) => {
               setFilterType(e.target.value);
-              setPage(0);
+              setPage(0); setExtra(0);
             }}
             className="text-xs px-2.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
@@ -338,7 +360,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   setFilterTopicId('');
                   setFilterType('all');
                   setSearchQuery('');
-                  setPage(0);
+                  setPage(0); setExtra(0);
                 }}
                 className="inline-flex items-center space-x-1.5 text-xs text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg transition font-medium border border-rose-200 shadow-sm"
                 title="Сбросить все установленные фильтры и поиск"
@@ -628,28 +650,65 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
       {/* Пагинация */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-200">
-          <button
-            onClick={() => setPage(p => Math.max(0, p - 1))}
-            disabled={page === 0}
-            className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            <span>Назад</span>
-          </button>
+        <div className="space-y-3">
+          {lastShown < totalPages - 1 && (
+            <button
+              onClick={() => setExtra((x) => x + 1)}
+              disabled={loadingMore}
+              className="w-full bg-white p-3 rounded-2xl border border-slate-200 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition disabled:opacity-60"
+            >
+              {loadingMore ? 'Загрузка…' : `Показать ещё (следующие ${Math.min(PAGE_SIZE, totalCount - (lastShown + 1) * PAGE_SIZE)} вопросов, страница ${lastShown + 2})`}
+            </button>
+          )}
 
-          <span className="text-xs text-slate-500">
-            Страница <span className="font-bold text-slate-800">{page + 1}</span> из {totalPages}
-          </span>
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200">
+            <button
+              onClick={() => goToPage(page - 1)}
+              disabled={page === 0}
+              className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Назад</span>
+            </button>
 
-          <button
-            onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
-            disabled={page >= totalPages - 1}
-            className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1"
-          >
-            <span>Вперед</span>
-            <ChevronRight className="w-4 h-4" />
-          </button>
+            <div className="flex flex-wrap items-center justify-center gap-3 text-xs text-slate-500">
+              <span>
+                Страница <span className="font-bold text-slate-800">{extra > 0 ? `${page + 1}–${lastShown + 1}` : page + 1}</span> из {totalPages}
+              </span>
+              <form
+                className="flex items-center gap-1.5"
+                onSubmit={(ev) => { ev.preventDefault(); submitJump(); }}
+              >
+                <label htmlFor="ql-jump" className="sr-only">Перейти на страницу</label>
+                <input
+                  id="ql-jump"
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={jumpTo}
+                  onChange={(ev) => setJumpTo(ev.target.value)}
+                  placeholder="№ стр."
+                  className="w-20 px-2 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!jumpTo}
+                  className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Перейти
+                </button>
+              </form>
+            </div>
+
+            <button
+              onClick={() => goToPage(lastShown + 1)}
+              disabled={lastShown >= totalPages - 1}
+              className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1"
+            >
+              <span>Вперед</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
