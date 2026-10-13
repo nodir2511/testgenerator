@@ -23,6 +23,41 @@ import { splitFractions, type MathNode, newFmtState, tokenizeFormatted } from '.
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 
+// Основной шрифт — 14 pt (в половинках пункта)
+const FONT_SIZE = 28;
+const FONT_PT = FONT_SIZE / 2;
+
+// Грубая оценка ширины текста Times New Roman в em (индексы уже, дроби считаются как обычный текст)
+function charEm(c: string): number {
+  if (c === ' ') return 0.25;
+  if (/[0-9]/.test(c)) return 0.5;
+  if (/[+=<>±−]/.test(c)) return 0.56;
+  if (/[→←⇄⇌↑↓]/.test(c)) return 1;
+  if (/[()[\]\-/]/.test(c)) return 0.34;
+  if (/[.,:;'!]/.test(c)) return 0.27;
+  if (/[iljtfI]/.test(c)) return 0.3;
+  if (/[mwMWЖШЩЫЮжшщфюы]/.test(c)) return 0.78;
+  if (/[A-ZА-ЯЁҶҚҒӢӮҲ]/.test(c)) return 0.7;
+  return 0.48;
+}
+
+function textWidthEm(text: string): number {
+  let w = 0;
+  let scale = 1;
+  for (const part of (text || '').split(/(<\/?(?:sub|sup|b|i)>)/)) {
+    if (part === '<sub>' || part === '<sup>') { scale = 0.6; continue; }
+    if (part === '</sub>' || part === '</sup>') { scale = 1; continue; }
+    if (/^<\/?[bi]>$/.test(part)) continue;
+    for (const c of part) w += charEm(c) * scale;
+  }
+  return w;
+}
+
+// Ширина варианта вместе с меткой «A) » в пунктах, с запасом на разницу шрифтов
+function optionWidthPt(text: string): number {
+  return (textWidthEm(text) + 1.35) * FONT_PT * 1.1;
+}
+
 // Рамки таблицы невидимы (BorderStyle.NONE)
 const NO_TABLE_BORDERS = {
   top: { style: BorderStyle.NONE, size: 0, color: 'auto' },
@@ -47,6 +82,9 @@ const CELL_MARGINS = {
   left: 100,
   right: 100,
 };
+
+// Свободная ширина ячейки в пунктах
+const cellInnerPt = (twips: number) => (twips - CELL_MARGINS.left - CELL_MARGINS.right) / 20;
 
 // Стиль серой ячейки с номером вопроса
 const NUMBER_CELL_MARGINS = {
@@ -158,7 +196,7 @@ function buildMathFraction(node: Exclude<MathNode, string>): MathFraction {
 export function parseFormattedTextRuns(
   text: string,
   isItalic = false,
-  fontSize = 24,
+  fontSize = FONT_SIZE,
   isBold = false
 ): ParagraphChild[] {
   if (!text) return [];
@@ -184,10 +222,6 @@ export function parseFormattedTextRuns(
     }
   }
   return out;
-}
-
-function cleanTextLength(text: string): number {
-  return (text || '').replace(/<[^>]+>/g, '').trim().length;
 }
 
 // Создание ячейки номера вопроса (серая плашка, белый жирный номер)
@@ -237,12 +271,13 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
     );
     const hasOptImages = optImgBuffers.some(b => b !== null);
 
-    const cleanLengths = opts.map((o: any) => cleanTextLength(isTg ? (o.text_tg || o.text) : (o.text_ru || o.text)));
-    const maxLen = Math.max(...cleanLengths, 0);
-    const sumLen = cleanLengths.reduce((a, b) => a + b, 0);
+    const optTexts: string[] = opts.map((o: any) => (isTg ? (o.text_tg || o.text) : (o.text_ru || o.text)) || '');
+    const maxW = Math.max(...optTexts.map(optionWidthPt), 0);
 
-    const isShort = !hasOptImages && maxLen <= 18 && sumLen <= 65;
-    const isMedium = !isShort && (!hasOptImages ? (maxLen <= 42 && sumLen <= 150) : maxLen <= 35);
+    // Четыре в ряд — только если каждый вариант влезает в одну строку узкой колонки;
+    // два в ряд — если влезает в половину ширины; иначе столбиком
+    const isShort = !hasOptImages && opts.length <= 4 && maxW <= cellInnerPt(2212);
+    const isMedium = !isShort && opts.length <= 4 && maxW <= cellInnerPt(4424);
 
     if (isShort) {
       const rows: TableRow[] = [
@@ -256,7 +291,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
               borders: NO_CELL_BORDERS,
               children: [
                 new Paragraph({
-                  children: parseFormattedTextRuns(qText, false, 24, true), // Текст вопроса жирный
+                  children: parseFormattedTextRuns(qText, false, FONT_SIZE, true), // Текст вопроса жирный
                 }),
               ],
             }),
@@ -300,8 +335,8 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
             children: [
               new Paragraph({
                 children: [
-                  new TextRun({ text: `${letters[i]}) `, bold: true, font: 'Times New Roman', size: 24 }),
-                  ...parseFormattedTextRuns(oText || '', false, 24, false),
+                  new TextRun({ text: `${letters[i]}) `, bold: true, font: 'Times New Roman', size: 28 }),
+                  ...parseFormattedTextRuns(oText || '', false, FONT_SIZE, false),
                 ],
               }),
             ],
@@ -329,7 +364,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
               borders: NO_CELL_BORDERS,
               children: [
                 new Paragraph({
-                  children: parseFormattedTextRuns(qText, false, 24, true),
+                  children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
                 }),
               ],
             }),
@@ -375,8 +410,8 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
               children: [
                 new Paragraph({
                   children: [
-                    new TextRun({ text: 'A) ', bold: true, font: 'Times New Roman', size: 24 }),
-                    ...parseFormattedTextRuns(oAText || '', false, 24, false),
+                    new TextRun({ text: 'A) ', bold: true, font: 'Times New Roman', size: 28 }),
+                    ...parseFormattedTextRuns(oAText || '', false, FONT_SIZE, false),
                   ],
                 }),
                 ...(optImgBuffers[0] ? [
@@ -394,8 +429,8 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
               children: [
                 new Paragraph({
                   children: [
-                    new TextRun({ text: 'B) ', bold: true, font: 'Times New Roman', size: 24 }),
-                    ...parseFormattedTextRuns(oBText || '', false, 24, false),
+                    new TextRun({ text: 'B) ', bold: true, font: 'Times New Roman', size: 28 }),
+                    ...parseFormattedTextRuns(oBText || '', false, FONT_SIZE, false),
                   ],
                 }),
                 ...(optImgBuffers[1] ? [
@@ -426,8 +461,8 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
               children: [
                 new Paragraph({
                   children: [
-                    new TextRun({ text: 'C) ', bold: true, font: 'Times New Roman', size: 24 }),
-                    ...parseFormattedTextRuns(oCText || '', false, 24, false),
+                    new TextRun({ text: 'C) ', bold: true, font: 'Times New Roman', size: 28 }),
+                    ...parseFormattedTextRuns(oCText || '', false, FONT_SIZE, false),
                   ],
                 }),
                 ...(optImgBuffers[2] ? [
@@ -445,8 +480,8 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
               children: [
                 new Paragraph({
                   children: [
-                    new TextRun({ text: 'D) ', bold: true, font: 'Times New Roman', size: 24 }),
-                    ...parseFormattedTextRuns(oDText || '', false, 24, false),
+                    new TextRun({ text: 'D) ', bold: true, font: 'Times New Roman', size: 28 }),
+                    ...parseFormattedTextRuns(oDText || '', false, FONT_SIZE, false),
                   ],
                 }),
                 ...(optImgBuffers[3] ? [
@@ -478,7 +513,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
               borders: NO_CELL_BORDERS,
               children: [
                 new Paragraph({
-                  children: parseFormattedTextRuns(qText, false, 24, true),
+                  children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
                 }),
               ],
             }),
@@ -522,8 +557,8 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
                 children: [
                   new Paragraph({
                     children: [
-                      new TextRun({ text: `${letters[i] || String(i + 1)}) `, bold: true, font: 'Times New Roman', size: 24 }),
-                      ...parseFormattedTextRuns(oText || '', false, 24, false),
+                      new TextRun({ text: `${letters[i] || String(i + 1)}) `, bold: true, font: 'Times New Roman', size: 28 }),
+                      ...parseFormattedTextRuns(oText || '', false, FONT_SIZE, false),
                     ],
                   }),
                   ...(optImgBuffers[i] ? [
@@ -576,7 +611,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
             borders: NO_CELL_BORDERS,
             children: [
               new Paragraph({
-                children: parseFormattedTextRuns(qText, false, 24, true),
+                children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
               }),
             ],
           }),
@@ -618,8 +653,8 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
         leftParas.push(
           new Paragraph({
             children: [
-              new TextRun({ text: `${letter}) `, bold: true, font: 'Times New Roman', size: 24 }),
-              ...parseFormattedTextRuns(lText || '', false, 24, false),
+              new TextRun({ text: `${letter}) `, bold: true, font: 'Times New Roman', size: 28 }),
+              ...parseFormattedTextRuns(lText || '', false, FONT_SIZE, false),
             ],
           })
         );
@@ -642,8 +677,8 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
         rightParas.push(
           new Paragraph({
             children: [
-              new TextRun({ text: `${num}) `, bold: true, font: 'Times New Roman', size: 24 }),
-              ...parseFormattedTextRuns(rText || '', false, 24, false),
+              new TextRun({ text: `${num}) `, bold: true, font: 'Times New Roman', size: 28 }),
+              ...parseFormattedTextRuns(rText || '', false, FONT_SIZE, false),
             ],
           })
         );
@@ -699,7 +734,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
           borders: NO_CELL_BORDERS,
           children: [
             new Paragraph({
-              children: parseFormattedTextRuns(qText, false, 24, true),
+              children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
             }),
           ],
         }),
@@ -740,8 +775,8 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
           children: [
             new Paragraph({
               children: [
-                new TextRun({ text: ansLabel, bold: true, font: 'Times New Roman', size: 24 }),
-                new TextRun({ text: '________________________', font: 'Times New Roman', size: 24 }),
+                new TextRun({ text: ansLabel, bold: true, font: 'Times New Roman', size: 28 }),
+                new TextRun({ text: '________________________', font: 'Times New Roman', size: 28 }),
               ],
             }),
           ],
@@ -818,6 +853,9 @@ export async function buildSingleTicketBlob(
   }
 
   const doc = new Document({
+    styles: {
+      default: { document: { run: { font: 'Times New Roman', size: FONT_SIZE } } },
+    },
     sections: [
       {
         properties: {
