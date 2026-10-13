@@ -151,12 +151,45 @@ function randomComposition(total: number, parts: number, rnd: Rnd): number[] {
   return out;
 }
 
+// Делит quota целых позиций между элементами пропорционально весу w, не превышая cap.
+// Дробные остатки разыгрываются случайно с вероятностью, пропорциональной остатку.
+function allocateProportional(quota: number, items: Array<{ w: number; cap: number }>, rnd: Rnd): number[] {
+  const alloc = items.map(() => 0);
+  let remaining = quota;
+  while (remaining > 0) {
+    const active = items.map((_, i) => i).filter((i) => alloc[i] < items[i].cap);
+    if (active.length === 0) break;
+    const totalW = active.reduce((s, i) => s + items[i].w, 0);
+    const frac: Array<{ i: number; f: number }> = [];
+    let given = 0;
+    for (const i of active) {
+      const ideal = (remaining * items[i].w) / totalW;
+      const add = Math.min(Math.floor(ideal), items[i].cap - alloc[i]);
+      alloc[i] += add;
+      given += add;
+      if (alloc[i] < items[i].cap) frac.push({ i, f: ideal - Math.floor(ideal) });
+    }
+    remaining -= given;
+    // Остаток: выбор без возвращения, шанс пропорционален дробной части (Efraimidis–Spirakis)
+    const keyed = frac.map(({ i, f }) => ({ i, k: Math.pow(rnd() || 1e-12, 1 / (f + 1e-6)) })).sort((a, b) => b.k - a.k);
+    for (const { i } of keyed) {
+      if (remaining === 0) break;
+      if (alloc[i] < items[i].cap) {
+        alloc[i]++;
+        remaining--;
+      }
+    }
+  }
+  return alloc;
+}
+
 /**
  * Параллельный подбор вопросов одного вида для ticketCount билетов.
  * Возвращает матрицу [билет][позиция] -> вопрос.
  *
  * Основной режим (в темах хватает вопросов, чтобы раздать всем билетам разные):
- * - позиции делятся между темами поровну (по кругу, лишняя позиция достаётся случайной теме);
+ * - позиции делятся между главами поровну (лишние — случайным главам), внутри главы — между
+ *   темами пропорционально числу вопросов;
  * - позиция j во всех билетах берётся из одной темы соседними вопросами:
  *   билет 1 — вопрос №35, билет 2 — №36, билет 3 — №37 и т.д.;
  * - ни один вопрос не повторяется ни внутри билета, ни между билетами.
@@ -199,21 +232,43 @@ export function pickParallel(pool: any[], count: number, ticketCount: number, rn
     return tickets;
   }
 
-  // Основной режим: позиции — темам по кругу, начиная со случайной темы
-  const start = randInt(topics.length, rnd);
-  const order = [...topics.slice(start), ...topics.slice(0, start)];
+  // Основной режим. 1) позиции делятся между главами поровну (лишние — случайным главам;
+  // если в главе вопросов не хватает, её доля уходит остальным). 2) внутри главы позиции
+  // делятся между темами пропорционально числу вопросов (потолок темы — floor(вопросов / T)).
+  const chapters = new Map<string, typeof topics>();
+  for (const t of topics) {
+    const f = t.list[0];
+    const key = f?.chapter_id ?? `ch${f?.chapter?.order_index ?? 0}:${f?.chapter?.name ?? ''}`;
+    if (!chapters.has(key)) chapters.set(key, []);
+    chapters.get(key)!.push(t);
+  }
+  const chList = [...chapters.values()].map((ts) => ({
+    topics: ts,
+    cap: ts.reduce((sum, t) => sum + Math.floor(t.list.length / T), 0),
+    quota: 0,
+  })).filter((c) => c.cap > 0);
+  const start = randInt(chList.length, rnd);
+  const order = [...chList.slice(start), ...chList.slice(0, start)];
   let left = P;
   let progress = true;
   while (left > 0 && progress) {
     progress = false;
-    for (const t of order) {
+    for (const c of order) {
       if (left === 0) break;
-      if (t.slots < Math.floor(t.list.length / T)) {
-        t.slots++;
+      if (c.quota < c.cap) {
+        c.quota++;
         left--;
         progress = true;
       }
     }
+  }
+  for (const c of chList) {
+    const alloc = allocateProportional(
+      c.quota,
+      c.topics.map((t) => ({ w: t.list.length, cap: Math.floor(t.list.length / T) })),
+      rnd,
+    );
+    c.topics.forEach((t, i) => { t.slots = alloc[i]; });
   }
 
   for (const t of topics) {

@@ -50,6 +50,64 @@ describe('pickParallel', () => {
     expect([...perTopic.values()].every((n) => n === 2)).toBe(true);
   });
 
+  // главы: sizes[c] = размеры тем главы c
+  function chapterPool(sizes: number[][]) {
+    const out: any[] = [];
+    sizes.forEach((topics, c) => topics.forEach((n, t) => {
+      for (let i = 1; i <= n; i++) {
+        out.push({
+          id: `c${c}t${t}-${i}`, type: 'test', chapter_id: `ch${c}`, topic_id: `c${c}t${t}`, num: i,
+          chapter: { name: `Г${c}`, order_index: c }, topic: { name: `Т${t}`, order_index: t },
+        });
+      }
+    }));
+    return out;
+  }
+  const countBy = (qs: any[], key: string) => {
+    const m = new Map<string, number>();
+    qs.forEach((q) => m.set(q[key], (m.get(q[key]) ?? 0) + 1));
+    return m;
+  };
+
+  it('главы получают позиции поровну, даже если в них разное число тем и вопросов', () => {
+    // глава 0: 1 большая тема, глава 1: 5 тем, глава 2: 2 темы
+    const pool = chapterPool([[200], [20, 20, 20, 20, 20], [40, 40]]);
+    for (let seed = 1; seed <= 20; seed++) {
+      const [first] = pickParallel(pool, 18, 2, rng(seed));
+      expect(first).toHaveLength(18);
+      const perCh = countBy(first, 'chapter_id');
+      expect([...perCh.values()].every((n) => n === 6)).toBe(true);
+    }
+  });
+
+  it('внутри главы позиции идут пропорционально размеру тем', () => {
+    const pool = chapterPool([[90, 10]]);
+    let big = 0, small = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const [first] = pickParallel(pool, 10, 2, rng(seed));
+      big += first.filter((q) => q.topic_id === 'c0t0').length;
+      small += first.filter((q) => q.topic_id === 'c0t1').length;
+    }
+    expect(big).toBe(270);
+    expect(small).toBe(30);
+  });
+
+  it('доля главы без места уходит другим, повторов нет', () => {
+    const pool = chapterPool([[6], [100], [100]]); // глава 0 вмещает 3 позиции при 2 билетах
+    const tickets = pickParallel(pool, 18, 2, rng(7));
+    tickets.forEach((t) => expect(t).toHaveLength(18));
+    const ids = tickets.flat().map((q) => q.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(countBy(tickets[0], 'chapter_id').get('ch0')).toBe(3);
+  });
+
+  it('малый вид (2 соответствия): главы разыгрываются случайно, каждая бывает', () => {
+    const pool = chapterPool([[10], [10], [10]]);
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 40; seed++) pickParallel(pool, 2, 2, rng(seed))[0].forEach((q) => seen.add(q.chapter_id));
+    expect(seen.size).toBe(3);
+  });
+
   it('позиция j во всех билетах — из одной темы, соседними вопросами', () => {
     const pool = makePool('test', 3, 20);
     const tickets = pickParallel(pool, 6, 3, rng(3));
