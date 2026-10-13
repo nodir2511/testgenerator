@@ -68,6 +68,6 @@ create policy "Просмотр вопросов в билетах" on public.ti
   ));
 
 -- Главные администраторы
-update public.profiles set is_owner = true where email in ('nodir.burhonow@gmail.com', 'admin@repetitor.tj');
+update public.profiles set is_owner = true where email = 'nodir.burhonow@gmail.com';
 
 select email, role, is_owner from public.profiles where is_owner order by email;
