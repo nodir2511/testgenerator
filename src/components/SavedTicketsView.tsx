@@ -7,6 +7,8 @@ import { useAuth } from '../hooks/useAuth';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
 import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, makeSelectionInfoLoader, withSelectionInfo } from '../lib/answerKeyExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
+import { saveAs } from 'file-saver';
+import { isClusterBatch, clusterVariantsFromBatch } from '../lib/clusterStore';
 import { 
   FileCheck2, 
   Download, 
@@ -71,7 +73,7 @@ export const SavedTicketsView: React.FC = () => {
       const load = makeSelectionInfoLoader();
       return Promise.all((data || []).map(async (b: any) => ({
         ...b,
-        tickets: await withSelectionInfo(b.tickets || [], b.subject_id, b.generation_params, load),
+        tickets: isClusterBatch(b) ? b.tickets || [] : await withSelectionInfo(b.tickets || [], b.subject_id, b.generation_params, load),
       })));
     },
   });
@@ -95,6 +97,24 @@ export const SavedTicketsView: React.FC = () => {
       if (stats.missing) notifyError(new Error(`В базе нет верного ответа у вопросов: ${stats.missing} — клетки в ключе пустые.`), 'Ключи готовы, но не полные');
     } catch (err: any) {
       notifyError(err, 'Ошибка при создании ключей');
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  // Экзамен-кластер: книжки на двух языках и ключи по всем предметам одним архивом
+  const handleClusterExport = async (batch: any) => {
+    try {
+      setExportingId(`${batch.id}-cluster`);
+      const { buildClusterZip } = await import('../lib/clusterExport');
+      const settings = batch.generation_params?.cluster?.settings;
+      if (!settings) throw new Error('В партии нет параметров экзамена');
+      const file = await buildClusterZip(settings, clusterVariantsFromBatch(batch.tickets || []));
+      saveAs(file.blob, file.fileName);
+      if (file.keyOverflow) notifyError(new Error(`В шаблонах ключей не нашлось мест для вопросов: ${file.keyOverflow}.`), 'Ключи заполнены не полностью');
+      if (file.missingAnswers) notifyError(new Error(`В базе нет верного ответа у вопросов: ${file.missingAnswers} — клетки в ключах пустые.`), 'Кластер готов, но ключи не полные');
+    } catch (err: any) {
+      notifyError(err, 'Ошибка при экспорте кластера');
     } finally {
       setExportingId(null);
     }
@@ -146,11 +166,13 @@ export const SavedTicketsView: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {batches.map((batch: any) => {
+          {batches.filter((b: any) => isOwner || !isClusterBatch(b)).map((batch: any) => {
+            const cluster = isClusterBatch(batch);
+            const clusterSubjects: Array<{ name: string; count: number }> = batch.generation_params?.cluster?.subjects ?? [];
             const isExpanded = expandedBatchId === batch.id;
             const tickets = batch.tickets || [];
             const chips = tickets[0]?.selection_info?.chips || [];
-            const accent = subjectAccent(batch.subject?.name);
+            const accent = cluster ? { bar: 'bg-gradient-to-r from-amber-400 to-orange-600', pill: 'bg-amber-50 text-amber-800 border-amber-200' } : subjectAccent(batch.subject?.name);
 
             return (
               <div
@@ -162,11 +184,16 @@ export const SavedTicketsView: React.FC = () => {
                   <div className="min-w-0 flex-1 space-y-3">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-bold text-slate-900 text-lg leading-tight">{batch.title}</h3>
-                      {batch.subject && (
+                      {cluster ? (
+                        <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${accent.pill}`}>Экзамен-кластер</span>
+                      ) : batch.subject && (
                         <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${accent.pill}`}>
                           {batch.subject.name}
                         </span>
                       )}
+                      {cluster && clusterSubjects.map((s) => (
+                        <span key={s.name} className="text-xs px-2 py-0.5 rounded-full border bg-slate-50 text-slate-700 border-slate-200">{s.name} · {s.count}</span>
+                      ))}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
@@ -184,7 +211,7 @@ export const SavedTicketsView: React.FC = () => {
                         <Layers className="w-3.5 h-3.5 text-slate-400" />
                         <b className="text-slate-700">{tickets.length}</b> {plural(tickets.length, 'вариант', 'варианта', 'вариантов')}
                       </span>
-                      {tickets[0] && (
+                      {tickets[0] && !cluster && (
                         <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 border border-slate-100">
                           <ListChecks className="w-3.5 h-3.5 text-slate-400" />
                           <b className="text-slate-700">{tickets[0].questions?.length}</b> в билете
@@ -192,7 +219,7 @@ export const SavedTicketsView: React.FC = () => {
                       )}
                     </div>
 
-                    {chips.length > 0 && (
+                    {!cluster && chips.length > 0 && (
                       <div className="flex items-start gap-2">
                         <span className="text-[11px] uppercase tracking-wide font-semibold text-slate-400 pt-1.5 shrink-0">Охват</span>
                         <div className="flex flex-wrap gap-1.5">
@@ -218,6 +245,18 @@ export const SavedTicketsView: React.FC = () => {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5 lg:max-w-[22rem] lg:justify-end">
+                    {cluster && (
+                      <button
+                        onClick={() => handleClusterExport(batch)}
+                        disabled={exportingId === `${batch.id}-cluster`}
+                        className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold flex items-center space-x-1 shadow-sm transition disabled:opacity-50"
+                        title="Книжки на русском и таджикском и ключи по всем предметам (ZIP)"
+                      >
+                        {exportingId === `${batch.id}-cluster` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                        <span>Скачать кластер (.zip)</span>
+                      </button>
+                    )}
+                    {!cluster && (<>
                     <button
                       onClick={() => handleExport(batch, 'ru')}
                       disabled={exportingId === `${batch.id}-ru`}
@@ -282,6 +321,7 @@ export const SavedTicketsView: React.FC = () => {
                         await keyArchiveExtras(batch.title, tickets, batch.subject?.name || '', { subjectId: batch.subject_id, params: batch.generation_params }, lang)
                       )}
                     />
+                    </>)}
 
                     <button
                       onClick={() => setExpandedBatchId(isExpanded ? null : batch.id)}
@@ -317,6 +357,7 @@ export const SavedTicketsView: React.FC = () => {
                             <span>Вариант {t.ticket_number}</span>
                             <div className="flex items-center space-x-1.5">
                               <span className="text-slate-400 font-normal mr-1">Вопросов: {t.questions?.length}</span>
+                              {!cluster && (<>
                               <button
                                 onClick={() => exportSingleTicketDocx(batch.title, t, batch.subject?.name || 'Экзамен', 'ru')}
                                 className="px-2 py-0.5 text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded border border-blue-200 transition"
@@ -331,6 +372,7 @@ export const SavedTicketsView: React.FC = () => {
                               >
                                 TJ (.docx)
                               </button>
+                              </>)}
                             </div>
                           </div>
                           <div className="space-y-1 text-xs text-slate-600 max-h-40 overflow-y-auto pr-1">

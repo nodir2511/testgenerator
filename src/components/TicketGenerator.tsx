@@ -441,8 +441,9 @@ export const TicketGenerator: React.FC = () => {
         .select('id, title, created_at, subject_id, generation_params, subject:subjects(name)')
         .eq('created_by', user!.id)
         .order('created_at', { ascending: false })
-        .limit(4);
-      return (data || []) as any[];
+        .limit(12);
+      // Партии экзамена-кластера повторять здесь нельзя (у них свой раздел)
+      return ((data || []) as any[]).filter((b) => b.generation_params?.source !== 'cluster').slice(0, 4);
     },
   });
 

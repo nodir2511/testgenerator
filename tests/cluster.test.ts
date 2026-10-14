@@ -139,3 +139,23 @@ describe('оформление книжки кластера', () => {
     expect(new Set(counts.slice(1)).size).toBe(1);
   });
 });
+
+describe('хранение кластера', () => {
+  it('варианты восстанавливаются из сохранённой партии в том же порядке', async () => {
+    const { clusterVariantsFromBatch } = await import('../src/lib/clusterStore');
+    const snap = (id: string, slot: number) => ({ id, type: 'test', cluster_slot: slot });
+    // Порядок строк в базе произвольный, порядок книжки задаёт order_index
+    const tickets = [{
+      ticket_number: 2,
+      questions: [
+        { order_index: 3, question_snapshot: snap('c', 3) },
+        { order_index: 1, question_snapshot: snap('a', 1) },
+        { order_index: 2, question_snapshot: snap('b', 1) },
+      ],
+    }, { ticket_number: 1, questions: [{ order_index: 1, question_snapshot: snap('x', 0) }] }];
+    const v = clusterVariantsFromBatch(tickets);
+    expect(v.map((x) => x.number)).toEqual([1, 2]);
+    expect(v[1].subjects.map((s) => s && s.map((q) => q.id))).toEqual([null, ['a', 'b'], null, ['c']]);
+    expect(v[0].subjects[0]!.length).toBe(1);
+  });
+});

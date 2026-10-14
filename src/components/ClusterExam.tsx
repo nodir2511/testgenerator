@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../hooks/useAuth';
+import { saveClusterBatch } from '../lib/clusterStore';
 import { saveAs } from 'file-saver';
 import { supabase } from '../lib/supabase';
 import { Subject } from '../types/database';
@@ -193,10 +195,12 @@ const TopicPicker: React.FC<{
 
 export const ClusterExam: React.FC = () => {
   const [state, setState] = useState<Saved>(load);
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ blob: Blob; fileName: string } | null>(null);
+  const [result, setResult] = useState<{ blob: Blob; fileName: string; saved: boolean } | null>(null);
   const busyRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -274,7 +278,17 @@ export const ClusterExam: React.FC = () => {
 
       setProgress('Сборка Word-файлов и ключей…');
       const file = await buildClusterZip(settings, variants);
-      setResult({ blob: file.blob, fileName: file.fileName });
+      // Экзамен сохраняется в «Сохранённых билетах» (видит только главный админ)
+      let saved = false;
+      setProgress('Сохранение в архив…');
+      try {
+        await saveClusterBatch({ settings, variants, subjectIds, userId: user?.id });
+        saved = true;
+        queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
+      } catch (saveErr) {
+        notifyError(saveErr, 'Кластер создан, но не сохранён в архив');
+      }
+      setResult({ blob: file.blob, fileName: file.fileName, saved });
       if (notes.length) notifyInfo(`Вопросов не хватило, книжки составлены из того, что есть. ${notes.join('; ')}`);
       if (file.keyOverflow) {
         notifyError(new Error(`В шаблонах ключей не нашлось мест для вопросов: ${file.keyOverflow}. Проверьте состав субтестов.`), 'Ключи заполнены не полностью');
@@ -388,7 +402,7 @@ export const ClusterExam: React.FC = () => {
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center space-x-2 text-sm text-emerald-800">
             <CheckCircle2 className="w-5 h-5 shrink-0" />
-            <span>Кластер готов: <strong>{result.fileName}</strong> ({(result.blob.size / 1048576).toFixed(1)} МБ)</span>
+            <span>Кластер готов: <strong>{result.fileName}</strong> ({(result.blob.size / 1048576).toFixed(1)} МБ){result.saved ? ' · сохранён во вкладке «Сохраненные билеты»' : ''}</span>
           </div>
           <button
             type="button"
