@@ -1,9 +1,9 @@
 import {
   Document, Packer, Paragraph, TextRun, ImageRun, AlignmentType, Table, TableRow, TableCell,
-  WidthType, BorderStyle, ShadingType, Footer, PageNumber, TabStopType, SectionType, VerticalAlign,
+  WidthType, BorderStyle, ShadingType, Footer, PageNumber, TabStopType, SectionType, VerticalAlign, LineRuleType,
 } from 'docx';
 import JSZip from 'jszip';
-import { createQuestionTable } from './docxExport';
+import { createQuestionTable, type QuestionOpts } from './docxExport';
 import { buildAnswerKeyFile } from './answerKeyExport';
 
 // Кластерный экзамен: тестовая книжка из 4 предметов (таджикский язык, биология, химия, физика)
@@ -171,6 +171,58 @@ async function bigNumber(n: number): Promise<Uint8Array> {
   return canvasToPng(c);
 }
 
+// Таблица для заполнения ответа на соответствие: A–D по вертикали, 1–5 по горизонтали
+async function answerGrid(lang: ClusterLang): Promise<Uint8Array> {
+  const c = document.createElement('canvas');
+  c.width = 470;
+  c.height = 380;
+  const g = c.getContext('2d')!;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillStyle = '#000000';
+  g.font = `bold 38px "${FONT}", serif`;
+  g.fillText(lang === 'tj' ? 'Ҷавоб:' : 'Ответ:', 235, 28);
+  g.fillStyle = '#c4c4c4';
+  roundedRect(g, 40, 56, 410, 316, 14);
+  g.fill();
+  g.font = `bold 32px "${FONT}", serif`;
+  for (let i = 0; i < 5; i++) {
+    g.fillStyle = '#222222';
+    g.fillText(String(i + 1), 170 + i * 58, 84);
+  }
+  for (let j = 0; j < 4; j++) {
+    g.fillStyle = '#222222';
+    g.fillText('ABCD'[j], 82, 150 + j * 64);
+    for (let i = 0; i < 5; i++) {
+      g.beginPath();
+      g.arc(170 + i * 58, 150 + j * 64, 25, 0, Math.PI * 2);
+      g.fillStyle = '#ffffff';
+      g.fill();
+    }
+  }
+  return canvasToPng(c);
+}
+
+// Вопрос целиком на одной странице: если не помещается, переносится на следующую.
+// Таблица вопроса вкладывается в одну неразрываемую строку внешней таблицы.
+function keepTogether(inner: Table) {
+  const none = { margins: { top: 0, bottom: 0, left: 0, right: 0 } };
+  return new Table({
+    width: { size: CONTENT_TWIPS, type: WidthType.DXA },
+    columnWidths: [CONTENT_TWIPS],
+    borders: NO_BORDERS,
+    rows: [new TableRow({
+      cantSplit: true,
+      children: [new TableCell({
+        width: { size: CONTENT_TWIPS, type: WidthType.DXA },
+        borders: NO_CELL_BORDERS,
+        ...none,
+        children: [inner, new Paragraph({ spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT }, children: [] })],
+      })],
+    })],
+  });
+}
+
 const run = (text: string, o: { bold?: boolean; size?: number; color?: string } = {}) =>
   new TextRun({ text, bold: o.bold, size: o.size ?? 28, color: o.color, font: FONT });
 
@@ -283,6 +335,7 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
   const page = { margin: MARGIN };
 
   const included = CLUSTER_SLOTS.map((_, s) => variant.subjects[s] != null);
+  const grid = await answerGrid(lang);
   const [header, subjectImgs, attention, instr1Top, instr1Rest, instr2, plaque, auxPhys, auxChem, title, digit] = await Promise.all([
     asset(lang, 'header'), Promise.all(CLUSTER_SLOTS.map((s, i) => (included[i] ? asset(lang, `subj_${s.kind}`) : Promise.resolve(new Uint8Array())))), asset(lang, 'attention'), asset(lang, 'instr1_top'), asset(lang, 'instr1_rest'), asset(lang, 'instr2'),
     asset(lang, 'plaque'), asset(lang, 'aux_phys'), asset(lang, 'aux_chem'), titleWithDate(lang, settings.date), bigNumber(variant.number),
@@ -354,7 +407,8 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
     if (!qs) continue;
     const children: any[] = [band(t.bands[kind]), gap(160)];
     for (let i = 0; i < qs.length; i++) {
-      children.push(await createQuestionTable(qs[i], i + 1, isTg));
+      const opts: QuestionOpts = { openBoxes: kind === 'taj' ? 5 : 4, matchingGrid: grid };
+      children.push(keepTogether(await createQuestionTable(qs[i], i + 1, isTg, opts)));
       children.push(gap(180));
     }
     children.push(imgPara(plaque, 600, { before: 120, after: 0 }));

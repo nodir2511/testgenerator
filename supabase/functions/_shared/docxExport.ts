@@ -13,6 +13,8 @@ import {
   WidthType, 
   BorderStyle,
   ShadingType,
+  HeightRule,
+  VerticalAlign,
   Math as DocxMath,
   MathFraction,
   MathRun,
@@ -266,8 +268,45 @@ function createEmptyNumCell(): TableCell {
   });
 }
 
+// Необязательное оформление вопроса (экзамен-кластер)
+export interface QuestionOpts {
+  /** Ответ открытого вопроса — ряд клеток (по одной на цифру) вместо линии */
+  openBoxes?: number;
+  /** Картинка таблицы для ответа на соответствие (A–D × 1–5), ставится справа от списков */
+  matchingGrid?: Uint8Array;
+}
+
+// «Ответ: □□□□» — подпись и ряд клеток по числу цифр
+function createAnswerBoxes(label: string, n: number): Table {
+  const BOX = 480;
+  const LABEL = 1700;
+  const line = { style: BorderStyle.SINGLE, size: 8, color: '000000' };
+  const cells = Array.from({ length: n }, () => new TableCell({
+    width: { size: BOX, type: WidthType.DXA },
+    borders: { top: line, bottom: line, left: line, right: line },
+    children: [new Paragraph({ children: [] })],
+  }));
+  return new Table({
+    width: { size: LABEL + n * BOX, type: WidthType.DXA },
+    columnWidths: [LABEL, ...Array(n).fill(BOX)],
+    borders: NO_TABLE_BORDERS,
+    rows: [new TableRow({
+      height: { value: BOX, rule: HeightRule.EXACT },
+      children: [
+        new TableCell({
+          width: { size: LABEL, type: WidthType.DXA },
+          borders: NO_CELL_BORDERS,
+          verticalAlign: VerticalAlign.CENTER,
+          children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, font: 'Times New Roman', size: 28 })] })],
+        }),
+        ...cells,
+      ],
+    })],
+  });
+}
+
 // Генерация таблицы для одного вопроса
-export async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Promise<Table> {
+export async function createQuestionTable(q: any, qNumber: number, isTg: boolean, opts: QuestionOpts = {}): Promise<Table> {
   const qText = isTg ? (q.content_tg || q.content) : (q.content_ru || q.content) || '';
   const imgBuffer = q.image_url ? await fetchImageBuffer(q.image_url) : null;
 
@@ -601,6 +640,10 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       .sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
 
     const maxLen = Math.max(leftItems.length, rightItems.length);
+    const grid = opts.matchingGrid;
+    const gridSize = grid ? imageSize(grid) : null;
+    const colW = grid ? 3100 : 4424;
+    const spanCols = grid ? 3 : 2;
     const leftImgBuffers = await Promise.all(
       leftItems.map((m: any) => m.image_url ? fetchImageBuffer(m.image_url) : Promise.resolve(null))
     );
@@ -613,7 +656,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
         children: [
           createNumberCell(qNumber),
           new TableCell({
-            columnSpan: 2,
+            columnSpan: spanCols,
             width: { size: 8848, type: WidthType.DXA },
             margins: CELL_MARGINS,
             borders: QUESTION_TOP_BORDERS,
@@ -633,7 +676,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
           children: [
             createEmptyNumCell(),
             new TableCell({
-              columnSpan: 2,
+              columnSpan: spanCols,
               width: { size: 8848, type: WidthType.DXA },
               margins: CELL_MARGINS,
               borders: NO_CELL_BORDERS,
@@ -707,17 +750,28 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
           children: [
             createEmptyNumCell(),
             new TableCell({
-              width: { size: 4424, type: WidthType.DXA },
+              width: { size: colW, type: WidthType.DXA },
               margins: CELL_MARGINS,
               borders: NO_CELL_BORDERS,
               children: leftParas,
             }),
             new TableCell({
-              width: { size: 4424, type: WidthType.DXA },
+              width: { size: colW, type: WidthType.DXA },
               margins: CELL_MARGINS,
               borders: NO_CELL_BORDERS,
               children: rightParas,
             }),
+            ...(grid && gridSize && rowIdx === 0 ? [new TableCell({
+              rowSpan: maxLen,
+              width: { size: 2648, type: WidthType.DXA },
+              margins: CELL_MARGINS,
+              borders: NO_CELL_BORDERS,
+              verticalAlign: VerticalAlign.TOP,
+              children: [new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [new ImageRun({ data: grid, transformation: { width: 160, height: Math.round((160 * gridSize.h) / gridSize.w) }, type: 'png' })],
+              })],
+            })] : []),
           ],
         })
       );
@@ -725,7 +779,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
     return new Table({
       width: { size: 9348, type: WidthType.DXA },
-      columnWidths: [500, 4424, 4424],
+      columnWidths: grid ? [500, 3100, 3100, 2648] : [500, 4424, 4424],
       borders: NO_TABLE_BORDERS,
       rows,
     });
@@ -780,14 +834,16 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
           width: { size: 8848, type: WidthType.DXA },
           margins: CELL_MARGINS,
           borders: NO_CELL_BORDERS,
-          children: [
-            new Paragraph({
-              children: [
-                new TextRun({ text: ansLabel, bold: true, font: 'Times New Roman', size: 28 }),
-                new TextRun({ text: '________________________', font: 'Times New Roman', size: 28 }),
-              ],
-            }),
-          ],
+          children: opts.openBoxes
+            ? [createAnswerBoxes(ansLabel.trim(), opts.openBoxes), new Paragraph({ spacing: { before: 0, after: 0 }, children: [] })]
+            : [
+              new Paragraph({
+                children: [
+                  new TextRun({ text: ansLabel, bold: true, font: 'Times New Roman', size: 28 }),
+                  new TextRun({ text: '________________________', font: 'Times New Roman', size: 28 }),
+                ],
+              }),
+            ],
         }),
       ],
     })

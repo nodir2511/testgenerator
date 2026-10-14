@@ -118,3 +118,24 @@ describe('вводный абзац инструкции', () => {
     expect(text(instructionIntro('tj', [all[2]]))).toBe('Саволнома аз як субтест иборат аст: химия. Субтести химия 27 саволу масъаларо дар бар мегирад.');
   });
 });
+
+describe('оформление книжки кластера', () => {
+  it('вопросы не разрываются, у открытых клетки (5 у таджикского, 4 у остальных), у соответствия таблица ответа', async () => {
+    const { buildClusterVariantBlob, CLUSTER_SLOTS } = await import('../src/lib/clusterExport');
+    const variant = {
+      number: 1,
+      subjects: CLUSTER_SLOTS.map(() => [test(1), matching(1), open(1)]),
+    };
+    const blob = await buildClusterVariantBlob({ code: 'А.5', exam: 'Авг', date: '27.09' }, variant, 'ru');
+    const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
+    expect(xml).toContain('<w:cantSplit');
+    expect(xml).toContain('<w:vMerge'); // таблица ответа на соответствие растянута на строки списка
+    // клетки ответа: строка высотой 480 с (1 + N) ячейками — считаем строки с точной высотой
+    expect((xml.match(/w:hRule="exact"/g) || []).length).toBe(4);
+    const rows = xml.match(/<w:tr>(?:(?!<\/w:tr>)[\s\S])*?w:hRule="exact"[\s\S]*?<\/w:tr>/g) || [];
+    const counts = rows.map((r) => (r.match(/<w:tc>/g) || []).length);
+    // таджикский на одну клетку длиннее остальных (вложенность добавляет одинаковое смещение)
+    expect(counts[0] - counts[1]).toBe(1);
+    expect(new Set(counts.slice(1)).size).toBe(1);
+  });
+});
