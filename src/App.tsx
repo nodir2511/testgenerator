@@ -9,9 +9,12 @@ const TicketGenerator = lazy(() => import('./components/TicketGenerator').then((
 const SavedTicketsView = lazy(() => import('./components/SavedTicketsView').then((m) => ({ default: m.SavedTicketsView })));
 const BulkImport = lazy(() => import('./components/BulkImport').then((m) => ({ default: m.BulkImport })));
 const UserManagementView = lazy(() => import('./components/UserManagementView').then((m) => ({ default: m.UserManagementView })));
+const ReleasesView = lazy(() => import('./components/ReleasesView').then((m) => ({ default: m.ReleasesView })));
 const StatsView = lazy(() => import('./components/StatsView').then((m) => ({ default: m.StatsView })));
 import { AuthModal } from './components/AuthModal';
 import { TelegramLink } from './components/TelegramLink';
+import { WhatsNewModal } from './components/WhatsNewModal';
+import { useReleases } from './hooks/useReleases';
 import { Question, ROLE_LABELS } from './types/database';
 import { 
   BookOpen, 
@@ -25,19 +28,21 @@ import {
   User as UserIcon,
   Menu,
   BarChart3,
+  Bell,
+  Megaphone,
   X,
   FileQuestion,
   Loader2,
   CheckCircle2
 } from 'lucide-react';
 
-type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats';
+type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'releases';
 
 export const App: React.FC = () => {
   const { user, profile, isAdmin, isOwner, isStaff, signOut, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const saved = localStorage.getItem('examiner_active_tab');
-    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats'];
+    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats', 'releases'];
     return (validTabs.includes(saved as TabType)) ? (saved as TabType) : 'generator';
   });
   const adminOnlyTabs: TabType[] = ['users', 'stats'];
@@ -61,6 +66,20 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [saveToast]);
 
+  // Обновления сайта: окно «Что нового» при входе, пока есть непрочитанные версии
+  const { unread, markRead } = useReleases();
+  const [newsDismissed, setNewsDismissed] = useState(false);
+  const showNews = !!user && !newsDismissed && unread.length > 0 && currentTab !== 'releases';
+  const closeNews = () => {
+    setNewsDismissed(true);
+    markRead(unread.map((r) => r.id));
+  };
+  const openReleases = () => {
+    setActiveTab('releases');
+    setIsQuestionFormOpen(false);
+    setMobileMenuOpen(false);
+  };
+
   // Навигационные ссылки
   const navItems = [
     { id: 'questions', label: 'Банк вопросов', icon: FileQuestion },
@@ -70,6 +89,7 @@ export const App: React.FC = () => {
     ...(isStaff ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
     ...(isAdmin ? [{ id: 'users', label: 'Пользователи и аудит', icon: Users }] : []),
     ...(isAdmin ? [{ id: 'stats', label: 'Статистика', icon: BarChart3 }] : []),
+    { id: 'releases', label: 'Что нового', icon: Megaphone },
   ];
 
   const handleAddQuestion = () => {
@@ -139,6 +159,12 @@ export const App: React.FC = () => {
                 </div>
               </div>
               <TelegramLink />
+              <button onClick={openReleases} className="relative p-1.5 text-slate-400 hover:text-blue-600 rounded-lg transition" title="Что нового" aria-label="Что нового">
+                <Bell className="w-4 h-4" />
+                {unread.length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center">{unread.length}</span>
+                )}
+              </button>
               <button
                 onClick={() => signOut()}
                 className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition"
@@ -151,6 +177,12 @@ export const App: React.FC = () => {
 
           {/* Мобильная кнопка бургера */}
           <div className="md:hidden flex items-center space-x-2">
+            <button onClick={openReleases} className="relative p-2 text-slate-500 hover:text-blue-600 rounded-lg transition" title="Что нового" aria-label="Что нового">
+              <Bell className="w-4 h-4" />
+              {unread.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center">{unread.length}</span>
+              )}
+            </button>
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100"
@@ -259,10 +291,13 @@ export const App: React.FC = () => {
             )}
             {currentTab === 'users' && <UserManagementView />}
             {currentTab === 'stats' && <StatsView />}
+            {currentTab === 'releases' && <ReleasesView />}
           </>
         )}
         </Suspense>
       </main>
+
+      {showNews && <WhatsNewModal releases={unread} onClose={closeNews} onOpenHistory={() => { closeNews(); openReleases(); }} />}
 
       {/* Подтверждение сохранения */}
       {saveToast && (
