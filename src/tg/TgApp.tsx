@@ -398,10 +398,10 @@ export default function TgApp() {
                 </div>
               )}
               {c.topics.length === 0 && <p className="tg-hint">В главе нет тем — берутся все вопросы главы.</p>}
-              {c.topics.map((t) => (
+              {c.topics.map((t, i) => (
                 <label key={t.id} className={`tg-row tg-check ${topicSel.includes(t.id) ? 'on' : ''}`}>
                   <input type="checkbox" checked={topicSel.includes(t.id)} onChange={() => setTopicSel(toggle(topicSel, t.id))} />
-                  <span className="tg-grow">{shortName(t.name, 80)}</span>
+                  <span className="tg-grow">{i + 1}. {shortName(t.name, 80)}</span>
                   <span className="tg-badge">{count(t.counts)}</span>
                 </label>
               ))}

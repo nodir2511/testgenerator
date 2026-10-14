@@ -687,12 +687,12 @@ export const TicketGenerator: React.FC = () => {
                     className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm transition"
                   >
                     {/* Заголовок главы (аккордеон) */}
-                    <div className="flex items-center justify-between p-2.5 bg-slate-50 hover:bg-slate-100/70 transition select-none">
-                      <div className="flex items-center space-x-2 flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 p-2.5 bg-slate-50 hover:bg-slate-100/70 transition select-none">
+                      <div className="flex items-start space-x-2 flex-1 min-w-[12rem]">
                         <button
                           type="button"
                           onClick={() => toggleChapterExpanded(ch.id)}
-                          className="p-1 text-slate-500 hover:text-slate-800 rounded transition"
+                          className="p-1 text-slate-500 hover:text-slate-800 rounded transition shrink-0"
                           title={isExpanded ? 'Свернуть список тем' : 'Раскрыть список тем'}
                         >
                           {isExpanded ? (
@@ -702,7 +702,7 @@ export const TicketGenerator: React.FC = () => {
                           )}
                         </button>
 
-                        <label className="flex items-center space-x-2 cursor-pointer truncate">
+                        <label className="flex items-start space-x-2 cursor-pointer min-w-0 flex-1">
                           <input
                             type="checkbox"
                             checked={isAllSelected}
@@ -710,19 +710,19 @@ export const TicketGenerator: React.FC = () => {
                               if (e.target.checked) handleSelectChapterTopics(ch.id);
                               else handleDeselectChapterTopics(ch.id);
                             }}
-                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                            className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 shrink-0"
                           />
-                          <span className="font-bold text-xs text-slate-900 truncate">
+                          <span className="font-bold text-xs text-slate-900 break-words leading-snug">
                             {ch.name}
                           </span>
                         </label>
 
-                        <span className="text-[11px] text-slate-400 font-medium shrink-0">
+                        <span className="text-[11px] text-slate-400 font-medium shrink-0 mt-0.5">
                           ({chSelectedTopics.length}/{chTopics.length} тем)
                         </span>
                       </div>
 
-                      <div className="flex items-center space-x-1 shrink-0 ml-2">
+                      <div className="flex items-center space-x-1 shrink-0 ml-8 sm:ml-2">
                         <button
                           type="button"
                           onClick={() => handleSelectChapterTopics(ch.id)}
@@ -747,7 +747,7 @@ export const TicketGenerator: React.FC = () => {
                         {chTopics.length === 0 ? (
                           <div className="text-xs text-slate-400 italic p-2">В этой главе пока нет тем</div>
                         ) : (
-                          chTopics.map(tp => {
+                          chTopics.map((tp, tpIdx) => {
                             const isChecked = selectedTopicIds.includes(tp.id);
                             return (
                               <label
@@ -764,7 +764,7 @@ export const TicketGenerator: React.FC = () => {
                                   onChange={(e) => handleToggleTopic(tp.id, ch.id, e.target.checked)}
                                   className="mt-0.5 w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 shrink-0"
                                 />
-                                <span className="leading-snug">{tp.name}</span>
+                                <span className="leading-snug">{tpIdx + 1}. {tp.name}</span>
                               </label>
                             );
                           })
