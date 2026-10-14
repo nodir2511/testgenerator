@@ -187,3 +187,24 @@ export interface AuditLog {
   details?: Record<string, unknown> | null;
   created_at: string;
 }
+
+/** Уровень роли для видимости обновлений: 4 главный админ, 3 админ, 2 админ по предметам, 1 преподаватель */
+export type ReleaseRank = 1 | 2 | 3 | 4;
+export type ReleaseItemKind = 'new' | 'fixed' | 'improved';
+
+export interface SiteReleaseItem {
+  id: string;
+  release_id: string;
+  kind: ReleaseItemKind;
+  text: string;
+  min_rank: ReleaseRank;
+  order_index: number;
+}
+
+export interface SiteRelease {
+  id: string;
+  version: string;
+  title: string;
+  released_at: string;
+  site_release_items: SiteReleaseItem[];
+}

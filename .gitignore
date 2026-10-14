@@ -63,3 +63,4 @@ supabase/.temp/
 !templates/key/*.docx
 !public/key-templates/*.docx
 !supabase/sql/*.sql
+!supabase/sql/releases/*.sql
