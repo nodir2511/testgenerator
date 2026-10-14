@@ -159,3 +159,28 @@ describe('хранение кластера', () => {
     expect(v[0].subjects[0]!.length).toBe(1);
   });
 });
+
+describe('химия и физика: надпись под последним вопросом страницы', () => {
+  it('страницы расставлены, надпись стоит после каждой группы вопросов', async () => {
+    const { buildClusterVariantBlob, CLUSTER_SLOTS } = await import('../src/lib/clusterExport');
+    const variant = {
+      number: 1,
+      subjects: CLUSTER_SLOTS.map((s) => s.kind === 'chem'
+        ? [
+          ...Array.from({ length: 18 }, (_, i) => test(i)),
+          ...Array.from({ length: 2 }, (_, i) => matching(i)),
+          ...Array.from({ length: 7 }, (_, i) => open(i)),
+        ]
+        : [test(1)]),
+    };
+    const blob = await buildClusterVariantBlob({ code: 'А.5', exam: 'Авг', date: '27.09' }, variant, 'ru');
+    const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
+    const labels = (xml.match(/Место для черновика/g) || []).length;
+    const breaks = (xml.match(/<w:pageBreakBefore/g) || []).length;
+    // у физики один вопрос = одна страница с надписью; у химии 27 вопросов не помещаются на одной
+    expect(labels).toBeGreaterThanOrEqual(3);
+    expect(breaks).toBeGreaterThanOrEqual(2);
+    // надпись на каждой странице: разрывов на 2 меньше (первые страницы химии и физики без разрыва), плюс один разрыв страницы инструкции
+    expect(labels).toBe(breaks - 1 + 2);
+  });
+});

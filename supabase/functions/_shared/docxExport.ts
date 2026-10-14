@@ -98,7 +98,7 @@ const cellInnerPt = (twips: number) => (twips - CELL_MARGINS.left - CELL_MARGINS
 
 // Отступы ячейки с номером вопроса
 const NUMBER_CELL_MARGINS = {
-  top: 80,
+  top: 0,
   bottom: 0,
   left: 0,
   right: 0,
@@ -249,7 +249,7 @@ function createNumberCell(qNumber: number): TableCell {
         // Серая плашка задана у абзаца, а не у ячейки: она остаётся в одну строку, даже если вопрос длинный
         shading: NUMBER_SHADING,
         border: { bottom: NUMBER_PLATE_LINE, left: NUMBER_PLATE_LINE, right: NUMBER_PLATE_LINE },
-        spacing: { before: 40, after: 40 },
+        spacing: { before: 0, after: 40 },
         children: [
           new TextRun({ text: String(qNumber), bold: true, font: 'Times New Roman', size: 28 }),
         ],
@@ -259,10 +259,10 @@ function createNumberCell(qNumber: number): TableCell {
 }
 
 // Создание пустой ячейки под номером для выравнивания
-function createEmptyNumCell(): TableCell {
+function createEmptyNumCell(margins = CELL_MARGINS): TableCell {
   return new TableCell({
     width: { size: 500, type: WidthType.DXA },
-    margins: CELL_MARGINS,
+    margins,
     borders: NO_CELL_BORDERS,
     children: [new Paragraph({ children: [] })],
   });
@@ -274,7 +274,13 @@ export interface QuestionOpts {
   openBoxes?: number;
   /** Картинка таблицы для ответа на соответствие (A–D × 1–5), ставится справа от списков */
   matchingGrid?: Uint8Array;
+  /** Подпись над таблицей ответа («Ответ:» / «Ҷавоб:») */
+  matchingGridLabel?: string;
+  /** Меньше пустого места между вопросом и вариантами ответа и между самими вариантами */
+  compact?: boolean;
 }
+
+const COMPACT_MARGINS = { top: 20, bottom: 20, left: 100, right: 100 };
 
 // «Ответ: □□□□» — подпись и ряд клеток по числу цифр
 function createAnswerBoxes(label: string, n: number): Table {
@@ -305,8 +311,55 @@ function createAnswerBoxes(label: string, n: number): Table {
   });
 }
 
+// Приблизительная высота вопроса в пунктах (по тем же правилам, что и вёрстка ниже; с запасом).
+// Нужна, чтобы расставить страницы заранее (экзамен-кластер: надпись «Место для черновика» под последним вопросом страницы).
+export async function estimateQuestionHeightPt(q: any, isTg: boolean, compact = true): Promise<number> {
+  const LINE = 17;
+  const m = compact ? 2 : 8; // поля ячейки сверху и снизу
+  const lines = (text: string, widthPt: number, bold = false) =>
+    Math.max(1, Math.ceil((textWidthEm(text) * FONT_PT * (bold ? 1.1 : 1.05)) / widthPt));
+  const textPt = 432;
+  const pick = (ru: any, tg: any, base: any) => (isTg ? (tg || base) : (ru || base)) || '';
+
+  let h = 1 + lines(pick(q.content_ru, q.content_tg, q.content), textPt, true) * LINE + m;
+  const img = q.image_url ? await fetchImageBuffer(q.image_url) : null;
+  if (img) h += fitImage(img, 540, 340, 2.5).height * 0.75 + 4 + m;
+
+  if (q.type === 'test' && q.options && q.options.length > 0) {
+    const opts = [...q.options].sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
+    const texts: string[] = opts.map((o: any) => pick(o.text_ru, o.text_tg, o.text));
+    const hasImg = opts.some((o: any) => o.image_url);
+    const maxW = Math.max(...texts.map(optionWidthPt), 0);
+    const isShort = !hasImg && opts.length <= 4 && maxW <= cellInnerPt(2212);
+    const isMedium = !isShort && opts.length <= 4 && maxW <= cellInnerPt(4424);
+    if (isShort) h += LINE + m;
+    else if (isMedium) {
+      for (let i = 0; i < texts.length; i += 2) {
+        const l = Math.max(lines(texts[i], 210), lines(texts[i + 1] ?? '', 210));
+        h += l * LINE + m;
+      }
+    } else {
+      texts.forEach((t, i) => { h += lines(t, textPt) * LINE + m + (opts[i].image_url ? 72 : 0); });
+    }
+  } else if (q.type === 'matching' && q.matching_items && q.matching_items.length > 0) {
+    const left = q.matching_items.filter((x: any) => x.side === 'left');
+    const right = q.matching_items.filter((x: any) => x.side === 'right');
+    let rows = 0;
+    for (let i = 0; i < Math.max(left.length, right.length); i++) {
+      const lt = left[i] ? pick(left[i].text_ru, left[i].text_tg, left[i].text) : '';
+      const rt = right[i] ? pick(right[i].text_ru, right[i].text_tg, right[i].text) : '';
+      rows += Math.max(lines(lt, 140), lines(rt, 140)) * LINE + m + (left[i]?.image_url || right[i]?.image_url ? 64 : 0);
+    }
+    h += Math.max(rows, 105); // не ниже таблицы для ответа
+  } else {
+    h += 28 + m; // ряд клеток для ответа
+  }
+  return h + 25; // промежуток между вопросами
+}
+
 // Генерация таблицы для одного вопроса
 export async function createQuestionTable(q: any, qNumber: number, isTg: boolean, opts: QuestionOpts = {}): Promise<Table> {
+  const cm = opts.compact ? COMPACT_MARGINS : CELL_MARGINS;
   const qText = isTg ? (q.content_tg || q.content) : (q.content_ru || q.content) || '';
   const imgBuffer = q.image_url ? await fetchImageBuffer(q.image_url) : null;
 
@@ -334,7 +387,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
             new TableCell({
               columnSpan: 4,
               width: { size: 8848, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: QUESTION_TOP_BORDERS,
               children: [
                 new Paragraph({
@@ -350,11 +403,11 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
         rows.push(
           new TableRow({
             children: [
-              createEmptyNumCell(),
+              createEmptyNumCell(cm),
               new TableCell({
                 columnSpan: 4,
                 width: { size: 8848, type: WidthType.DXA },
-                margins: CELL_MARGINS,
+                margins: cm,
                 borders: NO_CELL_BORDERS,
                 children: [
                   new Paragraph({
@@ -369,7 +422,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       }
 
       const letters = ['A', 'B', 'C', 'D'];
-      const optCells = [createEmptyNumCell()];
+      const optCells = [createEmptyNumCell(cm)];
 
       for (let i = 0; i < 4; i++) {
         const o = opts[i];
@@ -377,7 +430,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
         optCells.push(
           new TableCell({
             width: { size: 2212, type: WidthType.DXA },
-            margins: CELL_MARGINS,
+            margins: cm,
             borders: NO_CELL_BORDERS,
             children: [
               new Paragraph({
@@ -407,7 +460,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
             new TableCell({
               columnSpan: 2,
               width: { size: 8848, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: QUESTION_TOP_BORDERS,
               children: [
                 new Paragraph({
@@ -423,11 +476,11 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
         rows.push(
           new TableRow({
             children: [
-              createEmptyNumCell(),
+              createEmptyNumCell(cm),
               new TableCell({
                 columnSpan: 2,
                 width: { size: 8848, type: WidthType.DXA },
-                margins: CELL_MARGINS,
+                margins: cm,
                 borders: NO_CELL_BORDERS,
                 children: [
                   new Paragraph({
@@ -449,10 +502,10 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       rows.push(
         new TableRow({
           children: [
-            createEmptyNumCell(),
+            createEmptyNumCell(cm),
             new TableCell({
               width: { size: 4424, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: NO_CELL_BORDERS,
               children: [
                 new Paragraph({
@@ -471,7 +524,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
             }),
             new TableCell({
               width: { size: 4424, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: NO_CELL_BORDERS,
               children: [
                 new Paragraph({
@@ -500,10 +553,10 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       rows.push(
         new TableRow({
           children: [
-            createEmptyNumCell(),
+            createEmptyNumCell(cm),
             new TableCell({
               width: { size: 4424, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: NO_CELL_BORDERS,
               children: [
                 new Paragraph({
@@ -522,7 +575,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
             }),
             new TableCell({
               width: { size: 4424, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: NO_CELL_BORDERS,
               children: [
                 new Paragraph({
@@ -556,7 +609,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
             createNumberCell(qNumber),
             new TableCell({
               width: { size: 8848, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: QUESTION_TOP_BORDERS,
               children: [
                 new Paragraph({
@@ -572,10 +625,10 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
         rows.push(
           new TableRow({
             children: [
-              createEmptyNumCell(),
+              createEmptyNumCell(cm),
               new TableCell({
                 width: { size: 8848, type: WidthType.DXA },
-                margins: CELL_MARGINS,
+                margins: cm,
                 borders: NO_CELL_BORDERS,
                 children: [
                   new Paragraph({
@@ -596,10 +649,10 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
         rows.push(
           new TableRow({
             children: [
-              createEmptyNumCell(),
+              createEmptyNumCell(cm),
               new TableCell({
                 width: { size: 8848, type: WidthType.DXA },
-                margins: CELL_MARGINS,
+                margins: cm,
                 borders: NO_CELL_BORDERS,
                 children: [
                   new Paragraph({
@@ -658,7 +711,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
           new TableCell({
             columnSpan: spanCols,
             width: { size: 8848, type: WidthType.DXA },
-            margins: CELL_MARGINS,
+            margins: cm,
             borders: QUESTION_TOP_BORDERS,
             children: [
               new Paragraph({
@@ -674,11 +727,11 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       rows.push(
         new TableRow({
           children: [
-            createEmptyNumCell(),
+            createEmptyNumCell(cm),
             new TableCell({
               columnSpan: spanCols,
               width: { size: 8848, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: NO_CELL_BORDERS,
               children: [
                 new Paragraph({
@@ -748,29 +801,36 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       rows.push(
         new TableRow({
           children: [
-            createEmptyNumCell(),
+            createEmptyNumCell(cm),
             new TableCell({
               width: { size: colW, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: NO_CELL_BORDERS,
               children: leftParas,
             }),
             new TableCell({
               width: { size: colW, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: NO_CELL_BORDERS,
               children: rightParas,
             }),
             ...(grid && gridSize && rowIdx === 0 ? [new TableCell({
               rowSpan: maxLen,
               width: { size: 2648, type: WidthType.DXA },
-              margins: CELL_MARGINS,
+              margins: cm,
               borders: NO_CELL_BORDERS,
               verticalAlign: VerticalAlign.TOP,
-              children: [new Paragraph({
-                alignment: AlignmentType.CENTER,
-                children: [new ImageRun({ data: grid, transformation: { width: 160, height: Math.round((160 * gridSize.h) / gridSize.w) }, type: 'png' })],
-              })],
+              children: [
+                ...(opts.matchingGridLabel ? [new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  spacing: { after: 40 },
+                  children: [new TextRun({ text: opts.matchingGridLabel, bold: true, font: 'Times New Roman', size: 28 })],
+                })] : []),
+                new Paragraph({
+                  alignment: AlignmentType.CENTER,
+                  children: [new ImageRun({ data: grid, transformation: { width: 140, height: Math.round((140 * gridSize.h) / gridSize.w) }, type: 'png' })],
+                }),
+              ],
             })] : []),
           ],
         })
@@ -792,7 +852,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
         createNumberCell(qNumber),
         new TableCell({
           width: { size: 8848, type: WidthType.DXA },
-          margins: CELL_MARGINS,
+          margins: cm,
           borders: QUESTION_TOP_BORDERS,
           children: [
             new Paragraph({
@@ -808,10 +868,10 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
     rows.push(
       new TableRow({
         children: [
-          createEmptyNumCell(),
+          createEmptyNumCell(cm),
           new TableCell({
             width: { size: 8848, type: WidthType.DXA },
-            margins: CELL_MARGINS,
+            margins: cm,
             borders: NO_CELL_BORDERS,
             children: [
               new Paragraph({
@@ -829,10 +889,10 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
   rows.push(
     new TableRow({
       children: [
-        createEmptyNumCell(),
+        createEmptyNumCell(cm),
         new TableCell({
           width: { size: 8848, type: WidthType.DXA },
-          margins: CELL_MARGINS,
+          margins: cm,
           borders: NO_CELL_BORDERS,
           children: opts.openBoxes
             ? [createAnswerBoxes(ansLabel.trim(), opts.openBoxes), new Paragraph({ spacing: { before: 0, after: 0 }, children: [] })]

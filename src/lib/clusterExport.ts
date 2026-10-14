@@ -3,7 +3,7 @@ import {
   WidthType, BorderStyle, ShadingType, Footer, PageNumber, TabStopType, SectionType, VerticalAlign, LineRuleType,
 } from 'docx';
 import JSZip from 'jszip';
-import { createQuestionTable, type QuestionOpts } from './docxExport';
+import { createQuestionTable, estimateQuestionHeightPt, type QuestionOpts } from './docxExport';
 import { buildAnswerKeyFile } from './answerKeyExport';
 
 // Кластерный экзамен: тестовая книжка из 4 предметов (таджикский язык, биология, химия, физика)
@@ -44,6 +44,12 @@ const MARGIN = { top: 1134, bottom: 1134, left: 1134, right: 1134 };
 const DRAFT_SHARE = 0.35;
 const A4_HEIGHT_TWIPS = 16838;
 const DRAFT_BOTTOM = MARGIN.bottom + Math.round(DRAFT_SHARE * (A4_HEIGHT_TWIPS - MARGIN.top - MARGIN.bottom));
+// Оценка места на странице химии и физики (пункты): свободная часть страницы под черновик + запас на неточность оценки
+const PAGE_BODY_PT = (A4_HEIGHT_TWIPS - MARGIN.top - DRAFT_BOTTOM) / 20;
+const PAGE_BUDGET_PT = PAGE_BODY_PT * 0.9;
+const BAND_PT = 40; // полоса с названием предмета на первой странице
+const DRAFT_LABEL_PT = 34;
+const PLAQUE_PT = 56;
 const NONE = { style: BorderStyle.NONE, size: 0, color: 'auto' };
 const NO_BORDERS = { top: NONE, bottom: NONE, left: NONE, right: NONE, insideHorizontal: NONE, insideVertical: NONE };
 const NO_CELL_BORDERS = { top: NONE, bottom: NONE, left: NONE, right: NONE };
@@ -54,12 +60,14 @@ const L = {
     subjects: { taj: 'Таджикский язык', bio: 'Биология', chem: 'Химия', phys: 'Физика' },
     bands: { taj: 'ТАДЖИКСКИЙ ЯЗЫК', bio: 'БИОЛОГИЯ', chem: 'ХИМИЯ', phys: 'ФИЗИКА' },
     aux: { chem: 'Вспомогательный материал по химии', phys: 'Вспомогательный материал по физике' },
+    draft: 'Место для черновика',
   },
   tj: {
     component: 'Қисми', variant: 'Варианти', instruction: 'Дастур',
     subjects: { taj: 'Забони тоҷикӣ', bio: 'Биология', chem: 'Химия', phys: 'Физика' },
     bands: { taj: 'ЗАБОНИ ТОҶИКӢ', bio: 'БИОЛОГИЯ', chem: 'ХИМИЯ', phys: 'ФИЗИКА' },
     aux: { chem: 'Маводи ёрирасон аз фанни химия', phys: 'Маводи ёрирасон аз фанни физика' },
+    draft: 'Ҷой барои сиёҳнавис',
   },
 } as const;
 
@@ -70,8 +78,9 @@ const PILL = {
 };
 
 const assetCache = new Map<string, Promise<Uint8Array>>();
-function asset(lang: ClusterLang, name: string): Promise<Uint8Array> {
-  const url = `/cluster-assets/${lang}_${name}.png`;
+const assetNeutral = (name: string) => loadAsset(`/cluster-assets/${name}.png`);
+const asset = (lang: ClusterLang, name: string) => loadAsset(`/cluster-assets/${lang}_${name}.png`);
+function loadAsset(url: string): Promise<Uint8Array> {
   if (!assetCache.has(url)) {
     assetCache.set(url, (async () => {
       const res = await fetch(url);
@@ -168,38 +177,6 @@ async function bigNumber(n: number): Promise<Uint8Array> {
   g.strokeText(text, x, y);
   g.fillStyle = '#ffffff';
   g.fillText(text, x, y);
-  return canvasToPng(c);
-}
-
-// Таблица для заполнения ответа на соответствие: A–D по вертикали, 1–5 по горизонтали
-async function answerGrid(lang: ClusterLang): Promise<Uint8Array> {
-  const c = document.createElement('canvas');
-  c.width = 470;
-  c.height = 380;
-  const g = c.getContext('2d')!;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillStyle = '#000000';
-  g.font = `bold 38px "${FONT}", serif`;
-  g.fillText(lang === 'tj' ? 'Ҷавоб:' : 'Ответ:', 235, 28);
-  g.fillStyle = '#c4c4c4';
-  roundedRect(g, 40, 56, 410, 316, 14);
-  g.fill();
-  g.font = `bold 32px "${FONT}", serif`;
-  for (let i = 0; i < 5; i++) {
-    g.fillStyle = '#222222';
-    g.fillText(String(i + 1), 170 + i * 58, 84);
-  }
-  for (let j = 0; j < 4; j++) {
-    g.fillStyle = '#222222';
-    g.fillText('ABCD'[j], 82, 150 + j * 64);
-    for (let i = 0; i < 5; i++) {
-      g.beginPath();
-      g.arc(170 + i * 58, 150 + j * 64, 25, 0, Math.PI * 2);
-      g.fillStyle = '#ffffff';
-      g.fill();
-    }
-  }
   return canvasToPng(c);
 }
 
@@ -335,7 +312,7 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
   const page = { margin: MARGIN };
 
   const included = CLUSTER_SLOTS.map((_, s) => variant.subjects[s] != null);
-  const grid = await answerGrid(lang);
+  const grid = await assetNeutral('grid');
   const [header, subjectImgs, attention, instr1Top, instr1Rest, instr2, plaque, auxPhys, auxChem, title, digit] = await Promise.all([
     asset(lang, 'header'), Promise.all(CLUSTER_SLOTS.map((s, i) => (included[i] ? asset(lang, `subj_${s.kind}`) : Promise.resolve(new Uint8Array())))), asset(lang, 'attention'), asset(lang, 'instr1_top'), asset(lang, 'instr1_rest'), asset(lang, 'instr2'),
     asset(lang, 'plaque'), asset(lang, 'aux_phys'), asset(lang, 'aux_chem'), titleWithDate(lang, settings.date), bigNumber(variant.number),
@@ -406,12 +383,45 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
     const qs = variant.subjects[s];
     if (!qs) continue;
     const children: any[] = [band(t.bands[kind]), gap(160)];
-    for (let i = 0; i < qs.length; i++) {
-      const opts: QuestionOpts = { openBoxes: kind === 'taj' ? 5 : 4, matchingGrid: grid };
-      children.push(keepTogether(await createQuestionTable(qs[i], i + 1, isTg, opts)));
-      children.push(gap(180));
+    const withDraft = kind === 'chem' || kind === 'phys';
+    const opts: QuestionOpts = { openBoxes: kind === 'taj' ? 5 : 4, matchingGrid: grid, matchingGridLabel: isTg ? 'Ҷавоб:' : 'Ответ:', compact: true };
+    const question = async (i: number) => keepTogether(await createQuestionTable(qs[i], i + 1, isTg, opts));
+
+    if (!withDraft) {
+      for (let i = 0; i < qs.length; i++) {
+        children.push(await question(i), gap(180));
+      }
+      children.push(imgPara(plaque, 600, { before: 120, after: 0 }));
+    } else {
+      // Химия и физика: страницы расставляем сами (по оценке высоты), чтобы надпись «Место для черновика»
+      // стояла сразу под последним вопросом каждой страницы; ниже остаётся свободное место
+      const heights = await Promise.all(qs.map((q) => estimateQuestionHeightPt(q, isTg, true)));
+      const groups: number[][] = [];
+      let cur: number[] = [];
+      let used = BAND_PT;
+      heights.forEach((h, i) => {
+        if (cur.length && used + h + DRAFT_LABEL_PT > PAGE_BUDGET_PT) { groups.push(cur); cur = []; used = 0; }
+        cur.push(i);
+        used += h;
+      });
+      if (cur.length) groups.push(cur);
+      // последней странице нужно место и под плашку «Не забудьте…»
+      const last = groups[groups.length - 1];
+      if (last && last.length > 1) {
+        const lastUsed = last.reduce((n, i) => n + heights[i], groups.length === 1 ? BAND_PT : 0);
+        if (lastUsed + DRAFT_LABEL_PT + PLAQUE_PT > PAGE_BUDGET_PT) groups.push([last.pop() as number]);
+      }
+      for (let g = 0; g < groups.length; g++) {
+        if (g > 0) children.push(new Paragraph({ pageBreakBefore: true, spacing: { before: 0, after: 0, line: 20, lineRule: LineRuleType.EXACT }, children: [] }));
+        for (const i of groups[g]) children.push(await question(i), gap(180));
+        children.push(new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 60, after: 0 },
+          children: [run(t.draft, { size: 28, color: '808080' })],
+        }));
+        if (g === groups.length - 1) children.push(imgPara(plaque, 600, { before: 160, after: 0 }));
+      }
     }
-    children.push(imgPara(plaque, 600, { before: 120, after: 0 }));
     const subjectPage = kind === 'chem' || kind === 'phys' ? { margin: { ...MARGIN, bottom: DRAFT_BOTTOM } } : page;
     sections.push({ properties: { page: subjectPage, type: SectionType.NEXT_PAGE }, footers: { default: footer(footLabel(t.subjects[kind])) }, children });
   }
@@ -433,7 +443,7 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
   }
 
   const doc = new Document({
-    styles: { default: { document: { run: { font: FONT, size: 28 } } } },
+    styles: { default: { document: { run: { font: FONT, size: 28 }, paragraph: { spacing: { after: 0 } } } } },
     sections,
   });
   return Packer.toBlob(doc);
