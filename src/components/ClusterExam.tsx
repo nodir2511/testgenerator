@@ -24,6 +24,7 @@ interface Saved {
   variants: number;
   subjectIds: string[];
   counts: Counts[];
+  enabled: boolean[];
 }
 
 const defaults = (): Saved => ({
@@ -31,6 +32,7 @@ const defaults = (): Saved => ({
   variants: 4,
   subjectIds: CLUSTER_SLOTS.map(() => ''),
   counts: CLUSTER_SLOTS.map((s) => ({ ...s.counts })),
+  enabled: CLUSTER_SLOTS.map(() => true),
 });
 
 function load(): Saved {
@@ -79,6 +81,7 @@ export const ClusterExam: React.FC = () => {
   const setSetting = (k: keyof ClusterSettings, v: string) => setState((st) => ({ ...st, settings: { ...st.settings, [k]: v } }));
   const setCount = (i: number, k: keyof Counts, v: number) =>
     setState((st) => ({ ...st, counts: st.counts.map((c, j) => (j === i ? { ...c, [k]: Math.max(0, Math.min(100, v || 0)) } : c)) }));
+  const setEnabled = (i: number, on: boolean) => setState((st) => ({ ...st, enabled: CLUSTER_SLOTS.map((_, j) => (j === i ? on : st.enabled?.[j] !== false)) }));
   const setSubject = (i: number, id: string) => setState((st) => ({ ...st, subjectIds: st.subjectIds.map((x, j) => (j === i ? id : x)) }));
 
   const total = (c: Counts) => c.test + c.matching + c.open;
@@ -90,16 +93,22 @@ export const ClusterExam: React.FC = () => {
     setBusy(true);
     try {
       const { settings, variants: V, subjectIds, counts } = state;
+      const enabled = CLUSTER_SLOTS.map((_, i) => state.enabled?.[i] !== false);
+      if (!enabled.some(Boolean)) throw new Error('Включите хотя бы один предмет');
       if (!settings.code.trim() || !settings.exam.trim() || !settings.date.trim()) throw new Error('Заполните код кластера, название экзамена и дату');
       if (V < 1 || V > MAX_VARIANTS) throw new Error(`Вариантов может быть от 1 до ${MAX_VARIANTS}`);
-      if (subjectIds.some((id) => !id)) throw new Error('Выберите предмет для каждого из 4 субтестов');
+      if (subjectIds.some((id, i) => enabled[i] && !id)) throw new Error('Выберите предмет для каждого включённого субтеста');
 
       const variants: ClusterVariant[] = Array.from({ length: V }, (_, k) => ({ number: k + 1, subjects: [] }));
       const notes: string[] = [];
 
       for (let s = 0; s < CLUSTER_SLOTS.length; s++) {
         const slot = CLUSTER_SLOTS[s];
-        setProgress(`Подбор вопросов: ${slot.name} (${s + 1} из ${CLUSTER_SLOTS.length})…`);
+        if (!enabled[s]) {
+          variants.forEach((v) => v.subjects.push(null));
+          continue;
+        }
+        setProgress(`Подбор вопросов: ${slot.name}…`);
         const { data: all, error: qErr } = await fetchAllPages<any>(() =>
           supabase
             .from('questions')
@@ -192,27 +201,34 @@ export const ClusterExam: React.FC = () => {
 
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <h3 className="font-bold text-slate-900 text-sm">2. Субтесты</h3>
+        <p className="text-[11px] text-slate-400">Снимите галочку у предмета, чтобы не включать его в экзамен.</p>
         <div className="space-y-3">
-          {CLUSTER_SLOTS.map((slot, i) => (
-            <div key={slot.kind} className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <label className="text-xs font-semibold text-slate-600 space-y-1 block">
-                <span>{i + 1}. {slot.name}</span>
-                <select className={input} value={state.subjectIds[i]} onChange={(e) => setSubject(i, e.target.value)}>
+          {CLUSTER_SLOTS.map((slot, i) => {
+            const on = state.enabled?.[i] !== false;
+            return (
+            <div key={slot.kind} className={`grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end p-3 rounded-xl bg-slate-50 border border-slate-200 ${on ? '' : 'opacity-60'}`}>
+              <div className="space-y-1">
+                <label className="flex items-center space-x-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={on} onChange={(e) => setEnabled(i, e.target.checked)} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                  <span>{i + 1}. {slot.name}</span>
+                </label>
+                <select disabled={!on} className={input} value={state.subjectIds[i]} onChange={(e) => setSubject(i, e.target.value)}>
                   <option value="">— выберите предмет —</option>
                   {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
-              </label>
+              </div>
               <div className="flex items-end gap-2 flex-wrap">
                 {([['test', 'Тестов'], ['matching', 'Соответствий'], ['open', 'Открытых']] as const).map(([k, label]) => (
                   <label key={k} className="text-[11px] font-semibold text-slate-500 space-y-1 block">
                     <span>{label}</span>
-                    <input type="number" min={0} className={num} value={state.counts[i][k]} onChange={(e) => setCount(i, k, Number(e.target.value))} />
+                    <input type="number" min={0} disabled={!on} className={num} value={state.counts[i][k]} onChange={(e) => setCount(i, k, Number(e.target.value))} />
                   </label>
                 ))}
                 <span className="text-xs text-slate-500 pb-2">= {total(state.counts[i])}</span>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

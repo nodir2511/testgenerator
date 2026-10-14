@@ -83,3 +83,38 @@ describe('шаблоны ключей и рамка', () => {
     expect(xml).toContain('<w:left w:val="single"');
   });
 });
+
+describe('меньше 4 предметов', () => {
+  it('собирает книжку и ключи только по выбранным предметам', async () => {
+    const { buildClusterZip, CLUSTER_SLOTS } = await import('../src/lib/clusterExport');
+    const pick = [1, 3]; // биология и физика
+    const variants = [{
+      number: 1,
+      subjects: CLUSTER_SLOTS.map((s, i) => pick.includes(i)
+        ? [...Array.from({ length: s.counts.test }, (_, k) => test(k)), ...Array.from({ length: s.counts.matching }, (_, k) => matching(k)), ...Array.from({ length: s.counts.open }, (_, k) => open(k))]
+        : null),
+    }];
+    const file = await buildClusterZip({ code: 'А.5', exam: 'Авг', date: '27.09' }, variants);
+    const zip = await JSZip.loadAsync(await file.blob.arrayBuffer());
+    const keys = Object.keys(zip.files).filter((n) => n.startsWith('Ключи/') && !zip.files[n].dir);
+    expect(keys.length).toBe(2);
+    expect(file.keyOverflow).toBe(0);
+  });
+});
+
+describe('вводный абзац инструкции', () => {
+  const text = (r: Array<{ text: string }>) => r.map((x) => x.text).join('');
+  const all = [{ kind: 'taj', count: 26 }, { kind: 'bio', count: 26 }, { kind: 'chem', count: 27 }, { kind: 'phys', count: 27 }] as const;
+  it('совпадает с образцом при 4 предметах', async () => {
+    const { instructionIntro } = await import('../src/lib/clusterExport');
+    expect(text(instructionIntro('ru', [...all]))).toBe('Тестовая книжка состоит из четырёх субтестов. В субтесты включены задания закрытого типа (с выбором ответа и на соответствие) и открытого типа: в субтестах по таджикскому языку и биологии – 26 заданий, по химии и физике – 27 заданий.');
+    expect(text(instructionIntro('tj', [...all]))).toBe('Саволнома аз чор субтест иборат аст: забони тоҷикӣ, биология, химия ва физика. Субтестҳои забони тоҷикӣ ва биология 26 саволу масъала ва субтестҳои химия ва физика 27 саволу масъаларо дар бар мегиранд.');
+  });
+  it('подстраивается под меньшее число предметов', async () => {
+    const { instructionIntro } = await import('../src/lib/clusterExport');
+    expect(text(instructionIntro('ru', [all[2]]))).toBe('Тестовая книжка состоит из одного субтеста. В субтест включены задания закрытого типа (с выбором ответа и на соответствие) и открытого типа: в субтесте по химии – 27 заданий.');
+    expect(text(instructionIntro('ru', [all[1], all[3]]))).toContain('двух субтестов');
+    expect(text(instructionIntro('ru', [all[1], all[3]]))).toContain('в субтесте по биологии – 26 заданий, по физике – 27 заданий');
+    expect(text(instructionIntro('tj', [all[2]]))).toBe('Саволнома аз як субтест иборат аст: химия. Субтести химия 27 саволу масъаларо дар бар мегирад.');
+  });
+});
