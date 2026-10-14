@@ -22,6 +22,7 @@ import {
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
 import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo } from '../lib/answerKeyExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
+import { fetchAllPages } from '../lib/fetchAllPages';
 
 // Администратору на сайте можно до 50 вариантов; обычным пользователям — те же лимиты, что в Telegram (их же проверяет база)
 const ADMIN_SITE_LIMITS = { ...LIMITS, tickets: 50 };
@@ -48,18 +49,6 @@ const getStorageBool = (key: string, fallback: boolean): boolean => {
   if (val === null) return fallback;
   return val === 'true';
 };
-
-// Supabase отдаёт не больше 1000 строк за запрос — читаем постранично
-async function fetchAllPages<T>(build: () => any): Promise<{ data: T[] | null; error: any }> {
-  const all: T[] = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await build().order('id').range(from, from + 999);
-    if (error) return { data: null, error };
-    all.push(...(data || []));
-    if (!data || data.length < 1000) break;
-  }
-  return { data: all, error: null };
-}
 
 export const TicketGenerator: React.FC = () => {
   const queryClient = useQueryClient();
@@ -185,18 +174,19 @@ export const TicketGenerator: React.FC = () => {
 
   // Состояние раскрытых глав (аккордеон)
   const [expandedChapterIds, setExpandedChapterIds] = useState<Record<string, boolean>>(() =>
-    getStorageJSON('examiner_tg_expanded_chapters', {})
+    getStorageJSON('examiner_tg_expanded_chapters_v2', {})
   );
 
-  // Раскрываем новые главы по умолчанию
+  // Новые главы: на узком экране свёрнуты (показываем только заголовки), на широком раскрыты
   React.useEffect(() => {
     if (chapters.length > 0) {
+      const expandByDefault = window.innerWidth >= 640;
       setExpandedChapterIds(prev => {
         let changed = false;
         const next = { ...prev };
         chapters.forEach(ch => {
           if (next[ch.id] === undefined) {
-            next[ch.id] = true;
+            next[ch.id] = expandByDefault;
             changed = true;
           }
         });
@@ -206,7 +196,7 @@ export const TicketGenerator: React.FC = () => {
   }, [chapters]);
 
   React.useEffect(() => {
-    localStorage.setItem('examiner_tg_expanded_chapters', JSON.stringify(expandedChapterIds));
+    localStorage.setItem('examiner_tg_expanded_chapters_v2', JSON.stringify(expandedChapterIds));
   }, [expandedChapterIds]);
 
   // Выбрать все темы по всему предмету
@@ -673,13 +663,25 @@ export const TicketGenerator: React.FC = () => {
               </div>
             </div>
 
+            {/* Нехватка вопросов в выбранных темах — сразу рядом с выбором */}
+            {poolStats && fitted.error && (
+              <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg p-2 mb-2">⚠ {fitted.error}</p>
+            )}
+            {poolStats && !fitted.error && fitted.notes.length > 0 && (
+              <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 mb-2">
+                <span className="block font-semibold">Вопросов в выбранных темах не хватает на заданный состав билета:</span>
+                {fitted.notes.map((n) => <span key={n} className="block">• {n}</span>)}
+                <span className="block mt-0.5 text-amber-700">Выберите больше тем или уменьшите число вопросов.</span>
+              </div>
+            )}
+
             {/* Список глав в виде раскрывающегося аккордеона */}
             <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
               {chapters.map(ch => {
                 const chTopics = allTopics.filter(t => t.chapter_id === ch.id);
                 const chSelectedTopics = chTopics.filter(t => selectedTopicIds.includes(t.id));
                 const isAllSelected = chTopics.length > 0 && chSelectedTopics.length === chTopics.length;
-                const isExpanded = expandedChapterIds[ch.id] ?? true;
+                const isExpanded = expandedChapterIds[ch.id] ?? false;
 
                 return (
                   <div

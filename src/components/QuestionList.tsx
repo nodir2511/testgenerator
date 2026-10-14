@@ -5,6 +5,7 @@ import { assertRowsChanged } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { FormattedText } from './FormulaEditor';
+import { questionIssues, ISSUE_LABELS, ISSUE_FILTER_LABELS, matchesIssueFilter, IssueFilter } from '../lib/questionIssues';
 import { 
   Search, 
   Filter, 
@@ -42,6 +43,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const [filterTopicId, setFilterTopicId] = useState(() => localStorage.getItem('examiner_ql_topic_id') || '');
   const [filterType, setFilterType] = useState<string>(() => localStorage.getItem('examiner_ql_type') || 'all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterIssue, setFilterIssue] = useState<IssueFilter>('all');
   // page — первая показанная страница, extra — сколько страниц подгружено ниже кнопкой «Показать ещё»
   const [page, setPage] = useState(0);
   const [extra, setExtra] = useState(0);
@@ -108,8 +110,74 @@ export const QuestionList: React.FC<QuestionListProps> = ({
     },
   });
 
+  const applyFilters = (query: any) => {
+    if (filterSubjectId) query = query.eq('subject_id', filterSubjectId);
+    if (filterChapterId) query = query.eq('chapter_id', filterChapterId);
+    if (filterTopicId) query = query.eq('topic_id', filterTopicId);
+    if (filterType !== 'all') query = query.eq('type', filterType);
+    if (searchQuery.trim()) {
+      // Значение берём в кавычки и экранируем: запятые, скобки, % и _ в запросе не ломают фильтр
+      const like = '%' + searchQuery.trim().replace(/[\\%_]/g, '\\$&') + '%';
+      const quoted = '"' + like.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+      query = query.or(`content.ilike.${quoted},content_ru.ilike.${quoted},content_tg.ilike.${quoted}`);
+    }
+    return query;
+  };
+
+  const FULL_SELECT = `
+    *,
+    chapter:chapters(name),
+    topic:topics(name),
+    source:sources(name),
+    options:question_options(*),
+    matching_items:matching_items(*)
+  `;
+
+  // Список id вопросов с проблемами (по текущим фильтрам): проверка идёт на клиенте,
+  // потому что «число вариантов» и «верный ответ» в SQL-фильтр PostgREST не выразить
+  const loadIssueIds = async (): Promise<string[]> => {
+    const ids: string[] = [];
+    const build = (byNum: boolean, from: number) => {
+      let q = supabase
+        .from('questions')
+        .select('id, type, correct_numeric_answer, options:question_options(is_correct), matching_items:matching_items(id, side, correct_match_id)')
+        .eq('is_deleted', false);
+      q = byNum
+        ? q.order('num', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
+        : q.order('created_at', { ascending: false });
+      return applyFilters(q.order('id')).range(from, from + 999);
+    };
+    let byNum = Boolean(filterTopicId);
+    for (let from = 0; ; from += 1000) {
+      let { data, error } = await build(byNum, from);
+      if (error && error.code === '42703' && byNum) { byNum = false; ({ data, error } = await build(false, from)); }
+      if (error) throw error;
+      for (const row of (data || []) as any[]) {
+        if (matchesIssueFilter(questionIssues(row), filterIssue)) ids.push(row.id);
+      }
+      if (!data || data.length < 1000) break;
+    }
+    return ids;
+  };
+
+  const fetchIssuePage = async (pageNo: number) => {
+    const ids = await queryClient.fetchQuery({
+      queryKey: ['questions', 'issue-ids', filterSubjectId, filterChapterId, filterTopicId, filterType, searchQuery, filterIssue],
+      staleTime: 15000,
+      queryFn: loadIssueIds,
+    });
+    const slice = ids.slice(pageNo * PAGE_SIZE, (pageNo + 1) * PAGE_SIZE);
+    if (slice.length === 0) return { questions: [] as Question[], totalCount: ids.length };
+    const { data, error } = await supabase.from('questions').select(FULL_SELECT).in('id', slice);
+    if (error) throw error;
+    const order = new Map(slice.map((id, i) => [id, i]));
+    const questions = ((data || []) as Question[]).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    return { questions, totalCount: ids.length };
+  };
+
   // Запрос одной страницы вопросов с фильтрацией на сервере
   const fetchPage = async (pageNo: number) => {
+      if (filterIssue !== 'all') return fetchIssuePage(pageNo);
       const build = (byNum: boolean) => {
         let query = supabase
           .from('questions')
@@ -128,17 +196,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           : query.order('created_at', { ascending: false });
         query = query.range(pageNo * PAGE_SIZE, (pageNo + 1) * PAGE_SIZE - 1);
 
-        if (filterSubjectId) query = query.eq('subject_id', filterSubjectId);
-        if (filterChapterId) query = query.eq('chapter_id', filterChapterId);
-        if (filterTopicId) query = query.eq('topic_id', filterTopicId);
-        if (filterType !== 'all') query = query.eq('type', filterType);
-        if (searchQuery.trim()) {
-          // Значение берём в кавычки и экранируем: запятые, скобки, % и _ в запросе не ломают фильтр
-          const like = '%' + searchQuery.trim().replace(/[\\%_]/g, '\\$&') + '%';
-          const quoted = '"' + like.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
-          query = query.or(`content.ilike.${quoted},content_ru.ilike.${quoted},content_tg.ilike.${quoted}`);
-        }
-        return query;
+        return applyFilters(query);
       };
 
       let { data, count, error } = await build(Boolean(filterTopicId));
@@ -154,7 +212,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const shownPages = Array.from({ length: extra + 1 }, (_, i) => page + i);
   const pageResults = useQueries({
     queries: shownPages.map((p) => ({
-      queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, searchQuery, p],
+      queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, searchQuery, filterIssue, p],
       queryFn: () => fetchPage(p),
     })),
   });
@@ -234,7 +292,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           Фильтры и поиск
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {/* Поиск */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -308,6 +366,20 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             <option value="matching">На соответствие</option>
             <option value="open">Открытые</option>
           </select>
+
+          {/* Проблемные вопросы */}
+          <select
+            value={filterIssue}
+            onChange={(e) => {
+              setFilterIssue(e.target.value as IssueFilter);
+              setPage(0); setExtra(0);
+            }}
+            className={`text-xs px-2.5 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${filterIssue !== 'all' ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}
+          >
+            {(Object.keys(ISSUE_FILTER_LABELS) as IssueFilter[]).map((k) => (
+              <option key={k} value={k}>{ISSUE_FILTER_LABELS[k]}</option>
+            ))}
+          </select>
         </div>
 
         {/* Выбор языка отображения */}
@@ -351,10 +423,11 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             </div>
           </div>
           <div className="flex items-center space-x-3">
-            {(filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || searchQuery) && (
+            {(filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || filterIssue !== 'all' || searchQuery) && (
               <button
                 type="button"
                 onClick={() => {
+                  setFilterIssue('all');
                   setFilterSubjectId('');
                   setFilterChapterId('');
                   setFilterTopicId('');
@@ -435,6 +508,11 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                       {(q.source as any).name}
                     </span>
                   )}
+                  {questionIssues(q).map((code) => (
+                    <span key={code} className="text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+                      ⚠ {ISSUE_LABELS[code]}
+                    </span>
+                  ))}
                   <span className="text-[10px] text-slate-400 font-mono">
                     v{q.version}
                   </span>

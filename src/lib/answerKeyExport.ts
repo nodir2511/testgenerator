@@ -104,8 +104,12 @@ async function loadSelectionInfo(subjectId: string, params: any): Promise<string
 export interface KeyFile { blob: Blob; fileName: string; stats: { missing: number; overflow: number } }
 type KeySelection = { subjectId?: string | null; params?: any };
 
-export async function buildAnswerKeyFile(title: string, tickets: KeyTicket[], subjectName: string, selection?: KeySelection): Promise<KeyFile> {
-  const kind = keyKindOf(subjectName);
+export async function buildAnswerKeyFile(
+  title: string, tickets: KeyTicket[], subjectName: string, selection?: KeySelection,
+  /** Файл шаблона в public/key-templates (без .docx), если нужен не стандартный для предмета */
+  templateName?: string,
+): Promise<KeyFile> {
+  const kind = templateName ?? keyKindOf(subjectName);
   if (!kind) throw new Error('Для этого предмета нет шаблона ключей');
   const res = await fetch(`/key-templates/${kind}.docx`);
   if (!res.ok) throw new Error('Не удалось загрузить шаблон ключей');

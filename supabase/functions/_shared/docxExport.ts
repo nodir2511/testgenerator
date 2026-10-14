@@ -76,6 +76,11 @@ const NO_CELL_BORDERS = {
   right: { style: BorderStyle.NONE, size: 0, color: 'auto' },
 };
 
+// Рамка сверху у первой строки вопроса: линия над текстом вопроса и номер в рамке
+const FRAME_LINE = { style: BorderStyle.SINGLE, size: 8, color: '000000' };
+const QUESTION_TOP_BORDERS = { ...NO_CELL_BORDERS, top: FRAME_LINE };
+const NUMBER_BOX_BORDERS = { top: FRAME_LINE, bottom: FRAME_LINE, left: FRAME_LINE, right: FRAME_LINE };
+
 // Внутренние отступы ячеек таблицы для чистого выравнивания
 const CELL_MARGINS = {
   top: 80,
@@ -87,19 +92,12 @@ const CELL_MARGINS = {
 // Свободная ширина ячейки в пунктах
 const cellInnerPt = (twips: number) => (twips - CELL_MARGINS.left - CELL_MARGINS.right) / 20;
 
-// Стиль серой ячейки с номером вопроса
-// Серый фон задан у абзаца с номером, а не у ячейки: ячейка тянется на всю высоту строки
-// (длинный вопрос = много строк), абзац остаётся плашкой высотой в одну строку.
+// Отступы ячейки с номером вопроса
 const NUMBER_CELL_MARGINS = {
   top: 80,
   bottom: 0,
   left: 0,
   right: 0,
-};
-const NUMBER_SHADING = {
-  type: ShadingType.CLEAR,
-  color: 'auto',
-  fill: '595959', // Серый фон плашки нумерации
 };
 
 async function fetchImageBuffer(url: string): Promise<Uint8Array | null> {
@@ -229,25 +227,18 @@ export function parseFormattedTextRuns(
   return out;
 }
 
-// Создание ячейки номера вопроса (серая плашка, белый жирный номер)
+// Создание ячейки номера вопроса (номер в рамке)
 function createNumberCell(qNumber: number): TableCell {
   return new TableCell({
     width: { size: 500, type: WidthType.DXA },
     margins: NUMBER_CELL_MARGINS,
-    borders: NO_CELL_BORDERS,
+    borders: NUMBER_BOX_BORDERS,
     children: [
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        shading: NUMBER_SHADING,
         spacing: { before: 40, after: 40 },
         children: [
-          new TextRun({ 
-            text: String(qNumber), 
-            bold: true, 
-            color: 'FFFFFF', // Белая нумерация 
-            font: 'Times New Roman', 
-            size: 28 
-          }),
+          new TextRun({ text: String(qNumber), bold: true, font: 'Times New Roman', size: 28 }),
         ],
       }),
     ],
@@ -294,7 +285,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
               columnSpan: 4,
               width: { size: 8848, type: WidthType.DXA },
               margins: CELL_MARGINS,
-              borders: NO_CELL_BORDERS,
+              borders: QUESTION_TOP_BORDERS,
               children: [
                 new Paragraph({
                   children: parseFormattedTextRuns(qText, false, FONT_SIZE, true), // Текст вопроса жирный
@@ -367,7 +358,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
               columnSpan: 2,
               width: { size: 8848, type: WidthType.DXA },
               margins: CELL_MARGINS,
-              borders: NO_CELL_BORDERS,
+              borders: QUESTION_TOP_BORDERS,
               children: [
                 new Paragraph({
                   children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
@@ -516,7 +507,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
             new TableCell({
               width: { size: 8848, type: WidthType.DXA },
               margins: CELL_MARGINS,
-              borders: NO_CELL_BORDERS,
+              borders: QUESTION_TOP_BORDERS,
               children: [
                 new Paragraph({
                   children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
@@ -614,7 +605,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
             columnSpan: 2,
             width: { size: 8848, type: WidthType.DXA },
             margins: CELL_MARGINS,
-            borders: NO_CELL_BORDERS,
+            borders: QUESTION_TOP_BORDERS,
             children: [
               new Paragraph({
                 children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
@@ -737,7 +728,7 @@ async function createQuestionTable(q: any, qNumber: number, isTg: boolean): Prom
         new TableCell({
           width: { size: 8848, type: WidthType.DXA },
           margins: CELL_MARGINS,
-          borders: NO_CELL_BORDERS,
+          borders: QUESTION_TOP_BORDERS,
           children: [
             new Paragraph({
               children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),

@@ -9,6 +9,7 @@ const TicketGenerator = lazy(() => import('./components/TicketGenerator').then((
 const SavedTicketsView = lazy(() => import('./components/SavedTicketsView').then((m) => ({ default: m.SavedTicketsView })));
 const BulkImport = lazy(() => import('./components/BulkImport').then((m) => ({ default: m.BulkImport })));
 const UserManagementView = lazy(() => import('./components/UserManagementView').then((m) => ({ default: m.UserManagementView })));
+const ClusterExam = lazy(() => import('./components/ClusterExam').then((m) => ({ default: m.ClusterExam })));
 const StatsView = lazy(() => import('./components/StatsView').then((m) => ({ default: m.StatsView })));
 import { AuthModal } from './components/AuthModal';
 import { TelegramLink } from './components/TelegramLink';
@@ -31,18 +32,19 @@ import {
   CheckCircle2
 } from 'lucide-react';
 
-type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats';
+type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'cluster';
 
 export const App: React.FC = () => {
   const { user, profile, isAdmin, isOwner, isStaff, signOut, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const saved = localStorage.getItem('examiner_active_tab');
-    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats'];
+    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats', 'cluster'];
     return (validTabs.includes(saved as TabType)) ? (saved as TabType) : 'generator';
   });
   const adminOnlyTabs: TabType[] = ['users', 'stats'];
   const staffOnlyTabs: TabType[] = ['taxonomy', 'bulk_import'];
-  const currentTab: TabType = (!isAdmin && adminOnlyTabs.includes(activeTab)) || (!isStaff && staffOnlyTabs.includes(activeTab)) ? 'generator' : activeTab;
+  const ownerOnlyTabs: TabType[] = ['cluster'];
+  const currentTab: TabType = (!isAdmin && adminOnlyTabs.includes(activeTab)) || (!isStaff && staffOnlyTabs.includes(activeTab)) || (!isOwner && ownerOnlyTabs.includes(activeTab)) ? 'generator' : activeTab;
 
   React.useEffect(() => {
     localStorage.setItem('examiner_active_tab', activeTab);
@@ -68,6 +70,7 @@ export const App: React.FC = () => {
     { id: 'generator', label: 'Генератор билетов', icon: Sparkles },
     { id: 'saved_tickets', label: 'Сохраненные билеты', icon: FileCheck2 },
     ...(isStaff ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
+    ...(isOwner ? [{ id: 'cluster', label: 'Экзамен-кластер', icon: BookOpen }] : []),
     ...(isAdmin ? [{ id: 'users', label: 'Пользователи и аудит', icon: Users }] : []),
     ...(isAdmin ? [{ id: 'stats', label: 'Статистика', icon: BarChart3 }] : []),
   ];
@@ -259,6 +262,7 @@ export const App: React.FC = () => {
             )}
             {currentTab === 'users' && <UserManagementView />}
             {currentTab === 'stats' && <StatsView />}
+            {currentTab === 'cluster' && isOwner && <ClusterExam />}
           </>
         )}
         </Suspense>
