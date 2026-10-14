@@ -79,7 +79,9 @@ const NO_CELL_BORDERS = {
 // Рамка сверху у первой строки вопроса: линия над текстом вопроса и номер в рамке
 const FRAME_LINE = { style: BorderStyle.SINGLE, size: 8, color: '000000' };
 const QUESTION_TOP_BORDERS = { ...NO_CELL_BORDERS, top: FRAME_LINE };
-const NUMBER_BOX_BORDERS = { top: FRAME_LINE, bottom: FRAME_LINE, left: FRAME_LINE, right: FRAME_LINE };
+const NUMBER_CELL_BORDERS = { ...NO_CELL_BORDERS, top: FRAME_LINE };
+const NUMBER_SHADING = { type: ShadingType.CLEAR, color: 'auto', fill: 'D9D9D9' };
+const NUMBER_PLATE_LINE = { style: BorderStyle.SINGLE, size: 4, color: '7F7F7F', space: 0 };
 
 // Внутренние отступы ячеек таблицы для чистого выравнивания
 const CELL_MARGINS = {
@@ -100,7 +102,13 @@ const NUMBER_CELL_MARGINS = {
   right: 0,
 };
 
-async function fetchImageBuffer(url: string): Promise<Uint8Array | null> {
+const imageCache = new Map<string, Promise<Uint8Array | null>>();
+function fetchImageBuffer(url: string): Promise<Uint8Array | null> {
+  if (!imageCache.has(url)) imageCache.set(url, loadImageBuffer(url));
+  return imageCache.get(url)!;
+}
+
+async function loadImageBuffer(url: string): Promise<Uint8Array | null> {
   try {
     const res = await fetch(url, { mode: 'cors' });
     if (!res.ok) return null;
@@ -143,11 +151,11 @@ function imageSize(b: Uint8Array): { w: number; h: number } | null {
   return null;
 }
 
-// Вписывает картинку в рамку maxW×maxH с сохранением пропорций (без увеличения сверх рамки)
-function fitImage(data: Uint8Array, maxW: number, maxH: number): { width: number; height: number } {
+// Вписывает картинку в рамку maxW×maxH с сохранением пропорций (увеличение не больше maxScale)
+function fitImage(data: Uint8Array, maxW: number, maxH: number, maxScale = 1): { width: number; height: number } {
   const sz = imageSize(data);
   if (!sz || !sz.w || !sz.h) return { width: maxW, height: maxH };
-  const k = Math.min(maxW / sz.w, maxH / sz.h, 1);
+  const k = Math.min(maxW / sz.w, maxH / sz.h, maxScale);
   return { width: Math.max(1, Math.round(sz.w * k)), height: Math.max(1, Math.round(sz.h * k)) };
 }
 
@@ -227,15 +235,18 @@ export function parseFormattedTextRuns(
   return out;
 }
 
-// Создание ячейки номера вопроса (номер в рамке)
+// Создание ячейки номера вопроса (серая плашка в одну строку)
 function createNumberCell(qNumber: number): TableCell {
   return new TableCell({
     width: { size: 500, type: WidthType.DXA },
     margins: NUMBER_CELL_MARGINS,
-    borders: NUMBER_BOX_BORDERS,
+    borders: NUMBER_CELL_BORDERS,
     children: [
       new Paragraph({
         alignment: AlignmentType.CENTER,
+        // Серая плашка задана у абзаца, а не у ячейки: она остаётся в одну строку, даже если вопрос длинный
+        shading: NUMBER_SHADING,
+        border: { bottom: NUMBER_PLATE_LINE, left: NUMBER_PLATE_LINE, right: NUMBER_PLATE_LINE },
         spacing: { before: 40, after: 40 },
         children: [
           new TextRun({ text: String(qNumber), bold: true, font: 'Times New Roman', size: 28 }),
@@ -309,7 +320,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
                 children: [
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
-                    children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 300, 160), type: 'png' })],
+                    children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 540, 340, 2.5), type: 'png' })],
                   }),
                 ],
               }),
@@ -382,7 +393,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
                 children: [
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
-                    children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 300, 160), type: 'png' })],
+                    children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 540, 340, 2.5), type: 'png' })],
                   }),
                 ],
               }),
@@ -530,7 +541,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
                 children: [
                   new Paragraph({
                     alignment: AlignmentType.CENTER,
-                    children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 300, 160), type: 'png' })],
+                    children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 540, 340, 2.5), type: 'png' })],
                   }),
                 ],
               }),
@@ -629,7 +640,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
               children: [
                 new Paragraph({
                   alignment: AlignmentType.CENTER,
-                  children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 300, 160), type: 'png' })],
+                  children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 540, 340, 2.5), type: 'png' })],
                 }),
               ],
             }),
@@ -751,7 +762,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
             children: [
               new Paragraph({
                 alignment: AlignmentType.CENTER,
-                children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 300, 160), type: 'png' })],
+                children: [new ImageRun({ data: imgBuffer, transformation: fitImage(imgBuffer, 540, 340, 2.5), type: 'png' })],
               }),
             ],
           }),

@@ -40,6 +40,10 @@ export interface ClusterVariant {
 const FONT = 'Times New Roman';
 const CONTENT_TWIPS = 9638; // A4 минус поля по 20 мм
 const MARGIN = { top: 1134, bottom: 1134, left: 1134, right: 1134 };
+// У химии и физики часть каждой страницы оставляется свободной под черновик
+const DRAFT_SHARE = 0.35;
+const A4_HEIGHT_TWIPS = 16838;
+const DRAFT_BOTTOM = MARGIN.bottom + Math.round(DRAFT_SHARE * (A4_HEIGHT_TWIPS - MARGIN.top - MARGIN.bottom));
 const NONE = { style: BorderStyle.NONE, size: 0, color: 'auto' };
 const NO_BORDERS = { top: NONE, bottom: NONE, left: NONE, right: NONE, insideHorizontal: NONE, insideVertical: NONE };
 const NO_CELL_BORDERS = { top: NONE, bottom: NONE, left: NONE, right: NONE };
@@ -354,7 +358,8 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
       children.push(gap(180));
     }
     children.push(imgPara(plaque, 600, { before: 120, after: 0 }));
-    sections.push({ properties: { page, type: SectionType.NEXT_PAGE }, footers: { default: footer(footLabel(t.subjects[kind])) }, children });
+    const subjectPage = kind === 'chem' || kind === 'phys' ? { margin: { ...MARGIN, bottom: DRAFT_BOTTOM } } : page;
+    sections.push({ properties: { page: subjectPage, type: SectionType.NEXT_PAGE }, footers: { default: footer(footLabel(t.subjects[kind])) }, children });
   }
 
   // Справочные материалы (как в образце: физика, затем химия) — только для включённых предметов
