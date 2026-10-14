@@ -343,7 +343,7 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
           new TableCell({
             width: { size: 4300, type: WidthType.DXA }, borders: NO_CELL_BORDERS, verticalAlign: VerticalAlign.CENTER,
             margins: { top: 200, bottom: 100, left: 0, right: 0 },
-            children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [imgRun(digit, variant.number >= 10 ? 220 : 130)] })],
+            children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [imgRun(digit, variant.number >= 10 ? 190 : 115)] })],
           }),
         ],
       }),
@@ -351,11 +351,11 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
   });
 
   const cover = [
-    imgPara(header, 600, { after: 200 }),
-    imgPara(title, 560, { after: 360 }),
+    imgPara(header, 540, { after: 120 }),
+    imgPara(title, 500, { after: 200 }),
     coverTable,
-    gap(240),
-    imgPara(attention, 600, { after: 0 }),
+    gap(60),
+    imgPara(attention, 520, { after: 0 }),
   ];
 
   // Инструкция (2 страницы)
