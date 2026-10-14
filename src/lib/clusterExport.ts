@@ -41,12 +41,12 @@ const FONT = 'Times New Roman';
 const CONTENT_TWIPS = 9638; // A4 минус поля по 20 мм
 const MARGIN = { top: 1134, bottom: 1134, left: 1134, right: 1134 };
 // У химии и физики часть каждой страницы оставляется свободной под черновик
-const DRAFT_SHARE = 0.35;
+const DRAFT_SHARE = 0.3;
 const A4_HEIGHT_TWIPS = 16838;
 const DRAFT_BOTTOM = MARGIN.bottom + Math.round(DRAFT_SHARE * (A4_HEIGHT_TWIPS - MARGIN.top - MARGIN.bottom));
 // Оценка места на странице химии и физики (пункты): свободная часть страницы под черновик + запас на неточность оценки
 const PAGE_BODY_PT = (A4_HEIGHT_TWIPS - MARGIN.top - DRAFT_BOTTOM) / 20;
-const PAGE_BUDGET_PT = PAGE_BODY_PT * 0.9;
+const PAGE_BUDGET_PT = PAGE_BODY_PT * 0.95;
 const BAND_PT = 40; // полоса с названием предмета на первой странице
 const DRAFT_LABEL_PT = 34;
 const PLAQUE_PT = 56;

@@ -135,7 +135,7 @@ describe('оформление книжки кластера', () => {
     const rows = xml.match(/<w:tr>(?:(?!<\/w:tr>)[\s\S])*?w:hRule="exact"[\s\S]*?<\/w:tr>/g) || [];
     const counts = rows.map((r) => (r.match(/<w:tc>/g) || []).length);
     // таджикский на одну клетку длиннее остальных (вложенность добавляет одинаковое смещение)
-    expect(counts[0] - counts[1]).toBe(1);
+    expect(counts[0] - counts[1]).toBe(2); // клетка и зазор перед ней
     expect(new Set(counts.slice(1)).size).toBe(1);
   });
 });

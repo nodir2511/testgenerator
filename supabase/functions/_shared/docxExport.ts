@@ -285,16 +285,25 @@ const COMPACT_MARGINS = { top: 20, bottom: 20, left: 100, right: 100 };
 // «Ответ: □□□□» — подпись и ряд клеток по числу цифр
 function createAnswerBoxes(label: string, n: number): Table {
   const BOX = 480;
+  const GAP = 90; // зазор между клетками: каждая клетка — отдельный квадрат
   const LABEL = 1700;
   const line = { style: BorderStyle.SINGLE, size: 8, color: '000000' };
-  const cells = Array.from({ length: n }, () => new TableCell({
-    width: { size: BOX, type: WidthType.DXA },
-    borders: { top: line, bottom: line, left: line, right: line },
-    children: [new Paragraph({ children: [] })],
-  }));
+  const cells = Array.from({ length: n }, (_, i) => [
+    ...(i > 0 ? [new TableCell({
+      width: { size: GAP, type: WidthType.DXA },
+      borders: NO_CELL_BORDERS,
+      margins: { top: 0, bottom: 0, left: 0, right: 0 },
+      children: [new Paragraph({ children: [] })],
+    })] : []),
+    new TableCell({
+      width: { size: BOX, type: WidthType.DXA },
+      borders: { top: line, bottom: line, left: line, right: line },
+      children: [new Paragraph({ children: [] })],
+    }),
+  ]).flat();
   return new Table({
-    width: { size: LABEL + n * BOX, type: WidthType.DXA },
-    columnWidths: [LABEL, ...Array(n).fill(BOX)],
+    width: { size: LABEL + n * BOX + (n - 1) * GAP, type: WidthType.DXA },
+    columnWidths: [LABEL, ...Array.from({ length: n }, (_, i) => (i > 0 ? [GAP, BOX] : [BOX])).flat()],
     borders: NO_TABLE_BORDERS,
     rows: [new TableRow({
       height: { value: BOX, rule: HeightRule.EXACT },
@@ -314,7 +323,7 @@ function createAnswerBoxes(label: string, n: number): Table {
 // Приблизительная высота вопроса в пунктах (по тем же правилам, что и вёрстка ниже; с запасом).
 // Нужна, чтобы расставить страницы заранее (экзамен-кластер: надпись «Место для черновика» под последним вопросом страницы).
 export async function estimateQuestionHeightPt(q: any, isTg: boolean, compact = true): Promise<number> {
-  const LINE = 17;
+  const LINE = 16.5;
   const m = compact ? 2 : 8; // поля ячейки сверху и снизу
   const lines = (text: string, widthPt: number, bold = false) =>
     Math.max(1, Math.ceil((textWidthEm(text) * FONT_PT * (bold ? 1.1 : 1.05)) / widthPt));
