@@ -2,8 +2,8 @@
 -- Администраторы не ограничены. Применено: supabase db query --linked -f supabase/sql/generation_limits.sql
 --  * до 4 вариантов за раз
 --  * до 50 вопросов в одном билете
---  * до 10 наборов в сутки (по времени Таджикистана)
---  * не чаще одного набора в 5 секунд (защита от двойного нажатия)
+--  * до 5 наборов в сутки (по времени Таджикистана)
+--  * не чаще одного набора в минуту
 
 create or replace function public.enforce_generation_limits()
 returns trigger
@@ -26,11 +26,11 @@ begin
   if per_ticket > 50 then
     raise exception 'Не больше 50 вопросов в одном билете';
   end if;
-  if exists (select 1 from public.ticket_batches where created_by = new.created_by and created_at > now() - interval '5 seconds') then
-    raise exception 'Предыдущая генерация ещё выполняется. Подождите несколько секунд.';
+  if exists (select 1 from public.ticket_batches where created_by = new.created_by and created_at > now() - interval '1 minute') then
+    raise exception 'Генерировать можно не чаще одного раза в минуту. Подождите немного.';
   end if;
-  if (select count(*) from public.ticket_batches where created_by = new.created_by and created_at >= day_start) >= 10 then
-    raise exception 'Дневной лимит исчерпан: 10 генераций в сутки. Попробуйте завтра.';
+  if (select count(*) from public.ticket_batches where created_by = new.created_by and created_at >= day_start) >= 5 then
+    raise exception 'Дневной лимит исчерпан: 5 генераций в сутки. Попробуйте завтра.';
   end if;
   return new;
 end;
