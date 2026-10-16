@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { saveClusterBatch } from '../lib/clusterStore';
+import { useAuth } from '../hooks/useAuth';
+import { saveClusterBatch, loadUsedQuestionIds } from '../lib/clusterStore';
 import { saveAs } from 'file-saver';
 import { supabase } from '../lib/supabase';
 import { Subject } from '../types/database';
@@ -8,7 +9,7 @@ import { describeError, notifyError, notifyInfo } from '../lib/errors';
 import { keyKindOf } from '../lib/answerKey';
 import { CLUSTER_SLOTS, buildClusterZip, type ClusterSettings, type ClusterVariant } from '../lib/clusterExport';
 import {
-  fitSettings, pickParallel, chapterTotals, totalsOf, poolStats as calcPoolStats, toSnapshot,
+  fitSettings, pickParallel, chapterTotals, totalsOf, poolStats as calcPoolStats, toSnapshot, preferUnused,
 } from '../../supabase/functions/_shared/ticketing';
 import { Layers, Loader2, Download, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
 
@@ -21,6 +22,8 @@ const MAX_VARIANTS = 20;
 type Counts = { test: number; matching: number; open: number };
 interface Saved {
   settings: ClusterSettings;
+  /** Дата экзамена в виде ГГГГ-ММ-ДД (выбор в календаре); на обложке печатается как ДД.ММ */
+  dateIso?: string;
   variants: number;
   subjectIds: string[];
   counts: Counts[];
@@ -28,6 +31,8 @@ interface Saved {
   /** Выбранные темы и главы без тем по каждому предмету; пусто — весь предмет */
   topicIds: string[][];
   chapterIds: string[][];
+  /** Не брать вопросы, уже вошедшие в сохранённые экзамены-кластеры (если неповторяющихся хватает) */
+  avoidRepeats?: boolean;
 }
 
 const defaults = (): Saved => ({
@@ -38,6 +43,7 @@ const defaults = (): Saved => ({
   enabled: CLUSTER_SLOTS.map(() => true),
   topicIds: CLUSTER_SLOTS.map(() => []),
   chapterIds: CLUSTER_SLOTS.map(() => []),
+  avoidRepeats: true,
 });
 
 function load(): Saved {
@@ -47,6 +53,11 @@ function load(): Saved {
   } catch { /* ignore */ }
   return defaults();
 }
+
+// 2026-09-27 → «27.09»
+const coverDate = (iso: string) => (/^d{4}-d{2}-d{2}$/.test(iso) ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}` : '');
+
+const PREFS_KEY = 'cluster_v1';
 
 const LIGHT_COLUMNS = 'id, type, chapter_id, topic_id, num, seq, created_at';
 
@@ -68,7 +79,7 @@ async function loadLightQuestions(subjectId: string): Promise<any[]> {
   return out;
 }
 
-async function pickForSlot(subjectId: string, topicIds: string[], chapterIds: string[], want: Counts, V: number) {
+async function pickForSlot(subjectId: string, topicIds: string[], chapterIds: string[], want: Counts, V: number, used: Set<string>) {
   const [rows, chaptersRes] = await Promise.all([
     loadLightQuestions(subjectId),
     supabase.from('chapters').select('id, name, order_index').eq('subject_id', subjectId).eq('is_deleted', false),
@@ -97,8 +108,12 @@ async function pickForSlot(subjectId: string, topicIds: string[], chapterIds: st
   // Охват глав — по всем вопросам выбранных глав (как в генераторе билетов)
   const chosenChapters = new Set(selected.map((q) => q.chapter_id));
   const totals = chapterTotals(rows.filter((q) => chosenChapters.has(q.chapter_id)));
-  const pick = (type: 'test' | 'matching' | 'open', n: number) =>
-    pickParallel(selected.filter((q) => q.type === type), n, V, Math.random, totalsOf(totals, type));
+  // Вопросы из прошлых экзаменов — только если новых не хватает; сколько таких повторов вошло, считаем отдельно
+  let repeats = 0;
+  const pick = (type: 'test' | 'matching' | 'open', n: number) => {
+    const { pool } = preferUnused(selected.filter((q) => q.type === type), used, n * V);
+    return pickParallel(pool, n, V, Math.random, totalsOf(totals, type));
+  };
   const tests = pick('test', fit.settings.testCount);
   const matchings = pick('matching', fit.settings.matchingCount);
   const opens = pick('open', fit.settings.openCount);
@@ -106,6 +121,7 @@ async function pickForSlot(subjectId: string, topicIds: string[], chapterIds: st
   // Полные данные (варианты ответов, пары соответствия) — только для выбранных вопросов
   const ids = new Set<string>();
   for (let k = 0; k < V; k++) [...tests[k], ...matchings[k], ...opens[k]].forEach((q) => ids.add(q.id));
+  ids.forEach((id) => { if (used.has(id)) repeats++; });
   const idList = [...ids];
   const batches: string[][] = [];
   for (let i = 0; i < idList.length; i += 80) batches.push(idList.slice(i, i + 80));
@@ -118,7 +134,7 @@ async function pickForSlot(subjectId: string, topicIds: string[], chapterIds: st
   }
   const perVariant = Array.from({ length: V }, (_, k) =>
     [...tests[k], ...matchings[k], ...opens[k]].map((q) => toSnapshot({ ...full.get(q.id), chapter: q.chapter, topic: q.topic }, { shuffleOptions: true, shuffleMatching: true })));
-  return { perVariant, notes: fit.notes };
+  return { perVariant, notes: fit.notes, repeats, picked: ids.size };
 }
 
 // Выбор тем предмета: главы со списком тем; пусто — берётся весь предмет
@@ -194,6 +210,8 @@ const TopicPicker: React.FC<{
 
 export const ClusterExam: React.FC = () => {
   const [state, setState] = useState<Saved>(load);
+  const { user } = useAuth();
+  const prefsReady = React.useRef(false);
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
@@ -204,6 +222,28 @@ export const ClusterExam: React.FC = () => {
   React.useEffect(() => {
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* ignore */ }
   }, [state]);
+
+  // Параметры экзамена хранятся в базе (таблица user_prefs) — одинаковы на всех устройствах; браузер — запасной кэш
+  React.useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    supabase.from('user_prefs').select('value').eq('user_id', user.id).eq('key', PREFS_KEY).maybeSingle().then(({ data, error }) => {
+      if (cancelled || error) return;
+      const v = data?.value as Saved | undefined;
+      if (v && v.settings && Array.isArray(v.subjectIds) && Array.isArray(v.counts)) setState({ ...defaults(), ...v });
+      prefsReady.current = true;
+    });
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  React.useEffect(() => {
+    if (!user || !prefsReady.current) return;
+    const timer = setTimeout(() => {
+      supabase.from('user_prefs').upsert({ user_id: user.id, key: PREFS_KEY, value: state, updated_at: new Date().toISOString() })
+        .then(({ error }) => { if (error) console.warn('Не удалось сохранить параметры кластера', error); });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [state, user?.id]);
 
   const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
@@ -263,36 +303,50 @@ export const ClusterExam: React.FC = () => {
 
       const variants: ClusterVariant[] = Array.from({ length: V }, (_, k) => ({ number: k + 1, subjects: [] }));
       const notes: string[] = [];
+      const repeatNotes: string[] = [];
 
       // Предметы подбираются параллельно: сначала лёгкий список вопросов, полные данные — только для выбранных
       setProgress('Подбор вопросов…');
+      let used = new Set<string>();
+      if (state.avoidRepeats !== false) {
+        try {
+          used = await loadUsedQuestionIds();
+        } catch (e) {
+          notifyError(e, 'Не удалось проверить прошлые экзамены — повторы вопросов не исключены');
+        }
+      }
       const perSlot = await Promise.all(CLUSTER_SLOTS.map(async (slot, s) => {
         if (!enabled[s]) return null;
-        const r = await pickForSlot(subjectIds[s], state.topicIds?.[s] ?? [], state.chapterIds?.[s] ?? [], counts[s], V);
+        const r = await pickForSlot(subjectIds[s], state.topicIds?.[s] ?? [], state.chapterIds?.[s] ?? [], counts[s], V, used);
         r.notes.forEach((n) => notes.push(`${slot.name} — ${n}`));
+        if (r.repeats > 0) repeatNotes.push(`${slot.name}: ${r.repeats} из ${r.picked}`);
         return r.perVariant;
       }));
       perSlot.forEach((pv) => variants.forEach((v, k) => v.subjects.push(pv ? pv[k] : null)));
 
-      setProgress('Сборка Word-файлов и ключей…');
-      const file = await buildClusterZip(settings, variants);
-      // Экзамен сохраняется в «Сохранённых билетах» (видит только главный админ)
-      let saved = false;
+      // Сначала сохраняем экзамен в «Сохранённых билетах» (видит только главный админ), потом собираем файл:
+      // если сохранить не вышло — ничего не теряется (файл не создаётся), а если не вышла сборка — экзамен
+      // уже в архиве и скачивается оттуда.
       setProgress('Сохранение в архив…');
+      await saveClusterBatch({ settings, variants, subjectIds });
+      queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
+      const saved = true;
+
+      setProgress('Сборка Word-файлов и ключей…');
+      let file: Awaited<ReturnType<typeof buildClusterZip>>;
       try {
-        await saveClusterBatch({ settings, variants, subjectIds });
-        saved = true;
-        queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
-      } catch (saveErr) {
-        notifyError(saveErr, 'Кластер создан, но не сохранён в архив');
+        file = await buildClusterZip(settings, variants);
+      } catch (buildErr) {
+        throw new Error(`Экзамен сохранён во вкладке «Сохраненные билеты», но собрать файл не получилось (${describeError(buildErr, 'ошибка сборки')}). Скачайте его оттуда.`);
       }
       setResult({ blob: file.blob, fileName: file.fileName, saved });
+      if (repeatNotes.length) notifyInfo(`Новых вопросов не хватило, часть вопросов повторяет прошлые экзамены: ${repeatNotes.join('; ')}`);
       if (notes.length) notifyInfo(`Вопросов не хватило, книжки составлены из того, что есть. ${notes.join('; ')}`);
       if (file.keyOverflow) {
         notifyError(new Error(`В шаблонах ключей не нашлось мест для вопросов: ${file.keyOverflow}. Проверьте состав субтестов.`), 'Ключи заполнены не полностью');
       }
       if (file.missingAnswers) {
-        notifyError(new Error(`В базе нет верного ответа у вопросов: ${file.missingAnswers} — клетки в ключах пустые.`), 'Кластер готов, но ключи не полные');
+        notifyError(new Error(`В базе нет верного ответа у вопросов: ${file.missingAnswers} — клетки в ключах отмечены красным.`), 'Кластер готов, но ключи не полные');
       }
     } catch (err: any) {
       setError(describeError(err, 'Не удалось создать кластер'));
@@ -330,8 +384,12 @@ export const ClusterExam: React.FC = () => {
             <input className={input} value={state.settings.exam} onChange={(e) => setSetting('exam', e.target.value)} placeholder="Авг" />
           </label>
           <label className="text-xs font-semibold text-slate-600 space-y-1">
-            <span>Дата на обложке</span>
-            <input className={input} value={state.settings.date} onChange={(e) => setSetting('date', e.target.value)} placeholder="27.09" />
+            <span>Дата экзамена</span>
+            <input
+              type="date" className={input} value={state.dateIso ?? ''}
+              onChange={(e) => setState((st) => ({ ...st, dateIso: e.target.value, settings: { ...st.settings, date: coverDate(e.target.value) } }))}
+            />
+            <span className="block text-[11px] font-normal text-slate-400">На обложке: {state.settings.date || '—'}</span>
           </label>
           <label className="text-xs font-semibold text-slate-600 space-y-1">
             <span>Вариантов (1–{MAX_VARIANTS})</span>
@@ -341,6 +399,14 @@ export const ClusterExam: React.FC = () => {
             />
           </label>
         </div>
+        <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer select-none">
+          <input
+            type="checkbox" className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+            checked={state.avoidRepeats !== false}
+            onChange={(e) => setState((st) => ({ ...st, avoidRepeats: e.target.checked }))}
+          />
+          <span>Не брать вопросы, которые уже были в сохранённых экзаменах-кластерах (если не хватает новых — берутся и старые, с предупреждением)</span>
+        </label>
         <p className="text-[11px] text-slate-400">
           Пример: «Компонент {state.settings.code || 'А.5'}-{state.settings.exam || 'Авг'}» на обложке и «Компонент {state.settings.code || 'А.5'}-1» в колонтитулах первого варианта.
         </p>

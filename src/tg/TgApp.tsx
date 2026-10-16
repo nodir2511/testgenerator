@@ -258,6 +258,23 @@ export default function TgApp() {
     }
   }, [subject, chapterIds, topicIds, lang, settings, nums, title, shuffleOptions, shuffleMatching]);
 
+  // Прислать файл набора из истории ещё раз (в лимит генераций не засчитывается)
+  const resend = useCallback(async (b: HistoryBatch) => {
+    setBusy(true);
+    setError('');
+    try {
+      const r = await api<Result>('resend', { batchId: b.id, lang: b.generation_params.lang ?? 'ru' });
+      wa()?.HapticFeedback?.notificationOccurred('success');
+      setResult(r);
+      setStep('done');
+    } catch (e) {
+      wa()?.HapticFeedback?.notificationOccurred('error');
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   const next = useCallback(() => {
     setError('');
     if (step === 'chapters') {
@@ -334,13 +351,16 @@ export default function TgApp() {
       <section>
         <h2>Повторить прошлый набор</h2>
         {items.map((b) => (
-          <button key={b.id} className="tg-row" disabled={busy} onClick={() => pickSubject(subjects.find((s) => s.id === b.subject_id)!, false, b)}>
+          <React.Fragment key={b.id}>
+          <button className="tg-row" disabled={busy} onClick={() => pickSubject(subjects.find((s) => s.id === b.subject_id)!, false, b)}>
             <span className="tg-grow">
               {shortName(b.title, 50)}
               <span className="tg-sub">{new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · {b.generation_params.ticket_count ?? '?'} шт. · {shortName(b.subject?.name ?? '', 30)}</span>
             </span>
             <span className="tg-chev">↻</span>
           </button>
+          <button className="tg-link" disabled={busy} onClick={() => resend(b)}>Прислать файл ещё раз</button>
+          </React.Fragment>
         ))}
       </section>
     );
@@ -462,7 +482,7 @@ export default function TgApp() {
           <h1>✅ Отправлено в чат</h1>
           <p>Файл с билетами {result?.keySent ? 'и ключи ответов ' : ''}пришли в чат с ботом.</p>
           {!!result?.missingAnswers && (
-            <div className="tg-warn">В базе нет верного ответа у вопросов: {result.missingAnswers}. В ключах эти клетки пустые.</div>
+            <div className="tg-warn">В базе нет верного ответа у вопросов: {result.missingAnswers}. В ключах эти клетки отмечены красным.</div>
           )}
           <button className="tg-link" onClick={() => { setResult(null); setStep(subjects.length > 1 ? 'subject' : 'chapters'); }}>Создать ещё</button>
         </div>

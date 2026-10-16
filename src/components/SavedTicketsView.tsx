@@ -94,7 +94,7 @@ export const SavedTicketsView: React.FC = () => {
     try {
       setExportingId(`${batch.id}-key`);
       const stats = await exportAnswerKey(batch.title, batch.tickets || [], batch.subject?.name || '', { subjectId: batch.subject_id, params: batch.generation_params });
-      if (stats.missing) notifyError(new Error(`В базе нет верного ответа у вопросов: ${stats.missing} — клетки в ключе пустые.`), 'Ключи готовы, но не полные');
+      if (stats.missing) notifyError(new Error(`В базе нет верного ответа у вопросов: ${stats.missing} — клетки в ключе отмечены красным.`), 'Ключи готовы, но не полные');
     } catch (err: any) {
       notifyError(err, 'Ошибка при создании ключей');
     } finally {
@@ -112,7 +112,7 @@ export const SavedTicketsView: React.FC = () => {
       const file = await buildClusterZip(settings, clusterVariantsFromBatch(batch.tickets || []));
       saveAs(file.blob, file.fileName);
       if (file.keyOverflow) notifyError(new Error(`В шаблонах ключей не нашлось мест для вопросов: ${file.keyOverflow}.`), 'Ключи заполнены не полностью');
-      if (file.missingAnswers) notifyError(new Error(`В базе нет верного ответа у вопросов: ${file.missingAnswers} — клетки в ключах пустые.`), 'Кластер готов, но ключи не полные');
+      if (file.missingAnswers) notifyError(new Error(`В базе нет верного ответа у вопросов: ${file.missingAnswers} — клетки в ключах отмечены красным.`), 'Кластер готов, но ключи не полные');
     } catch (err: any) {
       notifyError(err, 'Ошибка при экспорте кластера');
     } finally {

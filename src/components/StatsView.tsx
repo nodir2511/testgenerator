@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { Loader2, BarChart3, Users, FileText, Send } from 'lucide-react';
+import { Loader2, BarChart3, Users, FileText, Send, SlidersHorizontal } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { notifyError, notifyInfo } from '../lib/errors';
+import { useGenerationSettings, type GenerationSettings } from '../lib/generationLimits';
 
 // Статистика использования генератора (только для администратора): RPC admin_usage_stats
 
@@ -30,6 +33,66 @@ function Bar({ value, max }: { value: number; max: number }) {
     </div>
   );
 }
+
+// Лимиты генерации для обычных пользователей (таблица generation_settings): меняет только главный админ
+const LIMIT_FIELDS: Array<{ key: keyof GenerationSettings; label: string; min: number; max: number }> = [
+  { key: 'per_day', label: 'Генераций в сутки', min: 1, max: 1000 },
+  { key: 'cooldown_seconds', label: 'Пауза между генерациями, сек.', min: 0, max: 86400 },
+  { key: 'max_tickets', label: 'Вариантов за раз', min: 1, max: 50 },
+  { key: 'max_per_ticket', label: 'Вопросов в одном билете', min: 1, max: 200 },
+];
+
+const GenerationLimitsCard: React.FC = () => {
+  const { isOwner } = useAuth();
+  const queryClient = useQueryClient();
+  const { data } = useGenerationSettings();
+  const [draft, setDraft] = useState<GenerationSettings | null>(null);
+  const [saving, setSaving] = useState(false);
+  React.useEffect(() => { if (data) setDraft(data); }, [data]);
+  if (!draft) return null;
+  const dirty = data && LIMIT_FIELDS.some((f) => draft[f.key] !== data[f.key]);
+  const valid = LIMIT_FIELDS.every((f) => Number.isInteger(draft[f.key]) && draft[f.key] >= f.min && draft[f.key] <= f.max);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('generation_settings').update(draft).eq('id', true);
+      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: ['generation_settings'] });
+      notifyInfo('Лимиты сохранены');
+    } catch (e) {
+      notifyError(e, 'Не удалось сохранить лимиты');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="bg-white border border-slate-200 rounded-2xl p-4">
+      <h3 className="font-bold text-slate-800 mb-1 flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-blue-600" /> Лимиты генерации</h3>
+      <p className="text-xs text-slate-500 mb-3">Для всех, кроме администраторов: сайт, Telegram-бот и Mini App.{isOwner ? '' : ' Менять может только главный админ.'}</p>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {LIMIT_FIELDS.map((f) => (
+          <label key={f.key} className="text-xs font-semibold text-slate-600 space-y-1">
+            <span>{f.label}</span>
+            <input
+              type="number" min={f.min} max={f.max} disabled={!isOwner}
+              value={Number.isNaN(draft[f.key]) ? '' : draft[f.key]}
+              onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value === '' ? NaN : Number(e.target.value) })}
+              className="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg disabled:bg-slate-50 disabled:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+        ))}
+      </div>
+      {isOwner && (
+        <button onClick={save} disabled={!dirty || !valid || saving}
+          className="mt-3 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold disabled:opacity-40">
+          {saving ? 'Сохранение…' : 'Сохранить'}
+        </button>
+      )}
+    </section>
+  );
+};
 
 export const StatsView: React.FC = () => {
   const [days, setDays] = useState(30);
@@ -74,6 +137,8 @@ export const StatsView: React.FC = () => {
           ))}
         </div>
       </div>
+
+      <GenerationLimitsCard />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cards.map((c) => (

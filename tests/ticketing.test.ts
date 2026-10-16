@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import JSZip from 'jszip';
 import {
-  TG_LIMITS, buildTickets, checkSettings, fitSettings, parseCount, parseNumbers, pickParallel, poolStats, toSnapshot, DEFAULT_SETTINGS,
+  TG_LIMITS, preferUnused, buildTickets, checkSettings, fitSettings, parseCount, parseNumbers, pickParallel, poolStats, toSnapshot, DEFAULT_SETTINGS,
 } from '../supabase/functions/_shared/ticketing';
 import { buildSingleTicketBlob, buildTicketsFile } from '../src/lib/docxExport';
 import { buildAnswerKeyDocx, keyKindOf, matchingAnswer, openAnswer, selectionInfo, testAnswer } from '../src/lib/answerKey';
@@ -347,5 +347,23 @@ describe('ключи ответов', () => {
     const text = (xml.match(/<w:t[^>]*>[^<]*<\/w:t>/g) || []).map((t) => t.replace(/<[^>]+>/g, ''));
     expect(text.filter((t) => t === 'Вариант(и) ')).toHaveLength(2);
     expect(text).toContain(',');
+  });
+});
+
+describe('preferUnused (кластер: без повторов с прошлыми экзаменами)', () => {
+  const pool = Array.from({ length: 10 }, (_, i) => ({ id: 'q' + i }));
+  it('без прошлых экзаменов берёт весь пул', () => {
+    expect(preferUnused(pool, new Set(), 4).pool).toHaveLength(10);
+  });
+  it('новых хватает — берёт только новые', () => {
+    const r = preferUnused(pool, new Set(['q0', 'q1', 'q2']), 5);
+    expect(r.fresh).toBe(true);
+    expect(r.pool.map((q) => q.id)).not.toContain('q1');
+    expect(r.pool).toHaveLength(7);
+  });
+  it('новых не хватает — весь пул, помечено как с повторами', () => {
+    const r = preferUnused(pool, new Set(['q0', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6']), 5);
+    expect(r.fresh).toBe(false);
+    expect(r.pool).toHaveLength(10);
   });
 });

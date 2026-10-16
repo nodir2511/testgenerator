@@ -33,10 +33,18 @@ export async function allowedSubjectIds(sb: any, user: { id: string; role?: stri
   return (data ?? []).map((r: any) => r.subject_id);
 }
 
-// Лимиты Telegram: администраторы работают с обычными лимитами сайта
+// Лимиты: у администраторов — лимиты сайта без дневного ограничения, у остальных — из таблицы
+// generation_settings (правится на вкладке «Статистика»); если таблицы нет — значения по умолчанию.
 export type Limits = { perType: number; tickets: number; total?: number; perDay: number };
-export function limitsFor(user: { role?: string }): Limits {
-  return user.role === 'admin' ? { ...T.LIMITS, perDay: Infinity } : { ...T.TG_LIMITS };
+export async function limitsFor(sb: any, user: { role?: string }): Promise<Limits> {
+  if (user.role === 'admin') return { ...T.LIMITS, perDay: Infinity };
+  try {
+    const { data } = await sb.from('generation_settings').select('per_day, max_tickets, max_per_ticket').eq('id', true).maybeSingle();
+    if (data) return { perType: T.TG_LIMITS.perType, tickets: data.max_tickets, total: data.max_per_ticket, perDay: data.per_day };
+  } catch (e) {
+    console.error('generation_settings read failed', e);
+  }
+  return { ...T.TG_LIMITS };
 }
 
 // Начало текущих суток по времени Таджикистана (UTC+5)
@@ -47,7 +55,7 @@ function dayStartIso(): string {
 }
 
 async function dailyLimitError(sb: any, user: { id: string; role?: string }): Promise<string | null> {
-  const perDay = limitsFor(user).perDay;
+  const perDay = (await limitsFor(sb, user)).perDay;
   if (!Number.isFinite(perDay)) return null;
   // Журнал генераций: удалённые наборы тоже считаются
   const { count } = await sb.from('generation_usage').select('*', { count: 'exact', head: true })
@@ -111,6 +119,106 @@ async function sendDocument(botToken: string, chat: number, bytes: Uint8Array, f
   if (!json.ok) throw new Error(`Не удалось отправить файл: ${json.description || res.status}`);
 }
 
+// Сборка Word/ZIP по уже сохранённым билетам и отправка в чат. Генерацию не создаёт и в лимит не засчитывается:
+// используется и при создании набора, и при повторной отправке из истории.
+export async function deliverBatch(opts: {
+  sb: any;
+  botToken: string;
+  chat: number;
+  title: string;
+  subjectId: string;
+  chapterIds: string[];
+  topicIds: string[];
+  /** Билеты в порядке номеров; question_snapshot — как хранится в ticket_questions */
+  tickets: Array<{ ticketNumber: number; questions: Array<{ question_snapshot: any }> }>;
+  lang: Lang;
+}): Promise<{ missingAnswers: number; keySent: boolean }> {
+  const { sb, botToken, chat, title, subjectId, chapterIds, topicIds, tickets, lang } = opts;
+  const sel: Selection = { subjectId, chapterIds, topicIds };
+  const { data: subj } = await sb.from('subjects').select('name').eq('id', subjectId).maybeSingle();
+  const subjectName = subj?.name ?? 'Химия';
+  const infos = await loadSelectionInfos(sb, sel);
+  const shaped = tickets.map((t) => ({ ticket_number: t.ticketNumber, selection_info: infos, questions: t.questions.map((q: any) => ({ question_snapshot: q.question_snapshot })) }));
+  const bytes = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
+  const files: Array<{ name: string; data: Uint8Array }> = [];
+  for (const t of shaped) {
+    if (lang === 'ru' || lang === 'both') files.push({ name: lang === 'both' ? `Русский/Вариант ${t.ticket_number}.docx` : `Вариант ${t.ticket_number}.docx`, data: await bytes(await buildSingleTicketBlob(title, t, subjectName, false)) });
+    if (lang === 'tg' || lang === 'both') files.push({ name: lang === 'both' ? `Тоҷикӣ/Варианти ${t.ticket_number}.docx` : `Варианти ${t.ticket_number}.docx`, data: await bytes(await buildSingleTicketBlob(title, t, subjectName, true)) });
+  }
+
+  // Ключи ответов (по шаблону предмета): в архив, если отправляется архив, иначе отдельным файлом
+  let missingAnswers = 0;
+  let keySent = false;
+  let key: { data: Uint8Array; name: string; note: string } | null = null;
+  const kind = keyKindOf(subjectName);
+  if (kind) {
+    try {
+      const tpl = Uint8Array.from(atob(KEY_TEMPLATES[kind]), (c) => c.charCodeAt(0));
+      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped, infos.ru);
+      missingAnswers = stats.missing;
+      key = {
+        data: kbytes,
+        name: `Ключи – ${T.safeFileName(title)}.docx`,
+        note: [
+          stats.missing ? `⚠️ В базе нет верного ответа у вопросов: ${stats.missing} — эти клетки в ключе отмечены красным.` : '',
+          stats.overflow ? `В шаблоне не хватило места для вопросов: ${stats.overflow}.` : '',
+        ].filter(Boolean).join(' '),
+      };
+    } catch (e) {
+      console.error('answer key failed', e);
+    }
+  }
+
+  const caption = `${title}: ${tickets.length} шт. (${lang === 'both' ? 'RU + TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase())})`;
+  if (files.length === 1) {
+    await sendDocument(botToken, chat, files[0].data, files[0].name, caption);
+    if (key) {
+      try {
+        await sendDocument(botToken, chat, key.data, key.name, `Ключи ответов: ${title}${key.note ? '\n' + key.note : ''}`);
+        keySent = true;
+      } catch (e) {
+        console.error('answer key send failed', e);
+      }
+    }
+  } else {
+    const zip = new JSZip();
+    files.forEach((f) => zip.file(f.name, f.data));
+    if (key) zip.file(key.name, key.data);
+    const zbytes = await zip.generateAsync({ type: 'uint8array' });
+    const suffix = lang === 'both' ? 'RU_TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase());
+    await sendDocument(botToken, chat, zbytes, `${T.safeFileName(title)}_${suffix}.zip`, `${caption}${key ? '\nВ архиве: ключи ответов.' : ''}${key?.note ? '\n' + key.note : ''}`);
+    keySent = Boolean(key);
+  }
+  return { missingAnswers, keySent };
+}
+
+// Повторная отправка набора из истории (свой набор пользователя, не кластерный)
+export async function resendBatch(opts: { sb: any; botToken: string; chat: number; user: { id: string }; batchId: string; lang?: Lang }) {
+  const { sb, botToken, chat, user, batchId } = opts;
+  const { data: batch } = await sb.from('ticket_batches').select('id, title, subject_id, created_by, generation_params').eq('id', batchId).maybeSingle();
+  if (!batch || batch.created_by !== user.id || batch.generation_params?.source === 'cluster') throw new Error('Набор не найден');
+  const { data: rows, error } = await sb.from('tickets')
+    .select('ticket_number, questions:ticket_questions(order_index, question_snapshot)')
+    .eq('batch_id', batchId).order('ticket_number');
+  if (error || !rows?.length) throw new Error('В наборе нет билетов');
+  const p = batch.generation_params ?? {};
+  const lang: Lang = opts.lang ?? (p.lang === 'tg' || p.lang === 'both' ? p.lang : 'ru');
+  const { data: gotLock } = await sb.rpc('acquire_generation_lock', { p_user: user.id, p_ttl_seconds: 180 });
+  if (gotLock === false) throw new Error('Предыдущая генерация ещё выполняется. Подождите минуту.');
+  try {
+    return await deliverBatch({
+      sb, botToken, chat, lang, title: batch.title, subjectId: batch.subject_id,
+      chapterIds: p.chapter_ids ?? [], topicIds: p.topic_ids ?? [],
+      tickets: rows.map((t: any) => ({
+        ticketNumber: t.ticket_number,
+        questions: [...(t.questions ?? [])].sort((x: any, y: any) => x.order_index - y.order_index),
+      })),
+    });
+  } finally {
+    await sb.from('generation_locks').delete().eq('user_id', user.id);
+  }
+}
+
 export async function generateAndSend(opts: {
   sb: any;
   botToken: string;
@@ -126,7 +234,7 @@ export async function generateAndSend(opts: {
   const { sb, botToken, chat, user, sel, settings: s, lang, source } = opts;
   const allowed = await allowedSubjectIds(sb, user);
   if (allowed && !allowed.includes(sel.subjectId)) throw new Error('Этот предмет вам не назначен');
-  const bad = T.checkSettings(s, limitsFor(user));
+  const bad = T.checkSettings(s, await limitsFor(sb, user));
   if (bad) throw new Error(bad);
   const dayErr = await dailyLimitError(sb, user);
   if (dayErr) throw new Error(dayErr);
@@ -150,8 +258,6 @@ export async function generateAndSend(opts: {
   const totals = await loadChapterTotals(sb, sel.subjectId, pool);
   const tickets = T.buildTickets(pool, fit.settings, Math.random, totals);
   const title = s.title.trim() || 'Экзаменационные билеты';
-  const { data: subj } = await sb.from('subjects').select('name').eq('id', sel.subjectId).maybeSingle();
-  const subjectName = subj?.name ?? 'Химия';
 
   // Партия, билеты и вопросы — одной транзакцией (supabase/sql/save_ticket_batch.sql); лимиты проверяет триггер
   const { data: saved, error: sErr } = await sb.rpc('save_ticket_batch', {
@@ -177,58 +283,10 @@ export async function generateAndSend(opts: {
     details: { tickets: s.ticketCount, lang, chat_id: chat, source },
   });
 
-  const infos = await loadSelectionInfos(sb, sel);
-  const shaped = tickets.map((t) => ({ ticket_number: t.ticketNumber, selection_info: infos, questions: t.questions.map((q: any) => ({ question_snapshot: q.question_snapshot })) }));
-  const bytes = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
-  const files: Array<{ name: string; data: Uint8Array }> = [];
-  for (const t of shaped) {
-    if (lang === 'ru' || lang === 'both') files.push({ name: lang === 'both' ? `Русский/Вариант ${t.ticket_number}.docx` : `Вариант ${t.ticket_number}.docx`, data: await bytes(await buildSingleTicketBlob(title, t, subjectName, false)) });
-    if (lang === 'tg' || lang === 'both') files.push({ name: lang === 'both' ? `Тоҷикӣ/Варианти ${t.ticket_number}.docx` : `Варианти ${t.ticket_number}.docx`, data: await bytes(await buildSingleTicketBlob(title, t, subjectName, true)) });
-  }
-
-  // Ключи ответов (по шаблону предмета): в архив, если отправляется архив, иначе отдельным файлом
-  let missingAnswers = 0;
-  let keySent = false;
-  let key: { data: Uint8Array; name: string; note: string } | null = null;
-  const kind = keyKindOf(subjectName);
-  if (kind) {
-    try {
-      const tpl = Uint8Array.from(atob(KEY_TEMPLATES[kind]), (c) => c.charCodeAt(0));
-      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped, infos.ru);
-      missingAnswers = stats.missing;
-      key = {
-        data: kbytes,
-        name: `Ключи – ${T.safeFileName(title)}.docx`,
-        note: [
-          stats.missing ? `⚠️ В базе нет верного ответа у вопросов: ${stats.missing} — эти клетки в ключе пустые.` : '',
-          stats.overflow ? `В шаблоне не хватило места для вопросов: ${stats.overflow}.` : '',
-        ].filter(Boolean).join(' '),
-      };
-    } catch (e) {
-      console.error('answer key failed', e);
-    }
-  }
-
-  const caption = `${title}: ${s.ticketCount} шт. (${lang === 'both' ? 'RU + TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase())})`;
-  if (files.length === 1) {
-    await sendDocument(botToken, chat, files[0].data, files[0].name, caption);
-    if (key) {
-      try {
-        await sendDocument(botToken, chat, key.data, key.name, `Ключи ответов: ${title}${key.note ? '\n' + key.note : ''}`);
-        keySent = true;
-      } catch (e) {
-        console.error('answer key send failed', e);
-      }
-    }
-  } else {
-    const zip = new JSZip();
-    files.forEach((f) => zip.file(f.name, f.data));
-    if (key) zip.file(key.name, key.data);
-    const zbytes = await zip.generateAsync({ type: 'uint8array' });
-    const suffix = lang === 'both' ? 'RU_TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase());
-    await sendDocument(botToken, chat, zbytes, `${T.safeFileName(title)}_${suffix}.zip`, `${caption}${key ? '\nВ архиве: ключи ответов.' : ''}${key?.note ? '\n' + key.note : ''}`);
-    keySent = Boolean(key);
-  }
-  return { missingAnswers, keySent };
+  return deliverBatch({
+    sb, botToken, chat, lang,
+    title, subjectId: sel.subjectId, chapterIds: sel.chapterIds, topicIds: sel.topicIds,
+    tickets: tickets.map((t) => ({ ticketNumber: t.ticketNumber, questions: t.questions })),
+  });
   }
 }

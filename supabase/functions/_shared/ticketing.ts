@@ -465,3 +465,13 @@ export function settingsText(subject: string, chapters: string[], topicCount: nu
   lines.push('', 'Нажмите на параметр, чтобы изменить его. Затем «Далее».');
   return lines.join('\n');
 }
+
+/**
+ * Для экзамена-кластера: если вопросов, не использованных в прошлых экзаменах, хватает на need разных
+ * (вопросов в билете × вариантов), берём только их; иначе — весь пул (повторы неизбежны).
+ */
+export function preferUnused<Q extends { id: string }>(pool: Q[], used: Set<string>, need: number): { pool: Q[]; fresh: boolean } {
+  if (used.size === 0) return { pool, fresh: true };
+  const fresh = pool.filter((q) => !used.has(q.id));
+  return fresh.length >= need ? { pool: fresh, fresh: true } : { pool, fresh: false };
+}

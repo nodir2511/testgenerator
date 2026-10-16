@@ -174,7 +174,7 @@ const prompts = (lim: { perType: number; tickets: number }): Record<string, stri
 // ---------------- Генерация ----------------
 async function generate(chat: number, msgId: number | undefined, st: State, user: any, lang: 'ru' | 'tg' | 'both') {
   const s = st.settings;
-  const bad = T.checkSettings(s, limitsFor(user));
+  const bad = T.checkSettings(s, await limitsFor(sb, user));
   if (bad) return send(chat, `⚠️ ${bad}`, T.kbSettings(s));
   try {
     await generateAndSend({
@@ -240,7 +240,8 @@ async function onMessage(m: any) {
       if (!t) return send(chat, 'Название не может быть пустым.');
       st.settings.title = t;
     } else {
-      const max = a === 'tickets' ? limitsFor(user).tickets : limitsFor(user).perType;
+      const lim = await limitsFor(sb, user);
+      const max = a === 'tickets' ? lim.tickets : lim.perType;
       const n = T.parseCount(text, max, a === 'tickets' ? 1 : 0);
       if (n === null) return send(chat, `Нужно целое число от ${a === 'tickets' ? 1 : 0} до ${max}.`);
       if (a === 'test') st.settings.testCount = n;
@@ -330,7 +331,7 @@ async function onCallback(cb: any) {
   if (data.startsWith('V:')) {
     st.awaiting = data.slice(2) as State['awaiting'];
     await saveState(chat, st);
-    return send(chat, prompts(limitsFor(user))[st.awaiting!]);
+    return send(chat, prompts(await limitsFor(sb, user))[st.awaiting!]);
   }
   if (data === 'O:opt' || data === 'O:mat') {
     if (data === 'O:opt') st.settings.shuffleOptions = !st.settings.shuffleOptions;
@@ -338,7 +339,7 @@ async function onCallback(cb: any) {
     return screenSettings(chat, msgId, st);
   }
   if (data === 'SN') {
-    const bad = T.checkSettings(st.settings, limitsFor(user));
+    const bad = T.checkSettings(st.settings, await limitsFor(sb, user));
     if (bad) return send(chat, `⚠️ ${bad}`);
     const fit = T.fitSettings(await countPool(st), st.settings);
     if (fit.error) return send(chat, `⚠️ ${fit.error}`);

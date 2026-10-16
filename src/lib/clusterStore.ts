@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { fetchAllPages } from './fetchAllPages';
 import { CLUSTER_SLOTS, type ClusterSettings, type ClusterVariant } from './clusterExport';
 
 // Хранение экзамена-кластера в «Сохранённых билетах»: обычная партия (ticket_batches) с пометкой
@@ -68,4 +69,24 @@ export function clusterVariantsFromBatch(tickets: any[]): ClusterVariant[] {
         });
       return { number: t.ticket_number, subjects };
     });
+}
+
+/** Идентификаторы вопросов, уже вошедших в сохранённые экзамены-кластеры (видит только главный админ) */
+export async function loadUsedQuestionIds(): Promise<Set<string>> {
+  const used = new Set<string>();
+  const { data: batches, error } = await supabase.from('ticket_batches').select('id, generation_params');
+  if (error) throw error;
+  const batchIds = (batches || []).filter((b: any) => isClusterBatch(b)).map((b: any) => b.id as string);
+  for (let i = 0; i < batchIds.length; i += 40) {
+    const { data: tickets, error: tErr } = await supabase.from('tickets').select('id').in('batch_id', batchIds.slice(i, i + 40));
+    if (tErr) throw tErr;
+    const ticketIds = (tickets || []).map((t: any) => t.id as string);
+    for (let j = 0; j < ticketIds.length; j += 40) {
+      const { data, error: qErr } = await fetchAllPages<any>(() =>
+        supabase.from('ticket_questions').select('id, question_id').in('ticket_id', ticketIds.slice(j, j + 40)));
+      if (qErr) throw qErr;
+      (data || []).forEach((r: any) => { if (r.question_id) used.add(r.question_id); });
+    }
+  }
+  return used;
 }

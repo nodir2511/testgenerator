@@ -11,7 +11,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
-import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser, type Limits } from '../_shared/generate.ts';
+import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser, resendBatch, type Limits } from '../_shared/generate.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -159,11 +159,12 @@ Deno.serve(async (req) => {
 
     switch (body?.action) {
       case 'me':
-        return json({ name: user.full_name || user.email, subjects: await subjectList(user), limits: limitsFor(user) });
+        return json({ name: user.full_name || user.email, subjects: await subjectList(user), limits: await limitsFor(sb, user) });
       case 'history': {
         const { data } = await sb.from('ticket_batches').select('id, title, created_at, subject_id, generation_params, subject:subjects(name)')
-          .eq('created_by', user.id).order('created_at', { ascending: false }).limit(8);
-        return json({ batches: data ?? [] });
+          .eq('created_by', user.id).order('created_at', { ascending: false }).limit(24);
+        // Кластерные экзамены в историю бота не попадают
+        return json({ batches: (data ?? []).filter((b: any) => b.generation_params?.source !== 'cluster').slice(0, 8) });
       }
       case 'tree': {
         if (typeof body.subjectId !== 'string') return json({ error: 'Не выбран предмет' }, 400);
@@ -172,7 +173,7 @@ Deno.serve(async (req) => {
         return json({ chapters: await tree(body.subjectId) });
       }
       case 'generate': {
-        const limits = limitsFor(user);
+        const limits = await limitsFor(sb, user);
         const p = parseGenerate(body, limits);
         if ('error' in p) return json({ error: p.error }, 400);
         const chat = tgUser.id;
@@ -187,6 +188,17 @@ Deno.serve(async (req) => {
         } catch (e) {
           console.error('tg-app generate failed', e);
           return json({ error: (e as Error).message || 'Не удалось создать билеты' }, 422);
+        }
+      }
+      case 'resend': {
+        if (typeof body.batchId !== 'string') return json({ error: 'Не выбран набор' }, 400);
+        const lang = body.lang === 'ru' || body.lang === 'tg' || body.lang === 'both' ? body.lang : undefined;
+        try {
+          const r = await resendBatch({ sb, botToken: BOT_TOKEN, chat: tgUser.id, user, batchId: body.batchId, lang });
+          return json({ ok: true, missingAnswers: r.missingAnswers, keySent: r.keySent });
+        } catch (e) {
+          console.error('tg-app resend failed', e);
+          return json({ error: (e as Error).message || 'Не удалось отправить файл' }, 422);
         }
       }
       default:

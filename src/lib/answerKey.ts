@@ -22,7 +22,7 @@ export interface KeyTicket {
 }
 
 export interface KeyStats {
-  /** Вопросы, для которых в базе нет верного ответа (в ключе клетки остались пустыми) */
+  /** Вопросы, для которых в базе нет верного ответа (в ключе эти клетки красные, с «?») */
   missing: number;
   /** Вопросы, которым не нашлось места в шаблоне */
   overflow: number;
@@ -44,6 +44,24 @@ function putText(cell: string, text: string): string {
   const end = cell.indexOf('</w:p>');
   if (end < 0) return cell;
   return cell.slice(0, end) + run + cell.slice(end);
+}
+
+// Клетка без ответа в базе: красная заливка и «?», чтобы пропуск был виден в готовом ключе
+const MISSING_FILL = 'FF9999';
+function markMissing(cell: string): string {
+  const shd = `<w:shd w:val="clear" w:color="auto" w:fill="${MISSING_FILL}"/>`;
+  let out = cell;
+  if (/<w:tcPr>/.test(out)) {
+    out = out.replace(/<w:tcPr>([\s\S]*?)<\/w:tcPr>/, (_m, inner: string) => {
+      const clean = inner.replace(/<w:shd\b[^>]*\/>/, '');
+      // Порядок элементов tcPr по схеме: shd идёт перед noWrap, tcMar, textDirection, tcFitText, vAlign, hideMark
+      const later = clean.search(/<w:(noWrap|tcMar|textDirection|tcFitText|vAlign|hideMark)\b/);
+      return '<w:tcPr>' + (later >= 0 ? clean.slice(0, later) + shd + clean.slice(later) : clean + shd) + '</w:tcPr>';
+    });
+  } else {
+    out = out.replace('<w:tc>', `<w:tc><w:tcPr>${shd}</w:tcPr>`);
+  }
+  return putText(out, '?');
 }
 
 type Slot = { r: number; c: number };
@@ -112,13 +130,15 @@ function fillTable(tbl: string, tests: any[], matching: any[], open: any[], stat
   const lay = layoutOf(texts);
   const put = new Map<string, string>();
   const set = (r: number, c: number, v: string) => put.set(`${r}:${c}`, v);
+  const red = new Set<string>();
+  const flag = (r: number, c: number) => red.add(`${r}:${c}`);
 
   tests.forEach((q, i) => {
     const slot = lay.tests[i];
     const a = testAnswer(q);
     if (!a) stats.missing++;
     if (!slot) { stats.overflow++; return; }
-    if (a) set(slot.r, slot.c, a);
+    if (a) set(slot.r, slot.c, a); else flag(slot.r, slot.c);
   });
   matching.forEach((q, i) => {
     const blk = lay.matching[i];
@@ -126,13 +146,15 @@ function fillTable(tbl: string, tests: any[], matching: any[], open: any[], stat
     if (ans.length === 0 || ans.some((x) => x === null)) stats.missing++;
     if (!blk) { stats.overflow++; return; }
     ans.forEach((a, k) => { if (a && blk.rows[k] !== undefined) set(blk.rows[k], blk.col, a); });
+    // Нет ответов совсем — краснеют все строки блока, иначе только пустые
+    blk.rows.forEach((row, k) => { if (ans.length === 0 || ans[k] == null) flag(row, blk.col); });
   });
   open.forEach((q, i) => {
     const blk = lay.open[i];
     const a = openAnswer(q);
     if (a === null) stats.missing++;
     if (!blk) { stats.overflow++; return; }
-    if (a === null) return;
+    if (a === null) { blk.cols.forEach((c) => flag(blk.r, c)); return; }
     const chars = [...a];
     const n = blk.cols.length;
     const parts = chars.length <= n ? chars : [...chars.slice(0, n - 1), chars.slice(n - 1).join('')];
@@ -145,7 +167,9 @@ function fillTable(tbl: string, tests: any[], matching: any[], open: any[], stat
     let ci = -1;
     return row.replace(cellRe, (cell) => {
       ci++;
-      const v = put.get(`${ri}:${ci}`);
+      const key = `${ri}:${ci}`;
+      if (red.has(key)) return markMissing(cell);
+      const v = put.get(key);
       return v === undefined ? cell : putText(cell, v);
     });
   });

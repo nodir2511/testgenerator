@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo, describeError } from '../lib/errors';
-import { fitSettings, pickParallel, chapterTotals, totalsOf,poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS, TG_LIMITS } from '../../supabase/functions/_shared/ticketing';
+import { fitSettings, pickParallel, chapterTotals, totalsOf,poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
 import { Subject, Chapter, Topic, Question, TicketBatch, Ticket, TicketQuestion } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -23,6 +23,7 @@ import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '.
 import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo } from '../lib/answerKeyExport';
 import { SendToTelegramButton } from './SendToTelegramButton';
 import { fetchAllPages } from '../lib/fetchAllPages';
+import { useUserLimits, formatCooldown } from '../lib/generationLimits';
 
 // Администратору на сайте можно до 50 вариантов; обычным пользователям — те же лимиты, что в Telegram (их же проверяет база)
 const ADMIN_SITE_LIMITS = { ...LIMITS, tickets: 50 };
@@ -53,7 +54,8 @@ const getStorageBool = (key: string, fallback: boolean): boolean => {
 export const TicketGenerator: React.FC = () => {
   const queryClient = useQueryClient();
   const { user, isAdmin } = useAuth();
-  const limits = isAdmin ? ADMIN_SITE_LIMITS : TG_LIMITS;
+  const userLimits = useUserLimits();
+  const limits = isAdmin ? ADMIN_SITE_LIMITS : userLimits;
   const generatingRef = React.useRef(false);
 
   // Параметры конфигурации билета (сохраняются при перезагрузке)
@@ -453,7 +455,7 @@ export const TicketGenerator: React.FC = () => {
       const stats = await exportAnswerKey(generatedBatch.title, generatedBatch.tickets, generatedSubjectName, {
         subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params,
       });
-      if (stats.missing) notifyError(new Error(`В базе нет верного ответа у вопросов: ${stats.missing} — клетки в ключе пустые.`), 'Ключи готовы, но не полные');
+      if (stats.missing) notifyError(new Error(`В базе нет верного ответа у вопросов: ${stats.missing} — клетки в ключе отмечены красным.`), 'Ключи готовы, но не полные');
     } catch (err: any) {
       notifyError(err, 'Ошибка при создании ключей');
     }
@@ -813,7 +815,7 @@ export const TicketGenerator: React.FC = () => {
                 />
                 {!isAdmin && (
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Лимиты: до {limits.tickets} вариантов за раз, до {TG_LIMITS.total} вопросов в билете, до {TG_LIMITS.perDay} наборов в сутки.
+                    Лимиты: до {limits.tickets} вариантов за раз, до {userLimits.total} вопросов в билете, до {userLimits.perDay} наборов в сутки, генерировать можно {formatCooldown(userLimits.cooldownSeconds)}.
                   </p>
                 )}
                 <p className="text-[11px] text-slate-400 mt-1">
