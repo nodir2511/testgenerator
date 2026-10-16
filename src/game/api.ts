@@ -50,6 +50,8 @@ export interface GameBoard {
   lobby: boolean;
   /** Номер слайда мини-презентации перед QR-кодом (null — презентация закончена) */
   intro: number | null;
+  /** Где в этой игре «Кот в мешке» и «Аукцион»: уровень → «ci-qi» → вид. Выбирается случайно при каждой новой игре. */
+  specials: Record<string, Record<string, 'cat' | 'auction'>>;
   log: LogEntry[];
 }
 export interface GameInput { cat?: number; bidders?: number[]; fs?: number[] }
@@ -83,6 +85,7 @@ export function freshBoard(keep?: Partial<GameBoard>): GameBoard {
     final: false,
     lobby: false,
     intro: null,
+    specials: {},
     log: [],
   };
 }
@@ -97,7 +100,7 @@ function normalize(row: any): GameSession {
     teams: Array.isArray(row.teams) ? row.teams : [],
     buzz: Array.isArray(row.buzz) ? row.buzz : [],
     input: row.input && typeof row.input === 'object' ? row.input : {},
-    board: { ...base, ...b, lobby: b.lobby ?? Object.keys(b).length === 0, intro: b.intro !== undefined ? b.intro : Object.keys(b).length === 0 ? 0 : null, q: b.q && b.q.text ? b.q : null, log: Array.isArray(b.log) ? b.log : [], layout: Array.isArray(b.layout) ? b.layout : [], used: { ...base.used, ...(b.used || {}) }, timer: { ...base.timer, ...(b.timer || {}) } },
+    board: { ...base, ...b, specials: b.specials && typeof b.specials === 'object' ? b.specials : {}, lobby: b.lobby ?? Object.keys(b).length === 0, intro: b.intro !== undefined ? b.intro : Object.keys(b).length === 0 ? 0 : null, q: b.q && b.q.text ? b.q : null, log: Array.isArray(b.log) ? b.log : [], layout: Array.isArray(b.layout) ? b.layout : [], used: { ...base.used, ...(b.used || {}) }, timer: { ...base.timer, ...(b.timer || {}) } },
   };
 }
 
@@ -271,4 +274,18 @@ export function playSound(kind: SoundKind) {
   else if (kind === 'gong') playTones([{ f: 196, d: 1.8, v: 0.3 }, { f: 294, d: 1.4, v: 0.15 }, { f: 98, d: 2, v: 0.2 }]);
   else if (kind === 'buzz') playTones([{ f: 880, d: 0.18, type: 'square', v: 0.12 }]);
   else playTones([523, 659, 784, 1047].map((f, i) => ({ f, d: 0.35, at: i * 0.18, type: 'triangle' as OscillatorType })).concat([{ f: 1047, d: 1.2, at: 0.8, type: 'triangle' }, { f: 784, d: 1.2, at: 0.8, type: 'triangle' }, { f: 659, d: 1.2, at: 0.8, type: 'triangle' }]));
+}
+
+/** Случайно выбирает на каждом уровне по одной клетке «Кот в мешке» и «Аукцион» (не занятые уже сыгранными) */
+export function pickSpecials(layout: LayoutRound[], used: GameBoard['used'] = {}): GameBoard['specials'] {
+  const out: GameBoard['specials'] = {};
+  for (const r of layout) {
+    const cells: string[] = [];
+    r.cats.forEach((c, ci) => c.values.forEach((_v, qi) => { if (!used[r.id]?.[ci + '-' + qi]) cells.push(ci + '-' + qi); }));
+    for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cells[i], cells[j]] = [cells[j], cells[i]]; }
+    out[r.id] = {};
+    if (cells[0]) out[r.id][cells[0]] = 'cat';
+    if (cells[1]) out[r.id][cells[1]] = 'auction';
+  }
+  return out;
 }

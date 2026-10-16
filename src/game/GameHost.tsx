@@ -6,7 +6,7 @@ import { FormattedText } from '../components/FormulaEditor';
 import { GameRound, INTRO_SLIDES, RULES, SPECIAL } from './content';
 import { buildReview, exportXlsx, resultText, standingsRows, type ReviewRow } from './review';
 import {
-  GameBoard, GameQ, GameSession, GameTeam, Lang, LayoutRound, QMode, TIMER_CHOICES, beep, freshBoard, queueOf,
+  GameBoard, GameQ, GameSession, GameTeam, Lang, LayoutRound, QMode, TIMER_CHOICES, beep, freshBoard, pickSpecials, queueOf,
   screenUrl, signed, standings, useGameSession, useServerClock, useTimerLeft,
 } from './api';
 import {
@@ -140,7 +140,11 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   // раскладка табло (без ответов) — для проектора
   useEffect(() => {
     const layout = layoutOf(pack);
-    if (JSON.stringify(layout) !== JSON.stringify(boardRef.current.layout)) commit((b) => ({ ...b, layout }));
+    const cur = boardRef.current;
+    const noSpecials = layout.some((r) => !cur.specials[r.id]);
+    if (JSON.stringify(layout) !== JSON.stringify(cur.layout) || noSpecials) {
+      commit((b) => ({ ...b, layout, specials: noSpecials ? pickSpecials(layout, b.used) : b.specials }));
+    }
   }, [pack, commit]);
 
   const left = useTimerLeft(board.timer, now);
@@ -211,13 +215,14 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
     const r = pack.find((x) => x.id === view) ?? pack[0];
     const c = r.cats[ci];
     const item = c.qs[qi];
-    const mode: QMode = item.tag === 'cat' ? 'cat' : item.tag === 'auction' ? 'bids' : 'buzz';
+    const tag = boardRef.current.specials[r.id]?.[ci + '-' + qi];
+    const mode: QMode = tag === 'cat' ? 'cat' : tag === 'auction' ? 'bids' : 'buzz';
     commit((b) => ({
       ...b,
       chooser: b.chooser ?? nextChooser(null),
       round: r.id,
       q: {
-        r: r.id, ci, qi, v: item.v, pts: item.v, cat: c.name, catt: c.nt, tag: item.tag,
+        r: r.id, ci, qi, v: item.v, pts: item.v, cat: c.name, catt: c.nt, tag,
         text: { q: item.q, qt: item.qt }, ans: null, shown: false, wrong: [], mode,
         chooser: mode === 'cat' ? b.chooser ?? nextChooser(null) : null, answerer: null, bids: null,
       },
@@ -312,7 +317,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   };
   const resetGame = () => {
     // новая игра начинается с презентации и QR (команды остаются в списке)
-    commit((b) => ({ ...freshBoard({ round: b.round, lang: b.lang, layout: b.layout, secs: b.secs }), lobby: true, intro: 0 }), true);
+    commit((b) => ({ ...freshBoard({ round: b.round, lang: b.lang, layout: b.layout, secs: b.secs }), specials: pickSpecials(b.layout), lobby: true, intro: 0 }), true);
     rpc('game_buzz_clear', { p_code: code });
     setConfirmReset(false);
   };
@@ -435,7 +440,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
             </p>
           )}
           {view === 'rules' && <RulesView />}
-          {view === 'host' && <HostSheet pack={pack} />}
+          {view === 'host' && <HostSheet pack={pack} specials={board.specials} />}
           {view === 'review' && <ReviewView rows={buildReview(board, pack, teams)} onExport={(rows) => exportXlsx('Игра', standingsRows(teams, board.scores), rows, `igra-${code}`)} />}
           {view === 'history' && <HistoryView />}
         </main>
@@ -776,7 +781,7 @@ const RulesView: React.FC = () => {
   return <div className="rules">{col('ru')}{col('tj')}</div>;
 };
 
-const HostSheet: React.FC<{ pack: GameRound[] }> = ({ pack }) => {
+const HostSheet: React.FC<{ pack: GameRound[]; specials: GameBoard['specials'] }> = ({ pack, specials }) => {
   const lang = useLang();
   const blk = (ru: React.ReactNode, tj: React.ReactNode) => lang === 'ru' ? <span>{ru}</span> : lang === 'tj' ? <span>{tj}</span> : <><span>{ru}</span><span className="t" lang="tg">{tj}</span></>;
   return (
@@ -786,22 +791,22 @@ const HostSheet: React.FC<{ pack: GameRound[] }> = ({ pack }) => {
         <section key={r.id}>
           <h2><Bi ru={r.tab} tj={r.tabt} /></h2>
           <p className="eyebrow"><Bi ru={r.sub} tj={r.subt} /></p>
-          {r.cats.map((c) => (
+          {r.cats.map((c, ci) => (
             <React.Fragment key={c.name}>
               <h3><Bi ru={c.name} tj={c.nt} /></h3>
               <ol>
-                {c.qs.map((q) => (
+                {c.qs.map((q, qi) => { const tag = specials[r.id]?.[ci + '-' + qi]; return (
                   <li key={q.v}>
                     <span className="hv">{q.v}</span>
                     <span className="hq">
-                      {blk(<><span dangerouslySetInnerHTML={{ __html: fmt(q.q) }} />{q.tag && <> <span className="badge">{pick(lang, SPECIAL[q.tag].ru, SPECIAL[q.tag].tj)}</span></>}</>,
+                      {blk(<><span dangerouslySetInnerHTML={{ __html: fmt(q.q) }} />{tag && <> <span className="badge">{pick(lang, SPECIAL[tag].ru, SPECIAL[tag].tj)}</span></>}</>,
                         <span dangerouslySetInnerHTML={{ __html: fmt(q.qt) }} />)}
                     </span>
                     <span className="ha">
                       {blk(<><b>Ответ:</b> <span dangerouslySetInnerHTML={{ __html: fmt(q.a) }} /></>, <><b>Ҷавоб:</b> <span dangerouslySetInnerHTML={{ __html: fmt(q.at) }} /></>)}
                     </span>
                   </li>
-                ))}
+                ); })}
               </ol>
             </React.Fragment>
           ))}
