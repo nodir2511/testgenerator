@@ -64,3 +64,12 @@ supabase/.temp/
 !public/key-templates/*.docx
 !supabase/sql/*.sql
 !supabase/sql/releases/*.sql
+
+# Python и временные файлы рабочих скриптов
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.tmp
+Thumbs.db
+coverage/
