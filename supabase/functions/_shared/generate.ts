@@ -49,8 +49,9 @@ function dayStartIso(): string {
 async function dailyLimitError(sb: any, user: { id: string; role?: string }): Promise<string | null> {
   const perDay = limitsFor(user).perDay;
   if (!Number.isFinite(perDay)) return null;
-  const { count } = await sb.from('ticket_batches').select('*', { count: 'exact', head: true })
-    .eq('created_by', user.id).gte('created_at', dayStartIso());
+  // Журнал генераций: удалённые наборы тоже считаются
+  const { count } = await sb.from('generation_usage').select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id).gte('created_at', dayStartIso());
   return (count ?? 0) >= perDay ? `Дневной лимит исчерпан: ${perDay} генераций в сутки. Попробуйте завтра.` : null;
 }
 
@@ -152,24 +153,24 @@ export async function generateAndSend(opts: {
   const { data: subj } = await sb.from('subjects').select('name').eq('id', sel.subjectId).maybeSingle();
   const subjectName = subj?.name ?? 'Химия';
 
-  const { data: batch, error: bErr } = await sb.from('ticket_batches').insert({
-    title, subject_id: sel.subjectId, created_by: user.id,
-    generation_params: {
-      chapter_ids: sel.chapterIds, topic_ids: sel.topicIds,
-      test_count: fit.settings.testCount, matching_count: fit.settings.matchingCount, open_count: fit.settings.openCount, ticket_count: s.ticketCount,
-      shuffle_options: s.shuffleOptions, shuffle_matching: s.shuffleMatching, source, lang,
-      requested: { test: s.testCount, matching: s.matchingCount, open: s.openCount },
+  // Партия, билеты и вопросы — одной транзакцией (supabase/sql/save_ticket_batch.sql); лимиты проверяет триггер
+  const { data: saved, error: sErr } = await sb.rpc('save_ticket_batch', {
+    p_batch: {
+      title, subject_id: sel.subjectId, created_by: user.id,
+      generation_params: {
+        chapter_ids: sel.chapterIds, topic_ids: sel.topicIds,
+        test_count: fit.settings.testCount, matching_count: fit.settings.matchingCount, open_count: fit.settings.openCount, ticket_count: s.ticketCount,
+        shuffle_options: s.shuffleOptions, shuffle_matching: s.shuffleMatching, source, lang,
+        requested: { test: s.testCount, matching: s.matchingCount, open: s.openCount },
+      },
     },
-  }).select().single();
-  if (bErr || !batch) throw bErr ?? new Error('Не удалось сохранить партию');
-
-  for (const t of tickets) {
-    const { data: ticket, error: tErr } = await sb.from('tickets').insert({ batch_id: batch.id, ticket_number: t.ticketNumber }).select().single();
-    if (tErr || !ticket) throw tErr ?? new Error('Не удалось сохранить билет');
-    const rows = t.questions.map((q: any) => ({ ticket_id: ticket.id, question_id: q.question_id, order_index: q.order_index, question_snapshot: q.question_snapshot }));
-    const { error: qErr } = await sb.from('ticket_questions').insert(rows);
-    if (qErr) throw qErr;
-  }
+    p_tickets: tickets.map((t) => ({
+      ticket_number: t.ticketNumber,
+      questions: t.questions.map((q: any) => ({ question_id: q.question_id, order_index: q.order_index, question_snapshot: q.question_snapshot })),
+    })),
+  });
+  if (sErr || !saved) throw new Error(sErr?.message || 'Не удалось сохранить партию');
+  const batch = saved.batch;
 
   await sb.from('audit_logs').insert({
     user_id: user.id, action: 'TELEGRAM_EXPORT', entity_type: 'ticket_batches', entity_id: batch.id,

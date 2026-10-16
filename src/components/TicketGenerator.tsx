@@ -346,14 +346,21 @@ export const TicketGenerator: React.FC = () => {
         ticketsData.push({ ticketNumber: k + 1, questions: [...tests[k], ...matchings[k], ...opens[k]] });
       }
 
-      // 4. Сохранение партии: партия, все билеты одним запросом, все вопросы билетов пачками.
-      // Любая ошибка — партия удаляется (если прав на удаление нет, остаётся пустая — об этом сообщим).
-      const { data: batch, error: bErr } = await supabase
-        .from('ticket_batches')
-        .insert({
+      // 4. Сохранение одной транзакцией: партия, билеты и вопросы билетов (см. supabase/sql/save_ticket_batch.sql).
+      // При любой ошибке база откатывает всё — недосозданных наборов не остаётся.
+      const snapOpts = { shuffleOptions, shuffleMatching };
+      const ticketsPayload = ticketsData.map(t => ({
+        ticket_number: t.ticketNumber,
+        questions: t.questions.map((q, idx) => ({
+          question_id: q.id,
+          order_index: idx + 1,
+          question_snapshot: toSnapshot(q, snapOpts),
+        })),
+      }));
+      const { data: saved, error: sErr } = await supabase.rpc('save_ticket_batch', {
+        p_batch: {
           title: batchTitle.trim() || 'Экзаменационные билеты',
           subject_id: subjectId,
-          created_by: user?.id,
           generation_params: {
             chapter_ids: selectedChapterIds,
             topic_ids: selectedTopicIds,
@@ -366,55 +373,15 @@ export const TicketGenerator: React.FC = () => {
             requested: { test: testCount, matching: matchingCount, open: openCount },
             source: 'site',
           },
-        })
-        .select()
-        .single();
-
-      if (bErr || !batch) throw bErr || new Error('Не удалось создать партию билетов');
-
-      let createdTicketsWithQuestions: any[] = [];
-      try {
-        const { data: savedTickets, error: tErr } = await supabase
-          .from('tickets')
-          .insert(ticketsData.map(t => ({ batch_id: batch.id, ticket_number: t.ticketNumber })))
-          .select();
-        if (tErr || !savedTickets || savedTickets.length !== ticketsData.length) {
-          throw tErr || new Error('Не все билеты были сохранены');
-        }
-        const idByNumber = new Map<number, any>(savedTickets.map((x: any) => [x.ticket_number, x]));
-
-        const snapOpts = { shuffleOptions, shuffleMatching };
-        const allRows: any[] = [];
-        const perTicket = new Map<number, any[]>();
-        for (const t of ticketsData) {
-          const saved = idByNumber.get(t.ticketNumber);
-          if (!saved) throw new Error('Не все билеты были сохранены');
-          const rows = t.questions.map((q, idx) => ({
-            ticket_id: saved.id,
-            question_id: q.id,
-            order_index: idx + 1,
-            question_snapshot: toSnapshot(q, snapOpts),
-          }));
-          perTicket.set(t.ticketNumber, rows);
-          allRows.push(...rows);
-        }
-
-        for (let i = 0; i < allRows.length; i += 200) {
-          const { error: qiErr } = await supabase.from('ticket_questions').insert(allRows.slice(i, i + 200));
-          if (qiErr) throw qiErr;
-        }
-
-        createdTicketsWithQuestions = ticketsData.map(t => ({
-          ...idByNumber.get(t.ticketNumber),
-          questions: perTicket.get(t.ticketNumber),
-        }));
-      } catch (saveErr: any) {
-        const { error: delErr } = await supabase.from('ticket_batches').delete().eq('id', batch.id);
-        if (delErr) {
-          notifyInfo('Билеты не сохранились полностью, а удалить недосозданную партию не удалось — попросите администратора удалить её в «Сохранённых».');
-        }
-        throw saveErr;
-      }
+        },
+        p_tickets: ticketsPayload,
+      });
+      if (sErr || !saved) throw sErr || new Error('Не удалось сохранить билеты');
+      const batch = (saved as any).batch;
+      const createdTicketsWithQuestions = ((saved as any).tickets as any[]).map((t, i) => ({
+        ...t,
+        questions: ticketsPayload[i].questions.map(q => ({ ...q, ticket_id: t.id })),
+      }));
 
       setGeneratedBatch({
         ...batch,

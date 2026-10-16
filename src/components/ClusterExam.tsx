@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useAuth } from '../hooks/useAuth';
 import { saveClusterBatch } from '../lib/clusterStore';
 import { saveAs } from 'file-saver';
 import { supabase } from '../lib/supabase';
@@ -195,7 +194,6 @@ const TopicPicker: React.FC<{
 
 export const ClusterExam: React.FC = () => {
   const [state, setState] = useState<Saved>(load);
-  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
@@ -282,7 +280,7 @@ export const ClusterExam: React.FC = () => {
       let saved = false;
       setProgress('Сохранение в архив…');
       try {
-        await saveClusterBatch({ settings, variants, subjectIds, userId: user?.id });
+        await saveClusterBatch({ settings, variants, subjectIds });
         saved = true;
         queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
       } catch (saveErr) {

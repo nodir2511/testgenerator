@@ -12,10 +12,9 @@ interface SaveArgs {
   variants: ClusterVariant[];
   /** Предмет базы для каждого места в книжке (в порядке CLUSTER_SLOTS) */
   subjectIds: string[];
-  userId: string | undefined;
 }
 
-export async function saveClusterBatch({ settings, variants, subjectIds, userId }: SaveArgs): Promise<string> {
+export async function saveClusterBatch({ settings, variants, subjectIds }: SaveArgs): Promise<string> {
   const active = CLUSTER_SLOTS.map((slot, i) => ({ slot, i })).filter(({ i }) => variants[0]?.subjects[i] != null);
   if (active.length === 0) throw new Error('Нет предметов для сохранения');
 
@@ -23,12 +22,11 @@ export async function saveClusterBatch({ settings, variants, subjectIds, userId 
   const typeCount = (t: string) => active.reduce((n, { i }) => n + first.subjects[i]!.filter((q) => q.type === t).length, 0);
   const title = `Кластер ${settings.code}-${settings.exam}`;
 
-  const { data: batch, error: bErr } = await supabase
-    .from('ticket_batches')
-    .insert({
+  // Одной транзакцией (supabase/sql/save_ticket_batch.sql): при ошибке ничего не остаётся
+  const { data, error } = await supabase.rpc('save_ticket_batch', {
+    p_batch: {
       title,
       subject_id: subjectIds[active[0].i],
-      created_by: userId,
       generation_params: {
         source: 'cluster',
         ticket_count: variants.length,
@@ -40,42 +38,19 @@ export async function saveClusterBatch({ settings, variants, subjectIds, userId 
           subjects: active.map(({ slot, i }) => ({ slot: i, kind: slot.kind, name: slot.name, subject_id: subjectIds[i], count: first.subjects[i]!.length })),
         },
       },
-    })
-    .select()
-    .single();
-  if (bErr || !batch) throw bErr || new Error('Не удалось создать партию');
-
-  try {
-    const { data: saved, error: tErr } = await supabase
-      .from('tickets')
-      .insert(variants.map((v) => ({ batch_id: batch.id, ticket_number: v.number })))
-      .select();
-    if (tErr || !saved || saved.length !== variants.length) throw tErr || new Error('Не все варианты были сохранены');
-    const idByNumber = new Map<number, string>(saved.map((t: any) => [t.ticket_number, t.id]));
-
-    const rows: any[] = [];
-    for (const v of variants) {
-      let order = 0;
+    },
+    p_tickets: variants.map((v) => {
+      const questions: any[] = [];
       CLUSTER_SLOTS.forEach((_, s) => {
         (v.subjects[s] || []).forEach((q) => {
-          rows.push({
-            ticket_id: idByNumber.get(v.number),
-            question_id: q.id ?? null,
-            order_index: ++order,
-            question_snapshot: { ...q, cluster_slot: s },
-          });
+          questions.push({ question_id: q.id ?? null, order_index: questions.length + 1, question_snapshot: { ...q, cluster_slot: s } });
         });
       });
-    }
-    for (let i = 0; i < rows.length; i += 200) {
-      const { error } = await supabase.from('ticket_questions').insert(rows.slice(i, i + 200));
-      if (error) throw error;
-    }
-  } catch (e) {
-    await supabase.from('ticket_batches').delete().eq('id', batch.id);
-    throw e;
-  }
-  return batch.id;
+      return { ticket_number: v.number, questions };
+    }),
+  });
+  if (error || !data) throw error || new Error('Не удалось сохранить экзамен');
+  return (data as any).batch.id;
 }
 
 /** Варианты книжки из сохранённой партии: вопросы по предметам в порядке книжки */
