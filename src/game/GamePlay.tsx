@@ -310,11 +310,17 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
           <p className="play-team">{myTeamName}</p>
           <p className="play-score"><Bi ru="Счёт" tj="Хол" />: <b className={myScore < 0 ? 'neg' : ''}>{signed(myScore)}</b></p>
         </div>
+        {board.lobby && (
+          <div className="play-wait">
+            <p className="play-hot"><Bi ru="Вы в игре! Ждём остальные команды, ведущий скоро начнёт" tj="Шумо дар бозӣ ҳастед! Дастаҳои дигарро интизорем, пешбар ба зудӣ оғоз мекунад" /></p>
+            <p className="play-small"><Bi ru={`Команд в игре: ${teams.length}`} tj={`Дастаҳо дар бозӣ: ${teams.length}`} /></p>
+          </div>
+        )}
         {showTimer && <div className="play-timer"><TimerView left={left} big /></div>}
         {center}
-        {status && <p className="play-msg" role="status">{status}</p>}
-        <details className="play-rules">
-          <summary><Bi ru="Правила" tj="Қоидаҳо" /></summary>
+        {status && !board.lobby && <p className="play-msg" role="status">{status}</p>}
+        <details className="play-rules" open={board.lobby || undefined}>
+          <summary><Bi ru="Правила игры" tj="Қоидаҳои бозӣ" /></summary>
           <ul>{TEAM_RULES.map((r, i) => <li key={i}><Bi ru={r.ru} tj={r.tj} /></li>)}</ul>
         </details>
         {me.pin && (

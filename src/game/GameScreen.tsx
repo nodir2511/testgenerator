@@ -91,7 +91,7 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
         </div>
       )}
 
-      {board.showLink && <LinkOverlay code={code} teams={teams} />}
+      {(board.lobby || board.showLink) && <LinkOverlay code={code} teams={teams} />}
     </GameShell>
   );
 };

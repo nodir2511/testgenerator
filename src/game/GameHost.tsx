@@ -559,7 +559,22 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
         </div>
       )}
 
-      {board.showLink && <LinkOverlay code={code} teams={teams} onClose={() => commit((b) => ({ ...b, showLink: false }))} />}
+      {board.lobby && (
+        <LinkOverlay
+          code={code}
+          teams={teams}
+          onRemove={removeTeam}
+          footer={
+            <div className="lobby-actions">
+              <button className="btn primary lobby-start" disabled={teams.length < 1} onClick={() => commit((b) => ({ ...b, lobby: false, showLink: false }))}>
+                <Bi ru={teams.length ? `Начать игру (команд: ${teams.length})` : 'Ждём команды…'} tj={teams.length ? `Оғози бозӣ (дастаҳо: ${teams.length})` : 'Интизори дастаҳо…'} />
+              </button>
+              <a className="btn" href={screenUrl(code)} target="_blank" rel="noreferrer"><Bi ru="Экран для проектора" tj="Экран барои проектор" /></a>
+            </div>
+          }
+        />
+      )}
+      {!board.lobby && board.showLink && <LinkOverlay code={code} teams={teams} onClose={() => commit((b) => ({ ...b, showLink: false }))} />}
     </GameShell>
   );
 };

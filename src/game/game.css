@@ -394,3 +394,11 @@
 .gm .rv-q{margin:6px 0 4px;font-weight:600}
 .gm .rv-a{margin:0;color:var(--good)}
 .gm .hist .btn{align-self:flex-start}
+
+/* стартовый экран (ожидание команд) */
+.gm .lobby-actions{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-top:8px}
+.gm .lobby-start{font-size:clamp(1.1rem,2vw,1.8rem);padding:14px 28px}
+.gm .chip-x{border:0;background:transparent;margin-left:8px;color:var(--muted);font-size:.9em;padding:0 2px}
+.gm .chip-x:hover{color:var(--bad)}
+.gm .play-wait{display:flex;flex-direction:column;gap:6px;text-align:center}
+.gm .play-wait p{margin:0}

@@ -321,7 +321,7 @@ export const Podium: React.FC<{ board: GameBoard; teams: GameTeam[] }> = ({ boar
 };
 
 /** Полноэкранная ссылка и QR для команд */
-export const LinkOverlay: React.FC<{ code: string; teams: GameTeam[]; onClose?: () => void }> = ({ code, teams, onClose }) => {
+export const LinkOverlay: React.FC<{ code: string; teams: GameTeam[]; onClose?: () => void; footer?: React.ReactNode; onRemove?: (n: number) => void }> = ({ code, teams, onClose, footer, onRemove }) => {
   const url = playUrl(code);
   const [qr, setQr] = useState('');
   useEffect(() => {
@@ -341,8 +341,9 @@ export const LinkOverlay: React.FC<{ code: string; teams: GameTeam[]; onClose?: 
             <Bi ru={`Зашли команд: ${teams.length} из 6`} tj={`Дастаҳои ворид шуда: ${teams.length} аз 6`} />
           </p>
           <div className="chips">
-            {[...teams].sort((a, b) => a.n - b.n).map((t) => <span key={t.n} style={tc(t.n)}>{t.name}</span>)}
+            {[...teams].sort((a, b) => a.n - b.n).map((t) => <span key={t.n} style={tc(t.n)}>{t.name}{onRemove && <button className="chip-x" onClick={() => onRemove(t.n)} aria-label="Убрать команду">✕</button>}</span>)}
           </div>
+          {footer}
         </div>
       </div>
     </div>
