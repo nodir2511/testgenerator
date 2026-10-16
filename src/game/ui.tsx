@@ -136,7 +136,7 @@ export const TeamGrid: React.FC<{
           <div className={`team${lead ? ' lead' : ''}${chooser === t.n ? ' choosing' : ''}`} key={t.n} style={tc(t.n)}>
             <div className="team-tags">
               {lead && <span className="lead-tag">{lang === 'both' ? 'Лидирует · Пешсаф' : pick(lang, 'Лидирует', 'Пешсаф')}</span>}
-              {chooser === t.n && <span className="choose-tag">{lang === 'both' ? 'Выбирает · Интихоб мекунад' : pick(lang, 'Выбирает', 'Интихоб мекунад')}</span>}
+              {chooser === t.n && <span className="choose-tag">▶ {lang === 'both' ? 'Выбирает · Интихоб мекунад' : pick(lang, 'Выбирает', 'Интихоб мекунад')}</span>}
             </div>
             {editable ? (
               <TeamNameInput key={t.name} name={t.name} onCommit={(v) => editable.onRename(t.n, v)} label={`${pick(lang, 'Название команды ', 'Номи даста ')}${t.n}`} />

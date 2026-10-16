@@ -59,7 +59,8 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
             {r && <p className="eyebrow"><Bi ru={`${r.tab} · ${r.sub}`} tj={`${r.tabt} · ${r.subt}`} /></p>}
             <GameTitle />
           </div>
-          <div className="top-ctl">
+          {/* в полноэкранном режиме кнопки не мешают картинке (выход — Esc) */}
+          <div className="top-ctl" hidden={fs}>
             <button className="btn" onClick={toggleSound} aria-pressed={sound}>{sound ? <Bi ru="🔊 Звук включён" tj="🔊 Садо фаъол аст" /> : <Bi ru="🔇 Включить звук" tj="🔇 Садоро фаъол кунед" />}</button>
             <button className="btn" onClick={toggleFs}>{fs ? <Bi ru="Выйти из полного экрана" tj="Аз экрани пурра баромадан" /> : <Bi ru="На весь экран" tj="Экрани пурра" />}</button>
           </div>
