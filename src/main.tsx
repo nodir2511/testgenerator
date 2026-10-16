@@ -36,13 +36,13 @@ const playMatch = path.match(/^[/]play[/]([A-Za-z0-9]+)/);
 const GameHostPage = React.lazy(() => import('./game/GameHost').then((m) => ({ default: m.GameHost })));
 const GameScreenPage = React.lazy(() => import('./game/GameScreen').then((m) => ({ default: m.GameScreen })));
 const GamePlayPage = React.lazy(() => import('./game/GamePlay').then((m) => ({ default: m.GamePlay })));
-if (screenMatch || playMatch || path === '/game' || path.startsWith('/game/')) {
+if (screenMatch || playMatch || path === '/play' || path === '/play/' || path === '/game' || path.startsWith('/game/')) {
   const code = (screenMatch || playMatch)?.[1]?.toUpperCase() ?? '';
   root.render(
     <React.StrictMode>
       <AuthProvider>
         <React.Suspense fallback={null}>
-          {screenMatch ? <GameScreenPage code={code} /> : playMatch ? <GamePlayPage code={code} /> : <GameHostPage />}
+          {screenMatch ? <GameScreenPage code={code} /> : path.startsWith('/play') ? <GamePlayPage code={code} /> : <GameHostPage />}
         </React.Suspense>
       </AuthProvider>
     </React.StrictMode>

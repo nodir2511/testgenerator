@@ -19,6 +19,10 @@
     {
       "source": "/play/(.*)",
       "destination": "/index.html"
+    },
+    {
+      "source": "/play",
+      "destination": "/index.html"
     }
   ]
 }

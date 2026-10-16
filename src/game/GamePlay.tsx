@@ -14,7 +14,7 @@ function writeMe(code: string, me: Me | null) {
 }
 
 /** Страница команды: вход по ссылке, таймер и большая кнопка «Ответить». Адрес: /play/КОД */
-export const GamePlay: React.FC<{ code: string }> = ({ code }) => {
+const PlayGame: React.FC<{ code: string }> = ({ code }) => {
   const { session, state, refetch } = useGameSession(code);
   const now = useServerClock();
   const [me, setMe] = useState<Me | null>(() => readMe(code));
@@ -115,3 +115,27 @@ export const GamePlay: React.FC<{ code: string }> = ({ code }) => {
     </GameShell>
   );
 };
+
+/** Вход без кода (/play): поле для ввода кода игры */
+const CodeEntry: React.FC = () => {
+  const [v, setV] = useState('');
+  const go = (e: React.FormEvent) => {
+    e.preventDefault();
+    const c = v.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (c) window.location.assign('/play/' + c);
+  };
+  return (
+    <GameShell lang="both">
+      <div className="play">
+        <h1 className="play-title"><Bi ru="Своя игра по химии" tj="Викторинаи «Своя игра» аз химия" /></h1>
+        <form className="play-join" onSubmit={go}>
+          <label htmlFor="gc"><Bi ru="Код игры (он на экране у ведущего)" tj="Рамзи бозӣ (дар экрани пешбар)" /></label>
+          <input id="gc" className="play-code" type="text" inputMode="text" maxLength={8} value={v} onChange={(e) => setV(e.target.value.toUpperCase())} autoFocus autoComplete="off" autoCapitalize="characters" />
+          <button className="btn primary play-go" disabled={!v.trim()}><Bi ru="Дальше" tj="Давом додан" /></button>
+        </form>
+      </div>
+    </GameShell>
+  );
+};
+
+export const GamePlay: React.FC<{ code: string }> = ({ code }) => (code ? <PlayGame code={code} /> : <CodeEntry />);
