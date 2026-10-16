@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { TEAM_RULES } from './content';
 import {
-  FALSE_START_MS, QUESTION_SECONDS, beep, queueOf, signed, standings, unlockAudio, useGameSession, useServerClock, useTimerLeft, useWakeLock,
+  FALSE_START_MS, QUESTION_SECONDS, beep, inputOf, queueOf, signed, standings, unlockAudio, useGameSession, useServerClock, useTimerLeft, useWakeLock,
 } from './api';
 import { Bi, GameShell, TimerView, tc, teamName } from './ui';
 
@@ -73,12 +73,12 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
   }, [me?.secret, code]);
 
   const q = board?.q ?? null;
-  const qid = q ? `${q.r}-${q.ci}-${q.qi}-${q.extra ? 'x' : ''}` : '';
+  const qid = q ? `${q.r}-${q.ci}-${q.qi}-${q.extra ? 'x' : ''}-${q.seq ?? ''}` : '';
   useEffect(() => { setNote(''); setBid(null); setBidSent(null); }, [qid]);
 
   // сигнал (вибрация + звук), когда команде пора действовать
   const myN = me?.n ?? 0;
-  const inQ = !!q && (!q.only || q.only.includes(myN)) && !q.wrong.includes(myN);
+  const inQ = !!q && q.won == null && (!q.only || q.only.includes(myN)) && !q.wrong.includes(myN);
   const running = !!board?.timer.running && left > 0;
   const attention = !me || !q || !inQ ? ''
     : q.mode === 'buzz' && running ? `buzz-${qid}-${board?.timer.startedAt}`
@@ -92,7 +92,7 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
   }, [attention]);
 
   // блокировка после фальстарта — обновляем экран, пока она идёт
-  const fsList = session?.input.fs ?? [];
+  const fsList = session ? inputOf(session.input, q).fs ?? [] : [];
   const startedAt = board?.timer.startedAt ?? 0;
   const lockLeft = me && running && fsList.includes(me.n) ? Math.max(0, startedAt + FALSE_START_MS - now()) : 0;
   useEffect(() => {
@@ -176,17 +176,20 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
   const myPos = queue.findIndex((b) => b.n === me.n) + 1; // 0 — не нажимали
   const wrong = !!q && q.wrong.includes(me.n);
   const notMine = !!q && !!q.only && !q.only.includes(me.n);
-  const buzzMode = !!q && q.mode === 'buzz' && !notMine && !wrong;
-  const live = buzzMode && running && lockLeft <= 0 && connected;
-  const early = buzzMode && !board.timer.running && !q?.shown && board.timer.left > 0;
+  const buzzMode = !!q && q.mode === 'buzz' && q.won == null && !notMine && !wrong;
+  // кнопку не блокируем из-за «нет связи»: нажатие всё равно уйдёт, как только сеть вернётся, а ответ сервера покажем
+  const live = buzzMode && running && lockLeft <= 0;
+  const paused = buzzMode && !board.timer.running && !!board.timer.startedAt && left > 0;
+  const early = buzzMode && !board.timer.running && !board.timer.startedAt && !q?.shown && board.timer.left > 0;
 
   const press = async () => {
     if (!(live || early) || pressing.current || myPos) return;
     pressing.current = true;
     if (live) setSent(qid);
     try { navigator.vibrate?.(40); } catch { /* ignore */ }
-    const { data } = await supabase.rpc('game_buzz', { p_code: code, p_n: me.n, p_secret: me.secret });
+    const { data, error } = await supabase.rpc('game_buzz', { p_code: code, p_n: me.n, p_secret: me.secret });
     pressing.current = false;
+    if (error) { setSent(''); setNote('net'); refetch(); return; }
     const res = data as { ok: boolean; reason?: string } | null;
     if (!res?.ok) {
       setSent('');
@@ -198,9 +201,9 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
 
   const giveCat = async (n: number) => {
     setBusy(true);
-    const { data } = await supabase.rpc('game_team_act', { p_code: code, p_n: me.n, p_secret: me.secret, p_kind: 'cat', p_value: n });
+    const { data, error } = await supabase.rpc('game_team_act', { p_code: code, p_n: me.n, p_secret: me.secret, p_kind: 'cat', p_value: n });
     setBusy(false);
-    if (!(data as { ok: boolean } | null)?.ok) setNote('cat_fail');
+    if (error) setNote('net'); else if (!(data as { ok: boolean } | null)?.ok) setNote('cat_fail');
     refetch();
   };
 
@@ -208,10 +211,12 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
   const curBid = bid ?? Math.min(q?.v ?? 0, maxBid);
   const sendBid = async (amount: number) => {
     setBusy(true);
-    const { data } = await supabase.rpc('game_team_act', { p_code: code, p_n: me.n, p_secret: me.secret, p_kind: 'bid', p_value: amount });
+    const { data, error } = await supabase.rpc('game_team_act', { p_code: code, p_n: me.n, p_secret: me.secret, p_kind: 'bid', p_value: amount });
     setBusy(false);
     const res = data as { ok: boolean; reason?: string } | null;
-    if (res?.ok) setBidSent(amount); else setNote(res?.reason === 'too_much' ? 'too_much' : 'bid_fail');
+    if (error) setNote('net');
+    else if (res?.ok) { setBidSent(amount); setNote(''); }
+    else setNote(res?.reason === 'too_much' ? 'too_much' : 'bid_fail');
     refetch();
   };
 
@@ -230,6 +235,10 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
       ? <b className="play-hot"><Bi ru="Ваша очередь выбирать вопрос!" tj="Навбати шумо барои интихоби савол!" /></b>
       : board.chooser ? <Bi ru={<>Вопрос выбирает: <b>{teamName(teams, board.chooser)}</b></>} tj={<>Саволро интихоб мекунад: <b>{teamName(teams, board.chooser)}</b></>} />
       : <Bi ru="Ждите следующий вопрос" tj="Саволи навбатиро интизор шавед" />;
+  } else if (q.won != null) {
+    status = q.won === me.n
+      ? <b className="play-hot"><Bi ru={`Верно! +${q.pts}`} tj={`Дуруст! +${q.pts}`} /></b>
+      : <Bi ru={<>Верно ответила: <b>{teamName(teams, q.won)}</b></>} tj={<>Дуруст ҷавоб дод: <b>{teamName(teams, q.won)}</b></>} />;
   } else if (notMine) {
     status = <Bi ru="Дополнительный вопрос для других команд" tj="Саволи иловагӣ барои дастаҳои дигар" />;
   } else if (q.mode === 'cat') {
@@ -237,6 +246,8 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
       center = (
         <div className="play-choice">
           <p className="play-hot"><Bi ru="«Кот в мешке»! Передайте вопрос другой команде:" tj="«Гурба дар халта»! Саволро ба дастаи дигар диҳед:" /></p>
+          {note === 'net' && <p className="play-bad"><Bi ru="Не дошло — проверьте связь и нажмите ещё раз" tj="Нарасид — алоқаро санҷед ва боз пахш кунед" /></p>}
+          {note === 'cat_fail' && <p className="play-bad"><Bi ru="Уже не получится — ведущий передал вопрос сам" tj="Дигар намешавад — пешбар саволро худаш дод" /></p>}
           {[...teams].filter((t) => t.n !== me.n).sort((a, b) => a.n - b.n).map((t) => (
             <button key={t.n} className="btn primary play-go" disabled={busy} onClick={() => giveCat(t.n)}>{t.name}</button>
           ))}
@@ -262,7 +273,10 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
         <p className="play-small"><Bi ru={`Не больше ${maxBid}`} tj={`На зиёда аз ${maxBid}`} /></p>
       </div>
     );
-    status = bidSent != null
+    status = note === 'too_much' ? <b className="play-bad"><Bi ru={`Ставка слишком большая: не больше ${maxBid}`} tj={`Нарх аз ҳад зиёд: на зиёда аз ${maxBid}`} /></b>
+      : note === 'bid_fail' ? <b className="play-bad"><Bi ru="Ставки уже закрыты" tj="Нархгузорӣ аллакай баста шуд" /></b>
+      : note === 'net' ? <b className="play-bad"><Bi ru="Ставка не дошла — проверьте связь и нажмите ещё раз" tj="Нарх нарасид — алоқаро санҷед ва боз пахш кунед" /></b>
+      : bidSent != null
       ? <Bi ru={`Ставка принята: ${bidSent}. Можно изменить, пока все не поставили`} tj={`Нарх қабул шуд: ${bidSent}. То гузоштани ҳама тағйир додан мумкин`} />
       : <Bi ru="Другие команды не видят вашу ставку" tj="Дастаҳои дигар нархи шуморо намебинанд" />;
   } else if (q.mode === 'answer') {
@@ -279,7 +293,7 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
     center = (
       <button
         className={`play-btn${live && !pressed ? ' live' : ''}${early ? ' early' : ''}${myPos === 1 ? ' won' : ''}`}
-        disabled={!(live || early) || pressed}
+        disabled={!(live || early) || pressed || paused}
         onPointerDown={(e) => { e.preventDefault(); press(); }}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); press(); } }}
       >
@@ -295,6 +309,8 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
     else if (lockLeft > 0) status = <b className="play-bad"><Bi ru="Фальстарт! Кнопка заблокирована" tj="Пеш аз вақт! Тугма қуфл аст" /></b>;
     else if (note === 'false_start') status = <b className="play-bad"><Bi ru="Фальстарт! После старта кнопка будет заблокирована на 1,5 с" tj="Пеш аз вақт! Баъди оғоз тугма 1,5 сония қуфл мешавад" /></b>;
     else if (note === 'closed') status = <Bi ru="Не успели — приём закрыт" tj="Нарасидед — қабул баста шуд" />;
+    else if (note === 'net') status = <b className="play-bad"><Bi ru="Нажатие не дошло — проверьте связь" tj="Пахш нарасид — алоқаро санҷед" /></b>;
+    else if (paused) status = <Bi ru="Пауза — ведущий скоро продолжит" tj="Таваққуф — пешбар ба зудӣ давом медиҳад" />;
     else if (live) status = <Bi ru="Знаете ответ? Жмите!" tj="Ҷавобро медонед? Пахш кунед!" />;
     else if (left <= 0) status = <Bi ru="Время вышло" tj="Вақт тамом шуд" />;
     else status = <Bi ru="Слушайте вопрос. Жмите только после старта таймера!" tj="Саволро гӯш кунед. Танҳо баъди оғози таймер пахш кунед!" />;

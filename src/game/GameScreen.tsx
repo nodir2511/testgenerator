@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { QUESTION_SECONDS, playSound, unlockAudio, useGameSession, useServerClock, useTimerLeft, useWakeLock } from './api';
-import { Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView, layoutRound } from './ui';
+import { QUESTION_SECONDS, inputOf, playSound, queueOf, unlockAudio, useGameSession, useServerClock, useTimerLeft, useWakeLock } from './api';
+import { Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView, WonBanner, layoutRound } from './ui';
 
 /** Экран для проектора: только показ, без входа. Адрес: /game/screen/КОД */
 export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
@@ -13,6 +13,14 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
 
   // звуки проектора: включаются кнопкой (браузер разрешает звук только после клика)
   const [sound, setSound] = useState(() => { try { return localStorage.getItem('game_sound') === '1'; } catch { return false; } });
+  const [needTap, setNeedTap] = useState(sound);
+  useEffect(() => {
+    if (!needTap) return;
+    const on = () => { unlockAudio(); setNeedTap(false); };
+    document.addEventListener('pointerdown', on);
+    document.addEventListener('keydown', on);
+    return () => { document.removeEventListener('pointerdown', on); document.removeEventListener('keydown', on); };
+  }, [needTap]);
   const toggleSound = () => {
     const next = !sound;
     setSound(next);
@@ -20,7 +28,7 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
     if (next) { unlockAudio(); playSound('open'); }
   };
   const qKey = board?.q ? `${board.q.r}-${board.q.ci}-${board.q.qi}-${board.q.extra ? 'x' : ''}` : '';
-  const firstBuzz = board?.q?.mode === 'buzz' ? session?.buzz.find((b) => !board.q!.wrong.includes(b.n))?.n ?? 0 : 0;
+  const firstBuzz = board?.q?.mode === 'buzz' && session ? queueOf(session.buzz, board.q)[0]?.n ?? 0 : 0;
   const prev = useRef({ qKey: '', left, final: false, first: 0 });
   useEffect(() => {
     const p = prev.current;
@@ -53,6 +61,7 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
   return (
     <GameShell lang={board.lang} fs={fs} proj>
       {!connected && <div className="offline" role="alert"><Bi ru="Нет связи — экран не обновляется" tj="Алоқа нест — экран нав намешавад" /></div>}
+      {sound && needTap && <div className="tap-sound" role="button">🔊 <Bi ru="Нажмите в любом месте, чтобы включить звук" tj="Барои фаъол кардани садо дар ягон ҷо пахш кунед" /></div>}
       <div className="app">
         <header className="top">
           <div>
@@ -80,8 +89,9 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
             {(q.mode === 'buzz' || q.mode === 'answer') && (
               <div className="tools"><TimerView left={left} big /></div>
             )}
-            <ModeStatus board={board} teams={teams} bidders={session.input.bidders} />
-            {q.mode === 'buzz' && <BuzzQueue board={board} teams={teams} buzz={session.buzz} />}
+            <WonBanner board={board} teams={teams} />
+            <ModeStatus board={board} teams={teams} bidders={inputOf(session.input, q).bidders} />
+            {q.mode === 'buzz' && q.won == null && <BuzzQueue board={board} teams={teams} buzz={session.buzz} />}
           </div>
         </div>
       )}

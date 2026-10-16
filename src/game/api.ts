@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 export type Lang = 'both' | 'ru' | 'tj';
 
 export interface GameTeam { n: number; name: string }
-export interface GameBuzz { n: number; t: number }
+export interface GameBuzz { n: number; t: number; /** номер вопроса, к которому относится нажатие */ s?: number }
 export type QMode = 'buzz' | 'cat' | 'bids' | 'answer';
 /** Публичная раскладка табло (без вопросов и ответов) */
 export interface LayoutCat { name: string; nt: string; values: number[] }
@@ -31,6 +31,10 @@ export interface GameQ {
   extra?: boolean;
   /** Текст вопроса скрыт (кот, аукцион): его знает только ведущий, в общие данные он попадает после ставок/передачи */
   hidden?: boolean;
+  /** Номер открытия вопроса: нажатия, ставки и «кот» прошлых вопросов к нему не относятся */
+  seq?: number;
+  /** Команда, ответившая верно: вопрос ещё открыт, чтобы показать ответ классу */
+  won?: number | null;
 }
 export interface GameTimer { running: boolean; left: number; endsAt: number | null; startedAt?: number | null }
 /** Итог сыгранного вопроса для разбора после игры (ответов здесь нет) */
@@ -61,7 +65,7 @@ export interface GameBoard {
   specials: Record<string, Record<string, 'cat' | 'auction'>>;
   log: LogEntry[];
 }
-export interface GameInput { cat?: number; bidders?: number[]; fs?: number[] }
+export interface GameInput { seq?: number; cat?: number; bidders?: number[]; fs?: number[] }
 export interface GameSession {
   code: string;
   host_id: string;
@@ -138,16 +142,19 @@ export function useGameSession(code: string | null) {
   const [session, setSession] = useState<GameSession | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
   const [connected, setConnected] = useState(true);
+  const fails = useRef(0);
+  const failed = () => { fails.current += 1; if (fails.current >= 2) setConnected(false); };
 
   const refetch = useCallback(async () => {
     if (!code) return;
     try {
       const { data, error } = await supabase.from('game_sessions').select('*').eq('code', code).maybeSingle();
-      if (error) { setConnected(false); return; }
+      if (error) { failed(); return; }
+      fails.current = 0;
       setConnected(true);
       if (data) { setSession(normalize(data)); setState('ready'); }
       else setState((s) => (s === 'ready' ? s : 'missing'));
-    } catch { setConnected(false); }
+    } catch { failed(); }
   }, [code]);
 
   // браузер сообщил о потере/возврате сети — проверяем сразу
@@ -194,8 +201,16 @@ export function useTimerLeft(timer: GameTimer, now: () => number): number {
 
 /** Очередь на ответ: порядок нажатий без команд, уже ответивших неверно */
 export function queueOf(buzz: GameBuzz[], q: GameQ | null): GameBuzz[] {
-  const wrong = q?.wrong ?? [];
-  return buzz.filter((b) => !wrong.includes(b.n) && (!q?.only || q.only.includes(b.n)));
+  if (!q) return [];
+  const wrong = q.wrong ?? [];
+  return buzz.filter((b) => (q.seq == null || b.s === q.seq) && !wrong.includes(b.n) && (!q.only || q.only.includes(b.n)));
+}
+
+/** Действия команд (кот, ставки, фальстарты) — только если они относятся к открытому сейчас вопросу */
+export function inputOf(input: GameInput, q: GameQ | null): GameInput {
+  if (!q) return {};
+  if (q.seq != null && input.seq !== q.seq) return {};
+  return input;
 }
 
 /** Места: одинаковые очки — одно место */

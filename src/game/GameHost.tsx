@@ -6,11 +6,11 @@ import { FormattedText } from '../components/FormulaEditor';
 import { GameRound, INTRO_SLIDES, RULES, SPECIAL } from './content';
 import { buildReview, exportXlsx, resultText, standingsRows, type ReviewRow } from './review';
 import {
-  GameBoard, GameQ, GameSession, GameTeam, Lang, LayoutRound, QMode, TIMER_CHOICES, beep, freshBoard, pickSpecials, queueOf,
+  GameBoard, GameQ, GameSession, GameTeam, Lang, LayoutRound, QMode, TIMER_CHOICES, beep, freshBoard, inputOf, pickSpecials, queueOf,
   screenUrl, signed, standings, useGameSession, useServerClock, useTimerLeft,
 } from './api';
 import {
-  Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView,
+  Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView, WonBanner,
   fmt, layoutRound, pick, tc, teamName, useLang,
 } from './ui';
 
@@ -82,12 +82,12 @@ export const GameHost: React.FC = () => {
 };
 
 const HostGame: React.FC<{ code: string; pack: GameRound[]; onNewCode: () => void }> = ({ code, pack, onNewCode }) => {
-  const { session, state } = useGameSession(code);
+  const { session, state, connected } = useGameSession(code);
   if (state === 'missing') {
     return <GameShell lang="ru"><div className="gate"><p>Игра не найдена или устарела.</p><button className="btn primary" onClick={onNewCode}>Создать новую</button></div></GameShell>;
   }
   if (!session) return <GameShell lang="ru"><p>Загрузка…</p></GameShell>;
-  return <HostBoard session={session} pack={pack} />;
+  return <HostBoard session={session} pack={pack} connected={connected} />;
 };
 
 const layoutOf = (pack: GameRound[]): LayoutRound[] => pack.map((r) => ({
@@ -95,7 +95,7 @@ const layoutOf = (pack: GameRound[]): LayoutRound[] => pack.map((r) => ({
   cats: r.cats.map((c) => ({ name: c.name, nt: c.nt, values: c.qs.map((q) => q.v) })),
 }));
 
-const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ session, pack }) => {
+const HostBoard: React.FC<{ session: GameSession; pack: GameRound[]; connected: boolean }> = ({ session, pack, connected }) => {
   const code = session.code;
   const now = useServerClock();
   const [board, setBoardState] = useState<GameBoard>(session.board);
@@ -104,7 +104,9 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   const clientId = useRef(Math.random().toString(36).slice(2, 10));
   const undoStack = useRef<GameBoard[]>([]);
   const [canUndo, setCanUndo] = useState(false);
-  const extraAns = useRef<{ a: string; at: string } | null>(null);
+  const extraKey = `game_extra_${session.code}`;
+  const extraAns = useRef<{ a: string; at: string } | null>((() => { try { return JSON.parse(sessionStorage.getItem(extraKey) || 'null'); } catch { return null; } })());
+  const [saveErr, setSaveErr] = useState('');
   const [view, setView] = useState<View>(session.board.round || pack[0]?.id || 'r1');
   const [confirmReset, setConfirmReset] = useState(false);
   const [tiePanel, setTiePanel] = useState<number[] | null>(null);
@@ -112,7 +114,8 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   const [fsNote, setFsNote] = useState(false);
 
   // teams, buzz и input приходят с сервера; board пишем только мы
-  const { teams, buzz, input } = session;
+  const { teams, buzz } = session;
+  const input = inputOf(session.input, board.q);
   const lang = board.lang;
 
   // коды команд для возврата — видит только ведущий
@@ -130,8 +133,21 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
     if (undoable) { undoStack.current = [...undoStack.current.slice(-19), prev]; setCanUndo(true); }
     boardRef.current = next;
     setBoardState(next);
-    writes.current = writes.current.then(() => supabase.from('game_sessions').update({ board: next }).eq('code', code));
+    writes.current = writes.current.then(() => pushBoard());
   }, [code]);
+
+  // запись табло: всегда последняя версия; при сбое сети — повтор, пока не получится
+  const pushBoard = async () => {
+    for (let attempt = 0; ; attempt++) {
+      const b = boardRef.current;
+      const { data, error } = await supabase.from('game_sessions').update({ board: b }).eq('code', code).select('code');
+      if (!error && data && data.length) { setSaveErr(''); return; }
+      setSaveErr(error ? 'Нет связи с сервером — изменения сохранятся, когда связь вернётся' : 'Нет доступа к игре — войдите на сайт заново');
+      if (!error) return; // 0 строк: вход истёк, повтор не поможет
+      await new Promise((r) => setTimeout(r, Math.min(1000 * (attempt + 1), 5000)));
+      if (boardRef.current !== b) continue; // за это время появились новые изменения — отправим их
+    }
+  };
 
   // вторая вкладка ведущего (телефон) изменила табло — берём её версию; последняя запись побеждает
   useEffect(() => {
@@ -142,6 +158,8 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
     if (inc.rev === cur.rev && inc.by === cur.by) return;
     boardRef.current = inc;
     setBoardState(inc);
+    undoStack.current = []; // «Отменить» не должна затирать изменения с другого устройства
+    setCanUndo(false);
   }, [session.board]);
 
   const undo = () => {
@@ -248,7 +266,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
       chooser: b.chooser ?? nextChooser(null),
       round: r.id,
       q: {
-        r: r.id, ci, qi, v: item.v, pts: item.v, cat: c.name, catt: c.nt, tag,
+        r: r.id, ci, qi, v: item.v, pts: item.v, cat: c.name, catt: c.nt, tag, seq: Math.round(now()),
         text: mode === 'buzz' ? { q: item.q, qt: item.qt } : { q: '', qt: '' }, hidden: mode !== 'buzz', ans: null, shown: false, wrong: [], mode,
         chooser: mode === 'cat' ? b.chooser ?? nextChooser(null) : null, answerer: null, bids: null,
       },
@@ -274,8 +292,9 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
     }
   }, [teamKey]);
 
-  const closedBoard = (b: GameBoard, markUsed: boolean, winner?: number): GameBoard => {
+  const closedBoard = (b: GameBoard, markUsed: boolean): GameBoard => {
     const q = b.q;
+    const winner = q?.won ?? undefined;
     const used = { ...b.used };
     let log = b.log;
     if (q && markUsed && !q.extra) {
@@ -289,6 +308,12 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
     rpc('game_buzz_clear', { p_code: code });
     if (wasExtra) saveResults();
   };
+  const backToBoard = () => {
+    const q = boardRef.current.q; if (!q) return;
+    const started = boardRef.current.timer.running || boardRef.current.timer.left < boardRef.current.secs || queue.length > 0 || q.wrong.length > 0 || q.won != null;
+    if (started && !window.confirm('Вернуть вопрос на табло? Нажатия команд сбросятся, а вопрос можно будет открыть заново.')) return;
+    closeQ(false);
+  };
   const closeQ = (markUsed: boolean) => {
     const wasExtra = !!boardRef.current.q?.extra;
     commit((b) => closedBoard(b, markUsed), markUsed);
@@ -297,11 +322,14 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
 
   const patchQ = (p: Partial<GameQ>) => commit((b) => (b.q ? { ...b, q: { ...b.q, ...p } } : b));
 
+  const answerOf = (q: GameQ) => {
+    if (q.extra) return extraAns.current;
+    const item = findItem(q);
+    return item ? { a: item.a, at: item.at } : null;
+  };
   const reveal = () => {
     const q = boardRef.current.q; if (!q) return;
-    const item = q.extra ? null : findItem(q);
-    const ans = q.extra ? extraAns.current : item ? { a: item.a, at: item.at } : null;
-    patchQ({ shown: true, ans });
+    patchQ({ shown: true, ans: answerOf(q) });
   };
 
   const startTimer = () => commit((b) => runTimer(b));
@@ -311,10 +339,14 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
 
   const judge = (n: number, ok: boolean) => {
     const q = boardRef.current.q; if (!q) return;
+    if (q.won != null) return;
     if (ok) {
-      const wasExtra = !!q.extra;
-      commit((b) => closedBoard({ ...b, scores: { ...b.scores, [n]: (b.scores[n] ?? 0) + q.pts } }, true, n), true);
-      afterClose(wasExtra);
+      commit((b) => (b.q ? {
+        ...b,
+        scores: { ...b.scores, [n]: (b.scores[n] ?? 0) + b.q.pts },
+        timer: { running: false, left: Math.max(left, 0), endsAt: null, startedAt: b.timer.startedAt ?? null },
+        q: { ...revealQ(b.q), won: n, shown: true, ans: answerOf(b.q) },
+      } : b), true);
     } else {
       commit((b) => ({
         ...b,
@@ -362,10 +394,11 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   // доп. вопрос из банка сайта
   const askExtra = (only: number[], text: GameQ['text'], ans: { a: string; at: string }) => {
     extraAns.current = ans;
+    try { sessionStorage.setItem(extraKey, JSON.stringify(ans)); } catch { /* ignore */ }
     commit((b) => ({
       ...b,
       final: false,
-      q: { r: 'extra', ci: -1, qi: -1, v: 100, pts: 100, cat: 'Дополнительный вопрос', catt: 'Саволи иловагӣ', text, ans: null, shown: false, wrong: [], mode: 'buzz', only, extra: true },
+      q: { r: 'extra', ci: -1, qi: -1, v: 100, pts: 100, cat: 'Дополнительный вопрос', catt: 'Саволи иловагӣ', text, ans: null, shown: false, wrong: [], mode: 'buzz', only, extra: true, seq: Math.round(now()) },
       timer: stoppedTimer(b),
     }));
     rpc('game_buzz_clear', { p_code: code });
@@ -383,7 +416,6 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
         return;
       }
       if (!b.q || e.repeat) return;
-      if (e.key === 'Escape') { closeQ(false); return; }
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.key.length !== 1 || e.key < '1' || e.key > '6') return;
@@ -459,6 +491,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
             <button className="btn hide-phone" onClick={toggleFs}>{fs ? <Bi ru="Выйти из полного экрана" tj="Аз экрани пурра баромадан" /> : <Bi ru="На весь экран" tj="Экрани пурра" />}</button>
           </div>
         </header>
+        {(!connected || saveErr) && <p className="offline-note" role="alert">⚠ {saveErr || 'Нет связи с сервером — проверьте интернет'}</p>}
         {fsNote && <p className="host-note"><Bi ru="Браузер не разрешил полноэкранный режим. Нажмите F11." tj="Браузер экрани пурраро иҷозат надод. F11-ро пахш кунед." /></p>}
 
         <main>
@@ -504,10 +537,16 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
       </div>
 
       {q && (
-        <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) closeQ(false); }}>
+        <div className="scrim">
           <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabIndex={-1}>
             <QuestionBody board={viewBoard} />
-            {(q.mode === 'buzz' || q.mode === 'answer') && (
+            <WonBanner board={board} teams={teams} />
+            {q.won != null && (
+              <div className="start-zone">
+                <button className="btn start-btn" onClick={() => closeQ(true)}><Bi ru="Закрыть вопрос →" tj="Саволро пӯшед →" /></button>
+              </div>
+            )}
+            {q.won == null && (q.mode === 'buzz' || q.mode === 'answer') && (
               <>
               <div className="start-zone">
                 <TimerView left={left} big />
@@ -552,12 +591,12 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
                 <div className="chips-btn">{sortedTeams.map((t) => <button className="btn" key={t.n} onClick={() => auctionGive(t.n)}>{t.name}</button>)}</div>
               </div>
             )}
-            {q.mode === 'buzz' && board.timer.running && <p className="armed" role="status"><Bi ru="Приём ответов открыт: команды видят кнопку «Ответить»" tj="Қабули ҷавоб кушода аст: дастаҳо тугмаи «Ҷавоб додан»-ро мебинанд" /></p>}
+            {q.mode === 'buzz' && q.won == null && board.timer.running && <p className="armed" role="status"><Bi ru="Приём ответов открыт: команды видят кнопку «Ответить»" tj="Қабули ҷавоб кушода аст: дастаҳо тугмаи «Ҷавоб додан»-ро мебинанд" /></p>}
             {q.mode === 'buzz' && (input.fs ?? []).length > 0 && (
               <p className="fs-note"><Bi ru={<>Фальстарт: {(input.fs ?? []).map((n) => teamName(teams, n)).join(', ')}</>} tj={<>Пеш аз вақт: {(input.fs ?? []).map((n) => teamName(teams, n)).join(', ')}</>} /></p>
             )}
-            {firstName && <p className="buzz" role="status"><Bi ru={<>Первой отвечает: <b>{firstName}</b></>} tj={<>Аввал ҷавоб медиҳад: <b>{firstName}</b></>} /></p>}
-            {q.mode === 'buzz' && <BuzzQueue board={board} teams={teams} buzz={buzz} />}
+            {firstName && q.won == null && <p className="buzz" role="status"><Bi ru={<>Первой отвечает: <b>{firstName}</b></>} tj={<>Аввал ҷавоб медиҳад: <b>{firstName}</b></>} /></p>}
+            {q.mode === 'buzz' && q.won == null && <BuzzQueue board={board} teams={teams} buzz={buzz} />}
             <div className="judge">
               {sortedTeams.filter((t) => !q.only || q.only.includes(t.n)).map((t) => {
                 const w = q.wrong.includes(t.n);
@@ -566,18 +605,18 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
                   <div className={`judge-row${w ? ' done' : ''}${hot ? ' first' : ''}`} key={t.n} style={tc(t.n)}>
                     <div className="jn"><kbd>{t.n}</kbd><span className="nm">{t.name}</span></div>
                     <div className="jb">
-                      <button className="ok" disabled={w} onClick={() => judge(t.n, true)}>✓ +{q.pts}</button>
-                      <button className="no" disabled={w} onClick={() => judge(t.n, false)}>✗ −{q.pts}</button>
+                      <button className="ok" disabled={w || q.won != null} onClick={() => judge(t.n, true)}>✓ +{q.pts}</button>
+                      <button className="no" disabled={w || q.won != null} onClick={() => judge(t.n, false)}>✗ −{q.pts}</button>
                     </div>
                   </div>
                 );
               })}
             </div>
             <div className="dlg-foot">
-              <button className="btn" onClick={() => closeQ(false)}><Bi ru="Вернуть на табло" tj="Ба ҷадвал баргардонед" /></button>
+              <button className="btn" onClick={backToBoard}><Bi ru="Вернуть на табло" tj="Ба ҷадвал баргардонед" /></button>
               {canUndo && <button className="btn" onClick={undo}><Bi ru="↶ Отменить" tj="↶ Бекор кардан" /></button>}
               <button className="btn primary" onClick={() => closeQ(true)}>
-                {q.shown ? <Bi ru="Закрыть вопрос" tj="Саволро пӯшед" /> : <Bi ru="Никто не ответил, закрыть" tj="Касе ҷавоб надод, пӯшед" />}
+                {q.won != null || q.shown ? <Bi ru="Закрыть вопрос" tj="Саволро пӯшед" /> : <Bi ru="Никто не ответил, закрыть" tj="Касе ҷавоб надод, пӯшед" />}
               </button>
             </div>
           </div>

@@ -191,10 +191,22 @@ export const BuzzQueue: React.FC<{ board: GameBoard; teams: GameTeam[]; buzz: Ga
   );
 };
 
+/** «Верно!» — команда ответила, вопрос ещё открыт, чтобы класс увидел ответ */
+export const WonBanner: React.FC<{ board: GameBoard; teams: GameTeam[] }> = ({ board, teams }) => {
+  const q = board.q;
+  if (!q || q.won == null) return null;
+  const who = teamName(teams, q.won);
+  return (
+    <p className="won-banner" role="status" style={tc(q.won)}>
+      <Bi ru={<>✓ Верно! <b>{who}</b> +{q.pts}</>} tj={<>✓ Дуруст! <b>{who}</b> +{q.pts}</>} />
+    </p>
+  );
+};
+
 /** Состояние особого вопроса (кот, аукцион) и кто отвечает — для ведущего и проектора */
 export const ModeStatus: React.FC<{ board: GameBoard; teams: GameTeam[]; bidders?: number[] }> = ({ board, teams, bidders }) => {
   const q = board.q;
-  if (!q) return null;
+  if (!q || q.won != null) return null;
   if (q.mode === 'cat') {
     const who = teamName(teams, q.chooser);
     return (

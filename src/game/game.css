@@ -562,3 +562,10 @@
 .gm.proj .buzz .bids{font-size:.75em}
 .gm.proj .armed{font-size:clamp(1.3rem,3vh,2.4rem)}
 .gm.proj .scrim.proj .tools{justify-content:center}
+
+/* 0.9: «Верно!», предупреждения о связи, звук на проекторе */
+.gm .won-banner{margin:0;padding:14px 18px;border-radius:14px;background:var(--good);color:#fff;font-weight:800;font-size:clamp(1.2rem,2.6vw,2rem);border-left:10px solid var(--tc,transparent)}
+.gm .won-banner .b i{color:rgba(255,255,255,.85)}
+.gm.proj .won-banner{font-size:clamp(1.6rem,4vh,3rem);background:linear-gradient(180deg,#2FBF6B,#1E9B52);box-shadow:0 0 30px rgba(77,235,146,.35)}
+.gm .offline-note{margin:0;padding:10px 14px;border-radius:10px;background:var(--bad);color:#fff;font-weight:700}
+.gm .tap-sound{position:fixed;left:50%;bottom:2vh;transform:translateX(-50%);z-index:120;background:#FFD54A;color:#1F1400;font-weight:800;padding:10px 20px;border-radius:999px;box-shadow:0 6px 20px rgba(0,0,0,.5);cursor:pointer;display:flex;gap:8px;align-items:center}
