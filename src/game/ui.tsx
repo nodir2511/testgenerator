@@ -345,7 +345,7 @@ export const IntroOverlay: React.FC<{ index: number; controls?: { onPrev: () => 
 };
 
 /** Полноэкранная ссылка и QR для команд */
-export const LinkOverlay: React.FC<{ code: string; teams: GameTeam[]; onClose?: () => void; footer?: React.ReactNode; onRemove?: (n: number) => void }> = ({ code, teams, onClose, footer, onRemove }) => {
+export const LinkOverlay: React.FC<{ code: string; teams: GameTeam[]; onClose?: () => void; footer?: React.ReactNode; onRemove?: (n: number) => void; closed?: boolean }> = ({ code, teams, onClose, footer, onRemove, closed }) => {
   const url = playUrl(code);
   const [qr, setQr] = useState('');
   useEffect(() => {
@@ -361,6 +361,7 @@ export const LinkOverlay: React.FC<{ code: string; teams: GameTeam[]; onClose?: 
           <p className="linkfull-hint"><Bi ru="Наведите камеру телефона на QR-код или откройте ссылку:" tj="Камераи телефонро ба рамзи QR равона кунед ё истинодро кушоед:" /></p>
           <p className="linkfull-url">{url.replace(/^https?:\/\//, '')}</p>
           <p className="linkfull-code"><Bi ru="Код игры" tj="Рамзи бозӣ" />: <b>{code}</b></p>
+          {closed && <p className="gate-err"><Bi ru="Вход закрыт ведущим" tj="Воридшавӣ аз тарафи пешбар баста шуд" /></p>}
           <p className="linkfull-teams">
             <Bi ru={`Зашли команд: ${teams.length} из 6`} tj={`Дастаҳои ворид шуда: ${teams.length} аз 6`} />
           </p>

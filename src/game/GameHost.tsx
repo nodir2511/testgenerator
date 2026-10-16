@@ -101,6 +101,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   const [board, setBoardState] = useState<GameBoard>(session.board);
   const boardRef = useRef<GameBoard>(session.board);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
+  const clientId = useRef(Math.random().toString(36).slice(2, 10));
   const undoStack = useRef<GameBoard[]>([]);
   const [canUndo, setCanUndo] = useState(false);
   const extraAns = useRef<{ a: string; at: string } | null>(null);
@@ -123,13 +124,25 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
 
   const commit = useCallback((fn: (b: GameBoard) => GameBoard, undoable = false) => {
     const prev = boardRef.current;
-    const next = fn(prev);
-    if (next === prev) return;
+    const changed = fn(prev);
+    if (changed === prev) return;
+    const next: GameBoard = { ...changed, rev: (prev.rev ?? 0) + 1, by: clientId.current };
     if (undoable) { undoStack.current = [...undoStack.current.slice(-19), prev]; setCanUndo(true); }
     boardRef.current = next;
     setBoardState(next);
     writes.current = writes.current.then(() => supabase.from('game_sessions').update({ board: next }).eq('code', code));
   }, [code]);
+
+  // вторая вкладка ведущего (телефон) изменила табло — берём её версию; последняя запись побеждает
+  useEffect(() => {
+    const inc = session.board;
+    const cur = boardRef.current;
+    if (!inc.by || inc.by === clientId.current) return;
+    if ((inc.rev ?? 0) < (cur.rev ?? 0)) return;
+    if (inc.rev === cur.rev && inc.by === cur.by) return;
+    boardRef.current = inc;
+    setBoardState(inc);
+  }, [session.board]);
 
   const undo = () => {
     const prev = undoStack.current.pop();
@@ -155,16 +168,20 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   const runTimer = (b: GameBoard, secs?: number): GameBoard => {
     const s = secs ?? (b.timer.left > 0 ? b.timer.left : b.secs);
     const t = Math.round(now());
-    return { ...b, timer: { running: true, left: s, endsAt: t + s * 1000, startedAt: t } };
+    const resumed = b.timer.left < b.secs && !!b.timer.startedAt; // продолжение после паузы — блокировку фальстарта не повторяем
+    return { ...b, timer: { running: true, left: s, endsAt: t + s * 1000, startedAt: resumed ? b.timer.startedAt : t } };
   };
   const stoppedTimer = (b: GameBoard) => ({ running: false, left: b.secs, endsAt: null, startedAt: null });
 
   // таймер дошёл до нуля
   useEffect(() => {
-    if (board.timer.running && left <= 0) {
+    if (!(board.timer.running && left <= 0)) return;
+    const id = setTimeout(() => {
+      if (!boardRef.current.timer.running) return;
       commit((b) => ({ ...b, timer: { running: false, left: 0, endsAt: null, startedAt: null } }));
       beep(440, 400);
-    }
+    }, 150 + Math.random() * 500);
+    return () => clearTimeout(id);
   }, [left, board.timer.running, commit]);
 
   // звук, когда появилось первое нажатие
@@ -178,11 +195,13 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
 
   // «Кот в мешке»: команда выбрала, кому передать — отвечает она, запускаем таймер
   useEffect(() => {
-    const q = boardRef.current.q;
-    if (q?.mode === 'cat' && input.cat != null) {
-      commit((b) => (b.q ? runTimer({ ...b, q: { ...b.q, mode: 'answer', answerer: input.cat ?? null } }, b.secs) : b));
+    if (board.q?.mode !== 'cat' || input.cat == null) return;
+    const id = setTimeout(() => {
+      if (boardRef.current.q?.mode !== 'cat') return;
+      commit((b) => (b.q ? runTimer({ ...b, q: revealQ({ ...b.q, mode: 'answer', answerer: input.cat ?? null }) }, b.secs) : b));
       beep();
-    }
+    }, 150 + Math.random() * 500);
+    return () => clearTimeout(id);
   }, [input.cat, board.q?.mode]);
 
   // «Аукцион»: все поставили — подводим итог
@@ -198,7 +217,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
       if (!b.q || b.q.mode !== 'bids') return b;
       return runTimer({
         ...b,
-        q: { ...b.q, mode: 'answer', answerer: win?.n ?? null, pts: win?.amount ?? b.q.v, bids: list.map(({ n, amount }) => ({ n, amount })) },
+        q: revealQ({ ...b.q, mode: 'answer', answerer: win?.n ?? null, pts: win?.amount ?? b.q.v, bids: list.map(({ n, amount }) => ({ n, amount })) }),
       }, b.secs);
     });
     beep();
@@ -206,10 +225,17 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   useEffect(() => {
     if (board.q?.mode !== 'bids' || !teams.length) return;
     const bidders = input.bidders ?? [];
-    if (teams.every((t) => bidders.includes(t.n))) closeBids();
+    if (!teams.every((t) => bidders.includes(t.n))) return;
+    const id = setTimeout(() => closeBids(), 150 + Math.random() * 500);
+    return () => clearTimeout(id);
   }, [input.bidders?.length, board.q?.mode, teams.length]);
 
   const findItem = (q: GameQ) => pack.find((r) => r.id === q.r)?.cats[q.ci]?.qs[q.qi];
+  /** Вопрос «кота»/«аукциона» становится общим, когда ясно, кто отвечает */
+  const revealQ = (q: GameQ): GameQ => {
+    const it = q.hidden ? findItem(q) : null;
+    return it ? { ...q, hidden: false, text: { q: it.q, qt: it.qt } } : q;
+  };
 
   const openQ = (ci: number, qi: number) => {
     const r = pack.find((x) => x.id === view) ?? pack[0];
@@ -223,7 +249,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
       round: r.id,
       q: {
         r: r.id, ci, qi, v: item.v, pts: item.v, cat: c.name, catt: c.nt, tag,
-        text: { q: item.q, qt: item.qt }, ans: null, shown: false, wrong: [], mode,
+        text: mode === 'buzz' ? { q: item.q, qt: item.qt } : { q: '', qt: '' }, hidden: mode !== 'buzz', ans: null, shown: false, wrong: [], mode,
         chooser: mode === 'cat' ? b.chooser ?? nextChooser(null) : null, answerer: null, bids: null,
       },
       timer: stoppedTimer(b),
@@ -279,7 +305,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   };
 
   const startTimer = () => commit((b) => runTimer(b));
-  const pauseTimer = () => commit((b) => ({ ...b, timer: { running: false, left: Math.max(left, 0), endsAt: null, startedAt: null } }));
+  const pauseTimer = () => commit((b) => ({ ...b, timer: { running: false, left: Math.max(left, 0), endsAt: null, startedAt: b.timer.startedAt ?? null } }));
   const resetTimer = () => commit((b) => ({ ...b, timer: stoppedTimer(b) }));
   const setSecs = (s: number) => commit((b) => ({ ...b, secs: s, timer: b.timer.running ? b.timer : { running: false, left: s, endsAt: null, startedAt: null } }));
 
@@ -301,8 +327,8 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
 
   // «Кот в мешке» без телефона: ведущий отмечает, кто выбрал, или сразу кому передан
   const catChooser = (n: number) => commit((b) => (b.q ? { ...b, chooser: n, q: { ...b.q, chooser: n } } : b));
-  const catGive = (n: number) => commit((b) => (b.q ? runTimer({ ...b, q: { ...b.q, mode: 'answer', answerer: n } }, b.secs) : b));
-  const auctionGive = (n: number) => commit((b) => (b.q ? runTimer({ ...b, q: { ...b.q, mode: 'answer', answerer: n } }, b.secs) : b));
+  const catGive = (n: number) => commit((b) => (b.q ? runTimer({ ...b, q: revealQ({ ...b.q, mode: 'answer', answerer: n }) }, b.secs) : b));
+  const auctionGive = (n: number) => commit((b) => (b.q ? runTimer({ ...b, q: revealQ({ ...b.q, mode: 'answer', answerer: n }) }, b.secs) : b));
 
   const adjust = (n: number, d: number) => commit((b) => ({ ...b, scores: { ...b.scores, [n]: (b.scores[n] ?? 0) + d } }), true);
   const rename = (n: number, name: string) => { rpc('game_rename', { p_code: code, p_n: n, p_name: name }); };
@@ -388,6 +414,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   const setLang = (l: Lang) => commit((b) => ({ ...b, lang: l }));
   const setRound = (id: string) => { commit((b) => ({ ...b, round: id })); setView(id); };
   const q = board.q;
+  const viewBoard: GameBoard = q?.hidden ? (() => { const it = findItem(q); return it ? { ...board, q: { ...q, text: { q: it.q, qt: it.qt } } } : board; })() : board;
   const sortedTeams = [...teams].sort((a, b) => a.n - b.n);
   const first = queue[0]?.n;
   // «Показать ответ» появляется, когда кто-то ответил (нажал кнопку или ошибся) или время вышло
@@ -453,6 +480,9 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
             <h2><Bi ru="Команды" tj="Дастаҳо" /> <span className="code-chip">{code}</span></h2>
             <div className="ctl">
               <button className="btn" onClick={undo} disabled={!canUndo}><Bi ru="↶ Отменить" tj="↶ Бекор кардан" /></button>
+              <button className={`btn${board.joinClosed ? ' danger' : ''}`} onClick={() => commit((b) => ({ ...b, joinClosed: !b.joinClosed }))}>
+                {board.joinClosed ? <Bi ru="🔒 Вход закрыт — открыть" tj="🔒 Воридшавӣ баста — кушодан" /> : <Bi ru="Закрыть вход" tj="Воридшавиро бастан" />}
+              </button>
               <button className="btn" onClick={showFinal} disabled={!teams.length}><Bi ru="Итоги" tj="Натиҷаҳо" /></button>
               {confirmReset ? (
                 <>
@@ -476,7 +506,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
       {q && (
         <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) closeQ(false); }}>
           <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabIndex={-1}>
-            <QuestionBody board={board} />
+            <QuestionBody board={viewBoard} />
             {(q.mode === 'buzz' || q.mode === 'answer') && (
               <>
               <div className="start-zone">
@@ -600,6 +630,9 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
                 <Bi ru={teams.length ? `Начать игру (команд: ${teams.length})` : 'Ждём команды…'} tj={teams.length ? `Оғози бозӣ (дастаҳо: ${teams.length})` : 'Интизори дастаҳо…'} />
               </button>
               <button className="btn" onClick={() => commit((b) => ({ ...b, intro: 0 }))}><Bi ru="← Презентация" tj="← Муаррифӣ" /></button>
+              <button className={`btn${board.joinClosed ? ' danger' : ''}`} onClick={() => commit((b) => ({ ...b, joinClosed: !b.joinClosed }))}>
+                {board.joinClosed ? <Bi ru="🔒 Вход закрыт — открыть" tj="🔒 Воридшавӣ баста — кушодан" /> : <Bi ru="Закрыть вход" tj="Воридшавиро бастан" />}
+              </button>
               <a className="btn" href={screenUrl(code)} target="_blank" rel="noreferrer"><Bi ru="Экран для проектора" tj="Экран барои проектор" /></a>
             </div>
           }

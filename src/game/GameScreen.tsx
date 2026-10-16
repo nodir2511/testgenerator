@@ -93,7 +93,7 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
       )}
 
       {board.lobby && board.intro != null && <IntroOverlay index={board.intro} />}
-      {((board.lobby && board.intro == null) || (!board.lobby && board.showLink)) && <LinkOverlay code={code} teams={teams} />}
+      {((board.lobby && board.intro == null) || (!board.lobby && board.showLink)) && <LinkOverlay code={code} teams={teams} closed={board.joinClosed} />}
     </GameShell>
   );
 };
