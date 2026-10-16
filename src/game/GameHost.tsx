@@ -311,7 +311,8 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
     });
   };
   const resetGame = () => {
-    commit((b) => freshBoard({ round: b.round, lang: b.lang, layout: b.layout, secs: b.secs }), true);
+    // новая игра начинается с презентации и QR (команды остаются в списке)
+    commit((b) => ({ ...freshBoard({ round: b.round, lang: b.lang, layout: b.layout, secs: b.secs }), lobby: true, intro: 0 }), true);
     rpc('game_buzz_clear', { p_code: code });
     setConfirmReset(false);
   };
