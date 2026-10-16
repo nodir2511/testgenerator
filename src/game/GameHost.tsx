@@ -24,7 +24,7 @@ export const GameHost: React.FC = () => {
   const [pack, setPack] = useState<GameRound[] | null>(null);
   const [looking, setLooking] = useState(true);
   const [error, setError] = useState('');
-  const allowed = !!user && (isAdmin || isOwner);
+  const allowed = !!user && isOwner;
 
   useEffect(() => {
     if (!allowed || !user) { setLooking(false); return; }

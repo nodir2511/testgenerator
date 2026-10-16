@@ -31,7 +31,6 @@ import {
   BarChart3,
   Bell,
   Gamepad2,
-  Megaphone,
   X,
   FileQuestion,
   Loader2,
@@ -91,11 +90,10 @@ export const App: React.FC = () => {
     { id: 'saved_tickets', label: 'Сохраненные билеты', icon: FileCheck2 },
     ...(isStaff ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
     ...(isOwner ? [{ id: 'cluster', label: 'Экзамен-кластер', icon: BookOpen }] : []),
-    ...(isAdmin ? [{ id: 'users', label: 'Пользователи и аудит', icon: Users }] : []),
-    ...(isAdmin ? [{ id: 'stats', label: 'Статистика', icon: BarChart3 }] : []),
-    ...(isAdmin || isOwner ? [{ id: 'game', label: 'Своя игра', icon: Gamepad2 }] : []),
-    { id: 'releases', label: 'Что нового', icon: Megaphone },
+    ...(isAdmin ? [{ id: 'admin', label: 'Администрирование', icon: Users }] : []),
+    ...(isOwner ? [{ id: 'game', label: 'Своя игра', icon: Gamepad2 }] : []),
   ];
+  const isAdminSection = currentTab === 'users' || currentTab === 'stats';
 
   const handleAddQuestion = () => {
     setEditingQuestion(null);
@@ -202,13 +200,13 @@ export const App: React.FC = () => {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-1 overflow-x-auto">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = currentTab === item.id;
+              const isActive = item.id === 'admin' ? isAdminSection : currentTab === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => {
                     if (item.id === 'game') { window.open('/game', '_blank'); return; }
-                    setActiveTab(item.id as TabType);
+                    setActiveTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
                     setIsQuestionFormOpen(false);
                   }}
                   className={`py-3 px-4 text-xs font-semibold border-b-2 flex items-center space-x-2 whitespace-nowrap transition-all ${
@@ -242,13 +240,13 @@ export const App: React.FC = () => {
             </div>
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = currentTab === item.id;
+              const isActive = item.id === 'admin' ? isAdminSection : currentTab === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => {
                     if (item.id === 'game') { window.open('/game', '_blank'); return; }
-                    setActiveTab(item.id as TabType);
+                    setActiveTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
                     setIsQuestionFormOpen(false);
                     setMobileMenuOpen(false);
                   }}
@@ -284,6 +282,22 @@ export const App: React.FC = () => {
           />
         ) : (
           <>
+            {isAdminSection && (
+              <div className="flex space-x-1 mb-5 border-b border-slate-200">
+                {([['users', 'Пользователи и аудит', Users], ['stats', 'Статистика', BarChart3]] as const).map(([id, label, Icon]) => (
+                  <button
+                    key={id}
+                    onClick={() => setActiveTab(id)}
+                    className={`py-2 px-4 text-xs font-semibold border-b-2 -mb-px flex items-center space-x-2 transition-all ${
+                      currentTab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {currentTab === 'questions' && (
               <QuestionList
                 onAddQuestion={handleAddQuestion}
