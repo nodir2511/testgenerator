@@ -86,7 +86,7 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
         <div className="scrim proj">
           <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
             <QuestionBody board={board} hideText={q.mode === 'cat' || q.mode === 'bids'} />
-            {(q.mode === 'buzz' || q.mode === 'answer') && (
+            {q.won == null && (q.mode === 'buzz' || q.mode === 'answer') && (
               <div className="tools"><TimerView left={left} big /></div>
             )}
             <WonBanner board={board} teams={teams} />
