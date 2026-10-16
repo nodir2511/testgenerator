@@ -43,11 +43,11 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
     e.preventDefault();
     setBusy(true); setErr('');
     const { data, error } = await supabase.rpc('game_join', { p_code: code, p_name: name });
-    setBusy(false);
-    if (error) { setErr(error.message); return; }
+    if (error) { setBusy(false); setErr(error.message); return; }
     const d = data as Me;
+    await refetch(); // сначала свежий список команд, иначе новая команда покажется «удалённой»
+    setBusy(false);
     writeMe(code, d); setMe(d);
-    refetch();
   };
 
   if (!me) {
