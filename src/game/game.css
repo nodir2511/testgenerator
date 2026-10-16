@@ -415,3 +415,14 @@
 .gm .intro-lines{list-style:none;margin:0;padding:0;display:grid;gap:clamp(12px,2.4vh,26px);max-width:min(92vw,1200px)}
 .gm .intro-lines li{font-size:clamp(1.2rem,2.8vw,2.6rem);font-weight:600;line-height:1.3;text-wrap:balance}
 .gm .intro-lines li .b i{font-size:.72em;color:var(--muted)}
+
+/* крупная кнопка старта у ведущего */
+.gm .start-zone{display:flex;flex-direction:column;align-items:center;gap:14px;padding:6px 0}
+.gm .start-zone .timer.big{font-size:clamp(2.6rem,8vw,5rem)}
+.gm .start-btn{width:min(100%,560px);padding:clamp(18px,3vh,30px) 24px;font-size:clamp(1.4rem,3.4vw,2.4rem);font-weight:800;border-radius:18px;background:var(--good);border-color:var(--good);color:#fff;letter-spacing:.02em}
+.gm .start-btn:hover:not(:disabled){background:var(--good);filter:brightness(1.1)}
+.gm .start-btn .b{align-items:center}
+.gm .start-btn.pause{background:var(--gold);border-color:var(--gold);color:var(--gold-ink)}
+.gm .start-btn.pause:hover{background:var(--gold)}
+.gm .reveal-btn{width:min(100%,560px);padding:14px 20px;font-size:1.2rem}
+.gm .tools{justify-content:center}

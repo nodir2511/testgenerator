@@ -390,6 +390,9 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   const q = board.q;
   const sortedTeams = [...teams].sort((a, b) => a.n - b.n);
   const first = queue[0]?.n;
+  // «Показать ответ» появляется, когда кто-то ответил (нажал кнопку или ошибся) или время вышло
+  const timerStarted = board.timer.running || left < board.secs;
+  const canReveal = !!q && (queue.length > 0 || q.wrong.length > 0 || left <= 0 || (q.mode === 'answer' && timerStarted));
   const firstName = q?.mode === 'buzz' ? teamName(teams, first) : '';
   const isRound = pack.some((r) => r.id === view);
   const curRound = pack.find((r) => r.id === view);
@@ -475,22 +478,26 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
           <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabIndex={-1}>
             <QuestionBody board={board} />
             {(q.mode === 'buzz' || q.mode === 'answer') && (
-              <div className="tools">
-                <TimerView left={left} />
+              <>
+              <div className="start-zone">
+                <TimerView left={left} big />
                 {board.timer.running
-                  ? <button className="btn" onClick={pauseTimer}><Bi ru="Пауза" tj="Таваққуф" /></button>
-                  : <button className="btn primary" onClick={startTimer} disabled={left <= 0}>
-                      {left === board.secs ? <Bi ru={q.mode === 'buzz' ? 'Старт · приём ответов' : 'Старт'} tj={q.mode === 'buzz' ? 'Оғоз · қабули ҷавоб' : 'Оғоз'} /> : <Bi ru="Продолжить" tj="Давом додан" />}
+                  ? <button className="btn start-btn pause" onClick={pauseTimer}><Bi ru="Пауза" tj="Таваққуф" /></button>
+                  : <button className="btn start-btn" onClick={startTimer} disabled={left <= 0 || (q.mode === 'answer' && !q.answerer)}>
+                      {left === board.secs ? <Bi ru={q.mode === 'buzz' ? 'СТАРТ · приём ответов' : 'СТАРТ'} tj={q.mode === 'buzz' ? 'ОҒОЗ · қабули ҷавоб' : 'ОҒОЗ'} /> : <Bi ru="Продолжить" tj="Давом додан" />}
                     </button>}
-                <button className="btn" onClick={resetTimer}><Bi ru="Сбросить" tj="Аз нав" /></button>
+                {!q.shown && canReveal && <button className="btn primary reveal-btn" onClick={reveal}><Bi ru="Показать ответ" tj="Ҷавобро нишон диҳед" /></button>}
+              </div>
+              <div className="tools">
+                <button className="btn" onClick={resetTimer}><Bi ru="Сбросить таймер" tj="Таймерро аз нав кунед" /></button>
                 <span className="seg secs" role="group" aria-label="Время на вопрос">
                   {TIMER_CHOICES.map((s) => <button key={s} aria-pressed={board.secs === s} onClick={() => setSecs(s)} disabled={board.timer.running}>{s} с</button>)}
                 </span>
                 <label className="pts"><Bi ru="Баллы" tj="Холҳо" />
                   <input type="number" step={100} value={q.pts} onChange={(e) => { const n = parseInt(e.target.value, 10); patchQ({ pts: isNaN(n) || n < 0 ? 0 : n }); }} />
                 </label>
-                {!q.shown && <button className="btn primary" onClick={reveal}><Bi ru="Показать ответ" tj="Ҷавобро нишон диҳед" /></button>}
               </div>
+              </>
             )}
             {q.mode !== 'buzz' && <ModeStatus board={board} teams={teams} bidders={input.bidders} />}
             {q.mode === 'cat' && (
