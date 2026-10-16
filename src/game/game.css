@@ -218,3 +218,7 @@
 .gm .play-btn:disabled:not(.won){cursor:default}
 .gm .play-pos{font-size:clamp(4rem,20vw,8rem);line-height:1}
 .gm .play-msg{margin:0;font-size:1.15rem;font-weight:600;min-height:3.2em}
+
+/* основа страницы (бывший body оригинала) */
+.gm{min-height:100vh;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.45;padding:20px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px))}
+.gm h1,.gm h2,.gm h3,.gm p{margin-top:0}
