@@ -45,7 +45,7 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
       </div>
 
       {board.q && (
-        <div className="scrim">
+        <div className="scrim proj">
           <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
             <QuestionBody board={board} />
             <div className="tools">
