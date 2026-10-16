@@ -234,3 +234,22 @@
 .gm .scrim.proj .answer .t{font-size:1em;color:inherit}
 .gm .scrim.proj .queue li{font-size:clamp(1.2rem,2.2vw,2.4rem)}
 .gm .scrim.proj .queue li.first{font-size:clamp(1.5rem,3vw,3.2rem)}
+
+/* проектор 16:9: табло растягивается на весь экран */
+.gm.proj{height:100vh;min-height:0;overflow:hidden;padding:1.4vh 1.6vw}
+.gm.proj .app{max-width:none;height:100%;gap:1.4vh}
+.gm.proj .top{flex:0 0 auto;align-items:center}
+.gm.proj h1{font-size:clamp(1.4rem,4.2vh,3rem)}
+.gm.proj .eyebrow{font-size:clamp(.7rem,1.6vh,1.1rem);margin-bottom:.4vh}
+.gm.proj main{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:1vh}
+.gm.proj .board-meta{flex:0 0 auto;font-size:clamp(.8rem,1.8vh,1.2rem)}
+.gm.proj .board-scroll{flex:1 1 auto;min-height:0;overflow:hidden;padding:0}
+.gm.proj .board{height:100%;min-width:0;gap:1vh 1vw;grid-template-rows:minmax(0,1.1fr) repeat(5,minmax(0,1fr))}
+.gm.proj .cat{min-height:0;font-size:clamp(1rem,2.5vh,2rem);padding:.6vh .5vw}
+.gm.proj .tile{min-height:0;font-size:clamp(1.6rem,6vh,5.5rem)}
+.gm.proj .teams{flex:0 0 auto;padding:1.4vh 1vw;gap:1vh}
+.gm.proj .team-grid{grid-template-columns:repeat(6,minmax(0,1fr));gap:1vw}
+.gm.proj .team{padding:1vh .8vw;gap:.4vh}
+.gm.proj .tname{font-size:clamp(1rem,2.6vh,2rem)}
+.gm.proj .team .score{font-size:clamp(1.8rem,6vh,4.5rem)}
+.gm.proj .lead-tag{font-size:clamp(.65rem,1.4vh,1rem)}

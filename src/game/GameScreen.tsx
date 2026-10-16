@@ -25,7 +25,7 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
 
   const r = roundById(board.round);
   return (
-    <GameShell lang={board.lang} fs={fs}>
+    <GameShell lang={board.lang} fs={fs} proj>
       <div className="app">
         <header className="top">
           <div>

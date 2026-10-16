@@ -13,7 +13,7 @@ export const useLang = () => useContext(LangCtx);
 export const roundById = (id: string): GameRound => ROUNDS.find((r) => r.id === id) ?? ROUNDS[0];
 
 /** Подключает шрифты игры и класс .gm; общая обёртка для всех трёх экранов */
-export const GameShell: React.FC<{ lang: Lang; fs?: boolean; children: React.ReactNode }> = ({ lang, fs, children }) => {
+export const GameShell: React.FC<{ lang: Lang; fs?: boolean; proj?: boolean; children: React.ReactNode }> = ({ lang, fs, proj, children }) => {
   useEffect(() => {
     const id = 'game-fonts';
     if (document.getElementById(id)) return;
@@ -24,7 +24,7 @@ export const GameShell: React.FC<{ lang: Lang; fs?: boolean; children: React.Rea
   }, []);
   return (
     <LangProvider value={lang}>
-      <div className={`gm${fs ? ' fs' : ''}`}>{children}</div>
+      <div className={`gm${fs ? ' fs' : ''}${proj ? ' proj' : ''}`}>{children}</div>
     </LangProvider>
   );
 };
