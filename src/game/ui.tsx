@@ -1,18 +1,20 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import './game.css';
-import { ROUNDS, SPECIAL, GameRound } from './data';
+import { FormattedText } from '../components/FormulaEditor';
+import { SPECIAL } from './content';
 import {
-  GameBoard, GameBuzz, GameTeam, Lang, formatTime, playUrl, queueOf, signed,
+  GameBoard, GameBuzz, GameTeam, LayoutRound, Lang, formatTime, playUrl, queueOf, signed, standings,
 } from './api';
 
 const LangCtx = createContext<Lang>('both');
 export const LangProvider = LangCtx.Provider;
 export const useLang = () => useContext(LangCtx);
 
-export const roundById = (id: string): GameRound => ROUNDS.find((r) => r.id === id) ?? ROUNDS[0];
+export const layoutRound = (board: GameBoard, id?: string): LayoutRound | null =>
+  board.layout.find((r) => r.id === (id ?? board.round)) ?? board.layout[0] ?? null;
 
-/** Подключает шрифты игры и класс .gm; общая обёртка для всех трёх экранов */
+/** Подключает шрифты игры и класс .gm; общая обёртка для всех экранов */
 export const GameShell: React.FC<{ lang: Lang; fs?: boolean; proj?: boolean; children: React.ReactNode }> = ({ lang, fs, proj, children }) => {
   useEffect(() => {
     const id = 'game-fonts';
@@ -29,7 +31,7 @@ export const GameShell: React.FC<{ lang: Lang; fs?: boolean; proj?: boolean; chi
   );
 };
 
-/** Разметка формул: H_2SO_4 → H₂SO₄, 10^23^ → 10²³. Вход — текст из data.ts (не пользовательский), всё экранируется. */
+/** Разметка формул пакета игры: H_2SO_4 → H₂SO₄, 10^23^ → 10²³. Всё экранируется. */
 export function fmt(s: string): string {
   return s
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -37,6 +39,10 @@ export function fmt(s: string): string {
     .replace(/_(\d+)/g, '<sub>$1</sub>')
     .replace(/\^([^^]+)\^/g, (_m, x: string) => '<sup>' + x.replace(/-/g, '−') + '</sup>');
 }
+
+/** Текст вопроса/ответа: разметка игры или (для банка сайта) разметка сайта */
+export const QT: React.FC<{ text: string; bank?: boolean }> = ({ text, bank }) =>
+  bank ? <FormattedText text={text} /> : <span dangerouslySetInnerHTML={{ __html: fmt(text) }} />;
 
 export const pick = (lang: Lang, ru: string, tj: string) => (lang === 'ru' ? ru : lang === 'tj' ? tj : `${ru} / ${tj}`);
 
@@ -53,40 +59,45 @@ export const Bi: React.FC<{ ru: React.ReactNode; tj: React.ReactNode }> = ({ ru,
   );
 };
 
-/** То же, но с разметкой формул */
-export const BiF: React.FC<{ ru: string; tj: string }> = ({ ru, tj }) => (
-  <Bi ru={<span dangerouslySetInnerHTML={{ __html: fmt(ru) }} />} tj={<span dangerouslySetInnerHTML={{ __html: fmt(tj) }} />} />
-);
+export const teamName = (teams: GameTeam[], n: number | null | undefined) =>
+  n == null ? '' : teams.find((t) => t.n === n)?.name ?? `№${n}`;
 
 /** Табло: категории × стоимость. Без onPick — только показ (проектор). */
-export const BoardGrid: React.FC<{ board: GameBoard; onPick?: (ci: number, qi: number) => void }> = ({ board, onPick }) => {
+export const BoardGrid: React.FC<{ board: GameBoard; roundId?: string; onPick?: (ci: number, qi: number) => void; teams?: GameTeam[] }> = ({ board, roundId, onPick, teams }) => {
   const lang = useLang();
-  const r = roundById(board.round);
+  const r = layoutRound(board, roundId);
+  if (!r) return <p className="queue-empty">…</p>;
   const used = board.used[r.id] || {};
+  const rows = Math.max(...r.cats.map((c) => c.values.length));
   let total = 0; let done = 0;
-  r.cats.forEach((c, ci) => c.qs.forEach((_q, qi) => { total++; if (used[`${ci}-${qi}`]) done++; }));
+  r.cats.forEach((c, ci) => c.values.forEach((_v, qi) => { total++; if (used[`${ci}-${qi}`]) done++; }));
+  const chooser = teams ? teamName(teams, board.chooser) : '';
   return (
     <>
       <div className="board-meta">
         <span><Bi ru={<>Сыграно вопросов: <b>{done}</b> из {total}</>} tj={<>Саволҳои бозидашуда: <b>{done}</b> аз {total}</>} /></span>
-        {onPick && <span><Bi ru="Выбирайте тему и стоимость вопроса" tj="Мавзӯъ ва арзиши саволро интихоб кунед" /></span>}
+        {chooser
+          ? <span className="chooser-tag"><Bi ru={<>Выбирает вопрос: <b>{chooser}</b></>} tj={<>Саволро интихоб мекунад: <b>{chooser}</b></>} /></span>
+          : onPick && <span><Bi ru="Выбирайте тему и стоимость вопроса" tj="Мавзӯъ ва арзиши саволро интихоб кунед" /></span>}
       </div>
       <div className="board-scroll">
-        <div className="board" role="grid">
+        <div className="board" role="grid" style={{ gridTemplateColumns: `repeat(${r.cats.length}, minmax(0, 1fr))` }}>
           {r.cats.map((c) => (
             <div className="cat" role="columnheader" key={c.name}><Bi ru={c.name} tj={c.nt} /></div>
           ))}
-          {[0, 1, 2, 3, 4].map((qi) => r.cats.map((c, ci) => {
+          {Array.from({ length: rows }, (_x, qi) => r.cats.map((c, ci) => {
             const isUsed = !!used[`${ci}-${qi}`];
+            const v = c.values[qi];
+            if (v == null) return <span key={`${ci}-${qi}`} />;
             return (
               <button
                 key={`${ci}-${qi}`}
-                className={`tile${onPick ? '' : ' ro'}`}
+                className={`tile${onPick ? '' : ' ro'}${isUsed ? ' used' : ''}`}
                 disabled={isUsed || !onPick}
                 onClick={() => onPick?.(ci, qi)}
-                aria-label={`${pick(lang, c.name, c.nt)}, ${c.qs[qi].v}${isUsed ? ', ' + pick(lang, 'сыграно', 'бозида шуд') : ''}`}
+                aria-label={`${pick(lang, c.name, c.nt)}, ${v}${isUsed ? ', ' + pick(lang, 'сыграно', 'бозида шуд') : ''}`}
               >
-                <span className="tile-v">{c.qs[qi].v}</span>
+                <span className="tile-v">{v}</span>
               </button>
             );
           }))}
@@ -96,16 +107,20 @@ export const BoardGrid: React.FC<{ board: GameBoard; onPick?: (ci: number, qi: n
   );
 };
 
-/** Карточки команд со счётом. Для ведущего (editable) — с переименованием и ±100. */
+/** Карточки команд со счётом. Для ведущего (editable) — переименование, ±100, «выбирает». */
 export const TeamGrid: React.FC<{
   teams: GameTeam[];
   scores: Record<string, number>;
+  chooser?: number | null;
+  /** Коды команд для возврата (только ведущему) */
+  pins?: Record<string, string>;
   editable?: {
     onRename: (n: number, name: string) => void;
     onAdjust: (n: number, d: number) => void;
     onRemove: (n: number) => void;
+    onChooser: (n: number) => void;
   };
-}> = ({ teams, scores, editable }) => {
+}> = ({ teams, scores, chooser, pins, editable }) => {
   const lang = useLang();
   const sc = (n: number) => scores[n] ?? 0;
   const max = teams.length ? Math.max(...teams.map((t) => sc(t.n))) : 0;
@@ -116,18 +131,23 @@ export const TeamGrid: React.FC<{
       {sorted.map((t) => {
         const lead = max > 0 && sc(t.n) === max && leaders === 1;
         return (
-          <div className={`team${lead ? ' lead' : ''}`} key={t.n}>
-            {lead && <span className="lead-tag">{lang === 'both' ? 'Лидирует · Пешсаф' : pick(lang, 'Лидирует', 'Пешсаф')}</span>}
+          <div className={`team${lead ? ' lead' : ''}${chooser === t.n ? ' choosing' : ''}`} key={t.n}>
+            <div className="team-tags">
+              {lead && <span className="lead-tag">{lang === 'both' ? 'Лидирует · Пешсаф' : pick(lang, 'Лидирует', 'Пешсаф')}</span>}
+              {chooser === t.n && <span className="choose-tag">{lang === 'both' ? 'Выбирает · Интихоб мекунад' : pick(lang, 'Выбирает', 'Интихоб мекунад')}</span>}
+            </div>
             {editable ? (
               <TeamNameInput key={t.name} name={t.name} onCommit={(v) => editable.onRename(t.n, v)} label={`${pick(lang, 'Название команды ', 'Номи даста ')}${t.n}`} />
             ) : (
               <div className="tname">{t.name}</div>
             )}
             <div className={`score${sc(t.n) < 0 ? ' neg' : ''}`}>{signed(sc(t.n))}</div>
+            {pins?.[t.n] && <div className="team-pin" title={pick(lang, 'Код команды для возврата в игру', 'Рамзи даста барои баргаштан ба бозӣ')}>{pick(lang, 'код', 'рамз')} {pins[t.n]}</div>}
             {editable && (
               <div className="adj">
                 <button onClick={() => editable.onAdjust(t.n, -100)}>−100</button>
                 <button onClick={() => editable.onAdjust(t.n, 100)}>+100</button>
+                <button onClick={() => editable.onChooser(t.n)} title={pick(lang, 'Эта команда выбирает вопрос', 'Ин даста саволро интихоб мекунад')} aria-pressed={chooser === t.n}>☝</button>
                 <button onClick={() => editable.onRemove(t.n)} aria-label={pick(lang, 'Убрать команду', 'Дастаро хориҷ кардан')} title={pick(lang, 'Убрать команду', 'Дастаро хориҷ кардан')}>✕</button>
               </div>
             )}
@@ -153,7 +173,6 @@ const TeamNameInput: React.FC<{ name: string; onCommit: (v: string) => void; lab
 /** Очередь нажатий «Ответить»: кто и насколько позже первого */
 export const BuzzQueue: React.FC<{ board: GameBoard; teams: GameTeam[]; buzz: GameBuzz[] }> = ({ board, teams, buzz }) => {
   const queue = queueOf(buzz, board.q);
-  const name = (n: number) => teams.find((t) => t.n === n)?.name ?? `№${n}`;
   if (!queue.length) {
     return <p className="queue-empty"><Bi ru="Пока никто не нажал «Ответить»" tj="Ҳоло касе «Ҷавоб додан»-ро пахш накардааст" /></p>;
   }
@@ -162,7 +181,7 @@ export const BuzzQueue: React.FC<{ board: GameBoard; teams: GameTeam[]; buzz: Ga
       {queue.map((b, i) => (
         <li key={b.n} className={i === 0 ? 'first' : ''}>
           <span className="qpos">{i + 1}</span>
-          <span className="qname">{name(b.n)}</span>
+          <span className="qname">{teamName(teams, b.n)}</span>
           <span className="qdelta">{i === 0 ? '' : `+${((b.t - queue[0].t) / 1000).toFixed(2)} с`}</span>
         </li>
       ))}
@@ -170,22 +189,59 @@ export const BuzzQueue: React.FC<{ board: GameBoard; teams: GameTeam[]; buzz: Ga
   );
 };
 
-/** Вопрос: шапка, пометка особой клетки, текст. Общий для ведущего и проектора. */
-export const QuestionBody: React.FC<{ board: GameBoard }> = ({ board }) => {
+/** Состояние особого вопроса (кот, аукцион) и кто отвечает — для ведущего и проектора */
+export const ModeStatus: React.FC<{ board: GameBoard; teams: GameTeam[]; bidders?: number[] }> = ({ board, teams, bidders }) => {
+  const q = board.q;
+  if (!q) return null;
+  if (q.mode === 'cat') {
+    const who = teamName(teams, q.chooser);
+    return (
+      <p className="armed" role="status">
+        {who
+          ? <Bi ru={<>«Кот в мешке»: <b>{who}</b> выбирает на телефоне, кому передать вопрос…</>} tj={<>«Гурба дар халта»: <b>{who}</b> дар телефон интихоб мекунад, ки саволро ба кӣ диҳад…</>} />
+          : <Bi ru="«Кот в мешке»: ведущий отмечает, какая команда выбрала вопрос" tj="«Гурба дар халта»: пешбар дастаи интихобкардаро қайд мекунад" />}
+      </p>
+    );
+  }
+  if (q.mode === 'bids') {
+    const done = bidders?.length ?? 0;
+    return (
+      <p className="armed" role="status">
+        <Bi ru={<>«Аукцион»: команды делают ставки на телефонах — {done} из {teams.length}</>} tj={<>«Аукцион»: дастаҳо дар телефонҳо нарх мегузоранд — {done} аз {teams.length}</>} />
+      </p>
+    );
+  }
+  if (q.mode === 'answer') {
+    const who = teamName(teams, q.answerer);
+    return (
+      <div className="buzz" role="status">
+        {who ? <Bi ru={<>Отвечает: <b>{who}</b>{q.tag === 'auction' && <> · ставка {q.pts}</>}</>} tj={<>Ҷавоб медиҳад: <b>{who}</b>{q.tag === 'auction' && <> · нарх {q.pts}</>}</>} />
+          : <Bi ru="Никто не сделал ставку — отвечающего выбирает ведущий" tj="Касе нарх нагузошт — ҷавобдиҳандаро пешбар интихоб мекунад" />}
+        {q.bids && q.bids.length > 0 && (
+          <div className="bids">
+            {q.bids.map((b) => <span key={b.n}>{teamName(teams, b.n)}: <b>{b.amount}</b></span>)}
+          </div>
+        )}
+      </div>
+    );
+  }
+  return null;
+};
+
+/** Вопрос: шапка, пометка особой клетки, текст. hideText — скрыть текст до ставок/передачи (проектор). */
+export const QuestionBody: React.FC<{ board: GameBoard; hideText?: boolean }> = ({ board, hideText }) => {
   const lang = useLang();
   const q = board.q;
   if (!q) return null;
-  const r = roundById(q.r);
-  const c = r.cats[q.ci];
-  const item = c.qs[q.qi];
-  const sp = item.tag ? SPECIAL[item.tag] : null;
+  const sp = q.tag ? SPECIAL[q.tag] : null;
+  const t = q.text;
   return (
     <>
       <div className="dlg-head">
-        <div><span className="dlg-cat" id="dlg-title">{pick(lang, c.name, c.nt)}</span></div>
+        <div><span className="dlg-cat" id="dlg-title">{q.extra ? pick(lang, 'Дополнительный вопрос', 'Саволи иловагӣ') : pick(lang, q.cat, q.catt)}</span></div>
         <div>
           {sp && <><span className="badge">{pick(lang, sp.ru, sp.tj)}</span>{' '}</>}
-          <span className="dlg-val">{item.v}</span>
+          <span className="dlg-val">{q.pts}</span>
         </div>
       </div>
       {sp && (
@@ -194,19 +250,34 @@ export const QuestionBody: React.FC<{ board: GameBoard }> = ({ board }) => {
           {lang !== 'ru' && <span className={lang === 'both' ? 't' : ''} lang="tg">{sp.ntj}</span>}
         </p>
       )}
-      {lang === 'ru' && <p className="q" dangerouslySetInnerHTML={{ __html: fmt(item.q) }} />}
-      {lang === 'tj' && <p className="q" lang="tg" dangerouslySetInnerHTML={{ __html: fmt(item.qt) }} />}
-      {lang === 'both' && (
+      {hideText ? (
+        <p className="q q-hidden"><Bi ru="Вопрос откроется, когда будет ясно, кто отвечает" tj="Савол вақте кушода мешавад, ки ҷавобдиҳанда маълум шавад" /></p>
+      ) : (
         <>
-          <p className="q" lang="ru" dangerouslySetInnerHTML={{ __html: fmt(item.q) }} />
-          <p className="q-tj" lang="tg" dangerouslySetInnerHTML={{ __html: fmt(item.qt) }} />
+          {lang !== 'tj' && <p className="q" lang="ru"><QT text={t.q} bank={t.bank} /></p>}
+          {lang !== 'ru' && t.qt && <p className={lang === 'both' ? 'q-tj' : 'q'} lang="tg"><QT text={t.qt} bank={t.bank} /></p>}
+          {t.image && <img className="q-img" src={t.image} alt="" />}
+          {t.options && t.options.length > 0 && (
+            <ol className="q-opts">
+              {t.options.map((o, i) => (
+                <li key={i}>
+                  <span className="q-opt-l">{String.fromCharCode(65 + i)}</span>
+                  <span>
+                    {lang !== 'tj' && <QT text={o.ru} bank />}
+                    {lang === 'both' && o.tj && o.tj !== o.ru && <span className="t"> / </span>}
+                    {lang !== 'ru' && o.tj && (lang === 'tj' || o.tj !== o.ru) && <QT text={o.tj} bank />}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
         </>
       )}
-      {q.shown && (
+      {q.shown && q.ans && (
         <p className="answer">
           <span className="lab">{pick(lang, 'Ответ', 'Ҷавоб')}</span>
-          {lang !== 'tj' && <span dangerouslySetInnerHTML={{ __html: fmt(item.a) }} />}
-          {lang !== 'ru' && <span className={lang === 'both' ? 't' : ''} lang="tg" dangerouslySetInnerHTML={{ __html: fmt(item.at) }} />}
+          {lang !== 'tj' && <span><QT text={q.ans.a} bank={t.bank} /></span>}
+          {lang !== 'ru' && q.ans.at && <span className={lang === 'both' ? 't' : ''} lang="tg"><QT text={q.ans.at} bank={t.bank} /></span>}
         </p>
       )}
     </>
@@ -216,6 +287,36 @@ export const QuestionBody: React.FC<{ board: GameBoard }> = ({ board }) => {
 export const TimerView: React.FC<{ left: number; big?: boolean }> = ({ left, big }) => (
   <span className={`timer${left <= 5 ? ' low' : ''}${big ? ' big' : ''}`} role="timer">{formatTime(left)}</span>
 );
+
+/** Пьедестал: 1–3 места и остальные */
+export const Podium: React.FC<{ board: GameBoard; teams: GameTeam[] }> = ({ board, teams }) => {
+  const list = standings(teams, board.scores);
+  const top = [2, 1, 3].map((p) => list.filter((t) => t.place === p));
+  const rest = list.filter((t) => t.place > 3);
+  return (
+    <div className="podium-wrap">
+      <p className="podium-title"><Bi ru="Итоги игры" tj="Натиҷаҳои бозӣ" /></p>
+      <div className="podium">
+        {top.map((group, i) => {
+          const place = [2, 1, 3][i];
+          return (
+            <div className={`pod pod-${place}`} key={place}>
+              <div className="pod-names">
+                {group.length ? group.map((t) => <div key={t.n} className="pod-name">{t.name}<span className="pod-score">{signed(t.score)}</span></div>) : <div className="pod-name pod-empty">—</div>}
+              </div>
+              <div className="pod-step"><span>{place}</span></div>
+            </div>
+          );
+        })}
+      </div>
+      {rest.length > 0 && (
+        <ol className="pod-rest">
+          {rest.map((t) => <li key={t.n}><b>{t.place}.</b> {t.name} — {signed(t.score)}</li>)}
+        </ol>
+      )}
+    </div>
+  );
+};
 
 /** Полноэкранная ссылка и QR для команд */
 export const LinkOverlay: React.FC<{ code: string; teams: GameTeam[]; onClose?: () => void }> = ({ code, teams, onClose }) => {

@@ -5,38 +5,75 @@ export type Lang = 'both' | 'ru' | 'tj';
 
 export interface GameTeam { n: number; name: string }
 export interface GameBuzz { n: number; t: number }
-export interface GameQ { r: string; ci: number; qi: number; shown: boolean; pts: number; wrong: number[] }
-export interface GameTimer { running: boolean; left: number; endsAt: number | null }
+export type QMode = 'buzz' | 'cat' | 'bids' | 'answer';
+/** Публичная раскладка табло (без вопросов и ответов) */
+export interface LayoutCat { name: string; nt: string; values: number[] }
+export interface LayoutRound { id: string; tab: string; tabt: string; sub: string; subt: string; cats: LayoutCat[] }
+/** Текст вопроса для экранов; bank — вопрос из банка сайта (своя разметка формул) */
+export interface QText { q: string; qt: string; options?: { ru: string; tj: string }[]; image?: string | null; bank?: boolean }
+export interface GameQ {
+  r: string; ci: number; qi: number; v: number; pts: number;
+  cat: string; catt: string; tag?: string;
+  text: QText;
+  /** Ответ — только после «Показать ответ» */
+  ans?: { a: string; at: string } | null;
+  shown: boolean;
+  wrong: number[];
+  mode: QMode;
+  /** «Кот в мешке»: кто передаёт вопрос */
+  chooser?: number | null;
+  /** Кто отвечает (кот, аукцион) */
+  answerer?: number | null;
+  /** Ставки аукциона, открываются после подведения */
+  bids?: { n: number; amount: number }[] | null;
+  /** Доп. вопрос: отвечать могут только эти команды */
+  only?: number[] | null;
+  extra?: boolean;
+}
+export interface GameTimer { running: boolean; left: number; endsAt: number | null; startedAt?: number | null }
 export interface GameBoard {
   round: string;
   lang: Lang;
+  layout: LayoutRound[];
   used: Record<string, Record<string, true>>;
   scores: Record<string, number>;
+  /** Чья очередь выбирать вопрос */
+  chooser: number | null;
   q: GameQ | null;
   timer: GameTimer;
+  secs: number;
   showLink: boolean;
+  final: boolean;
 }
+export interface GameInput { cat?: number; bidders?: number[]; fs?: number[] }
 export interface GameSession {
   code: string;
   host_id: string;
   teams: GameTeam[];
   board: GameBoard;
   buzz: GameBuzz[];
+  input: GameInput;
   created_at: string;
 }
 
 export const QUESTION_SECONDS = 30;
+export const TIMER_CHOICES = [15, 30, 60];
 export const MAX_TEAMS = 6;
+export const FALSE_START_MS = 1500;
 
 export function freshBoard(keep?: Partial<GameBoard>): GameBoard {
   return {
     round: keep?.round ?? 'r1',
     lang: keep?.lang ?? 'both',
-    used: { r1: {}, r2: {} },
+    layout: keep?.layout ?? [],
+    used: {},
     scores: {},
+    chooser: null,
     q: null,
-    timer: { running: false, left: QUESTION_SECONDS, endsAt: null },
+    timer: { running: false, left: keep?.secs ?? QUESTION_SECONDS, endsAt: null },
+    secs: keep?.secs ?? QUESTION_SECONDS,
     showLink: false,
+    final: false,
   };
 }
 
@@ -49,7 +86,8 @@ function normalize(row: any): GameSession {
     created_at: row.created_at,
     teams: Array.isArray(row.teams) ? row.teams : [],
     buzz: Array.isArray(row.buzz) ? row.buzz : [],
-    board: { ...base, ...b, used: { ...base.used, ...(b.used || {}) }, timer: { ...base.timer, ...(b.timer || {}) } },
+    input: row.input && typeof row.input === 'object' ? row.input : {},
+    board: { ...base, ...b, q: b.q && b.q.text ? b.q : null, layout: Array.isArray(b.layout) ? b.layout : [], used: { ...base.used, ...(b.used || {}) }, timer: { ...base.timer, ...(b.timer || {}) } },
   };
 }
 
@@ -123,21 +161,35 @@ export function useTimerLeft(timer: GameTimer, now: () => number): number {
 /** Очередь на ответ: порядок нажатий без команд, уже ответивших неверно */
 export function queueOf(buzz: GameBuzz[], q: GameQ | null): GameBuzz[] {
   const wrong = q?.wrong ?? [];
-  return buzz.filter((b) => !wrong.includes(b.n));
+  return buzz.filter((b) => !wrong.includes(b.n) && (!q?.only || q.only.includes(b.n)));
+}
+
+/** Места: одинаковые очки — одно место */
+export function standings(teams: GameTeam[], scores: Record<string, number>) {
+  const list = teams.map((t) => ({ ...t, score: scores[t.n] ?? 0 })).sort((a, b) => b.score - a.score || a.n - b.n);
+  return list.map((t) => ({ ...t, place: 1 + list.filter((x) => x.score > t.score).length }));
 }
 
 export const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 export const signed = (n: number) => (n < 0 ? '−' : '') + Math.abs(n);
 
-export function beep() {
+// Звук: один AudioContext, разблокируется первым касанием (иначе телефоны молчат)
+let audio: AudioContext | null = null;
+export function unlockAudio() {
   try {
     const Ctx = window.AudioContext || (window as any).webkitAudioContext;
     if (!Ctx) return;
-    const ac = new Ctx();
-    const o = ac.createOscillator();
-    const g = ac.createGain();
-    o.type = 'square'; o.frequency.value = 880; g.gain.value = 0.15;
-    o.connect(g); g.connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.22);
-    setTimeout(() => { try { ac.close(); } catch { /* ignore */ } }, 400);
+    if (!audio) audio = new Ctx();
+    if (audio.state === 'suspended') audio.resume();
+  } catch { /* ignore */ }
+}
+export function beep(freq = 880, ms = 220) {
+  try {
+    unlockAudio();
+    if (!audio) return;
+    const o = audio.createOscillator();
+    const g = audio.createGain();
+    o.type = 'square'; o.frequency.value = freq; g.gain.value = 0.15;
+    o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime + ms / 1000);
   } catch { /* ignore */ }
 }

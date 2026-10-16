@@ -2,22 +2,25 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { AuthModal } from '../components/AuthModal';
-import { ROUNDS, RULES, SPECIAL } from './data';
+import { FormattedText } from '../components/FormulaEditor';
+import { GameRound, RULES, SPECIAL } from './content';
 import {
-  GameBoard, GameQ, Lang, QUESTION_SECONDS, beep, freshBoard, queueOf, screenUrl,
-  useGameSession, useServerClock, useTimerLeft, GameSession,
+  GameBoard, GameQ, GameSession, GameTeam, Lang, LayoutRound, QMode, TIMER_CHOICES, beep, freshBoard, queueOf,
+  screenUrl, signed, standings, useGameSession, useServerClock, useTimerLeft,
 } from './api';
 import {
-  Bi, BiF, BoardGrid, BuzzQueue, GameShell, GameTitle, LinkOverlay, QuestionBody, TeamGrid, TimerView,
-  fmt, pick, roundById, useLang,
+  Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView,
+  fmt, layoutRound, pick, teamName, useLang,
 } from './ui';
 
-type View = 'r1' | 'r2' | 'rules' | 'host';
+type View = string; // id уровня, 'rules', 'host' или 'history'
+const PACK_ID = 'chem-1';
 
-/** Вход ведущего: проверка роли и поиск/создание игры */
+/** Вход ведущего: проверка роли, поиск/создание игры, загрузка пакета вопросов */
 export const GameHost: React.FC = () => {
   const { user, isAdmin, isOwner, isLoading } = useAuth();
   const [code, setCode] = useState<string | null>(null);
+  const [pack, setPack] = useState<GameRound[] | null>(null);
   const [looking, setLooking] = useState(true);
   const [error, setError] = useState('');
   const allowed = !!user && (isAdmin || isOwner);
@@ -27,9 +30,16 @@ export const GameHost: React.FC = () => {
     let dead = false;
     (async () => {
       const since = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
-      const { data } = await supabase.from('game_sessions').select('code').eq('host_id', user.id)
-        .gte('created_at', since).order('created_at', { ascending: false }).limit(1);
-      if (!dead) { setCode(data?.[0]?.code ?? null); setLooking(false); }
+      const [{ data }, { data: p, error: pe }] = await Promise.all([
+        supabase.from('game_sessions').select('code').eq('host_id', user.id)
+          .gte('created_at', since).order('created_at', { ascending: false }).limit(1),
+        supabase.from('game_packs').select('content').eq('id', PACK_ID).maybeSingle(),
+      ]);
+      if (dead) return;
+      if (pe || !p) setError('Не найден пакет вопросов игры. Примените supabase/sql/game_pack_chemistry.sql.');
+      else setPack((p.content as { rounds: GameRound[] }).rounds);
+      setCode(data?.[0]?.code ?? null);
+      setLooking(false);
     })();
     return () => { dead = true; };
   }, [allowed, user?.id]);
@@ -41,12 +51,13 @@ export const GameHost: React.FC = () => {
     setCode(data as string);
   };
 
+  if (!isLoading && !looking && allowed && code && pack) {
+    return <HostGame code={code} pack={pack} onNewCode={() => setCode(null)} />;
+  }
   let body: React.ReactNode;
-  if (isLoading || looking) {
-    body = <p>Загрузка…</p>;
-  } else if (!user) {
-    body = <AuthModal isOpen />;
-  } else if (!allowed) {
+  if (isLoading || looking) body = <p>Загрузка…</p>;
+  else if (!user) body = <AuthModal isOpen />;
+  else if (!allowed) {
     body = (
       <div className="gate">
         <h1>Своя игра</h1>
@@ -54,7 +65,9 @@ export const GameHost: React.FC = () => {
         <a className="btn" href="/">На сайт</a>
       </div>
     );
-  } else if (!code) {
+  } else if (!pack) {
+    body = <div className="gate"><h1>Своя игра</h1><p className="gate-err">{error}</p></div>;
+  } else {
     body = (
       <div className="gate">
         <h1><Bi ru="Своя игра по химии" tj="Викторинаи «Своя игра» аз химия" /></h1>
@@ -63,51 +76,87 @@ export const GameHost: React.FC = () => {
         {error && <p className="gate-err">{error}</p>}
       </div>
     );
-  } else {
-    body = <HostGame code={code} onNewCode={() => setCode(null)} />;
   }
-  return code && allowed && !isLoading && !looking ? <>{body}</> : <GameShell lang="ru">{body}</GameShell>;
+  return <GameShell lang="ru">{body}</GameShell>;
 };
 
-const HostGame: React.FC<{ code: string; onNewCode: () => void }> = ({ code, onNewCode }) => {
+const HostGame: React.FC<{ code: string; pack: GameRound[]; onNewCode: () => void }> = ({ code, pack, onNewCode }) => {
   const { session, state } = useGameSession(code);
   if (state === 'missing') {
-    return <div className="gate"><p>Игра не найдена или устарела.</p><button className="btn primary" onClick={onNewCode}>Создать новую</button></div>;
+    return <GameShell lang="ru"><div className="gate"><p>Игра не найдена или устарела.</p><button className="btn primary" onClick={onNewCode}>Создать новую</button></div></GameShell>;
   }
-  if (!session) return <p>Загрузка…</p>;
-  return <HostBoard session={session} />;
+  if (!session) return <GameShell lang="ru"><p>Загрузка…</p></GameShell>;
+  return <HostBoard session={session} pack={pack} />;
 };
 
-const HostBoard: React.FC<{ session: GameSession }> = ({ session }) => {
+const layoutOf = (pack: GameRound[]): LayoutRound[] => pack.map((r) => ({
+  id: r.id, tab: r.tab, tabt: r.tabt, sub: r.sub, subt: r.subt,
+  cats: r.cats.map((c) => ({ name: c.name, nt: c.nt, values: c.qs.map((q) => q.v) })),
+}));
+
+const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ session, pack }) => {
   const code = session.code;
   const now = useServerClock();
   const [board, setBoardState] = useState<GameBoard>(session.board);
   const boardRef = useRef<GameBoard>(session.board);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
-  const [view, setView] = useState<View>('r1');
+  const undoStack = useRef<GameBoard[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const extraAns = useRef<{ a: string; at: string } | null>(null);
+  const [view, setView] = useState<View>(session.board.round || pack[0]?.id || 'r1');
   const [confirmReset, setConfirmReset] = useState(false);
+  const [tiePanel, setTiePanel] = useState<number[] | null>(null);
   const [fs, setFs] = useState(false);
   const [fsNote, setFsNote] = useState(false);
 
-  // teams и buzz приходят с сервера; board — наш собственный (пишем только мы)
-  const teams = session.teams;
-  const buzz = session.buzz;
+  // teams, buzz и input приходят с сервера; board пишем только мы
+  const { teams, buzz, input } = session;
   const lang = board.lang;
 
-  const commit = useCallback((fn: (b: GameBoard) => GameBoard) => {
-    const next = fn(boardRef.current);
+  // коды команд для возврата — видит только ведущий
+  const [pins, setPins] = useState<Record<string, string>>({});
+  const teamKey = teams.map((t) => t.n).join(',');
+  useEffect(() => {
+    supabase.rpc('game_team_pins', { p_code: code }).then(({ data }) => setPins((data as Record<string, string>) || {}));
+  }, [teamKey, code]);
+
+  const commit = useCallback((fn: (b: GameBoard) => GameBoard, undoable = false) => {
+    const prev = boardRef.current;
+    const next = fn(prev);
+    if (next === prev) return;
+    if (undoable) { undoStack.current = [...undoStack.current.slice(-19), prev]; setCanUndo(true); }
     boardRef.current = next;
     setBoardState(next);
     writes.current = writes.current.then(() => supabase.from('game_sessions').update({ board: next }).eq('code', code));
   }, [code]);
 
+  const undo = () => {
+    const prev = undoStack.current.pop();
+    setCanUndo(undoStack.current.length > 0);
+    if (prev) commit(() => prev);
+  };
+
+  // раскладка табло (без ответов) — для проектора
+  useEffect(() => {
+    const layout = layoutOf(pack);
+    if (JSON.stringify(layout) !== JSON.stringify(boardRef.current.layout)) commit((b) => ({ ...b, layout }));
+  }, [pack, commit]);
+
   const left = useTimerLeft(board.timer, now);
+  const rpc = (fn: string, args: Record<string, unknown>) => supabase.rpc(fn, args);
+
+  const runTimer = (b: GameBoard, secs?: number): GameBoard => {
+    const s = secs ?? (b.timer.left > 0 ? b.timer.left : b.secs);
+    const t = Math.round(now());
+    return { ...b, timer: { running: true, left: s, endsAt: t + s * 1000, startedAt: t } };
+  };
+  const stoppedTimer = (b: GameBoard) => ({ running: false, left: b.secs, endsAt: null, startedAt: null });
 
   // таймер дошёл до нуля
   useEffect(() => {
     if (board.timer.running && left <= 0) {
-      commit((b) => ({ ...b, timer: { running: false, left: 0, endsAt: null } }));
-      beep();
+      commit((b) => ({ ...b, timer: { running: false, left: 0, endsAt: null, startedAt: null } }));
+      beep(440, 400);
     }
   }, [left, board.timer.running, commit]);
 
@@ -120,66 +169,168 @@ const HostBoard: React.FC<{ session: GameSession }> = ({ session }) => {
     firstSeen.current = n;
   }, [queue[0]?.n]);
 
-  const rpc = (fn: string, args: Record<string, unknown>) => supabase.rpc(fn, args);
+  // «Кот в мешке»: команда выбрала, кому передать — отвечает она, запускаем таймер
+  useEffect(() => {
+    const q = boardRef.current.q;
+    if (q?.mode === 'cat' && input.cat != null) {
+      commit((b) => (b.q ? runTimer({ ...b, q: { ...b.q, mode: 'answer', answerer: input.cat ?? null } }, b.secs) : b));
+      beep();
+    }
+  }, [input.cat, board.q?.mode]);
+
+  // «Аукцион»: все поставили — подводим итог
+  const closingBids = useRef(false);
+  const closeBids = async () => {
+    if (closingBids.current || boardRef.current.q?.mode !== 'bids') return;
+    closingBids.current = true;
+    const { data } = await rpc('game_bids_get', { p_code: code });
+    closingBids.current = false;
+    const list = (Array.isArray(data) ? data : []) as { n: number; amount: number }[];
+    const win = list.find((x) => x.amount > 0) ?? null;
+    commit((b) => {
+      if (!b.q || b.q.mode !== 'bids') return b;
+      return runTimer({
+        ...b,
+        q: { ...b.q, mode: 'answer', answerer: win?.n ?? null, pts: win?.amount ?? b.q.v, bids: list.map(({ n, amount }) => ({ n, amount })) },
+      }, b.secs);
+    });
+    beep();
+  };
+  useEffect(() => {
+    if (board.q?.mode !== 'bids' || !teams.length) return;
+    const bidders = input.bidders ?? [];
+    if (teams.every((t) => bidders.includes(t.n))) closeBids();
+  }, [input.bidders?.length, board.q?.mode, teams.length]);
+
+  const findItem = (q: GameQ) => pack.find((r) => r.id === q.r)?.cats[q.ci]?.qs[q.qi];
 
   const openQ = (ci: number, qi: number) => {
-    const r = roundById(board.round);
+    const r = pack.find((x) => x.id === view) ?? pack[0];
+    const c = r.cats[ci];
+    const item = c.qs[qi];
+    const mode: QMode = item.tag === 'cat' ? 'cat' : item.tag === 'auction' ? 'bids' : 'buzz';
     commit((b) => ({
       ...b,
-      q: { r: r.id, ci, qi, shown: false, pts: r.cats[ci].qs[qi].v, wrong: [] },
-      timer: { running: false, left: QUESTION_SECONDS, endsAt: null },
+      chooser: b.chooser ?? nextChooser(null),
+      round: r.id,
+      q: {
+        r: r.id, ci, qi, v: item.v, pts: item.v, cat: c.name, catt: c.nt, tag: item.tag,
+        text: { q: item.q, qt: item.qt }, ans: null, shown: false, wrong: [], mode,
+        chooser: mode === 'cat' ? b.chooser ?? nextChooser(null) : null, answerer: null, bids: null,
+      },
+      timer: stoppedTimer(b),
     }));
     rpc('game_buzz_clear', { p_code: code });
   };
 
-  const closeQ = (markUsed: boolean) => {
-    commit((b) => {
-      const q = b.q;
-      const used = { ...b.used };
-      if (q && markUsed) used[q.r] = { ...(used[q.r] || {}), [`${q.ci}-${q.qi}`]: true };
-      return { ...b, used, q: null, timer: { running: false, left: QUESTION_SECONDS, endsAt: null } };
-    });
+  // очередь выбора вопроса: команды по кругу в порядке номеров
+  const teamsRef = useRef(teams);
+  teamsRef.current = teams;
+  const nextChooser = (cur: number | null): number | null => {
+    const ns = teamsRef.current.map((t) => t.n).sort((x, y) => x - y);
+    if (!ns.length) return null;
+    if (cur == null) return ns[0];
+    return ns.find((n) => n > cur) ?? ns[0];
+  };
+
+  // первой выбирает команда с наименьшим номером
+  useEffect(() => {
+    if (teams.length && (boardRef.current.chooser == null || !teams.some((t) => t.n === boardRef.current.chooser))) {
+      commit((b) => ({ ...b, chooser: nextChooser(null) }));
+    }
+  }, [teamKey]);
+
+  const closedBoard = (b: GameBoard, markUsed: boolean): GameBoard => {
+    const q = b.q;
+    const used = { ...b.used };
+    if (q && markUsed && !q.extra) used[q.r] = { ...(used[q.r] || {}), [q.ci + '-' + q.qi]: true };
+    const chooser = q && markUsed && !q.extra ? nextChooser(b.chooser) : b.chooser;
+    return { ...b, used, chooser, q: null, timer: stoppedTimer(b), final: q?.extra ? true : b.final };
+  };
+  const afterClose = (wasExtra: boolean) => {
     rpc('game_buzz_clear', { p_code: code });
+    if (wasExtra) saveResults();
+  };
+  const closeQ = (markUsed: boolean) => {
+    const wasExtra = !!boardRef.current.q?.extra;
+    commit((b) => closedBoard(b, markUsed), markUsed);
+    afterClose(wasExtra);
   };
 
   const patchQ = (p: Partial<GameQ>) => commit((b) => (b.q ? { ...b, q: { ...b.q, ...p } } : b));
 
-  const startTimer = () => commit((b) => {
-    const secs = b.timer.left > 0 ? b.timer.left : QUESTION_SECONDS;
-    return { ...b, timer: { running: true, left: secs, endsAt: Math.round(now()) + secs * 1000 } };
-  });
-  const pauseTimer = () => commit((b) => ({ ...b, timer: { running: false, left: Math.max(left, 0), endsAt: null } }));
-  const resetTimer = () => commit((b) => ({ ...b, timer: { running: false, left: QUESTION_SECONDS, endsAt: null } }));
+  const reveal = () => {
+    const q = boardRef.current.q; if (!q) return;
+    const item = q.extra ? null : findItem(q);
+    const ans = q.extra ? extraAns.current : item ? { a: item.a, at: item.at } : null;
+    patchQ({ shown: true, ans });
+  };
+
+  const startTimer = () => commit((b) => runTimer(b));
+  const pauseTimer = () => commit((b) => ({ ...b, timer: { running: false, left: Math.max(left, 0), endsAt: null, startedAt: null } }));
+  const resetTimer = () => commit((b) => ({ ...b, timer: stoppedTimer(b) }));
+  const setSecs = (s: number) => commit((b) => ({ ...b, secs: s, timer: b.timer.running ? b.timer : { running: false, left: s, endsAt: null, startedAt: null } }));
 
   const judge = (n: number, ok: boolean) => {
-    const q = board.q; if (!q) return;
+    const q = boardRef.current.q; if (!q) return;
     if (ok) {
-      commit((b) => ({ ...b, scores: { ...b.scores, [n]: (b.scores[n] ?? 0) + q.pts } }));
-      closeQ(true);
+      const wasExtra = !!q.extra;
+      commit((b) => closedBoard({ ...b, scores: { ...b.scores, [n]: (b.scores[n] ?? 0) + q.pts } }, true), true);
+      afterClose(wasExtra);
     } else {
       commit((b) => ({
         ...b,
         scores: { ...b.scores, [n]: (b.scores[n] ?? 0) - q.pts },
         q: b.q ? { ...b.q, wrong: [...b.q.wrong, n] } : b.q,
-      }));
+      }), true);
       rpc('game_buzz_drop', { p_code: code, p_n: n });
     }
   };
 
-  const adjust = (n: number, d: number) => commit((b) => ({ ...b, scores: { ...b.scores, [n]: (b.scores[n] ?? 0) + d } }));
+  // «Кот в мешке» без телефона: ведущий отмечает, кто выбрал, или сразу кому передан
+  const catChooser = (n: number) => commit((b) => (b.q ? { ...b, chooser: n, q: { ...b.q, chooser: n } } : b));
+  const catGive = (n: number) => commit((b) => (b.q ? runTimer({ ...b, q: { ...b.q, mode: 'answer', answerer: n } }, b.secs) : b));
+  const auctionGive = (n: number) => commit((b) => (b.q ? runTimer({ ...b, q: { ...b.q, mode: 'answer', answerer: n } }, b.secs) : b));
+
+  const adjust = (n: number, d: number) => commit((b) => ({ ...b, scores: { ...b.scores, [n]: (b.scores[n] ?? 0) + d } }), true);
   const rename = (n: number, name: string) => { rpc('game_rename', { p_code: code, p_n: n, p_name: name }); };
+  const setChooser = (n: number) => commit((b) => ({ ...b, chooser: n }));
   const removeTeam = (n: number) => {
     if (!window.confirm('Убрать команду из игры?')) return;
     rpc('game_remove_team', { p_code: code, p_n: n });
     commit((b) => {
       const scores = { ...b.scores }; delete scores[n];
-      return { ...b, scores };
+      return { ...b, scores, chooser: b.chooser === n ? null : b.chooser };
     });
   };
   const resetGame = () => {
-    commit((b) => freshBoard({ round: b.round, lang: b.lang }));
+    commit((b) => freshBoard({ round: b.round, lang: b.lang, layout: b.layout, secs: b.secs }), true);
     rpc('game_buzz_clear', { p_code: code });
     setConfirmReset(false);
+  };
+
+  const saveResults = async () => {
+    const b = boardRef.current;
+    const rows = standings(teams, b.scores).map((t) => ({ name: t.name, score: t.score, place: t.place }));
+    if (!rows.length) return;
+    await supabase.from('game_results').upsert(
+      { code, session_started: session.created_at, round: b.round, title: layoutRound(b)?.tab ?? b.round, teams: rows, finished_at: new Date().toISOString() },
+      { onConflict: 'code,session_started,round' },
+    );
+  };
+  const showFinal = () => { commit((b) => ({ ...b, final: true, showLink: false })); saveResults(); };
+
+  // доп. вопрос из банка сайта
+  const askExtra = (only: number[], text: GameQ['text'], ans: { a: string; at: string }) => {
+    extraAns.current = ans;
+    commit((b) => ({
+      ...b,
+      final: false,
+      q: { r: 'extra', ci: -1, qi: -1, v: 100, pts: 100, cat: 'Дополнительный вопрос', catt: 'Саволи иловагӣ', text, ans: null, shown: false, wrong: [], mode: 'buzz', only, extra: true },
+      timer: stoppedTimer(b),
+    }));
+    rpc('game_buzz_clear', { p_code: code });
+    setTiePanel(null);
   };
 
   // клавиши: 1–6 — нажать за команду, Esc — вернуть вопрос на табло
@@ -189,7 +340,7 @@ const HostBoard: React.FC<{ session: GameSession }> = ({ session }) => {
       if (!b.q || e.repeat) return;
       if (e.key === 'Escape') { closeQ(false); return; }
       const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (e.key.length !== 1 || e.key < '1' || e.key > '6') return;
       const n = parseInt(e.key, 10);
       if (!teams.some((t) => t.n === n)) return;
@@ -216,30 +367,37 @@ const HostBoard: React.FC<{ session: GameSession }> = ({ session }) => {
   };
 
   const setLang = (l: Lang) => commit((b) => ({ ...b, lang: l }));
-  const setRound = (id: string) => { commit((b) => ({ ...b, round: id })); setView(id as View); };
+  const setRound = (id: string) => { commit((b) => ({ ...b, round: id })); setView(id); };
   const q = board.q;
   const sortedTeams = [...teams].sort((a, b) => a.n - b.n);
   const first = queue[0]?.n;
-  const firstName = teams.find((t) => t.n === first)?.name;
+  const firstName = q?.mode === 'buzz' ? teamName(teams, first) : '';
+  const isRound = pack.some((r) => r.id === view);
+  const curRound = pack.find((r) => r.id === view);
+  const roundUsed = curRound ? Object.keys(board.used[curRound.id] || {}).length : 0;
+  const roundTotal = curRound ? curRound.cats.reduce((s, c) => s + c.qs.length, 0) : 0;
+  const ties = tieGroups(teams, board.scores);
 
   return (
     <GameShell lang={lang} fs={fs}>
-      <div className="app">
+      <div className="app host-app">
         <header className="top">
           <div>
             <p className="eyebrow">
               {view === 'rules' ? <Bi ru="Как играть" tj="Тарзи бозӣ" /> : view === 'host' ? <Bi ru="Вопросы с ответами" tj="Саволҳо бо ҷавобҳо" /> :
-                <Bi ru={`${roundById(view).tab} · ${roundById(view).sub}`} tj={`${roundById(view).tabt} · ${roundById(view).subt}`} />}
+                view === 'history' ? <Bi ru="Прошлые игры" tj="Бозиҳои гузашта" /> :
+                curRound && <Bi ru={`${curRound.tab} · ${curRound.sub}`} tj={`${curRound.tabt} · ${curRound.subt}`} />}
             </p>
             <GameTitle />
           </div>
           <div className="top-ctl">
             <nav className="tabs" role="tablist">
-              {ROUNDS.map((r) => (
+              {pack.map((r) => (
                 <button key={r.id} className="tab" role="tab" aria-selected={view === r.id} onClick={() => setRound(r.id)}><Bi ru={r.tab} tj={r.tabt} /></button>
               ))}
               <button className="tab" role="tab" aria-selected={view === 'rules'} onClick={() => setView('rules')}><Bi ru="Правила" tj="Қоидаҳо" /></button>
               <button className="tab" role="tab" aria-selected={view === 'host'} onClick={() => setView('host')}><Bi ru="Лист ведущего" tj="Варақаи пешбар" /></button>
+              <button className="tab" role="tab" aria-selected={view === 'history'} onClick={() => setView('history')}><Bi ru="История" tj="Таърих" /></button>
             </nav>
             <div className="seg" role="group">
               {([['both', 'RU + TJ'], ['ru', 'RU'], ['tj', 'TJ']] as [Lang, string][]).map(([l, t]) => (
@@ -247,22 +405,31 @@ const HostBoard: React.FC<{ session: GameSession }> = ({ session }) => {
               ))}
             </div>
             <button className="btn primary" onClick={() => commit((b) => ({ ...b, showLink: true }))}><Bi ru="Ссылка для команд" tj="Истинод барои дастаҳо" /></button>
-            <a className="btn" href={screenUrl(code)} target="_blank" rel="noreferrer"><Bi ru="Экран для проектора" tj="Экран барои проектор" /></a>
-            <button className="btn" onClick={toggleFs}>{fs ? <Bi ru="Выйти из полного экрана" tj="Аз экрани пурра баромадан" /> : <Bi ru="На весь экран" tj="Экрани пурра" />}</button>
+            <a className="btn hide-phone" href={screenUrl(code)} target="_blank" rel="noreferrer"><Bi ru="Экран для проектора" tj="Экран барои проектор" /></a>
+            <button className="btn hide-phone" onClick={toggleFs}>{fs ? <Bi ru="Выйти из полного экрана" tj="Аз экрани пурра баромадан" /> : <Bi ru="На весь экран" tj="Экрани пурра" />}</button>
           </div>
         </header>
         {fsNote && <p className="host-note"><Bi ru="Браузер не разрешил полноэкранный режим. Нажмите F11." tj="Браузер экрани пурраро иҷозат надод. F11-ро пахш кунед." /></p>}
 
         <main>
-          {(view === 'r1' || view === 'r2') && <BoardGrid board={{ ...board, round: view }} onPick={openQ} />}
+          {isRound && <BoardGrid board={board} roundId={view} onPick={openQ} teams={teams} />}
+          {isRound && roundTotal > 0 && roundUsed >= roundTotal && !board.final && (
+            <p className="host-note done-note">
+              <Bi ru="Все вопросы уровня сыграны." tj="Ҳамаи саволҳои сатҳ бозида шуданд." />{' '}
+              <button className="btn primary" onClick={showFinal}><Bi ru="Показать итоги" tj="Натиҷаҳоро нишон диҳед" /></button>
+            </p>
+          )}
           {view === 'rules' && <RulesView />}
-          {view === 'host' && <HostSheet />}
+          {view === 'host' && <HostSheet pack={pack} />}
+          {view === 'history' && <HistoryView />}
         </main>
 
         <section className="teams" aria-label="Команды">
           <div className="teams-head">
             <h2><Bi ru="Команды" tj="Дастаҳо" /> <span className="code-chip">{code}</span></h2>
             <div className="ctl">
+              <button className="btn" onClick={undo} disabled={!canUndo}><Bi ru="↶ Отменить" tj="↶ Бекор кардан" /></button>
+              <button className="btn" onClick={showFinal} disabled={!teams.length}><Bi ru="Итоги" tj="Натиҷаҳо" /></button>
               {confirmReset ? (
                 <>
                   <span><Bi ru="Сбросить очки и табло?" tj="Холҳо ва ҷадвалро барқарор мекунед?" /></span>
@@ -277,7 +444,7 @@ const HostBoard: React.FC<{ session: GameSession }> = ({ session }) => {
           {teams.length === 0 ? (
             <p className="queue-empty"><Bi ru="Пока ни одна команда не зашла. Нажмите «Ссылка для команд» и покажите её классу." tj="Ҳоло ягон даста надаромадааст. «Истинод барои дастаҳо»-ро пахш карда, ба синф нишон диҳед." /></p>
           ) : (
-            <TeamGrid teams={teams} scores={board.scores} editable={{ onRename: rename, onAdjust: adjust, onRemove: removeTeam }} />
+            <TeamGrid teams={teams} scores={board.scores} chooser={board.chooser} pins={pins} editable={{ onRename: rename, onAdjust: adjust, onRemove: removeTeam, onChooser: setChooser }} />
           )}
         </section>
       </div>
@@ -286,27 +453,59 @@ const HostBoard: React.FC<{ session: GameSession }> = ({ session }) => {
         <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) closeQ(false); }}>
           <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabIndex={-1}>
             <QuestionBody board={board} />
-            <div className="tools">
-              <TimerView left={left} />
-              {board.timer.running
-                ? <button className="btn" onClick={pauseTimer}><Bi ru="Пауза" tj="Таваққуф" /></button>
-                : <button className="btn primary" onClick={startTimer} disabled={left <= 0}>
-                    {left === QUESTION_SECONDS ? <Bi ru={`Старт · приём ответов (${QUESTION_SECONDS} с)`} tj={`Оғоз · қабули ҷавоб (${QUESTION_SECONDS} сония)`} /> : <Bi ru="Продолжить" tj="Давом додан" />}
-                  </button>}
-              <button className="btn" onClick={resetTimer}><Bi ru="Сбросить" tj="Аз нав" /></button>
-              <label className="pts"><Bi ru="Баллы" tj="Холҳо" />
-                <input type="number" step={100} value={q.pts} onChange={(e) => { const n = parseInt(e.target.value, 10); patchQ({ pts: isNaN(n) || n < 0 ? 0 : n }); }} />
-              </label>
-              {!q.shown && <button className="btn primary" onClick={() => patchQ({ shown: true })}><Bi ru="Показать ответ" tj="Ҷавобро нишон диҳед" /></button>}
-            </div>
-            {board.timer.running && <p className="armed" role="status"><Bi ru="Приём ответов открыт: команды видят кнопку «Ответить»" tj="Қабули ҷавоб кушода аст: дастаҳо тугмаи «Ҷавоб додан»-ро мебинанд" /></p>}
+            {(q.mode === 'buzz' || q.mode === 'answer') && (
+              <div className="tools">
+                <TimerView left={left} />
+                {board.timer.running
+                  ? <button className="btn" onClick={pauseTimer}><Bi ru="Пауза" tj="Таваққуф" /></button>
+                  : <button className="btn primary" onClick={startTimer} disabled={left <= 0}>
+                      {left === board.secs ? <Bi ru={q.mode === 'buzz' ? 'Старт · приём ответов' : 'Старт'} tj={q.mode === 'buzz' ? 'Оғоз · қабули ҷавоб' : 'Оғоз'} /> : <Bi ru="Продолжить" tj="Давом додан" />}
+                    </button>}
+                <button className="btn" onClick={resetTimer}><Bi ru="Сбросить" tj="Аз нав" /></button>
+                <span className="seg secs" role="group" aria-label="Время на вопрос">
+                  {TIMER_CHOICES.map((s) => <button key={s} aria-pressed={board.secs === s} onClick={() => setSecs(s)} disabled={board.timer.running}>{s} с</button>)}
+                </span>
+                <label className="pts"><Bi ru="Баллы" tj="Холҳо" />
+                  <input type="number" step={100} value={q.pts} onChange={(e) => { const n = parseInt(e.target.value, 10); patchQ({ pts: isNaN(n) || n < 0 ? 0 : n }); }} />
+                </label>
+                {!q.shown && <button className="btn primary" onClick={reveal}><Bi ru="Показать ответ" tj="Ҷавобро нишон диҳед" /></button>}
+              </div>
+            )}
+            {q.mode !== 'buzz' && <ModeStatus board={board} teams={teams} bidders={input.bidders} />}
+            {q.mode === 'cat' && (
+              <div className="host-pick">
+                {!q.chooser && <><span className="lab"><Bi ru="Кто выбрал этот вопрос?" tj="Ин саволро кӣ интихоб кард?" /></span>
+                  <div className="chips-btn">{sortedTeams.map((t) => <button className="btn" key={t.n} onClick={() => catChooser(t.n)}>{t.name}</button>)}</div></>}
+                <span className="lab"><Bi ru="Или сразу передать команде (если у неё нет телефона):" tj="Ё фавран ба даста диҳед (агар телефон надошта бошад):" /></span>
+                <div className="chips-btn">{sortedTeams.filter((t) => t.n !== q.chooser).map((t) => <button className="btn" key={t.n} onClick={() => catGive(t.n)}>{t.name}</button>)}</div>
+              </div>
+            )}
+            {q.mode === 'bids' && (
+              <div className="host-pick">
+                <div className="chips-btn">
+                  {sortedTeams.map((t) => <span key={t.n} className={`bid-chip${(input.bidders ?? []).includes(t.n) ? ' done' : ''}`}>{t.name}{(input.bidders ?? []).includes(t.n) ? ' ✓' : ''}</span>)}
+                </div>
+                <button className="btn primary" onClick={closeBids}><Bi ru="Подвести ставки" tj="Ҷамъбасти нархҳо" /></button>
+              </div>
+            )}
+            {q.mode === 'answer' && !q.answerer && (
+              <div className="host-pick">
+                <span className="lab"><Bi ru="Кто отвечает?" tj="Кӣ ҷавоб медиҳад?" /></span>
+                <div className="chips-btn">{sortedTeams.map((t) => <button className="btn" key={t.n} onClick={() => auctionGive(t.n)}>{t.name}</button>)}</div>
+              </div>
+            )}
+            {q.mode === 'buzz' && board.timer.running && <p className="armed" role="status"><Bi ru="Приём ответов открыт: команды видят кнопку «Ответить»" tj="Қабули ҷавоб кушода аст: дастаҳо тугмаи «Ҷавоб додан»-ро мебинанд" /></p>}
+            {q.mode === 'buzz' && (input.fs ?? []).length > 0 && (
+              <p className="fs-note"><Bi ru={<>Фальстарт: {(input.fs ?? []).map((n) => teamName(teams, n)).join(', ')}</>} tj={<>Пеш аз вақт: {(input.fs ?? []).map((n) => teamName(teams, n)).join(', ')}</>} /></p>
+            )}
             {firstName && <p className="buzz" role="status"><Bi ru={<>Первой отвечает: <b>{firstName}</b></>} tj={<>Аввал ҷавоб медиҳад: <b>{firstName}</b></>} /></p>}
-            <BuzzQueue board={board} teams={teams} buzz={buzz} />
+            {q.mode === 'buzz' && <BuzzQueue board={board} teams={teams} buzz={buzz} />}
             <div className="judge">
-              {sortedTeams.map((t) => {
+              {sortedTeams.filter((t) => !q.only || q.only.includes(t.n)).map((t) => {
                 const w = q.wrong.includes(t.n);
+                const hot = q.mode === 'answer' ? q.answerer === t.n : first === t.n;
                 return (
-                  <div className={`judge-row${w ? ' done' : ''}${first === t.n ? ' first' : ''}`} key={t.n}>
+                  <div className={`judge-row${w ? ' done' : ''}${hot ? ' first' : ''}`} key={t.n}>
                     <div className="jn"><kbd>{t.n}</kbd><span className="nm">{t.name}</span></div>
                     <div className="jb">
                       <button className="ok" disabled={w} onClick={() => judge(t.n, true)}>✓ +{q.pts}</button>
@@ -318,6 +517,7 @@ const HostBoard: React.FC<{ session: GameSession }> = ({ session }) => {
             </div>
             <div className="dlg-foot">
               <button className="btn" onClick={() => closeQ(false)}><Bi ru="Вернуть на табло" tj="Ба ҷадвал баргардонед" /></button>
+              {canUndo && <button className="btn" onClick={undo}><Bi ru="↶ Отменить" tj="↶ Бекор кардан" /></button>}
               <button className="btn primary" onClick={() => closeQ(true)}>
                 {q.shown ? <Bi ru="Закрыть вопрос" tj="Саволро пӯшед" /> : <Bi ru="Никто не ответил, закрыть" tj="Касе ҷавоб надод, пӯшед" />}
               </button>
@@ -326,8 +526,164 @@ const HostBoard: React.FC<{ session: GameSession }> = ({ session }) => {
         </div>
       )}
 
+      {board.final && !q && (
+        <div className="scrim">
+          <div className="dlg">
+            <Podium board={board} teams={teams} />
+            {ties.length > 0 && !tiePanel && (
+              <div className="host-pick">
+                <span className="lab"><Bi ru="Одинаковые очки — можно задать дополнительный вопрос из банка сайта:" tj="Холҳо баробаранд — аз бонки саволҳои сайт саволи иловагӣ додан мумкин:" /></span>
+                <div className="chips-btn">
+                  {ties.map((g) => (
+                    <button className="btn primary" key={g.join('-')} onClick={() => setTiePanel(g)}>
+                      {g.map((n) => teamName(teams, n)).join(' — ')} ({signed(board.scores[g[0]] ?? 0)})
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {tiePanel && <TieBreak teams={teams} only={tiePanel} onAsk={askExtra} onCancel={() => setTiePanel(null)} />}
+            <div className="dlg-foot">
+              <button className="btn" onClick={() => commit((b) => ({ ...b, final: false }))}><Bi ru="Вернуться к табло" tj="Ба ҷадвал баргаштан" /></button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {board.showLink && <LinkOverlay code={code} teams={teams} onClose={() => commit((b) => ({ ...b, showLink: false }))} />}
     </GameShell>
+  );
+};
+
+/** Группы команд с одинаковыми очками (от лидеров вниз) */
+function tieGroups(teams: GameTeam[], scores: Record<string, number>): number[][] {
+  const by = new Map<number, number[]>();
+  teams.forEach((t) => { const s = scores[t.n] ?? 0; by.set(s, [...(by.get(s) || []), t.n]); });
+  return [...by.entries()].filter(([, ns]) => ns.length > 1).sort((a, b) => b[0] - a[0]).map(([, ns]) => ns.sort((a, b) => a - b));
+}
+
+interface BankQuestion {
+  id: string; type: 'test' | 'open' | 'matching'; content: string; content_ru: string | null; content_tg: string | null;
+  image_url: string | null; correct_numeric_answer: string | number | null;
+  options: { text: string; text_ru: string | null; text_tg: string | null; is_correct: boolean | null; order_index: number }[];
+}
+
+/** Доп. вопрос из банка сайта: предмет → случайный вопрос (тест или открытый) → задать */
+const TieBreak: React.FC<{ teams: GameTeam[]; only: number[]; onAsk: (only: number[], text: GameQ['text'], ans: { a: string; at: string }) => void; onCancel: () => void }> = ({ teams, only, onAsk, onCancel }) => {
+  const [subjects, setSubjects] = useState<{ id: string; name: string }[]>([]);
+  const [subject, setSubject] = useState('');
+  const [chapters, setChapters] = useState<{ id: string; name: string }[]>([]);
+  const [chapter, setChapter] = useState('');
+  const [pool, setPool] = useState<BankQuestion[]>([]);
+  const [cur, setCur] = useState<BankQuestion | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    supabase.from('subjects').select('id,name').eq('is_deleted', false).order('name').then(({ data }) => setSubjects(data || []));
+  }, []);
+  useEffect(() => {
+    setChapters([]); setChapter(''); setPool([]); setCur(null);
+    if (!subject) return;
+    supabase.from('chapters').select('id,name').eq('subject_id', subject).eq('is_deleted', false).order('order_index').then(({ data }) => setChapters(data || []));
+  }, [subject]);
+
+  const load = async () => {
+    setLoading(true); setErr('');
+    let query = supabase.from('questions')
+      .select('id,type,content,content_ru,content_tg,image_url,correct_numeric_answer,options:question_options(text,text_ru,text_tg,is_correct,order_index)')
+      .eq('subject_id', subject).eq('is_deleted', false).in('type', ['test', 'open']).limit(300);
+    if (chapter) query = query.eq('chapter_id', chapter);
+    const { data, error } = await query;
+    setLoading(false);
+    if (error) { setErr(error.message); return; }
+    const list = ((data || []) as unknown as BankQuestion[]).filter((x) =>
+      x.type === 'open' ? x.correct_numeric_answer != null && String(x.correct_numeric_answer) !== '' : x.options?.some((o) => o.is_correct));
+    if (!list.length) { setErr('В этом разделе нет подходящих вопросов (тест с верным ответом или открытый с числовым ответом).'); return; }
+    setPool(list);
+    setCur(list[Math.floor(Math.random() * list.length)]);
+  };
+  const another = () => { if (pool.length) setCur(pool[Math.floor(Math.random() * pool.length)]); };
+
+  const toGame = (x: BankQuestion) => {
+    const opts = [...(x.options || [])].sort((a, b) => a.order_index - b.order_index);
+    const text: GameQ['text'] = {
+      bank: true,
+      q: x.content_ru || x.content,
+      qt: x.content_tg || '',
+      image: x.image_url,
+      options: x.type === 'test' ? opts.map((o) => ({ ru: o.text_ru || o.text, tj: o.text_tg || '' })) : undefined,
+    };
+    let a = ''; let at = '';
+    if (x.type === 'test') {
+      const i = opts.findIndex((o) => o.is_correct);
+      const o = opts[i];
+      a = `${String.fromCharCode(65 + i)}) ${o.text_ru || o.text}`;
+      at = o.text_tg ? `${String.fromCharCode(65 + i)}) ${o.text_tg}` : '';
+    } else {
+      a = String(x.correct_numeric_answer);
+    }
+    return { text, ans: { a, at } };
+  };
+
+  const g = cur ? toGame(cur) : null;
+  return (
+    <div className="tiebreak">
+      <p className="lab"><Bi ru={<>Дополнительный вопрос для: <b>{only.map((n) => teamName(teams, n)).join(', ')}</b></>} tj={<>Саволи иловагӣ барои: <b>{only.map((n) => teamName(teams, n)).join(', ')}</b></>} /></p>
+      <div className="tb-row">
+        <select value={subject} onChange={(e) => setSubject(e.target.value)}>
+          <option value="">— предмет —</option>
+          {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <select value={chapter} onChange={(e) => setChapter(e.target.value)} disabled={!chapters.length}>
+          <option value="">все разделы</option>
+          {chapters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <button className="btn" onClick={load} disabled={!subject || loading}>{loading ? '…' : 'Взять вопрос'}</button>
+      </div>
+      {err && <p className="gate-err">{err}</p>}
+      {cur && g && (
+        <div className="tb-preview">
+          <p className="tb-q"><FormattedText text={g.text.q} /></p>
+          {g.text.qt && <p className="tb-q t"><FormattedText text={g.text.qt} /></p>}
+          {g.text.options && <ol className="q-opts small">{g.text.options.map((o, i) => <li key={i}><span className="q-opt-l">{String.fromCharCode(65 + i)}</span><FormattedText text={o.ru} /></li>)}</ol>}
+          <p className="tb-a"><b>Ответ:</b> <FormattedText text={g.ans.a} /></p>
+          <div className="chips-btn">
+            <button className="btn primary" onClick={() => onAsk(only, g.text, g.ans)}>Задать этот вопрос</button>
+            <button className="btn" onClick={another}>Другой вопрос</button>
+          </div>
+        </div>
+      )}
+      <div className="chips-btn"><button className="btn" onClick={onCancel}>Отмена</button></div>
+    </div>
+  );
+};
+
+interface ResultRow { id: string; code: string; title: string | null; round: string; finished_at: string; teams: { name: string; score: number; place: number }[] }
+
+const HistoryView: React.FC = () => {
+  const [rows, setRows] = useState<ResultRow[] | null>(null);
+  useEffect(() => {
+    supabase.from('game_results').select('id,code,title,round,finished_at,teams').order('finished_at', { ascending: false }).limit(100)
+      .then(({ data }) => setRows((data || []) as ResultRow[]));
+  }, []);
+  if (!rows) return <p>Загрузка…</p>;
+  if (!rows.length) return <p className="queue-empty"><Bi ru="Пока нет сохранённых игр. Итоги сохраняются по кнопке «Итоги»." tj="Ҳоло бозиҳои сабтшуда нест. Натиҷаҳо бо тугмаи «Натиҷаҳо» сабт мешаванд." /></p>;
+  return (
+    <div className="history">
+      {rows.map((r) => (
+        <article className="hist" key={r.id}>
+          <header>
+            <b>{new Date(r.finished_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</b>
+            <span>{r.title || r.round}</span>
+            <span className="code-chip">{r.code}</span>
+          </header>
+          <ol>
+            {r.teams.map((t, i) => <li key={i}><b>{t.place}.</b> {t.name} — {signed(t.score)}</li>)}
+          </ol>
+        </article>
+      ))}
+    </div>
   );
 };
 
@@ -350,13 +706,13 @@ const RulesView: React.FC = () => {
   return <div className="rules">{col('ru')}{col('tj')}</div>;
 };
 
-const HostSheet: React.FC = () => {
+const HostSheet: React.FC<{ pack: GameRound[] }> = ({ pack }) => {
   const lang = useLang();
   const blk = (ru: React.ReactNode, tj: React.ReactNode) => lang === 'ru' ? <span>{ru}</span> : lang === 'tj' ? <span>{tj}</span> : <><span>{ru}</span><span className="t" lang="tg">{tj}</span></>;
   return (
     <div className="host">
       <p className="host-note"><Bi ru="Этот раздел для ведущего: здесь все вопросы с ответами. Не выводите его на экран для класса." tj="Ин бахш барои пешбар аст: дар ин ҷо ҳамаи саволҳо бо ҷавобҳо ҳастанд. Онро барои синф ба экран набароред." /></p>
-      {ROUNDS.map((r) => (
+      {pack.map((r) => (
         <section key={r.id}>
           <h2><Bi ru={r.tab} tj={r.tabt} /></h2>
           <p className="eyebrow"><Bi ru={r.sub} tj={r.subt} /></p>
@@ -384,4 +740,3 @@ const HostSheet: React.FC = () => {
     </div>
   );
 };
-
