@@ -321,7 +321,7 @@ export const Podium: React.FC<{ board: GameBoard; teams: GameTeam[] }> = ({ boar
 };
 
 /** Слайд мини-презентации на весь экран. С controls — для ведущего (листает), без — для проектора. */
-export const IntroOverlay: React.FC<{ index: number; controls?: { onPrev: () => void; onNext: () => void; onSkip: () => void } }> = ({ index, controls }) => {
+export const IntroOverlay: React.FC<{ index: number; controls?: { onPrev: () => void; onNext: () => void; onSkip: () => void; projectorHref?: string } }> = ({ index, controls }) => {
   const s = INTRO_SLIDES[Math.min(index, INTRO_SLIDES.length - 1)];
   const last = index >= INTRO_SLIDES.length - 1;
   return (
@@ -336,6 +336,7 @@ export const IntroOverlay: React.FC<{ index: number; controls?: { onPrev: () => 
         <div className="lobby-actions">
           <button className="btn" onClick={controls.onPrev} disabled={index <= 0}>← <Bi ru="Назад" tj="Ба қафо" /></button>
           <button className="btn primary lobby-start" onClick={controls.onNext}>{last ? <Bi ru="Показать QR-код →" tj="Нишон додани QR →" /> : <Bi ru="Дальше →" tj="Минбаъд →" />}</button>
+          {controls.projectorHref && <a className="btn primary" href={controls.projectorHref} target="_blank" rel="noreferrer">📽 <Bi ru="Показать на проекторе" tj="Дар проектор нишон диҳед" /></a>}
           <button className="btn" onClick={controls.onSkip}><Bi ru="Пропустить презентацию" tj="Гузаштан аз муаррифӣ" /></button>
         </div>
       )}

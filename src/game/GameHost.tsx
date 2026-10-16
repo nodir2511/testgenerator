@@ -578,6 +578,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
             onPrev: () => commit((b) => ({ ...b, intro: Math.max(0, (b.intro ?? 0) - 1) })),
             onNext: () => commit((b) => ({ ...b, intro: (b.intro ?? 0) + 1 >= INTRO_SLIDES.length ? null : (b.intro ?? 0) + 1 })),
             onSkip: () => commit((b) => ({ ...b, intro: null })),
+            projectorHref: screenUrl(code),
           }}
         />
       )}
