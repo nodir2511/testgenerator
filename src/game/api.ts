@@ -31,6 +31,8 @@ export interface GameQ {
   extra?: boolean;
 }
 export interface GameTimer { running: boolean; left: number; endsAt: number | null; startedAt?: number | null }
+/** Итог сыгранного вопроса для разбора после игры (ответов здесь нет) */
+export interface LogEntry { r: string; ci: number; qi: number; v: number; res: 'ok' | 'none'; n?: number; wrong: number[] }
 export interface GameBoard {
   round: string;
   lang: Lang;
@@ -44,6 +46,7 @@ export interface GameBoard {
   secs: number;
   showLink: boolean;
   final: boolean;
+  log: LogEntry[];
 }
 export interface GameInput { cat?: number; bidders?: number[]; fs?: number[] }
 export interface GameSession {
@@ -74,6 +77,7 @@ export function freshBoard(keep?: Partial<GameBoard>): GameBoard {
     secs: keep?.secs ?? QUESTION_SECONDS,
     showLink: false,
     final: false,
+    log: [],
   };
 }
 
@@ -87,7 +91,7 @@ function normalize(row: any): GameSession {
     teams: Array.isArray(row.teams) ? row.teams : [],
     buzz: Array.isArray(row.buzz) ? row.buzz : [],
     input: row.input && typeof row.input === 'object' ? row.input : {},
-    board: { ...base, ...b, q: b.q && b.q.text ? b.q : null, layout: Array.isArray(b.layout) ? b.layout : [], used: { ...base.used, ...(b.used || {}) }, timer: { ...base.timer, ...(b.timer || {}) } },
+    board: { ...base, ...b, q: b.q && b.q.text ? b.q : null, log: Array.isArray(b.log) ? b.log : [], layout: Array.isArray(b.layout) ? b.layout : [], used: { ...base.used, ...(b.used || {}) }, timer: { ...base.timer, ...(b.timer || {}) } },
   };
 }
 
@@ -117,13 +121,27 @@ export function useServerClock(): () => number {
 export function useGameSession(code: string | null) {
   const [session, setSession] = useState<GameSession | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
+  const [connected, setConnected] = useState(true);
 
   const refetch = useCallback(async () => {
     if (!code) return;
-    const { data } = await supabase.from('game_sessions').select('*').eq('code', code).maybeSingle();
-    if (data) { setSession(normalize(data)); setState('ready'); }
-    else setState((s) => (s === 'ready' ? s : 'missing'));
+    try {
+      const { data, error } = await supabase.from('game_sessions').select('*').eq('code', code).maybeSingle();
+      if (error) { setConnected(false); return; }
+      setConnected(true);
+      if (data) { setSession(normalize(data)); setState('ready'); }
+      else setState((s) => (s === 'ready' ? s : 'missing'));
+    } catch { setConnected(false); }
   }, [code]);
+
+  // браузер сообщил о потере/возврате сети — проверяем сразу
+  useEffect(() => {
+    const off = () => setConnected(false);
+    const on = () => { refetch(); };
+    window.addEventListener('offline', off);
+    window.addEventListener('online', on);
+    return () => { window.removeEventListener('offline', off); window.removeEventListener('online', on); };
+  }, [refetch]);
 
   useEffect(() => {
     if (!code) return;
@@ -141,7 +159,7 @@ export function useGameSession(code: string | null) {
     return () => { clearInterval(poll); supabase.removeChannel(ch); };
   }, [code, refetch]);
 
-  return { session, state, refetch };
+  return { session, state, refetch, connected };
 }
 
 /** Секунд до конца таймера (по серверным часам), обновляется 4 раза в секунду. */
@@ -192,4 +210,59 @@ export function beep(freq = 880, ms = 220) {
     o.type = 'square'; o.frequency.value = freq; g.gain.value = 0.15;
     o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime + ms / 1000);
   } catch { /* ignore */ }
+}
+
+/** Не даёт экрану погаснуть, пока открыта страница игры (Wake Lock; где не поддерживается — просто ничего не делает) */
+export function useWakeLock() {
+  useEffect(() => {
+    let lock: { release: () => Promise<void> } | null = null;
+    let dead = false;
+    const take = async () => {
+      try {
+        const wl = (navigator as any).wakeLock;
+        if (!wl || document.visibilityState !== 'visible' || lock) return;
+        lock = await wl.request('screen');
+        if (dead) { lock?.release(); lock = null; return; }
+        (lock as any).addEventListener?.('release', () => { lock = null; });
+      } catch { /* ignore */ }
+    };
+    take();
+    const onVis = () => { if (document.visibilityState === 'visible') take(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { dead = true; document.removeEventListener('visibilitychange', onVis); lock?.release().catch(() => undefined); };
+  }, []);
+}
+
+/** Цвета команд: один и тот же на телефоне, проекторе, в очереди и на пьедестале */
+export const TEAM_COLORS = ['#E5484D', '#2F9E44', '#3B82F6', '#F59F00', '#9C36B5', '#0CA8A8'];
+export const teamColor = (n: number) => TEAM_COLORS[(Math.max(1, n) - 1) % TEAM_COLORS.length];
+
+// --- звуки проектора ---
+type Tone = { f: number; d: number; at?: number; type?: OscillatorType; v?: number };
+function playTones(tones: Tone[]) {
+  try {
+    unlockAudio();
+    if (!audio) return;
+    const t0 = audio.currentTime;
+    tones.forEach((t) => {
+      const o = audio!.createOscillator();
+      const g = audio!.createGain();
+      const start = t0 + (t.at ?? 0);
+      o.type = t.type ?? 'sine';
+      o.frequency.value = t.f;
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.exponentialRampToValueAtTime(t.v ?? 0.2, start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + t.d);
+      o.connect(g); g.connect(audio!.destination);
+      o.start(start); o.stop(start + t.d + 0.05);
+    });
+  } catch { /* ignore */ }
+}
+export type SoundKind = 'open' | 'tick' | 'gong' | 'fanfare' | 'buzz';
+export function playSound(kind: SoundKind) {
+  if (kind === 'open') playTones([{ f: 523, d: 0.25, type: 'triangle' }, { f: 659, d: 0.25, at: 0.15, type: 'triangle' }, { f: 784, d: 0.5, at: 0.3, type: 'triangle' }]);
+  else if (kind === 'tick') playTones([{ f: 1500, d: 0.06, type: 'square', v: 0.08 }]);
+  else if (kind === 'gong') playTones([{ f: 196, d: 1.8, v: 0.3 }, { f: 294, d: 1.4, v: 0.15 }, { f: 98, d: 2, v: 0.2 }]);
+  else if (kind === 'buzz') playTones([{ f: 880, d: 0.18, type: 'square', v: 0.12 }]);
+  else playTones([523, 659, 784, 1047].map((f, i) => ({ f, d: 0.35, at: i * 0.18, type: 'triangle' as OscillatorType })).concat([{ f: 1047, d: 1.2, at: 0.8, type: 'triangle' }, { f: 784, d: 1.2, at: 0.8, type: 'triangle' }, { f: 659, d: 1.2, at: 0.8, type: 'triangle' }]));
 }

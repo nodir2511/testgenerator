@@ -4,7 +4,7 @@ import './game.css';
 import { FormattedText } from '../components/FormulaEditor';
 import { SPECIAL } from './content';
 import {
-  GameBoard, GameBuzz, GameTeam, LayoutRound, Lang, formatTime, playUrl, queueOf, signed, standings,
+  GameBoard, GameBuzz, GameTeam, LayoutRound, Lang, formatTime, playUrl, queueOf, signed, standings, teamColor,
 } from './api';
 
 const LangCtx = createContext<Lang>('both');
@@ -58,6 +58,8 @@ export const Bi: React.FC<{ ru: React.ReactNode; tj: React.ReactNode }> = ({ ru,
     </span>
   );
 };
+
+export const tc = (n: number) => ({ '--tc': teamColor(n) } as React.CSSProperties);
 
 export const teamName = (teams: GameTeam[], n: number | null | undefined) =>
   n == null ? '' : teams.find((t) => t.n === n)?.name ?? `№${n}`;
@@ -131,7 +133,7 @@ export const TeamGrid: React.FC<{
       {sorted.map((t) => {
         const lead = max > 0 && sc(t.n) === max && leaders === 1;
         return (
-          <div className={`team${lead ? ' lead' : ''}${chooser === t.n ? ' choosing' : ''}`} key={t.n}>
+          <div className={`team${lead ? ' lead' : ''}${chooser === t.n ? ' choosing' : ''}`} key={t.n} style={tc(t.n)}>
             <div className="team-tags">
               {lead && <span className="lead-tag">{lang === 'both' ? 'Лидирует · Пешсаф' : pick(lang, 'Лидирует', 'Пешсаф')}</span>}
               {chooser === t.n && <span className="choose-tag">{lang === 'both' ? 'Выбирает · Интихоб мекунад' : pick(lang, 'Выбирает', 'Интихоб мекунад')}</span>}
@@ -179,7 +181,7 @@ export const BuzzQueue: React.FC<{ board: GameBoard; teams: GameTeam[]; buzz: Ga
   return (
     <ol className="queue">
       {queue.map((b, i) => (
-        <li key={b.n} className={i === 0 ? 'first' : ''}>
+        <li key={b.n} className={i === 0 ? 'first' : ''} style={tc(b.n)}>
           <span className="qpos">{i + 1}</span>
           <span className="qname">{teamName(teams, b.n)}</span>
           <span className="qdelta">{i === 0 ? '' : `+${((b.t - queue[0].t) / 1000).toFixed(2)} с`}</span>
@@ -219,7 +221,7 @@ export const ModeStatus: React.FC<{ board: GameBoard; teams: GameTeam[]; bidders
           : <Bi ru="Никто не сделал ставку — отвечающего выбирает ведущий" tj="Касе нарх нагузошт — ҷавобдиҳандаро пешбар интихоб мекунад" />}
         {q.bids && q.bids.length > 0 && (
           <div className="bids">
-            {q.bids.map((b) => <span key={b.n}>{teamName(teams, b.n)}: <b>{b.amount}</b></span>)}
+            {q.bids.map((b) => <span key={b.n} style={tc(b.n)}>{teamName(teams, b.n)}: <b>{b.amount}</b></span>)}
           </div>
         )}
       </div>
@@ -302,7 +304,7 @@ export const Podium: React.FC<{ board: GameBoard; teams: GameTeam[] }> = ({ boar
           return (
             <div className={`pod pod-${place}`} key={place}>
               <div className="pod-names">
-                {group.length ? group.map((t) => <div key={t.n} className="pod-name">{t.name}<span className="pod-score">{signed(t.score)}</span></div>) : <div className="pod-name pod-empty">—</div>}
+                {group.length ? group.map((t) => <div key={t.n} className="pod-name" style={tc(t.n)}><span className="pod-nm">{t.name}</span><span className="pod-score">{signed(t.score)}</span></div>) : <div className="pod-name pod-empty">—</div>}
               </div>
               <div className="pod-step"><span>{place}</span></div>
             </div>
@@ -311,7 +313,7 @@ export const Podium: React.FC<{ board: GameBoard; teams: GameTeam[] }> = ({ boar
       </div>
       {rest.length > 0 && (
         <ol className="pod-rest">
-          {rest.map((t) => <li key={t.n}><b>{t.place}.</b> {t.name} — {signed(t.score)}</li>)}
+          {rest.map((t) => <li key={t.n} style={tc(t.n)}><b>{t.place}.</b> {t.name} — {signed(t.score)}</li>)}
         </ol>
       )}
     </div>
@@ -339,7 +341,7 @@ export const LinkOverlay: React.FC<{ code: string; teams: GameTeam[]; onClose?: 
             <Bi ru={`Зашли команд: ${teams.length} из 6`} tj={`Дастаҳои ворид шуда: ${teams.length} аз 6`} />
           </p>
           <div className="chips">
-            {[...teams].sort((a, b) => a.n - b.n).map((t) => <span key={t.n}>{t.name}</span>)}
+            {[...teams].sort((a, b) => a.n - b.n).map((t) => <span key={t.n} style={tc(t.n)}>{t.name}</span>)}
           </div>
         </div>
       </div>

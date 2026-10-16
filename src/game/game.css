@@ -366,3 +366,31 @@
   .gm .dlg-foot{position:sticky;bottom:-16px;background:var(--surface);padding:10px 0}
   .gm .podium .pod-name{font-size:.95rem}
 }
+
+/* --- версия 0.6: цвета команд, связь --- */
+.gm .team{border-top:5px solid var(--tc,var(--line))}
+.gm .queue li{border-left:8px solid var(--tc,var(--line))}
+.gm .judge-row{border-left:6px solid var(--tc,var(--line))}
+.gm .bid-chip{border-left:6px solid var(--tc,var(--line))}
+.gm .pod-name .pod-nm{border-bottom:4px solid var(--tc,transparent);padding-bottom:2px;align-self:center}
+.gm .pod-rest li{border-left:6px solid var(--tc,transparent);padding-left:8px}
+.gm .buzz .bids span{border-left:5px solid var(--tc,transparent)}
+.gm .linkfull .chips span{border-top:5px solid var(--tc,var(--line))}
+.gm .play-head{border-bottom:5px solid var(--tc,transparent);padding-bottom:8px}
+.gm .play-btn.live{box-shadow:0 10px 0 rgba(0,0,0,.25),0 0 0 6px var(--tc,transparent)}
+.gm .offline{position:fixed;top:0;left:0;right:0;z-index:100;background:var(--bad);color:#fff;font-weight:700;text-align:center;padding:10px 16px}
+.gm .offline .b{align-items:center}
+
+/* разбор игры */
+.gm .review{display:flex;flex-direction:column;gap:14px}
+.gm .review-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.gm .review-list{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.gm .review-list li{background:var(--surface);border:1px solid var(--line);border-left:6px solid var(--good);border-radius:12px;padding:12px 14px}
+.gm .review-list li.none{border-left-color:var(--bad)}
+.gm .review-list li.mix{border-left-color:var(--gold)}
+.gm .rv-head{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline}
+.gm .rv-v{font-family:var(--f-display);color:var(--accent)}
+.gm .rv-res{margin-left:auto;color:var(--muted);font-weight:600}
+.gm .rv-q{margin:6px 0 4px;font-weight:600}
+.gm .rv-a{margin:0;color:var(--good)}
+.gm .hist .btn{align-self:flex-start}

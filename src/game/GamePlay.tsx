@@ -2,9 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { TEAM_RULES } from './content';
 import {
-  FALSE_START_MS, QUESTION_SECONDS, beep, queueOf, signed, standings, unlockAudio, useGameSession, useServerClock, useTimerLeft,
+  FALSE_START_MS, QUESTION_SECONDS, beep, queueOf, signed, standings, unlockAudio, useGameSession, useServerClock, useTimerLeft, useWakeLock,
 } from './api';
-import { Bi, GameShell, TimerView, teamName } from './ui';
+import { Bi, GameShell, TimerView, tc, teamName } from './ui';
 
 interface Me { n: number; secret: string; name: string; pin?: string }
 const storeKey = (code: string) => `game_team_${code}`;
@@ -24,8 +24,9 @@ const buzzSignal = () => {
 
 /** Страница команды: вход по ссылке, таймер и большая кнопка «Ответить». Адрес: /play/КОД */
 const PlayGame: React.FC<{ code: string }> = ({ code }) => {
-  const { session, state, refetch } = useGameSession(code);
+  const { session, state, refetch, connected } = useGameSession(code);
   const now = useServerClock();
+  useWakeLock();
   const [me, setMe] = useState<Me | null>(() => readMe(code));
   const [kicked, setKicked] = useState(false);
   const [tab, setTab] = useState<'new' | 'back'>('new');
@@ -176,7 +177,7 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
   const wrong = !!q && q.wrong.includes(me.n);
   const notMine = !!q && !!q.only && !q.only.includes(me.n);
   const buzzMode = !!q && q.mode === 'buzz' && !notMine && !wrong;
-  const live = buzzMode && running && lockLeft <= 0;
+  const live = buzzMode && running && lockLeft <= 0 && connected;
   const early = buzzMode && !board.timer.running && !q?.shown && board.timer.left > 0;
 
   const press = async () => {
@@ -303,7 +304,8 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
 
   return (
     <GameShell lang="both">
-      <div className="play">
+      {!connected && <div className="offline" role="alert"><Bi ru="Нет связи! Проверьте интернет — игра подключится сама" tj="Алоқа нест! Интернетро санҷед — бозӣ худаш пайваст мешавад" /></div>}
+      <div className="play" style={tc(me.n)}>
         <div className="play-head">
           <p className="play-team">{myTeamName}</p>
           <p className="play-score"><Bi ru="Счёт" tj="Хол" />: <b className={myScore < 0 ? 'neg' : ''}>{signed(myScore)}</b></p>

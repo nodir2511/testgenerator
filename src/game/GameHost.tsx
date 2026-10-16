@@ -4,13 +4,14 @@ import { useAuth } from '../hooks/useAuth';
 import { AuthModal } from '../components/AuthModal';
 import { FormattedText } from '../components/FormulaEditor';
 import { GameRound, RULES, SPECIAL } from './content';
+import { buildReview, exportXlsx, resultText, standingsRows, type ReviewRow } from './review';
 import {
   GameBoard, GameQ, GameSession, GameTeam, Lang, LayoutRound, QMode, TIMER_CHOICES, beep, freshBoard, queueOf,
   screenUrl, signed, standings, useGameSession, useServerClock, useTimerLeft,
 } from './api';
 import {
   Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView,
-  fmt, layoutRound, pick, teamName, useLang,
+  fmt, layoutRound, pick, tc, teamName, useLang,
 } from './ui';
 
 type View = string; // id уровня, 'rules', 'host' или 'history'
@@ -242,12 +243,16 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
     }
   }, [teamKey]);
 
-  const closedBoard = (b: GameBoard, markUsed: boolean): GameBoard => {
+  const closedBoard = (b: GameBoard, markUsed: boolean, winner?: number): GameBoard => {
     const q = b.q;
     const used = { ...b.used };
-    if (q && markUsed && !q.extra) used[q.r] = { ...(used[q.r] || {}), [q.ci + '-' + q.qi]: true };
+    let log = b.log;
+    if (q && markUsed && !q.extra) {
+      used[q.r] = { ...(used[q.r] || {}), [q.ci + '-' + q.qi]: true };
+      log = [...b.log, { r: q.r, ci: q.ci, qi: q.qi, v: q.v, res: winner != null ? 'ok' : 'none', n: winner, wrong: q.wrong }];
+    }
     const chooser = q && markUsed && !q.extra ? nextChooser(b.chooser) : b.chooser;
-    return { ...b, used, chooser, q: null, timer: stoppedTimer(b), final: q?.extra ? true : b.final };
+    return { ...b, used, log, chooser, q: null, timer: stoppedTimer(b), final: q?.extra ? true : b.final };
   };
   const afterClose = (wasExtra: boolean) => {
     rpc('game_buzz_clear', { p_code: code });
@@ -277,7 +282,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
     const q = boardRef.current.q; if (!q) return;
     if (ok) {
       const wasExtra = !!q.extra;
-      commit((b) => closedBoard({ ...b, scores: { ...b.scores, [n]: (b.scores[n] ?? 0) + q.pts } }, true), true);
+      commit((b) => closedBoard({ ...b, scores: { ...b.scores, [n]: (b.scores[n] ?? 0) + q.pts } }, true, n), true);
       afterClose(wasExtra);
     } else {
       commit((b) => ({
@@ -315,10 +320,10 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
     const b = boardRef.current;
     const rows = standings(teams, b.scores).map((t) => ({ name: t.name, score: t.score, place: t.place }));
     if (!rows.length) return;
-    await supabase.from('game_results').upsert(
-      { code, session_started: session.created_at, round: b.round, title: layoutRound(b)?.tab ?? b.round, teams: rows, finished_at: new Date().toISOString() },
-      { onConflict: 'code,session_started,round' },
-    );
+    const row = { code, session_started: session.created_at, round: b.round, title: layoutRound(b)?.tab ?? b.round, teams: rows, finished_at: new Date().toISOString() };
+    const { error } = await supabase.from('game_results').upsert({ ...row, review: buildReview(b, pack, teams) }, { onConflict: 'code,session_started,round' });
+    // если в базе ещё нет колонки review — сохраняем хотя бы результаты
+    if (error) await supabase.from('game_results').upsert(row, { onConflict: 'code,session_started,round' });
   };
   const showFinal = () => { commit((b) => ({ ...b, final: true, showLink: false })); saveResults(); };
 
@@ -387,7 +392,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
           <div>
             <p className="eyebrow">
               {view === 'rules' ? <Bi ru="Как играть" tj="Тарзи бозӣ" /> : view === 'host' ? <Bi ru="Вопросы с ответами" tj="Саволҳо бо ҷавобҳо" /> :
-                view === 'history' ? <Bi ru="Прошлые игры" tj="Бозиҳои гузашта" /> :
+                view === 'history' ? <Bi ru="Прошлые игры" tj="Бозиҳои гузашта" /> : view === 'review' ? <Bi ru="Разбор этой игры" tj="Таҳлили ин бозӣ" /> :
                 curRound && <Bi ru={`${curRound.tab} · ${curRound.sub}`} tj={`${curRound.tabt} · ${curRound.subt}`} />}
             </p>
             <GameTitle />
@@ -399,6 +404,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
               ))}
               <button className="tab" role="tab" aria-selected={view === 'rules'} onClick={() => setView('rules')}><Bi ru="Правила" tj="Қоидаҳо" /></button>
               <button className="tab" role="tab" aria-selected={view === 'host'} onClick={() => setView('host')}><Bi ru="Лист ведущего" tj="Варақаи пешбар" /></button>
+              <button className="tab" role="tab" aria-selected={view === 'review'} onClick={() => setView('review')}><Bi ru="Разбор" tj="Таҳлил" /></button>
               <button className="tab" role="tab" aria-selected={view === 'history'} onClick={() => setView('history')}><Bi ru="История" tj="Таърих" /></button>
             </nav>
             <div className="seg" role="group">
@@ -423,6 +429,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
           )}
           {view === 'rules' && <RulesView />}
           {view === 'host' && <HostSheet pack={pack} />}
+          {view === 'review' && <ReviewView rows={buildReview(board, pack, teams)} onExport={(rows) => exportXlsx('Игра', standingsRows(teams, board.scores), rows, `igra-${code}`)} />}
           {view === 'history' && <HistoryView />}
         </main>
 
@@ -485,7 +492,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
             {q.mode === 'bids' && (
               <div className="host-pick">
                 <div className="chips-btn">
-                  {sortedTeams.map((t) => <span key={t.n} className={`bid-chip${(input.bidders ?? []).includes(t.n) ? ' done' : ''}`}>{t.name}{(input.bidders ?? []).includes(t.n) ? ' ✓' : ''}</span>)}
+                  {sortedTeams.map((t) => <span key={t.n} className={`bid-chip${(input.bidders ?? []).includes(t.n) ? ' done' : ''}`} style={tc(t.n)}>{t.name}{(input.bidders ?? []).includes(t.n) ? ' ✓' : ''}</span>)}
                 </div>
                 <button className="btn primary" onClick={closeBids}><Bi ru="Подвести ставки" tj="Ҷамъбасти нархҳо" /></button>
               </div>
@@ -507,7 +514,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
                 const w = q.wrong.includes(t.n);
                 const hot = q.mode === 'answer' ? q.answerer === t.n : first === t.n;
                 return (
-                  <div className={`judge-row${w ? ' done' : ''}${hot ? ' first' : ''}`} key={t.n}>
+                  <div className={`judge-row${w ? ' done' : ''}${hot ? ' first' : ''}`} key={t.n} style={tc(t.n)}>
                     <div className="jn"><kbd>{t.n}</kbd><span className="nm">{t.name}</span></div>
                     <div className="jb">
                       <button className="ok" disabled={w} onClick={() => judge(t.n, true)}>✓ +{q.pts}</button>
@@ -661,12 +668,39 @@ const TieBreak: React.FC<{ teams: GameTeam[]; only: number[]; onAsk: (only: numb
   );
 };
 
-interface ResultRow { id: string; code: string; title: string | null; round: string; finished_at: string; teams: { name: string; score: number; place: number }[] }
+interface ResultRow { id: string; code: string; title: string | null; round: string; finished_at: string; teams: { name: string; score: number; place: number }[]; review?: ReviewRow[] | null }
+
+const ReviewView: React.FC<{ rows: ReviewRow[]; onExport: (rows: ReviewRow[]) => void }> = ({ rows, onExport }) => {
+  const [f, setF] = useState<'all' | 'none' | 'wrong'>('all');
+  const shown = rows.filter((r) => f === 'all' || (f === 'none' ? r.res === 'none' : r.wrong.length > 0));
+  return (
+    <div className="review">
+      <div className="review-bar">
+        <span className="seg" role="group">
+          <button aria-pressed={f === 'all'} onClick={() => setF('all')}>Все ({rows.length})</button>
+          <button aria-pressed={f === 'none'} onClick={() => setF('none')}>Без ответа ({rows.filter((r) => r.res === 'none').length})</button>
+          <button aria-pressed={f === 'wrong'} onClick={() => setF('wrong')}>Были ошибки ({rows.filter((r) => r.wrong.length > 0).length})</button>
+        </span>
+        <button className="btn primary" disabled={!rows.length} onClick={() => onExport(rows)}>Выгрузить в Excel</button>
+      </div>
+      {!rows.length && <p className="queue-empty"><Bi ru="Пока нет сыгранных вопросов" tj="Ҳоло саволи бозидашуда нест" /></p>}
+      <ol className="review-list">
+        {shown.map((r, i) => (
+          <li key={i} className={r.res === 'ok' && !r.wrong.length ? 'ok' : r.res === 'none' ? 'none' : 'mix'}>
+            <div className="rv-head"><b>{r.cat}</b><span className="rv-v">{r.v}</span><span className="rv-res">{resultText(r)}</span></div>
+            <p className="rv-q">{r.q}</p>
+            <p className="rv-a"><b>Ответ:</b> {r.a}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+};
 
 const HistoryView: React.FC = () => {
   const [rows, setRows] = useState<ResultRow[] | null>(null);
   useEffect(() => {
-    supabase.from('game_results').select('id,code,title,round,finished_at,teams').order('finished_at', { ascending: false }).limit(100)
+    supabase.from('game_results').select('id,code,title,round,finished_at,teams,review').order('finished_at', { ascending: false }).limit(100)
       .then(({ data }) => setRows((data || []) as ResultRow[]));
   }, []);
   if (!rows) return <p>Загрузка…</p>;
@@ -683,6 +717,7 @@ const HistoryView: React.FC = () => {
           <ol>
             {r.teams.map((t, i) => <li key={i}><b>{t.place}.</b> {t.name} — {signed(t.score)}</li>)}
           </ol>
+          <button className="btn" onClick={() => exportXlsx(r.title || r.round, r.teams, r.review ?? [], `igra-${r.code}-${r.finished_at.slice(0, 10)}`)}>Excel</button>
         </article>
       ))}
     </div>
