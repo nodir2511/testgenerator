@@ -426,3 +426,72 @@
 .gm .start-btn.pause:hover{background:var(--gold)}
 .gm .reveal-btn{width:min(100%,560px);padding:14px 20px;font-size:1.2rem}
 .gm .tools{justify-content:center}
+
+/* длинные названия тем не вылезают из заголовка */
+.gm .cat{overflow:hidden;overflow-wrap:anywhere;hyphens:auto}
+.gm .cat.long{font-size:clamp(.72rem,1.05vw,.92rem)}
+.gm .cat.xlong{font-size:clamp(.66rem,.92vw,.8rem)}
+.gm .cat.long .b i,.gm .cat.xlong .b i{font-size:.82em}
+.gm.proj .board{grid-template-rows:minmax(0,1.5fr) repeat(5,minmax(0,1fr))}
+.gm.proj .cat{line-height:1.15}
+.gm.proj .cat.long{font-size:clamp(.85rem,2.1vh,1.5rem)}
+.gm.proj .cat.xlong{font-size:clamp(.78rem,1.8vh,1.3rem)}
+
+/* --- проектор на белую стену: максимум контраста ---
+   Чёрное на стене = «нет света», поэтому фон чёрный, а всё важное яркое и крупное: светло-жёлтые цифры на ярко-синем,
+   белый текст, толстые рамки. Серые и приглушённые цвета убраны — на стене они теряются. */
+.gm.proj{
+  --bg:#000; --surface:#0A0F24; --ink:#fff; --muted:#E3EAF5; --line:#7C8DB5;
+  --accent:#4CD0FF; --accent-ink:#00131F;
+  --tile:#1D44E0; --tile-hover:#1D44E0; --tile-ink:#FFE14D;
+  --tile-used:#161616; --tile-used-ink:#9A9A9A;
+  --gold:#FFC531; --gold-ink:#1F1400; --good:#4DEB92; --bad:#FF7A7A; --scrim:rgba(0,0,0,.9);
+  color-scheme:dark;
+}
+.gm.proj .b i{opacity:1;color:var(--muted)}
+.gm.proj .eyebrow{color:var(--muted);font-weight:700}
+.gm.proj .board-meta{color:#fff;font-weight:600}
+.gm.proj .cat{background:#0A0F24;border:3px solid var(--line);color:#fff;font-weight:800}
+.gm.proj .tile{font-weight:700;border:0;text-shadow:0 2px 0 rgba(0,0,0,.35)}
+.gm.proj .tile.used:disabled{border:2px dashed #555}
+.gm.proj .tile.used:disabled .tile-v{opacity:.7}
+.gm.proj .teams{border:3px solid var(--line);background:#050816}
+.gm.proj .team{border:3px solid var(--line);border-top:10px solid var(--tc,var(--line));background:#0A0F24}
+.gm.proj .team.lead{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold) inset}
+.gm.proj .team .tname{font-weight:800;color:#fff}
+.gm.proj .team .score{color:#fff}
+.gm.proj .team .score.neg{color:var(--bad)}
+.gm.proj .lead-tag,.gm.proj .choose-tag{font-size:clamp(.7rem,1.5vh,1.05rem)}
+.gm.proj .chooser-tag{font-size:clamp(1rem,2.4vh,1.6rem);font-weight:700}
+.gm.proj .chooser-tag b{color:var(--gold)}
+.gm.proj .dlg{background:#000;border:0}
+.gm.proj .dlg-cat{color:#fff;font-weight:700}
+.gm.proj .dlg-val{color:var(--tile-ink)}
+.gm.proj .q-tj{border-left:8px solid var(--accent);color:#fff;font-weight:600}
+.gm.proj .answer{background:#0A0F24;border-left:10px solid var(--good);color:#fff}
+.gm.proj .answer .lab{color:var(--good)}
+.gm.proj .timer{color:#fff}
+.gm.proj .timer.low{color:var(--bad)}
+.gm.proj .queue li{background:#0A0F24;border:3px solid var(--line);border-left:12px solid var(--tc,var(--line));color:#fff}
+.gm.proj .queue li.first{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold);background:#1A1400}
+.gm.proj .queue .qdelta{color:var(--muted)}
+.gm.proj .queue-empty{color:var(--muted)}
+.gm.proj .armed{background:var(--accent);color:var(--accent-ink)}
+.gm.proj .buzz{background:var(--gold);color:var(--gold-ink)}
+.gm.proj .btn{border:2px solid var(--line);color:#fff;background:#0A0F24}
+.gm.proj .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+/* QR-экран и презентация: белая карточка вокруг QR и крупный текст */
+.gm.proj .linkfull,.gm.proj .intro{background:#000;color:#fff}
+.gm.proj .linkfull-hint{color:var(--muted)}
+.gm.proj .linkfull-url{color:var(--tile-ink)}
+.gm .intro-lines li .b i{color:var(--muted)}
+.gm.proj .intro-lines li .b i{color:#C9D6F0}
+.gm.proj .intro-dots span{background:#444}
+.gm.proj .intro-dots span.past,.gm.proj .intro-dots span.on{background:var(--tile-ink)}
+.gm.proj .pod-1 .pod-step{background:var(--gold)}
+.gm.proj .podium-title{color:#fff}
+.gm.proj .pod-name{color:#fff}
+.gm.proj .pod-score{color:var(--tile-ink)}
+.gm.proj .answer .lab{font-size:clamp(1rem,2.2vh,1.7rem)}
+.gm.proj .queue-empty{font-size:clamp(1.2rem,2.8vh,2.2rem)}
+.gm.proj .scrim .queue-empty .b{align-items:flex-start}

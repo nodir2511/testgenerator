@@ -85,7 +85,7 @@ export const BoardGrid: React.FC<{ board: GameBoard; roundId?: string; onPick?: 
       <div className="board-scroll">
         <div className="board" role="grid" style={{ gridTemplateColumns: `repeat(${r.cats.length}, minmax(0, 1fr))` }}>
           {r.cats.map((c) => (
-            <div className="cat" role="columnheader" key={c.name}><Bi ru={c.name} tj={c.nt} /></div>
+            <div className={`cat${c.name.length > 22 ? ' long' : ''}${c.name.length > 30 ? ' xlong' : ''}`} role="columnheader" key={c.name}><Bi ru={c.name} tj={c.nt} /></div>
           ))}
           {Array.from({ length: rows }, (_x, qi) => r.cats.map((c, ci) => {
             const isUsed = !!used[`${ci}-${qi}`];
