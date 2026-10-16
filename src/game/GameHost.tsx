@@ -143,7 +143,9 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   }, [pack, commit]);
 
   const left = useTimerLeft(board.timer, now);
-  const rpc = (fn: string, args: Record<string, unknown>) => supabase.rpc(fn, args);
+  // запрос Supabase уходит только после then/await — поэтому всегда вызываем then
+  const rpc = (fn: string, args: Record<string, unknown>) =>
+    supabase.rpc(fn, args).then((res) => { if (res.error) console.error(fn, res.error.message); return res; });
 
   const runTimer = (b: GameBoard, secs?: number): GameBoard => {
     const s = secs ?? (b.timer.left > 0 ? b.timer.left : b.secs);
