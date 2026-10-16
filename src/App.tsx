@@ -30,6 +30,7 @@ import {
   Menu,
   BarChart3,
   Bell,
+  Gamepad2,
   Megaphone,
   X,
   FileQuestion,
@@ -92,6 +93,7 @@ export const App: React.FC = () => {
     ...(isOwner ? [{ id: 'cluster', label: 'Экзамен-кластер', icon: BookOpen }] : []),
     ...(isAdmin ? [{ id: 'users', label: 'Пользователи и аудит', icon: Users }] : []),
     ...(isAdmin ? [{ id: 'stats', label: 'Статистика', icon: BarChart3 }] : []),
+    ...(isAdmin || isOwner ? [{ id: 'game', label: 'Своя игра', icon: Gamepad2 }] : []),
     { id: 'releases', label: 'Что нового', icon: Megaphone },
   ];
 
@@ -205,6 +207,7 @@ export const App: React.FC = () => {
                 <button
                   key={item.id}
                   onClick={() => {
+                    if (item.id === 'game') { window.open('/game', '_blank'); return; }
                     setActiveTab(item.id as TabType);
                     setIsQuestionFormOpen(false);
                   }}
@@ -244,6 +247,7 @@ export const App: React.FC = () => {
                 <button
                   key={item.id}
                   onClick={() => {
+                    if (item.id === 'game') { window.open('/game', '_blank'); return; }
                     setActiveTab(item.id as TabType);
                     setIsQuestionFormOpen(false);
                     setMobileMenuOpen(false);

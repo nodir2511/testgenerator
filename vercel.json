@@ -1,6 +1,24 @@
 {
   "rewrites": [
-    { "source": "/tg", "destination": "/index.html" },
-    { "source": "/tg/(.*)", "destination": "/index.html" }
+    {
+      "source": "/tg",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/tg/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/game",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/game/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/play/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

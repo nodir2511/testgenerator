@@ -29,7 +29,25 @@ const queryClient = new QueryClient({
 
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 
-// /tg — Telegram Mini App: лёгкая страница без входа через Supabase Auth
+// Своя игра: /game — ведущий, /game/screen/КОД — проектор, /play/КОД — команда
+const path = window.location.pathname;
+const screenMatch = path.match(/^[/]game[/]screen[/]([A-Za-z0-9]+)/);
+const playMatch = path.match(/^[/]play[/]([A-Za-z0-9]+)/);
+const GameHostPage = React.lazy(() => import('./game/GameHost').then((m) => ({ default: m.GameHost })));
+const GameScreenPage = React.lazy(() => import('./game/GameScreen').then((m) => ({ default: m.GameScreen })));
+const GamePlayPage = React.lazy(() => import('./game/GamePlay').then((m) => ({ default: m.GamePlay })));
+if (screenMatch || playMatch || path === '/game' || path.startsWith('/game/')) {
+  const code = (screenMatch || playMatch)?.[1]?.toUpperCase() ?? '';
+  root.render(
+    <React.StrictMode>
+      <AuthProvider>
+        <React.Suspense fallback={null}>
+          {screenMatch ? <GameScreenPage code={code} /> : playMatch ? <GamePlayPage code={code} /> : <GameHostPage />}
+        </React.Suspense>
+      </AuthProvider>
+    </React.StrictMode>
+  );
+} else // /tg — Telegram Mini App: лёгкая страница без входа через Supabase Auth
 if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/tg/')) {
   const TgApp = React.lazy(() => import('./tg/TgApp'));
   root.render(
