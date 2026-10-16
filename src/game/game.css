@@ -402,3 +402,16 @@
 .gm .chip-x:hover{color:var(--bad)}
 .gm .play-wait{display:flex;flex-direction:column;gap:6px;text-align:center}
 .gm .play-wait p{margin:0}
+
+/* мини-презентация */
+.gm .intro{gap:clamp(14px,3vh,36px)}
+.gm .intro-dots{display:flex;gap:10px}
+.gm .intro-dots span{width:14px;height:14px;border-radius:50%;background:var(--line)}
+.gm .intro-dots span.past{background:var(--accent);opacity:.5}
+.gm .intro-dots span.on{background:var(--accent);transform:scale(1.3)}
+.gm .intro-icon{font-size:clamp(4rem,14vh,10rem);line-height:1}
+.gm .intro-title{font-family:var(--f-display);font-weight:700;font-size:clamp(1.8rem,5vw,4.6rem);margin:0;text-wrap:balance}
+.gm .intro-title .b i{font-family:var(--f-body);font-size:.5em;font-weight:600;opacity:.8}
+.gm .intro-lines{list-style:none;margin:0;padding:0;display:grid;gap:clamp(12px,2.4vh,26px);max-width:min(92vw,1200px)}
+.gm .intro-lines li{font-size:clamp(1.2rem,2.8vw,2.6rem);font-weight:600;line-height:1.3;text-wrap:balance}
+.gm .intro-lines li .b i{font-size:.72em;color:var(--muted)}

@@ -48,6 +48,8 @@ export interface GameBoard {
   final: boolean;
   /** Ожидание команд перед началом: ведущий и проектор показывают QR, команды читают правила */
   lobby: boolean;
+  /** Номер слайда мини-презентации перед QR-кодом (null — презентация закончена) */
+  intro: number | null;
   log: LogEntry[];
 }
 export interface GameInput { cat?: number; bidders?: number[]; fs?: number[] }
@@ -80,6 +82,7 @@ export function freshBoard(keep?: Partial<GameBoard>): GameBoard {
     showLink: false,
     final: false,
     lobby: false,
+    intro: null,
     log: [],
   };
 }
@@ -94,7 +97,7 @@ function normalize(row: any): GameSession {
     teams: Array.isArray(row.teams) ? row.teams : [],
     buzz: Array.isArray(row.buzz) ? row.buzz : [],
     input: row.input && typeof row.input === 'object' ? row.input : {},
-    board: { ...base, ...b, lobby: b.lobby ?? Object.keys(b).length === 0, q: b.q && b.q.text ? b.q : null, log: Array.isArray(b.log) ? b.log : [], layout: Array.isArray(b.layout) ? b.layout : [], used: { ...base.used, ...(b.used || {}) }, timer: { ...base.timer, ...(b.timer || {}) } },
+    board: { ...base, ...b, lobby: b.lobby ?? Object.keys(b).length === 0, intro: b.intro !== undefined ? b.intro : Object.keys(b).length === 0 ? 0 : null, q: b.q && b.q.text ? b.q : null, log: Array.isArray(b.log) ? b.log : [], layout: Array.isArray(b.layout) ? b.layout : [], used: { ...base.used, ...(b.used || {}) }, timer: { ...base.timer, ...(b.timer || {}) } },
   };
 }
 

@@ -3,14 +3,14 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { AuthModal } from '../components/AuthModal';
 import { FormattedText } from '../components/FormulaEditor';
-import { GameRound, RULES, SPECIAL } from './content';
+import { GameRound, INTRO_SLIDES, RULES, SPECIAL } from './content';
 import { buildReview, exportXlsx, resultText, standingsRows, type ReviewRow } from './review';
 import {
   GameBoard, GameQ, GameSession, GameTeam, Lang, LayoutRound, QMode, TIMER_CHOICES, beep, freshBoard, queueOf,
   screenUrl, signed, standings, useGameSession, useServerClock, useTimerLeft,
 } from './api';
 import {
-  Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView,
+  Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView,
   fmt, layoutRound, pick, tc, teamName, useLang,
 } from './ui';
 
@@ -344,6 +344,12 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const b = boardRef.current;
+      // презентация: стрелки и пробел листают слайды
+      if (b.lobby && b.intro != null) {
+        if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') { e.preventDefault(); commit((x) => ({ ...x, intro: (x.intro ?? 0) + 1 >= INTRO_SLIDES.length ? null : (x.intro ?? 0) + 1 })); }
+        else if (e.key === 'ArrowLeft') commit((x) => ({ ...x, intro: Math.max(0, (x.intro ?? 0) - 1) }));
+        return;
+      }
       if (!b.q || e.repeat) return;
       if (e.key === 'Escape') { closeQ(false); return; }
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -559,7 +565,17 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
         </div>
       )}
 
-      {board.lobby && (
+      {board.lobby && board.intro != null && (
+        <IntroOverlay
+          index={board.intro}
+          controls={{
+            onPrev: () => commit((b) => ({ ...b, intro: Math.max(0, (b.intro ?? 0) - 1) })),
+            onNext: () => commit((b) => ({ ...b, intro: (b.intro ?? 0) + 1 >= INTRO_SLIDES.length ? null : (b.intro ?? 0) + 1 })),
+            onSkip: () => commit((b) => ({ ...b, intro: null })),
+          }}
+        />
+      )}
+      {board.lobby && board.intro == null && (
         <LinkOverlay
           code={code}
           teams={teams}
@@ -569,6 +585,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[] }> = ({ sess
               <button className="btn primary lobby-start" disabled={teams.length < 1} onClick={() => commit((b) => ({ ...b, lobby: false, showLink: false }))}>
                 <Bi ru={teams.length ? `Начать игру (команд: ${teams.length})` : 'Ждём команды…'} tj={teams.length ? `Оғози бозӣ (дастаҳо: ${teams.length})` : 'Интизори дастаҳо…'} />
               </button>
+              <button className="btn" onClick={() => commit((b) => ({ ...b, intro: 0 }))}><Bi ru="← Презентация" tj="← Муаррифӣ" /></button>
               <a className="btn" href={screenUrl(code)} target="_blank" rel="noreferrer"><Bi ru="Экран для проектора" tj="Экран барои проектор" /></a>
             </div>
           }

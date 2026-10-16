@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import './game.css';
 import { FormattedText } from '../components/FormulaEditor';
-import { SPECIAL } from './content';
+import { INTRO_SLIDES, SPECIAL } from './content';
 import {
   GameBoard, GameBuzz, GameTeam, LayoutRound, Lang, formatTime, playUrl, queueOf, signed, standings, teamColor,
 } from './api';
@@ -315,6 +315,29 @@ export const Podium: React.FC<{ board: GameBoard; teams: GameTeam[] }> = ({ boar
         <ol className="pod-rest">
           {rest.map((t) => <li key={t.n} style={tc(t.n)}><b>{t.place}.</b> {t.name} — {signed(t.score)}</li>)}
         </ol>
+      )}
+    </div>
+  );
+};
+
+/** Слайд мини-презентации на весь экран. С controls — для ведущего (листает), без — для проектора. */
+export const IntroOverlay: React.FC<{ index: number; controls?: { onPrev: () => void; onNext: () => void; onSkip: () => void } }> = ({ index, controls }) => {
+  const s = INTRO_SLIDES[Math.min(index, INTRO_SLIDES.length - 1)];
+  const last = index >= INTRO_SLIDES.length - 1;
+  return (
+    <div className="linkfull intro" role="dialog" aria-modal="true">
+      <div className="intro-dots" aria-hidden="true">{INTRO_SLIDES.map((_x, i) => <span key={i} className={i === index ? 'on' : i < index ? 'past' : ''} />)}</div>
+      <div className="intro-icon" aria-hidden="true">{s.icon}</div>
+      <h2 className="intro-title"><Bi ru={s.title.ru} tj={s.title.tj} /></h2>
+      <ul className="intro-lines">
+        {s.lines.map((l, i) => <li key={i}><Bi ru={l.ru} tj={l.tj} /></li>)}
+      </ul>
+      {controls && (
+        <div className="lobby-actions">
+          <button className="btn" onClick={controls.onPrev} disabled={index <= 0}>← <Bi ru="Назад" tj="Ба қафо" /></button>
+          <button className="btn primary lobby-start" onClick={controls.onNext}>{last ? <Bi ru="Показать QR-код →" tj="Нишон додани QR →" /> : <Bi ru="Дальше →" tj="Минбаъд →" />}</button>
+          <button className="btn" onClick={controls.onSkip}><Bi ru="Пропустить презентацию" tj="Гузаштан аз муаррифӣ" /></button>
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { QUESTION_SECONDS, playSound, unlockAudio, useGameSession, useServerClock, useTimerLeft, useWakeLock } from './api';
-import { Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView, layoutRound } from './ui';
+import { Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView, layoutRound } from './ui';
 
 /** Экран для проектора: только показ, без входа. Адрес: /game/screen/КОД */
 export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
@@ -91,7 +91,8 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
         </div>
       )}
 
-      {(board.lobby || board.showLink) && <LinkOverlay code={code} teams={teams} />}
+      {board.lobby && board.intro != null && <IntroOverlay index={board.intro} />}
+      {((board.lobby && board.intro == null) || (!board.lobby && board.showLink)) && <LinkOverlay code={code} teams={teams} />}
     </GameShell>
   );
 };
