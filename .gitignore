@@ -73,3 +73,6 @@ venv/
 *.tmp
 Thumbs.db
 coverage/
+
+# Пакет вопросов «Своей игры»: данные, не коммитить
+supabase/sql/game_pack_chemistry.sql
