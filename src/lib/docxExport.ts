@@ -1048,7 +1048,7 @@ export async function buildTicketsFile(
   extraFiles: Array<{ name: string; blob: Blob }> = []
 ): Promise<ExportFile | null> {
   if (!tickets || tickets.length === 0) return null;
-  if (tickets.length === 1 && lang !== 'both') return buildSingleTicketFile(examTitle, tickets[0], subjectName, lang);
+  if (tickets.length === 1 && lang !== 'both' && extraFiles.length === 0) return buildSingleTicketFile(examTitle, tickets[0], subjectName, lang);
 
   const zip = new JSZip();
   for (const t of tickets) {

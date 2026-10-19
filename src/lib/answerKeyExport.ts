@@ -139,7 +139,7 @@ export async function exportAnswerKey(
 export async function keyArchiveExtras(
   title: string, tickets: KeyTicket[], subjectName: string, selection: KeySelection | undefined, lang: string,
 ): Promise<Array<{ name: string; blob: Blob }>> {
-  if (lang !== 'both' || !hasKeyTemplate(subjectName)) return [];
+  if (!hasKeyTemplate(subjectName)) return [];
   try {
     const f = await buildAnswerKeyFile(title, tickets, subjectName, selection);
     return [{ name: f.fileName, blob: f.blob }];
