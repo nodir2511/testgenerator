@@ -170,7 +170,7 @@ export async function deliverBatch(opts: {
   }
 
   const caption = `${title}: ${tickets.length} шт. (${lang === 'both' ? 'RU + TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase())})`;
-  if (files.length === 1) {
+  if (files.length === 1 && !key) {
     await sendDocument(botToken, chat, files[0].data, files[0].name, caption);
     if (key) {
       try {
