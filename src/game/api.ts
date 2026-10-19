@@ -1,10 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { supabase } from '../lib/supabase';
 
 export type Lang = 'both' | 'ru' | 'tj';
 
 export interface GameTeam { n: number; name: string }
-export interface GameBuzz { n: number; t: number; /** номер вопроса, к которому относится нажатие */ s?: number }
+export interface GameBuzz {
+  n: number;
+  /** Момент нажатия по серверным часам (мс): по нему строится очередь */
+  t: number;
+  /** номер вопроса, к которому относится нажатие */
+  s?: number;
+  /** Когда нажатие дошло до сервера (мс) */
+  a?: number;
+  /** Погрешность часов телефона в момент нажатия (мс) */
+  e?: number;
+}
 export type QMode = 'buzz' | 'cat' | 'bids' | 'answer';
 /** Публичная раскладка табло (без вопросов и ответов) */
 export interface LayoutCat { name: string; nt: string; values: number[] }
@@ -80,6 +90,12 @@ export const QUESTION_SECONDS = 30;
 export const TIMER_CHOICES = [15, 30, 60];
 export const MAX_TEAMS = 6;
 export const FALSE_START_MS = 1500;
+/** Отсчёт «3-2-1» перед приёмом ответов: все устройства успевают получить старт заранее */
+export const START_COUNTDOWN_MS = 3000;
+/** Сколько ждём запоздавших нажатий, прежде чем объявить, кто первый */
+export const SETTLE_MS = 800;
+/** Запас на задержку сенсорного экрана (мс на каждую из двух команд) при сравнении нажатий */
+export const TOUCH_MS = 15;
 
 export function freshBoard(keep?: Partial<GameBoard>): GameBoard {
   return {
@@ -118,23 +134,230 @@ function normalize(row: any): GameSession {
 export const playUrl = (code: string) => `${window.location.origin}/play/${code}`;
 export const screenUrl = (code: string) => `${window.location.origin}/game/screen/${code}`;
 
-/** Серверные часы: возвращает функцию «сейчас по серверу, мс». Синхронизация по game_time(). */
+// --- Единые часы: у всех устройств «сейчас» — это время сервера ---
+// Системные часы телефона не используются: поправка к серверу вычисляется по нескольким пробам (берём самую быструю,
+// у неё наименьшая погрешность), а ход времени между пробами считается по монотонным часам performance.now().
+
+export interface ClockSample {
+  /** Задержка запроса туда и обратно, мс */
+  rtt: number;
+  /** Время сервера в середине пробы, мс */
+  server: number;
+  /** performance.now() в середине пробы, мс */
+  perf: number;
+}
+export interface ClockEstimate { server: number; perf: number; rtt: number }
+
+export const CLOCK_PROBES = 7;
+/** Пробы медленнее этого не вытесняют уже имеющуюся оценку */
+export const MAX_GOOD_RTT_MS = 2000;
+/** Запас на уход монотонных часов: 100 ppm = 0,1 мс на каждую секунду */
+export const CLOCK_DRIFT_MS_PER_S = 0.1;
+
+/** Самая быстрая проба */
+export function bestSample(samples: ClockSample[]): ClockSample | null {
+  let best: ClockSample | null = null;
+  for (const s of samples) if (s.rtt >= 0 && (!best || s.rtt < best.rtt)) best = s;
+  return best;
+}
+export const estimateAt = (e: ClockEstimate, perfNow: number) => e.server + (perfNow - e.perf);
+/** Погрешность оценки: половина задержки пробы плюс уход часов с момента пробы */
+export const estimateError = (e: ClockEstimate, perfNow: number) => e.rtt / 2 + (Math.max(0, perfNow - e.perf) / 1000) * CLOCK_DRIFT_MS_PER_S;
+/** Новая оценка заменяет прежнюю, только если она точнее (или прежняя недействительна) */
+export function mergeEstimate(prev: ClockEstimate | null, cand: ClockSample | null, perfNow: number, force = false): ClockEstimate | null {
+  if (!cand) return prev;
+  const next: ClockEstimate = { server: cand.server, perf: cand.perf, rtt: cand.rtt };
+  if (!prev || force) return next;
+  if (cand.rtt > MAX_GOOD_RTT_MS) return prev;
+  return estimateError(next, perfNow) <= estimateError(prev, perfNow) ? next : prev;
+}
+
+export interface ClockInfo {
+  synced: boolean;
+  /** Задержка лучшей пробы, мс */
+  rtt: number | null;
+  /** Погрешность часов, мс */
+  err: number | null;
+}
+
+let clockEst: ClockEstimate | null = null;
+let clockInfo: ClockInfo = { synced: false, rtt: null, err: null };
+let clockForce = false;
+let clockUsers = 0;
+let clockBusy = false;
+let clockRounds = 0;
+let clockTimer: ReturnType<typeof setTimeout> | null = null;
+let hiddenAt = 0;
+const clockListeners = new Set<() => void>();
+
+function publishClock() {
+  clockInfo = clockEst
+    ? { synced: true, rtt: Math.round(clockEst.rtt), err: Math.round(estimateError(clockEst, performance.now())) }
+    : { synced: false, rtt: null, err: null };
+  clockListeners.forEach((f) => f());
+}
+
+/** Сейчас по серверу, мс (до первой синхронизации — по системным часам) */
+export const serverNow = (): number => (clockEst ? estimateAt(clockEst, performance.now()) : Date.now());
+
+/** Серверное время для метки события (event.timeStamp на шкале performance.now); null, если часы ещё не синхронизированы */
+export function serverTimeOfEvent(ts?: number): number | null {
+  if (!clockEst) return null;
+  const p = performance.now();
+  const stamp = typeof ts === 'number' && ts > 0 && p - ts >= 0 && p - ts <= 1000 ? ts : p;
+  return Math.round(estimateAt(clockEst, stamp));
+}
+
+async function clockRound() {
+  if (clockBusy) return;
+  clockBusy = true;
+  try {
+    const samples: ClockSample[] = [];
+    for (let i = 0; i < CLOCK_PROBES; i++) {
+      const p0 = performance.now();
+      let value: unknown = null;
+      try { const { data, error } = await supabase.rpc('game_time'); value = error ? null : data; } catch { value = null; }
+      const p1 = performance.now();
+      if (typeof value !== 'number') continue;
+      samples.push({ rtt: p1 - p0, server: value, perf: (p0 + p1) / 2 });
+      // хватит, если уже есть быстрая проба
+      if (samples.length >= 3 && Math.min(...samples.map((x) => x.rtt)) < 40) break;
+    }
+    clockEst = mergeEstimate(clockEst, bestSample(samples), performance.now(), clockForce);
+    if (samples.length) clockForce = false;
+    publishClock();
+  } finally {
+    clockBusy = false;
+  }
+}
+
+function scheduleClock() {
+  if (clockTimer) clearTimeout(clockTimer);
+  // первые минуты проверяем чаще, потом раз в 30 с
+  clockTimer = setTimeout(async () => { await clockRound(); clockRounds++; scheduleClock(); }, clockRounds < 3 ? 8000 : 30000);
+}
+const onClockVisibility = () => {
+  if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+  // после сна монотонные часы могли остановиться — прежнюю оценку не жалеем
+  if (hiddenAt && Date.now() - hiddenAt > 5000) clockForce = true;
+  hiddenAt = 0;
+  clockRound();
+};
+const onClockOnline = () => { clockRound(); };
+
+function startClock() {
+  clockUsers++;
+  if (clockUsers === 1) {
+    clockRounds = 0;
+    clockRound().then(scheduleClock);
+    document.addEventListener('visibilitychange', onClockVisibility);
+    window.addEventListener('online', onClockOnline);
+  }
+  return () => {
+    clockUsers--;
+    if (clockUsers === 0) {
+      if (clockTimer) clearTimeout(clockTimer);
+      clockTimer = null;
+      document.removeEventListener('visibilitychange', onClockVisibility);
+      window.removeEventListener('online', onClockOnline);
+    }
+  };
+}
+
+/** Серверные часы: возвращает функцию «сейчас по серверу, мс». Одна синхронизация на всю страницу. */
 export function useServerClock(): () => number {
-  const offset = useRef(0);
+  useEffect(() => startClock(), []);
+  return serverNow;
+}
+
+/** Состояние часов (задержка и погрешность) — обновляется после каждой синхронизации */
+export function useClockInfo(): ClockInfo {
+  return useSyncExternalStore(
+    (cb) => { clockListeners.add(cb); return () => { clockListeners.delete(cb); }; },
+    () => clockInfo,
+  );
+}
+
+// --- Отсчёт «3-2-1» ---
+/** Секунд до начала приёма (по серверным часам); 0 — приём идёт или таймер не запущен */
+export function countdownLeft(timer: GameTimer, nowMs: number): number {
+  if (!timer.running || !timer.startedAt || timer.startedAt <= nowMs) return 0;
+  // отсчёт короче START_COUNTDOWN_MS: большие значения — это ещё не синхронизированные часы устройства
+  return Math.min(Math.ceil(START_COUNTDOWN_MS / 1000), Math.ceil((timer.startedAt - nowMs) / 1000));
+}
+export function useCountdown(timer: GameTimer, now: () => number): number {
+  const [v, setV] = useState(() => countdownLeft(timer, now()));
+  useEffect(() => {
+    const c = countdownLeft(timer, now());
+    setV(c);
+    if (c === 0) return;
+    const id = setInterval(() => {
+      const x = countdownLeft(timer, now());
+      setV(x);
+      if (x === 0) clearInterval(id);
+    }, 50);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timer.running, timer.startedAt]);
+  return v;
+}
+
+// --- Порядок нажатий ---
+/** Сколько ещё ждать запоздавших нажатий (мс), пока первое нажатие «свежее»; 0 — порядок можно объявлять */
+export function settleLeft(queue: GameBuzz[], nowMs: number): number {
+  const a = queue[0]?.a;
+  // не больше SETTLE_MS, даже если часы устройства ещё не синхронизированы и «сейчас» сильно отстаёт
+  return a == null ? 0 : Math.min(SETTLE_MS, Math.max(0, a + SETTLE_MS - nowMs));
+}
+/** true, когда порядок нажатий можно показывать (запоздавшие пакеты успели дойти) */
+export function useSettled(queue: GameBuzz[], now: () => number): boolean {
+  const [, force] = useState(0);
+  const left = settleLeft(queue, now());
+  const key = queue[0] ? `${queue[0].n}-${queue[0].a}` : '';
+  useEffect(() => {
+    if (left <= 0) return;
+    const id = setTimeout(() => force((x) => x + 1), left + 30);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, left > 0]);
+  return left <= 0;
+}
+
+export interface CloseCall { a: number; b: number; gap: number; margin: number }
+/** Первые два нажатия «почти одновременны»: разница меньше суммы погрешностей часов и запаса на сенсор */
+export function closeCall(queue: GameBuzz[]): CloseCall | null {
+  if (queue.length < 2) return null;
+  const [x, y] = queue;
+  const gap = y.t - x.t;
+  const margin = (x.e ?? 0) + (y.e ?? 0) + 2 * TOUCH_MS;
+  return gap < margin ? { a: x.n, b: y.n, gap, margin } : null;
+}
+
+// --- Связь команд (для ведущего) ---
+export interface TeamNet { rtt: number; err: number; /** секунд с последнего отчёта */ age: number }
+export type NetLevel = 'good' | 'fair' | 'bad' | 'none';
+export function netLevel(n: TeamNet | undefined): NetLevel {
+  if (!n || n.age > 90) return 'none';
+  if (n.err > 250 || n.rtt > 500) return 'bad';
+  if (n.err > 80 || n.rtt > 200) return 'fair';
+  return 'good';
+}
+/** Связь команд: ведущий опрашивает сервер раз в 5 с */
+export function useTeamNet(code: string): Record<string, TeamNet> {
+  const [net, setNet] = useState<Record<string, TeamNet>>({});
   useEffect(() => {
     let dead = false;
-    const sync = async () => {
-      const t0 = Date.now();
-      const { data, error } = await supabase.rpc('game_time');
-      const t1 = Date.now();
-      if (dead || error || typeof data !== 'number') return;
-      offset.current = data - (t0 + t1) / 2;
+    const load = async () => {
+      try {
+        const { data, error } = await supabase.rpc('game_net_get', { p_code: code });
+        if (!dead && !error && data && typeof data === 'object') setNet(data as Record<string, TeamNet>);
+      } catch { /* связь вернётся — обновимся */ }
     };
-    sync();
-    const id = setInterval(sync, 60000);
+    load();
+    const id = setInterval(load, 5000);
     return () => { dead = true; clearInterval(id); };
-  }, []);
-  return useCallback(() => Date.now() + offset.current, []);
+  }, [code]);
+  return net;
 }
 
 /** Строка игры по коду: загрузка + realtime + подстраховка опросом. */
@@ -187,7 +410,12 @@ export function useGameSession(code: string | null) {
 
 /** Секунд до конца таймера (по серверным часам), обновляется 4 раза в секунду. */
 export function useTimerLeft(timer: GameTimer, now: () => number): number {
-  const calc = () => (timer.running && timer.endsAt ? Math.max(0, Math.ceil((timer.endsAt - now()) / 1000)) : timer.left);
+  const calc = () => {
+    if (!timer.running || !timer.endsAt) return timer.left;
+    const t = now();
+    if (timer.startedAt && t < timer.startedAt) return timer.left; // идёт отсчёт «3-2-1»: время вопроса ещё не пошло
+    return Math.max(0, Math.ceil((timer.endsAt - t) / 1000));
+  };
   const [left, setLeft] = useState(calc);
   useEffect(() => {
     setLeft(calc());

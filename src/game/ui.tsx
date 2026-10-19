@@ -4,7 +4,7 @@ import './game.css';
 import { FormattedText } from '../components/FormulaEditor';
 import { INTRO_SLIDES, SPECIAL } from './content';
 import {
-  GameBoard, GameBuzz, GameTeam, LayoutRound, Lang, formatTime, playUrl, queueOf, signed, standings, teamColor,
+  CloseCall, GameBoard, GameBuzz, GameTeam, LayoutRound, Lang, TeamNet, closeCall, formatTime, netLevel, playUrl, queueOf, signed, standings, teamColor,
 } from './api';
 
 const LangCtx = createContext<Lang>('both');
@@ -116,13 +116,15 @@ export const TeamGrid: React.FC<{
   chooser?: number | null;
   /** Коды команд для возврата (только ведущему) */
   pins?: Record<string, string>;
+  /** Связь команд: задержка и погрешность часов (только ведущему) */
+  net?: Record<string, TeamNet>;
   editable?: {
     onRename: (n: number, name: string) => void;
     onAdjust: (n: number, d: number) => void;
     onRemove: (n: number) => void;
     onChooser: (n: number) => void;
   };
-}> = ({ teams, scores, chooser, pins, editable }) => {
+}> = ({ teams, scores, chooser, pins, net, editable }) => {
   const lang = useLang();
   const sc = (n: number) => scores[n] ?? 0;
   const max = teams.length ? Math.max(...teams.map((t) => sc(t.n))) : 0;
@@ -144,6 +146,7 @@ export const TeamGrid: React.FC<{
               <div className="tname">{t.name}</div>
             )}
             <div className={`score${sc(t.n) < 0 ? ' neg' : ''}`}>{signed(sc(t.n))}</div>
+            {net && <NetBadge net={net[t.n]} />}
             {pins?.[t.n] && <div className="team-pin" title={pick(lang, 'Код команды для возврата в игру', 'Рамзи даста барои баргаштан ба бозӣ')}>{pick(lang, 'код', 'рамз')} {pins[t.n]}</div>}
             {editable && (
               <div className="adj">
@@ -160,6 +163,16 @@ export const TeamGrid: React.FC<{
   );
 };
 
+/** Связь команды для ведущего: задержка до сервера и погрешность часов телефона */
+export const NetBadge: React.FC<{ net?: TeamNet }> = ({ net }) => {
+  const lang = useLang();
+  const level = netLevel(net);
+  const text = level === 'none' ? pick(lang, 'связи нет', 'алоқа нест')
+    : `${net!.rtt} мс${level === 'bad' ? ' · ' + pick(lang, 'слабая связь', 'алоқаи суст') : level === 'fair' ? ' · ' + pick(lang, 'средняя', 'миёна') : ''}`;
+  const title = net ? pick(lang, `Задержка ${net.rtt} мс, погрешность часов ±${net.err} мс`, `Таъхир ${net.rtt} мс, хатогии соат ±${net.err} мс`) : pick(lang, 'Телефон команды ещё не прислал данные', 'Телефони даста ҳанӯз маълумот нафиристодааст');
+  return <div className={`net net-${level}`} title={title}><i aria-hidden="true" />{text}</div>;
+};
+
 const TeamNameInput: React.FC<{ name: string; onCommit: (v: string) => void; label: string }> = ({ name, onCommit, label }) => {
   const [v, setV] = useState(name);
   return (
@@ -173,10 +186,13 @@ const TeamNameInput: React.FC<{ name: string; onCommit: (v: string) => void; lab
 };
 
 /** Очередь нажатий «Ответить»: кто и насколько позже первого */
-export const BuzzQueue: React.FC<{ board: GameBoard; teams: GameTeam[]; buzz: GameBuzz[] }> = ({ board, teams, buzz }) => {
+export const BuzzQueue: React.FC<{ board: GameBoard; teams: GameTeam[]; buzz: GameBuzz[]; /** false — ждём запоздавших, порядок пока не объявляем */ settled?: boolean }> = ({ board, teams, buzz, settled = true }) => {
   const queue = queueOf(buzz, board.q);
   if (!queue.length) {
     return <p className="queue-empty"><Bi ru="Пока никто не нажал «Ответить»" tj="Ҳоло касе «Ҷавоб додан»-ро пахш накардааст" /></p>;
+  }
+  if (!settled) {
+    return <p className="queue-empty" role="status"><Bi ru="Нажатия приняты — определяем, кто был первым…" tj="Пахшҳо қабул шуд — муайян мекунем, ки кӣ аввал буд…" /></p>;
   }
   return (
     <ol className="queue">
@@ -301,6 +317,27 @@ export const QuestionBody: React.FC<{ board: GameBoard; hideText?: boolean }> = 
 export const TimerView: React.FC<{ left: number; big?: boolean }> = ({ left, big }) => (
   <span className={`timer${left <= 5 ? ' low' : ''}${big ? ' big' : ''}`} role="timer">{formatTime(left)}</span>
 );
+
+/** Отсчёт «3-2-1» вместо таймера, пока приём ответов не начался */
+export const CountdownView: React.FC<{ left: number }> = ({ left }) => (
+  <span className="timer big low countdown" role="timer" aria-live="assertive">{left}</span>
+);
+
+/** Первые два нажатия почти одновременны: решение за ведущим */
+export const CloseCallNote: React.FC<{ queue: GameBuzz[]; teams: GameTeam[] }> = ({ queue, teams }) => {
+  const c: CloseCall | null = closeCall(queue);
+  if (!c) return null;
+  const a = teamName(teams, c.a);
+  const b = teamName(teams, c.b);
+  return (
+    <p className="close-call" role="status">
+      <Bi
+        ru={<>Почти одновременно: <b>{a}</b> и <b>{b}</b> (разница {Math.max(0, Math.round(c.gap))} мс, погрешность до {Math.round(c.margin)} мс). Решите по обстановке.</>}
+        tj={<>Қариб ҳамзамон: <b>{a}</b> ва <b>{b}</b> (фарқият {Math.max(0, Math.round(c.gap))} мс, хато то {Math.round(c.margin)} мс). Аз рӯи вазъият ҳал кунед.</>}
+      />
+    </p>
+  );
+};
 
 /** Пьедестал: 1–3 места и остальные */
 export const Podium: React.FC<{ board: GameBoard; teams: GameTeam[] }> = ({ board, teams }) => {

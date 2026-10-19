@@ -6,11 +6,11 @@ import { FormattedText } from '../components/FormulaEditor';
 import { GameRound, INTRO_SLIDES, RULES, SPECIAL } from './content';
 import { buildReview, exportXlsx, resultText, standingsRows, type ReviewRow } from './review';
 import {
-  GameBoard, GameQ, GameSession, GameTeam, Lang, LayoutRound, QMode, TIMER_CHOICES, beep, freshBoard, inputOf, pickSpecials, queueOf,
-  screenUrl, signed, standings, useGameSession, useServerClock, useTimerLeft,
+  GameBoard, GameQ, GameSession, GameTeam, Lang, LayoutRound, QMode, START_COUNTDOWN_MS, TIMER_CHOICES, beep, freshBoard, inputOf, netLevel, pickSpecials, queueOf,
+  screenUrl, signed, standings, useCountdown, useGameSession, useServerClock, useSettled, useTeamNet, useTimerLeft,
 } from './api';
 import {
-  Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView, WonBanner,
+  Bi, BoardGrid, BuzzQueue, CloseCallNote, CountdownView, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, NetBadge, Podium, QuestionBody, TeamGrid, TimerView, WonBanner,
   fmt, layoutRound, pick, tc, teamName, useLang,
 } from './ui';
 
@@ -179,15 +179,19 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[]; connected: 
   }, [pack, commit]);
 
   const left = useTimerLeft(board.timer, now);
+  const cd = useCountdown(board.timer, now);   // отсчёт «3-2-1» перед приёмом ответов
+  const net = useTeamNet(code);                // связь команд: задержка и погрешность часов
   // запрос Supabase уходит только после then/await — поэтому всегда вызываем then
   const rpc = (fn: string, args: Record<string, unknown>) =>
     supabase.rpc(fn, args).then((res) => { if (res.error) console.error(fn, res.error.message); return res; });
 
-  const runTimer = (b: GameBoard, secs?: number): GameBoard => {
+  // countdown: приём ответов начнётся через START_COUNTDOWN_MS на всех устройствах одновременно (по серверным часам)
+  const runTimer = (b: GameBoard, secs?: number, countdown = false): GameBoard => {
     const s = secs ?? (b.timer.left > 0 ? b.timer.left : b.secs);
     const t = Math.round(now());
     const resumed = b.timer.left < b.secs && !!b.timer.startedAt; // продолжение после паузы — блокировку фальстарта не повторяем
-    return { ...b, timer: { running: true, left: s, endsAt: t + s * 1000, startedAt: resumed ? b.timer.startedAt : t } };
+    const startedAt = resumed ? (b.timer.startedAt as number) : countdown ? t + START_COUNTDOWN_MS : t;
+    return { ...b, timer: { running: true, left: s, endsAt: (resumed ? t : startedAt) + s * 1000, startedAt } };
   };
   const stoppedTimer = (b: GameBoard) => ({ running: false, left: b.secs, endsAt: null, startedAt: null });
 
@@ -205,6 +209,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[]; connected: 
   // звук, когда появилось первое нажатие
   const firstSeen = useRef(0);
   const queue = queueOf(buzz, board.q);
+  const settled = useSettled(queue, now);      // ждём запоздавшие нажатия, прежде чем объявлять, кто первый
   useEffect(() => {
     const n = queue[0]?.n ?? 0;
     if (n && n !== firstSeen.current) beep();
@@ -332,8 +337,9 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[]; connected: 
     patchQ({ shown: true, ans: answerOf(q) });
   };
 
-  const startTimer = () => commit((b) => runTimer(b));
-  const pauseTimer = () => commit((b) => ({ ...b, timer: { running: false, left: Math.max(left, 0), endsAt: null, startedAt: b.timer.startedAt ?? null } }));
+  const startTimer = () => commit((b) => runTimer(b, undefined, b.q?.mode === 'buzz'));
+  // пауза во время отсчёта отменяет старт
+  const pauseTimer = () => commit((b) => (b.timer.startedAt && b.timer.startedAt > now() ? { ...b, timer: stoppedTimer(b) } : { ...b, timer: { running: false, left: Math.max(left, 0), endsAt: null, startedAt: b.timer.startedAt ?? null } }));
   const resetTimer = () => commit((b) => ({ ...b, timer: stoppedTimer(b) }));
   const setSecs = (s: number) => commit((b) => ({ ...b, secs: s, timer: b.timer.running ? b.timer : { running: false, left: s, endsAt: null, startedAt: null } }));
 
@@ -448,7 +454,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[]; connected: 
   const q = board.q;
   const viewBoard: GameBoard = q?.hidden ? (() => { const it = findItem(q); return it ? { ...board, q: { ...q, text: { q: it.q, qt: it.qt } } } : board; })() : board;
   const sortedTeams = [...teams].sort((a, b) => a.n - b.n);
-  const first = queue[0]?.n;
+  const first = settled ? queue[0]?.n : undefined;
   // «Показать ответ» появляется, когда кто-то ответил (нажал кнопку или ошибся) или время вышло
   const timerStarted = board.timer.running || left < board.secs;
   const canReveal = !!q && (queue.length > 0 || q.wrong.length > 0 || left <= 0 || (q.mode === 'answer' && timerStarted));
@@ -531,7 +537,7 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[]; connected: 
           {teams.length === 0 ? (
             <p className="queue-empty"><Bi ru="Пока ни одна команда не зашла. Нажмите «Ссылка для команд» и покажите её классу." tj="Ҳоло ягон даста надаромадааст. «Истинод барои дастаҳо»-ро пахш карда, ба синф нишон диҳед." /></p>
           ) : (
-            <TeamGrid teams={teams} scores={board.scores} chooser={board.chooser} pins={pins} editable={{ onRename: rename, onAdjust: adjust, onRemove: removeTeam, onChooser: setChooser }} />
+            <TeamGrid teams={teams} scores={board.scores} chooser={board.chooser} pins={pins} net={net} editable={{ onRename: rename, onAdjust: adjust, onRemove: removeTeam, onChooser: setChooser }} />
           )}
         </section>
       </div>
@@ -549,9 +555,9 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[]; connected: 
             {q.won == null && (q.mode === 'buzz' || q.mode === 'answer') && (
               <>
               <div className="start-zone">
-                <TimerView left={left} big />
+                {cd > 0 ? <CountdownView left={cd} /> : <TimerView left={left} big />}
                 {board.timer.running
-                  ? <button className="btn start-btn pause" onClick={pauseTimer}><Bi ru="Пауза" tj="Таваққуф" /></button>
+                  ? <button className="btn start-btn pause" onClick={pauseTimer}>{cd > 0 ? <Bi ru="Отменить старт" tj="Бекор кардани оғоз" /> : <Bi ru="Пауза" tj="Таваққуф" />}</button>
                   : <button className="btn start-btn" onClick={startTimer} disabled={left <= 0 || (q.mode === 'answer' && !q.answerer)}>
                       {left === board.secs ? <Bi ru={q.mode === 'buzz' ? 'СТАРТ · приём ответов' : 'СТАРТ'} tj={q.mode === 'buzz' ? 'ОҒОЗ · қабули ҷавоб' : 'ОҒОЗ'} /> : <Bi ru="Продолжить" tj="Давом додан" />}
                     </button>}
@@ -591,19 +597,21 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[]; connected: 
                 <div className="chips-btn">{sortedTeams.map((t) => <button className="btn" key={t.n} onClick={() => auctionGive(t.n)}>{t.name}</button>)}</div>
               </div>
             )}
-            {q.mode === 'buzz' && q.won == null && board.timer.running && <p className="armed" role="status"><Bi ru="Приём ответов открыт: команды видят кнопку «Ответить»" tj="Қабули ҷавоб кушода аст: дастаҳо тугмаи «Ҷавоб додан»-ро мебинанд" /></p>}
+            {q.mode === 'buzz' && q.won == null && board.timer.running && cd > 0 && <p className="armed" role="status"><Bi ru="Отсчёт: команды готовятся, нажатие до старта — фальстарт" tj="Ҳисоб: дастаҳо омода мешаванд, пахш пеш аз оғоз — хато" /></p>}
+            {q.mode === 'buzz' && q.won == null && board.timer.running && cd === 0 && <p className="armed" role="status"><Bi ru="Приём ответов открыт: команды видят кнопку «Ответить»" tj="Қабули ҷавоб кушода аст: дастаҳо тугмаи «Ҷавоб додан»-ро мебинанд" /></p>}
             {q.mode === 'buzz' && (input.fs ?? []).length > 0 && (
               <p className="fs-note"><Bi ru={<>Фальстарт: {(input.fs ?? []).map((n) => teamName(teams, n)).join(', ')}</>} tj={<>Пеш аз вақт: {(input.fs ?? []).map((n) => teamName(teams, n)).join(', ')}</>} /></p>
             )}
             {firstName && q.won == null && <p className="buzz" role="status"><Bi ru={<>Первой отвечает: <b>{firstName}</b></>} tj={<>Аввал ҷавоб медиҳад: <b>{firstName}</b></>} /></p>}
-            {q.mode === 'buzz' && q.won == null && <BuzzQueue board={board} teams={teams} buzz={buzz} />}
+            {q.mode === 'buzz' && q.won == null && <BuzzQueue board={board} teams={teams} buzz={buzz} settled={settled} />}
+            {q.mode === 'buzz' && q.won == null && settled && <CloseCallNote queue={queue} teams={teams} />}
             <div className="judge">
               {sortedTeams.filter((t) => !q.only || q.only.includes(t.n)).map((t) => {
                 const w = q.wrong.includes(t.n);
                 const hot = q.mode === 'answer' ? q.answerer === t.n : first === t.n;
                 return (
                   <div className={`judge-row${w ? ' done' : ''}${hot ? ' first' : ''}`} key={t.n} style={tc(t.n)}>
-                    <div className="jn"><kbd>{t.n}</kbd><span className="nm">{t.name}</span></div>
+                    <div className="jn"><kbd>{t.n}</kbd><span className="nm">{t.name}</span>{netLevel(net[t.n]) === 'bad' && <NetBadge net={net[t.n]} />}</div>
                     <div className="jb">
                       <button className="ok" disabled={w || q.won != null} onClick={() => judge(t.n, true)}>✓ +{q.pts}</button>
                       <button className="no" disabled={w || q.won != null} onClick={() => judge(t.n, false)}>✗ −{q.pts}</button>

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { QUESTION_SECONDS, inputOf, playSound, queueOf, unlockAudio, useGameSession, useServerClock, useTimerLeft, useWakeLock } from './api';
-import { Bi, BoardGrid, BuzzQueue, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView, WonBanner, layoutRound } from './ui';
+import { QUESTION_SECONDS, inputOf, playSound, queueOf, unlockAudio, useCountdown, useGameSession, useServerClock, useSettled, useTimerLeft, useWakeLock } from './api';
+import { Bi, BoardGrid, BuzzQueue, CountdownView, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, Podium, QuestionBody, TeamGrid, TimerView, WonBanner, layoutRound } from './ui';
 
 /** Экран для проектора: только показ, без входа. Адрес: /game/screen/КОД */
 export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
@@ -9,7 +9,11 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
   useWakeLock();
   const [fs, setFs] = useState(false);
   const board = session?.board;
-  const left = useTimerLeft(board?.timer ?? { running: false, left: QUESTION_SECONDS, endsAt: null }, now);
+  const timer = board?.timer ?? { running: false, left: QUESTION_SECONDS, endsAt: null };
+  const left = useTimerLeft(timer, now);
+  const cd = useCountdown(timer, now);   // отсчёт «3-2-1» перед приёмом ответов
+  const queue = session && board?.q ? queueOf(session.buzz, board.q) : [];
+  const settled = useSettled(queue, now); // ждём запоздавшие нажатия, прежде чем объявлять, кто первый
 
   // звуки проектора: включаются кнопкой (браузер разрешает звук только после клика)
   const [sound, setSound] = useState(() => { try { return localStorage.getItem('game_sound') === '1'; } catch { return false; } });
@@ -28,19 +32,21 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
     if (next) { unlockAudio(); playSound('open'); }
   };
   const qKey = board?.q ? `${board.q.r}-${board.q.ci}-${board.q.qi}-${board.q.extra ? 'x' : ''}` : '';
-  const firstBuzz = board?.q?.mode === 'buzz' && session ? queueOf(session.buzz, board.q)[0]?.n ?? 0 : 0;
-  const prev = useRef({ qKey: '', left, final: false, first: 0 });
+  const firstBuzz = board?.q?.mode === 'buzz' && settled ? queue[0]?.n ?? 0 : 0;
+  const prev = useRef({ qKey: '', left, final: false, first: 0, cd: 0 });
   useEffect(() => {
     const p = prev.current;
     if (sound && board) {
       if (qKey && qKey !== p.qKey) playSound('open');
+      if (cd > 0 && cd !== p.cd) playSound('tick');
+      if (p.cd > 0 && cd === 0 && board.timer.running) playSound('open');
       if (board.timer.running && left > 0 && left <= 5 && left !== p.left) playSound('tick');
       if (qKey && left === 0 && p.left > 0 && qKey === p.qKey) playSound('gong');
       if (board.final && !board.q && !p.final) playSound('fanfare');
       if (firstBuzz && firstBuzz !== p.first) playSound('buzz');
     }
-    prev.current = { qKey, left, final: !!board?.final && !board?.q, first: firstBuzz };
-  }, [qKey, left, board?.final, board?.q, firstBuzz, sound]);
+    prev.current = { qKey, left, final: !!board?.final && !board?.q, first: firstBuzz, cd };
+  }, [qKey, left, board?.final, board?.q, firstBuzz, sound, cd]);
 
   useEffect(() => {
     const on = () => setFs(!!(document.fullscreenElement || (document as any).webkitFullscreenElement));
@@ -87,11 +93,11 @@ export const GameScreen: React.FC<{ code: string }> = ({ code }) => {
           <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
             <QuestionBody board={board} hideText={q.mode === 'cat' || q.mode === 'bids'} />
             {q.won == null && (q.mode === 'buzz' || q.mode === 'answer') && (
-              <div className="tools"><TimerView left={left} big /></div>
+              <div className="tools">{cd > 0 ? <CountdownView left={cd} /> : <TimerView left={left} big />}</div>
             )}
             <WonBanner board={board} teams={teams} />
             <ModeStatus board={board} teams={teams} bidders={inputOf(session.input, q).bidders} />
-            {q.mode === 'buzz' && q.won == null && <BuzzQueue board={board} teams={teams} buzz={session.buzz} />}
+            {q.mode === 'buzz' && q.won == null && <BuzzQueue board={board} teams={teams} buzz={session.buzz} settled={settled} />}
           </div>
         </div>
       )}

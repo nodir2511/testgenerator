@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { TEAM_RULES } from './content';
 import {
-  FALSE_START_MS, QUESTION_SECONDS, beep, inputOf, queueOf, signed, standings, unlockAudio, useGameSession, useServerClock, useTimerLeft, useWakeLock,
+  FALSE_START_MS, QUESTION_SECONDS, beep, inputOf, queueOf, serverNow, serverTimeOfEvent, signed, standings, unlockAudio, useClockInfo, useCountdown, useGameSession,
+  useServerClock, useSettled, useTimerLeft, useWakeLock,
 } from './api';
 import { Bi, GameShell, TimerView, tc, teamName } from './ui';
 
@@ -42,8 +43,19 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
   const [, tick] = useState(0);
   const pressing = useRef(false);
 
+  const clock = useClockInfo();
+
   const board = session?.board;
-  const left = useTimerLeft(board?.timer ?? { running: false, left: QUESTION_SECONDS, endsAt: null }, now);
+  const timer = board?.timer ?? { running: false, left: QUESTION_SECONDS, endsAt: null };
+  const left = useTimerLeft(timer, now);
+  // отсчёт «3-2-1» перед приёмом ответов: кнопка включается сама в назначенный серверный момент, второго сигнала по сети не нужно
+  const cd = useCountdown(timer, now);
+
+  // телефон сообщает ведущему задержку и погрешность часов
+  useEffect(() => {
+    if (!me || clock.rtt == null || clock.err == null) return;
+    supabase.rpc('game_net_report', { p_code: code, p_n: me.n, p_secret: me.secret, p_rtt: clock.rtt, p_err: clock.err }).then(() => undefined, () => undefined);
+  }, [me?.secret, clock]);
 
   // звук на телефоне разрешается только после касания
   useEffect(() => {
@@ -73,6 +85,9 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
   }, [me?.secret, code]);
 
   const q = board?.q ?? null;
+  // порядок нажатий объявляем, когда запоздавшие пакеты успели дойти
+  const queue = queueOf(session?.buzz ?? [], q);
+  const settled = useSettled(queue, now);
   const qid = q ? `${q.r}-${q.ci}-${q.qi}-${q.extra ? 'x' : ''}-${q.seq ?? ''}` : '';
   useEffect(() => { setNote(''); setBid(null); setBidSent(null); }, [qid]);
 
@@ -81,7 +96,7 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
   const inQ = !!q && q.won == null && (!q.only || q.only.includes(myN)) && !q.wrong.includes(myN);
   const running = !!board?.timer.running && left > 0;
   const attention = !me || !q || !inQ ? ''
-    : q.mode === 'buzz' && running ? `buzz-${qid}-${board?.timer.startedAt}`
+    : q.mode === 'buzz' && running && cd === 0 ? `buzz-${qid}-${board?.timer.startedAt}`
     : q.mode === 'cat' && q.chooser === myN ? `cat-${qid}`
     : q.mode === 'bids' ? `bids-${qid}`
     : q.mode === 'answer' && q.answerer === myN ? `answer-${qid}` : '';
@@ -172,29 +187,43 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
   const teams = session.teams;
   const myScore = board.scores[me.n] ?? 0;
   const myTeamName = teamName(teams, me.n) || me.name;
-  const queue = queueOf(session.buzz, q);
   const myPos = queue.findIndex((b) => b.n === me.n) + 1; // 0 — не нажимали
   const wrong = !!q && q.wrong.includes(me.n);
   const notMine = !!q && !!q.only && !q.only.includes(me.n);
   const buzzMode = !!q && q.mode === 'buzz' && q.won == null && !notMine && !wrong;
   // кнопку не блокируем из-за «нет связи»: нажатие всё равно уйдёт, как только сеть вернётся, а ответ сервера покажем
-  const live = buzzMode && running && lockLeft <= 0;
+  const counting = cd > 0;
+  const live = buzzMode && running && !counting && lockLeft <= 0;
   const paused = buzzMode && !board.timer.running && !!board.timer.startedAt && left > 0;
-  const early = buzzMode && !board.timer.running && !board.timer.startedAt && !q?.shown && board.timer.left > 0;
+  // до старта (в том числе во время отсчёта) кнопка нажимается, но это фальстарт
+  const early = buzzMode && (counting || (!board.timer.running && !board.timer.startedAt && !q?.shown && board.timer.left > 0));
 
-  const press = async () => {
+  const press = async (stamp?: number) => {
     if (!(live || early) || pressing.current || myPos) return;
     pressing.current = true;
     if (live) setSent(qid);
     try { navigator.vibrate?.(40); } catch { /* ignore */ }
-    const { data, error } = await supabase.rpc('game_buzz', { p_code: code, p_n: me.n, p_secret: me.secret });
+    // момент касания по серверным часам: порядок нажатий считается по нему, а не по времени прихода пакета
+    const t = serverTimeOfEvent(stamp);
+    const args = { p_code: code, p_n: me.n, p_secret: me.secret, p_t: t, p_seq: q?.seq ?? null, p_err: clock.err };
+    let res: any = { data: null, error: null };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      res = await supabase.rpc('game_buzz', args);
+      // на сервере ещё нет обновления 0.10 — старый вызов без времени
+      if (res.error?.code === 'PGRST202') res = await supabase.rpc('game_buzz', { p_code: code, p_n: me.n, p_secret: me.secret });
+      if (!res.error) break;
+      // нажатие не дошло: повторяем с тем же временем, пока оно укладывается в окно запоздавших нажатий
+      if (t == null || serverNow() - t > 1500) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
     pressing.current = false;
+    const { data, error } = res;
     if (error) { setSent(''); setNote('net'); refetch(); return; }
-    const res = data as { ok: boolean; reason?: string } | null;
-    if (!res?.ok) {
+    const out = data as { ok: boolean; reason?: string } | null;
+    if (!out?.ok) {
       setSent('');
-      setNote(res?.reason ?? 'error');
-      if (res?.reason === 'forbidden') dropMe(true);
+      setNote(out?.reason ?? 'error');
+      if (out?.reason === 'forbidden') dropMe(true);
     } else setNote('');
     refetch();
   };
@@ -292,17 +321,19 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
     // обычный вопрос: большая кнопка
     center = (
       <button
-        className={`play-btn${live && !pressed ? ' live' : ''}${early ? ' early' : ''}${myPos === 1 ? ' won' : ''}`}
+        className={`play-btn${live && !pressed ? ' live' : ''}${early ? ' early' : ''}${myPos === 1 && settled ? ' won' : ''}`}
         disabled={!(live || early) || pressed || paused}
-        onPointerDown={(e) => { e.preventDefault(); press(); }}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); press(); } }}
+        onPointerDown={(e) => { e.preventDefault(); press(e.nativeEvent.timeStamp); }}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); press(e.nativeEvent.timeStamp); } }}
       >
-        {myPos > 0 ? <span className="play-pos">{myPos}</span>
+        {myPos > 0 ? <span className="play-pos">{settled ? myPos : '…'}</span>
+          : counting ? <span className="play-pos">{cd}</span>
           : lockLeft > 0 ? <span className="play-pos">{(lockLeft / 1000).toFixed(1)}</span>
           : <Bi ru="ОТВЕТИТЬ" tj="ҶАВОБ ДОДАН" />}
       </button>
     );
     if (wrong) status = <Bi ru="Ваш ответ неверный. Отвечают другие команды" tj="Ҷавоби шумо нодуруст. Дастаҳои дигар ҷавоб медиҳанд" />;
+    else if (myPos > 0 && !settled) status = <Bi ru="Нажатие принято! Определяем порядок…" tj="Пахш қабул шуд! Тартибро муайян мекунем…" />;
     else if (myPos === 1) status = <b className="play-hot"><Bi ru="Вы первые! Отвечайте ведущему" tj="Шумо аввал! Ба пешбар ҷавоб диҳед" /></b>;
     else if (myPos > 1) status = <Bi ru={`Вы в очереди: №${myPos}`} tj={`Шумо дар навбат: №${myPos}`} />;
     else if (pressed) status = <Bi ru="Отправляем…" tj="Фиристода истодаам…" />;
@@ -310,6 +341,7 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
     else if (note === 'false_start') status = <b className="play-bad"><Bi ru="Фальстарт! После старта кнопка будет заблокирована на 1,5 с" tj="Пеш аз вақт! Баъди оғоз тугма 1,5 сония қуфл мешавад" /></b>;
     else if (note === 'closed') status = <Bi ru="Не успели — приём закрыт" tj="Нарасидед — қабул баста шуд" />;
     else if (note === 'net') status = <b className="play-bad"><Bi ru="Нажатие не дошло — проверьте связь" tj="Пахш нарасид — алоқаро санҷед" /></b>;
+    else if (counting) status = <b className="play-hot"><Bi ru="Приготовьтесь! Жмите, когда отсчёт закончится" tj="Омода шавед! Баъди тамом шудани ҳисоб пахш кунед" /></b>;
     else if (paused) status = <Bi ru="Пауза — ведущий скоро продолжит" tj="Таваққуф — пешбар ба зудӣ давом медиҳад" />;
     else if (live) status = <Bi ru="Знаете ответ? Жмите!" tj="Ҷавобро медонед? Пахш кунед!" />;
     else if (left <= 0) status = <Bi ru="Время вышло" tj="Вақт тамом шуд" />;
@@ -326,6 +358,9 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
           <p className="play-team">{myTeamName}</p>
           <p className="play-score"><Bi ru="Счёт" tj="Хол" />: <b className={myScore < 0 ? 'neg' : ''}>{signed(myScore)}</b></p>
         </div>
+        {connected && clock.err != null && clock.err > 300 && (
+          <p className="play-small play-bad" role="status"><Bi ru="Слабая связь: порядок нажатий считается по времени касания, но лучше перейти ближе к роутеру" tj="Алоқаи суст: тартиби пахшҳо аз рӯи вақти ламс ҳисоб мешавад, аммо ба роутер наздиктар шавед" /></p>
+        )}
         {board.lobby && (
           <div className="play-wait">
             <p className="play-hot"><Bi ru="Вы в игре! Ждём остальные команды, ведущий скоро начнёт" tj="Шумо дар бозӣ ҳастед! Дастаҳои дигарро интизорем, пешбар ба зудӣ оғоз мекунад" /></p>

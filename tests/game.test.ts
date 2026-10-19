@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { freshBoard, inputOf, pickSpecials, queueOf, standings, type GameQ, type LayoutRound } from '../src/game/api';
+import {
+  CLOCK_DRIFT_MS_PER_S, MAX_GOOD_RTT_MS, SETTLE_MS, bestSample, closeCall, countdownLeft, estimateAt, estimateError, freshBoard, inputOf, mergeEstimate, netLevel,
+  pickSpecials, queueOf, settleLeft, standings, type ClockSample, type GameBuzz, type GameQ, type GameTimer, type LayoutRound,
+} from '../src/game/api';
 import { buildReview, resultText } from '../src/game/review';
 import type { GameRound } from '../src/game/content';
 
@@ -74,5 +77,98 @@ describe('разбор игры', () => {
     const rows = buildReview(board, pack, [{ n: 1, name: 'A' }, { n: 2, name: 'B' }]);
     expect(rows[0].q).toBe('H2O?');
     expect(resultText(rows[0])).toBe('Верно: B; ошиблись: A');
+  });
+});
+
+
+describe('единые часы', () => {
+  const sample = (rtt: number, server = 1_000_000, perf = 5000): ClockSample => ({ rtt, server, perf });
+
+  it('берёт самую быструю пробу: у неё наименьшая погрешность', () => {
+    expect(bestSample([sample(300), sample(40), sample(120)])?.rtt).toBe(40);
+    expect(bestSample([])).toBeNull();
+  });
+  it('ход времени между пробами считается по монотонным часам, а не по системным', () => {
+    const e = { server: 1_000_000, perf: 5000, rtt: 40 };
+    expect(estimateAt(e, 5000)).toBe(1_000_000);
+    expect(estimateAt(e, 7500)).toBe(1_002_500);
+  });
+  it('погрешность = половина задержки + уход часов со времени пробы', () => {
+    const e = { server: 0, perf: 0, rtt: 100 };
+    expect(estimateError(e, 0)).toBe(50);
+    expect(estimateError(e, 10_000)).toBeCloseTo(50 + 10 * CLOCK_DRIFT_MS_PER_S);
+  });
+  it('медленная проба не вытесняет точную оценку', () => {
+    const good = { server: 1_000_000, perf: 5000, rtt: 30 };
+    expect(mergeEstimate(good, sample(900, 1_010_000, 15_000), 15_000)).toBe(good);
+  });
+  it('новая быстрая проба заменяет устаревшую оценку', () => {
+    const old = { server: 1_000_000, perf: 5000, rtt: 200 };
+    const next = mergeEstimate(old, sample(30, 1_100_000, 105_000), 105_000);
+    expect(next).toEqual({ server: 1_100_000, perf: 105_000, rtt: 30 });
+  });
+  it('очень медленные пробы принимаются только если оценки ещё нет или после сна устройства', () => {
+    const slow = sample(MAX_GOOD_RTT_MS + 500);
+    expect(mergeEstimate(null, slow, 6000)).not.toBeNull();
+    const prev = { server: 1, perf: 1, rtt: 20 };
+    expect(mergeEstimate(prev, slow, 6000)).toBe(prev);
+    expect(mergeEstimate(prev, slow, 6000, true)?.rtt).toBe(slow.rtt);
+  });
+  it('без новых проб оценка не меняется', () => {
+    const prev = { server: 1, perf: 1, rtt: 20 };
+    expect(mergeEstimate(prev, null, 10)).toBe(prev);
+  });
+});
+
+describe('отсчёт «3-2-1»', () => {
+  const timer = (p: Partial<GameTimer>): GameTimer => ({ running: true, left: 30, endsAt: 40_000, startedAt: 10_000, ...p });
+  it('считает секунды до начала приёма по серверному времени', () => {
+    expect(countdownLeft(timer({}), 7_000)).toBe(3);
+    expect(countdownLeft(timer({}), 8_001)).toBe(2);
+    expect(countdownLeft(timer({}), 9_990)).toBe(1);
+  });
+  it('0 — приём идёт, таймер не запущен или это продолжение после паузы', () => {
+    expect(countdownLeft(timer({}), 10_000)).toBe(0);
+    expect(countdownLeft(timer({}), 20_000)).toBe(0);
+    expect(countdownLeft(timer({ running: false }), 7_000)).toBe(0);
+    expect(countdownLeft(timer({ startedAt: null }), 7_000)).toBe(0);
+  });
+});
+
+describe('порядок нажатий при слабой связи', () => {
+  const b = (n: number, t: number, extra: Partial<GameBuzz> = {}): GameBuzz => ({ n, t, s: 1000, ...extra });
+
+  it('ждёт запоздавшие нажатия, пока первое свежее', () => {
+    expect(settleLeft([b(1, 100, { a: 1000 })], 1000)).toBe(SETTLE_MS);
+    expect(settleLeft([b(1, 100, { a: 1000 })], 1000 + SETTLE_MS)).toBe(0);
+    expect(settleLeft([], 5000)).toBe(0);
+  });
+  it('ожидание не длиннее SETTLE_MS, даже если часы устройства отстают', () => {
+    expect(settleLeft([b(1, 100, { a: 1_000_000 })], 0)).toBe(SETTLE_MS);
+  });
+  it('нажатия без времени прихода (старые записи) считаются установленными', () => {
+    expect(settleLeft([b(1, 100)], 5000)).toBe(0);
+  });
+  it('«почти одновременно»: разница меньше суммы погрешностей и запаса на сенсор', () => {
+    const c = closeCall([b(1, 1000, { e: 20 }), b(2, 1040, { e: 20 })]);
+    expect(c).toMatchObject({ a: 1, b: 2, gap: 40 });
+    expect(closeCall([b(1, 1000, { e: 20 }), b(2, 1500, { e: 20 })])).toBeNull();
+  });
+  it('у нажатий без данных о погрешности остаётся запас на сенсор', () => {
+    expect(closeCall([b(1, 1000), b(2, 1020)])).not.toBeNull();
+    expect(closeCall([b(1, 1000), b(2, 1100)])).toBeNull();
+  });
+  it('одно нажатие — сравнивать не с кем', () => {
+    expect(closeCall([b(1, 1000)])).toBeNull();
+  });
+});
+
+describe('связь команд для ведущего', () => {
+  it('оценивает уровень по задержке, погрешности и свежести данных', () => {
+    expect(netLevel({ rtt: 40, err: 20, age: 5 })).toBe('good');
+    expect(netLevel({ rtt: 250, err: 125, age: 5 })).toBe('fair');
+    expect(netLevel({ rtt: 700, err: 350, age: 5 })).toBe('bad');
+    expect(netLevel({ rtt: 40, err: 20, age: 200 })).toBe('none');
+    expect(netLevel(undefined)).toBe('none');
   });
 });
