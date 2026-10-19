@@ -180,6 +180,7 @@ export const App: React.FC = () => {
 
           {/* Мобильная кнопка бургера */}
           <div className="md:hidden flex items-center space-x-2">
+            <TelegramLink />
             <button onClick={openReleases} className="relative p-2 text-slate-500 hover:text-blue-600 rounded-lg transition" title="Что нового" aria-label="Что нового">
               <Bell className="w-4 h-4" />
               {unread.length > 0 && (
