@@ -359,14 +359,14 @@ export const SavedTicketsView: React.FC = () => {
                               <span className="text-slate-400 font-normal mr-1">Вопросов: {t.questions?.length}</span>
                               {!cluster && (<>
                               <button
-                                onClick={() => exportSingleTicketDocx(batch.title, t, batch.subject?.name || 'Экзамен', 'ru')}
+                                onClick={async () => { try { await exportSingleTicketDocx(batch.title, t, batch.subject?.name || 'Экзамен', 'ru', await keyArchiveExtras(batch.title, [t], batch.subject?.name || '', { subjectId: batch.subject_id, params: batch.generation_params }, 'ru')); } catch (err: any) { notifyError(err, 'Ошибка при экспорте в Word'); } }}
                                 className="px-2 py-0.5 text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded border border-blue-200 transition"
                                 title="Скачать этот вариант на русском"
                               >
                                 RU (.docx)
                               </button>
                               <button
-                                onClick={() => exportSingleTicketDocx(batch.title, t, batch.subject?.name || 'Экзамен', 'tg')}
+                                onClick={async () => { try { await exportSingleTicketDocx(batch.title, t, batch.subject?.name || 'Экзамен', 'tg', await keyArchiveExtras(batch.title, [t], batch.subject?.name || '', { subjectId: batch.subject_id, params: batch.generation_params }, 'tg')); } catch (err: any) { notifyError(err, 'Ошибка при экспорте в Word'); } }}
                                 className="px-2 py-0.5 text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded border border-emerald-200 transition"
                                 title="Скачать этот вариант на таджикском"
                               >

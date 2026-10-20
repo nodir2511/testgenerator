@@ -1064,15 +1064,21 @@ export async function buildTicketsFile(
   return { blob: await zip.generateAsync({ type: 'blob' }), fileName: `${examTitle}_${suffix}.zip` };
 }
 
-// Скачать один вариант
+// Скачать один вариант; с ключами (extraFiles) — ZIP: вариант и ключи рядом
 export async function exportSingleTicketDocx(
   examTitle: string,
   ticket: ExportTicket,
   subjectName: string = 'Химия',
-  lang: 'ru' | 'tg' = 'ru'
+  lang: 'ru' | 'tg' = 'ru',
+  extraFiles: Array<{ name: string; blob: Blob }> = []
 ) {
   const file = await buildSingleTicketFile(examTitle, ticket, subjectName, lang);
-  saveAs(file.blob, file.fileName);
+  if (extraFiles.length === 0) return saveAs(file.blob, file.fileName);
+  const zip = new JSZip();
+  zip.file(file.fileName, file.blob);
+  for (const e of extraFiles) zip.file(e.name, e.blob);
+  const suffix = lang === 'tg' ? 'TJ' : 'RU';
+  saveAs(await zip.generateAsync({ type: 'blob' }), `${examTitle} – Вариант ${ticket.ticket_number}_${suffix}.zip`);
 }
 
 // Скачать партию билетов

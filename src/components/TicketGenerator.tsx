@@ -448,6 +448,20 @@ export const TicketGenerator: React.FC = () => {
     }
   };
 
+  // Один вариант вместе с его ключами (ZIP)
+  const exportSingleWithKey = async (t: any, lang: 'ru' | 'tg') => {
+    if (!generatedBatch) return;
+    try {
+      const subj = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия';
+      await exportSingleTicketDocx(
+        generatedBatch.title || batchTitle, t, subj, lang,
+        await keyArchiveExtras(generatedBatch.title || batchTitle, [t], subj, { subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params }, lang)
+      );
+    } catch (err: any) {
+      notifyError(err, 'Ошибка экспорта в Word');
+    }
+  };
+
   const generatedSubjectName = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || '';
   const handleExportKey = async () => {
     if (!generatedBatch || !generatedBatch.tickets) return;
@@ -929,14 +943,14 @@ export const TicketGenerator: React.FC = () => {
                   <div className="flex items-center space-x-1.5">
                     <span className="text-xs font-normal text-slate-500 mr-1">Вопросов: {t.questions.length}</span>
                     <button
-                      onClick={() => exportSingleTicketDocx(generatedBatch?.title || batchTitle, t, subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия', 'ru')}
+                      onClick={() => exportSingleWithKey(t, 'ru')}
                       className="px-2 py-0.5 text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded border border-blue-200 transition"
                       title="Скачать Вариант на русском"
                     >
                       RU (.docx)
                     </button>
                     <button
-                      onClick={() => exportSingleTicketDocx(generatedBatch?.title || batchTitle, t, subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия', 'tg')}
+                      onClick={() => exportSingleWithKey(t, 'tg')}
                       className="px-2 py-0.5 text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded border border-emerald-200 transition"
                       title="Скачать Вариант на таджикском"
                     >
