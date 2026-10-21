@@ -933,11 +933,9 @@ export async function buildSingleTicketBlob(
   subjectName: string = 'Химия',
   isTg: boolean
 ): Promise<Blob> {
-  // Какие главы и темы вошли в билеты (одинаково на каждом варианте)
-  const selInfo = isTg ? ticket.selection_info?.tg : ticket.selection_info?.ru;
+  // В шапке только номер варианта; предмет и темы указываются только в ключах
   const docChildren: any[] = [];
   const headerVariant = isTg ? `Варианти ${ticket.ticket_number}` : `Вариант ${ticket.ticket_number}`;
-  const headerSubject = isTg ? `Фан: ${subjectName}` : `Предмет: ${subjectName}`;
 
   // Шапка отдельного билета (по требованию: «рус "Вариант 1", тадж "Варианти 1"»)
   docChildren.push(
@@ -953,26 +951,6 @@ export async function buildSingleTicketBlob(
         }),
       ],
     }),
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 140 },
-      children: [
-        new TextRun({
-          text: `${headerSubject}${examTitle ? `  •  ${examTitle}` : ''}`,
-          font: 'Times New Roman',
-          size: 22,
-          color: '555555',
-        }),
-      ],
-    }),
-    ...(selInfo ? [new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 140 },
-      children: [
-        new TextRun({ text: isTg ? 'Дохил шудааст: ' : 'Включено: ', bold: true, font: 'Times New Roman', size: 22, color: '555555' }),
-        new TextRun({ text: selInfo, font: 'Times New Roman', size: 22, color: '555555' }),
-      ],
-    })] : []),
     new Paragraph({
       spacing: { after: 180 },
       border: {
