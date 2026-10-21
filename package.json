@@ -1,11 +1,7 @@
 {
   "name": "exam-ticket-generator",
   "private": true,
-<<<<<<< HEAD
-  "version": "0.10.8",
-=======
-  "version": "0.10.1",
->>>>>>> 7720b09 (В шапке билетов только «Вариант N»; предмет и темы только в ключах (0.10.1))
+  "version": "0.10.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
