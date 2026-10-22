@@ -239,6 +239,27 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
   const questions = pageResults.flatMap((r) => r.data?.questions || []);
   const totalCount = data?.totalCount || 0;
+
+  // Связи «тест ↔ открытый вопрос / соответствие»: показываем, где ещё используется вопрос
+  const shownIds = questions.map((q) => q.id);
+  const { data: links } = useQuery({
+    queryKey: ['question-links', shownIds.join(',')],
+    enabled: shownIds.length > 0,
+    queryFn: async () => {
+      const out = new Map<string, string[]>();
+      const push = (id: string, label: string) => out.set(id, [...(out.get(id) || []), label]);
+      const label = (x: any) => (x.type === 'test' ? 'тест' : x.type === 'open' ? 'открытый' : 'соответствие') + (x.num != null ? ` №${x.num}` : '');
+      const { data: back } = await supabase.from('questions').select('id, type, num, linked_ids').eq('is_deleted', false).overlaps('linked_ids', shownIds);
+      for (const b of back || []) for (const t of (b.linked_ids || []) as string[]) if (shownIds.includes(t)) push(t, label(b));
+      const targets = Array.from(new Set(questions.flatMap((q) => ((q as any).linked_ids || []) as string[])));
+      if (targets.length) {
+        const { data: tg } = await supabase.from('questions').select('id, type, num').in('id', targets);
+        const byId = new Map((tg || []).map((x: any) => [x.id, x]));
+        for (const q of questions) for (const t of ((q as any).linked_ids || []) as string[]) if (byId.has(t)) push(q.id, label(byId.get(t)));
+      }
+      return out;
+    },
+  });
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
   // После удаления последнего вопроса на странице возвращаемся на последнюю существующую
@@ -513,6 +534,11 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                       ⚠ {ISSUE_LABELS[code]}
                     </span>
                   ))}
+                  {(links?.get(q.id) || []).length > 0 && (
+                    <span className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded" title="Эти вопросы не попадут в один билет">
+                      🔗 Связан: {(links?.get(q.id) || []).join(', ')}
+                    </span>
+                  )}
                   <span className="text-[10px] text-slate-400 font-mono">
                     v{q.version}
                   </span>
