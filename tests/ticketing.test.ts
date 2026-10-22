@@ -277,7 +277,7 @@ describe('ключи ответов', () => {
     expect(selectionInfo(chapters.slice(0, 2), topics, [], [])).toBe('Главы 1, 2 — полностью');
   });
 
-  it('вариант билета: под шапкой печатаются главы и темы (рус. и тадж.)', async () => {
+  it('вариант билета: в шапке только номер варианта, без предмета, глав и тем (рус. и тадж.)', async () => {
     const chapters = [1, 2, 3, 4].map((n) => ({ id: 'c' + n, order_index: n }));
     const topics = chapters.flatMap((c) => [1, 2, 3, 4, 5].map((n) => ({ id: `${c.id}t${n}`, chapter_id: c.id, order_index: n })));
     const picked = [...topics.filter((t) => t.chapter_id !== 'c4'), ...topics.filter((t) => t.chapter_id === 'c4' && t.order_index <= 4)].map((t) => t.id);
@@ -288,12 +288,9 @@ describe('ключи ответов', () => {
       const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
       return (xml.match(/<w:t[^>]*>[^<]*<\/w:t>/g) || []).map((x) => x.replace(/<[^>]+>/g, '')).join('|');
     };
-    expect(await textOf(false)).toContain('Включено: |Главы 1, 2, 3 — полностью; глава 4 — темы 1–4');
-    expect(await textOf(true)).toContain('Дохил шудааст: |Бобҳои 1, 2, 3 — пурра; боби 4 — мавзӯъҳои 1–4');
-    // без описания строки нет
-    const blob = await buildSingleTicketBlob('Экзамен', { ticket_number: 1, questions: [] }, 'Химия', false);
-    const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
-    expect(xml).not.toContain('Включено');
+    // в самом билете только «Вариант N»: ни предмета, ни экзамена, ни глав и тем (они только в ключах)
+    expect(await textOf(false)).toBe('Вариант 1');
+    expect(await textOf(true)).toBe('Варианти 1');
   });
 
   it('архив «RU + TJ»: варианты обоих языков и ключи в одном ZIP', async () => {
