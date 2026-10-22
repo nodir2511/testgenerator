@@ -1,7 +1,7 @@
 import { 
   Document, 
   Packer, 
-  Paragraph, 
+  Paragraph as DocxParagraph, 
   TextRun, 
   ImageRun, 
   AlignmentType, 
@@ -25,6 +25,14 @@ import {
 import { splitFractions, type MathNode, newFmtState, tokenizeFormatted } from './fractions';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
+
+// Абзацы «держатся» со следующим: вместе с cantSplit у строк это не даёт вопросу с вариантами
+// разорваться между страницами (у последней строки таблицы вопроса признак снимается, см. keepTogether)
+class Paragraph extends DocxParagraph {
+  constructor(options: ConstructorParameters<typeof DocxParagraph>[0]) {
+    super(typeof options === 'string' ? options : { keepNext: true, keepLines: true, ...options });
+  }
+}
 
 // Основной шрифт — 14 pt (в половинках пункта)
 const FONT_SIZE = 28;
@@ -305,7 +313,7 @@ function createAnswerBoxes(label: string, n: number): Table {
     width: { size: LABEL + n * BOX + (n - 1) * GAP, type: WidthType.DXA },
     columnWidths: [LABEL, ...Array.from({ length: n }, (_, i) => (i > 0 ? [GAP, BOX] : [BOX])).flat()],
     borders: NO_TABLE_BORDERS,
-    rows: [new TableRow({
+    rows: [new TableRow({ cantSplit: true,
       height: { value: BOX, rule: HeightRule.EXACT },
       children: [
         new TableCell({
@@ -366,8 +374,24 @@ export async function estimateQuestionHeightPt(q: any, isTg: boolean, compact = 
   return h + 25; // промежуток между вопросами
 }
 
-// Генерация таблицы для одного вопроса
+// Снимает «держать со следующим» у абзацев последней строки таблицы: иначе все вопросы склеятся в цепочку
+function stripKeepNext(node: any) {
+  if (!node || typeof node !== 'object' || !Array.isArray(node.root)) return;
+  node.root = node.root.filter((c: any) => c?.rootKey !== 'w:keepNext');
+  node.root.forEach(stripKeepNext);
+}
+function keepTogether(table: Table): Table {
+  const rows = ((table as any).root as any[]).filter((c) => c instanceof TableRow);
+  if (rows.length) stripKeepNext(rows[rows.length - 1]);
+  return table;
+}
+
+// Генерация таблицы для одного вопроса: вопрос целиком переносится на новую страницу, а не рвётся
 export async function createQuestionTable(q: any, qNumber: number, isTg: boolean, opts: QuestionOpts = {}): Promise<Table> {
+  return keepTogether(await buildQuestionTable(q, qNumber, isTg, opts));
+}
+
+async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: QuestionOpts = {}): Promise<Table> {
   const cm = opts.compact ? COMPACT_MARGINS : CELL_MARGINS;
   const qText = isTg ? (q.content_tg || q.content) : (q.content_ru || q.content) || '';
   const imgBuffer = q.image_url ? await fetchImageBuffer(q.image_url) : null;
@@ -390,7 +414,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
     if (isShort) {
       const rows: TableRow[] = [
-        new TableRow({
+        new TableRow({ cantSplit: true,
           children: [
             createNumberCell(qNumber),
             new TableCell({
@@ -410,7 +434,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
       if (imgBuffer) {
         rows.push(
-          new TableRow({
+          new TableRow({ cantSplit: true,
             children: [
               createEmptyNumCell(cm),
               new TableCell({
@@ -453,7 +477,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
         );
       }
 
-      rows.push(new TableRow({ children: optCells }));
+      rows.push(new TableRow({ cantSplit: true, children: optCells }));
 
       return new Table({
         width: { size: 9348, type: WidthType.DXA },
@@ -463,7 +487,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       });
     } else if (isMedium) {
       const rows: TableRow[] = [
-        new TableRow({
+        new TableRow({ cantSplit: true,
           children: [
             createNumberCell(qNumber),
             new TableCell({
@@ -483,7 +507,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
       if (imgBuffer) {
         rows.push(
-          new TableRow({
+          new TableRow({ cantSplit: true,
             children: [
               createEmptyNumCell(cm),
               new TableCell({
@@ -509,7 +533,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       const oBText = oB ? (isTg ? (oB.text_tg || oB.text) : (oB.text_ru || oB.text)) : '';
 
       rows.push(
-        new TableRow({
+        new TableRow({ cantSplit: true,
           children: [
             createEmptyNumCell(cm),
             new TableCell({
@@ -560,7 +584,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       const oDText = oD ? (isTg ? (oD.text_tg || oD.text) : (oD.text_ru || oD.text)) : '';
 
       rows.push(
-        new TableRow({
+        new TableRow({ cantSplit: true,
           children: [
             createEmptyNumCell(cm),
             new TableCell({
@@ -613,7 +637,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       });
     } else {
       const rows: TableRow[] = [
-        new TableRow({
+        new TableRow({ cantSplit: true,
           children: [
             createNumberCell(qNumber),
             new TableCell({
@@ -632,7 +656,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
       if (imgBuffer) {
         rows.push(
-          new TableRow({
+          new TableRow({ cantSplit: true,
             children: [
               createEmptyNumCell(cm),
               new TableCell({
@@ -656,7 +680,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
         const o = opts[i];
         const oText = o ? (isTg ? (o.text_tg || o.text) : (o.text_ru || o.text)) : '';
         rows.push(
-          new TableRow({
+          new TableRow({ cantSplit: true,
             children: [
               createEmptyNumCell(cm),
               new TableCell({
@@ -714,7 +738,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
     );
 
     const rows: TableRow[] = [
-      new TableRow({
+      new TableRow({ cantSplit: true,
         children: [
           createNumberCell(qNumber),
           new TableCell({
@@ -734,7 +758,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
     if (imgBuffer) {
       rows.push(
-        new TableRow({
+        new TableRow({ cantSplit: true,
           children: [
             createEmptyNumCell(cm),
             new TableCell({
@@ -808,7 +832,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
       }
 
       rows.push(
-        new TableRow({
+        new TableRow({ cantSplit: true,
           children: [
             createEmptyNumCell(cm),
             new TableCell({
@@ -856,7 +880,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
   // ОТКРЫТЫЙ ВОПРОС С ПОЛЕМ ДЛЯ ОТВЕТА
   const rows: TableRow[] = [
-    new TableRow({
+    new TableRow({ cantSplit: true,
       children: [
         createNumberCell(qNumber),
         new TableCell({
@@ -875,7 +899,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
   if (imgBuffer) {
     rows.push(
-      new TableRow({
+      new TableRow({ cantSplit: true,
         children: [
           createEmptyNumCell(cm),
           new TableCell({
@@ -896,7 +920,7 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
   const ansLabel = isTg ? 'Ҷавоб: ' : 'Ответ: ';
   rows.push(
-    new TableRow({
+    new TableRow({ cantSplit: true,
       children: [
         createEmptyNumCell(cm),
         new TableCell({

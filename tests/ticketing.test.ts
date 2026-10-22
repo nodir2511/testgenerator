@@ -391,3 +391,26 @@ describe('separateLinked', () => {
     expect(JSON.stringify(lists)).toBe(before);
   });
 });
+
+describe('перенос вопроса между страницами', () => {
+  it('строки вопроса не рвутся и держатся вместе, у последней строки признак снят', async () => {
+    const q = (type: string, n: number) => toSnapshot({
+      ...makePool(type, 1, 1)[0], id: `${type}${n}`,
+      options: type === 'test' ? [0, 1, 2, 3].map((k) => ({ id: `o${n}${k}`, text: `Вариант ${k} достаточно длинный текст ответа номер ${k}`, order_index: k + 1, is_correct: k === 1 })) : undefined,
+    }, { shuffleOptions: false, shuffleMatching: false });
+    const tickets = { ticket_number: 1, questions: [q('test', 1), q('open', 2), q('test', 3)].map((s) => ({ question_snapshot: s })) };
+    const blob = await buildSingleTicketBlob('Экзамен', tickets, 'Химия', false);
+    const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
+    expect(xml).toContain('<w:cantSplit');
+    expect(xml).toContain('<w:keepNext');
+    // в каждой таблице верхнего уровня последняя строка без keepNext, предыдущие — с ним
+    const tables = xml.split('<w:tbl>').slice(1).map((t) => t.split('</w:tbl>')[0]);
+    const multi = tables.filter((t) => (t.match(/<w:tr[ >]/g) || []).length >= 2 && !t.includes('<w:tbl>'));
+    expect(multi.length).toBeGreaterThan(0);
+    for (const t of multi) {
+      const rows = t.split(/<w:tr[ >]/).slice(1);
+      expect(rows[rows.length - 1]).not.toContain('<w:keepNext');
+      expect(rows[0]).toContain('<w:keepNext');
+    }
+  });
+});
