@@ -9,7 +9,7 @@ import { describeError, notifyError, notifyInfo } from '../lib/errors';
 import { keyKindOf } from '../lib/answerKey';
 import { CLUSTER_SLOTS, buildClusterZip, type ClusterSettings, type ClusterVariant } from '../lib/clusterExport';
 import {
-  fitSettings, pickParallel, chapterTotals, totalsOf, poolStats as calcPoolStats, toSnapshot, preferUnused,
+  fitSettings, pickParallel, separateLinked, chapterTotals, totalsOf, poolStats as calcPoolStats, toSnapshot, preferUnused,
 } from '../../supabase/functions/_shared/ticketing';
 import { Layers, Loader2, Download, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
 
@@ -59,7 +59,7 @@ const coverDate = (iso: string) => (/^d{4}-d{2}-d{2}$/.test(iso) ? `${iso.slice(
 
 const PREFS_KEY = 'cluster_v1';
 
-const LIGHT_COLUMNS = 'id, type, chapter_id, topic_id, num, seq, created_at';
+const LIGHT_COLUMNS = 'id, type, chapter_id, topic_id, num, seq, created_at, linked_ids';
 
 // Все вопросы предмета без вариантов ответа (быстро), страницы по 1000 — параллельно
 async function loadLightQuestions(subjectId: string): Promise<any[]> {
@@ -117,6 +117,7 @@ async function pickForSlot(subjectId: string, topicIds: string[], chapterIds: st
   const tests = pick('test', fit.settings.testCount);
   const matchings = pick('matching', fit.settings.matchingCount);
   const opens = pick('open', fit.settings.openCount);
+  separateLinked([tests, matchings, opens], selected);
 
   // Полные данные (варианты ответов, пары соответствия) — только для выбранных вопросов
   const ids = new Set<string>();

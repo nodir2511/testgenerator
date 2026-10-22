@@ -95,6 +95,8 @@ export interface Question {
   correct_numeric_answer?: number | null;
   seq?: number | null;
   num?: number | null;
+  /** Тесты, из которых сделан этот вопрос: с ними он не попадает в один билет */
+  linked_ids?: string[] | null;
   version: number;
   is_deleted: boolean;
   deleted_at?: string | null;

@@ -322,6 +322,52 @@ export function pickParallel(
   return tickets;
 }
 
+/**
+ * Развод связанных вопросов: открытый вопрос, сделанный из теста (или задание на соответствие,
+ * собранное из тестов), не должен попадать в один билет с этим тестом. Связь хранится в
+ * questions.linked_ids у производного вопроса; здесь она читается в обе стороны.
+ * Порядок видов: тесты остаются на местах, затем заменяются соответствия, затем открытые.
+ * Замена — любой не использованный ни в одном билете вопрос того же вида (сначала из той же темы),
+ * не связанный с остальными вопросами билета. Если замены нет, вопрос остаётся как есть.
+ */
+export function separateLinked(kinds: any[][][], pool: any[], rnd: Rnd = Math.random): void {
+  const links = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    if (!links.has(a)) links.set(a, new Set());
+    links.get(a)!.add(b);
+  };
+  for (const q of pool) for (const id of q.linked_ids ?? []) { link(q.id, id); link(id, q.id); }
+  if (links.size === 0) return;
+  const clash = (q: any, ids: Set<string>) => {
+    const l = links.get(q.id);
+    if (!l) return false;
+    for (const id of l) if (ids.has(id)) return true;
+    return false;
+  };
+  const used = new Set<string>();
+  for (const kind of kinds) for (const t of kind) for (const q of t) used.add(q.id);
+  const T = kinds[0]?.length ?? 0;
+  for (let k = 0; k < T; k++) {
+    for (let ki = 1; ki < kinds.length; ki++) {
+      const list = kinds[ki][k];
+      for (let i = 0; i < list.length; i++) {
+        const others = new Set<string>();
+        kinds.forEach((kind, kj) => kind[k].forEach((q, j) => { if (!(kj === ki && j === i)) others.add(q.id); }));
+        if (!clash(list[i], others)) continue;
+        const type = list[i].type;
+        const fits = pool.filter((c) => c.type === type && !used.has(c.id) && !clash(c, others));
+        if (fits.length === 0) continue;
+        const same = fits.filter((c) => c.topic_id === list[i].topic_id);
+        const from = same.length ? same : fits;
+        const pick = from[randInt(from.length, rnd)];
+        used.delete(list[i].id);
+        used.add(pick.id);
+        list[i] = pick;
+      }
+    }
+  }
+}
+
 export type ChapterTotals = Record<string, { test: number; matching: number; open: number }>;
 
 /** Считает все вопросы по главам и видам из строк { chapter_id, type } */
@@ -342,6 +388,7 @@ export function buildTickets(pool: any[], s: Settings, rnd: Rnd = Math.random, t
   const tests = pickParallel(pool.filter((q) => q.type === 'test'), s.testCount, T, rnd, totalsOf(totals, 'test'));
   const matching = pickParallel(pool.filter((q) => q.type === 'matching'), s.matchingCount, T, rnd, totalsOf(totals, 'matching'));
   const open = pickParallel(pool.filter((q) => q.type === 'open'), s.openCount, T, rnd, totalsOf(totals, 'open'));
+  separateLinked([tests, matching, open], pool, rnd);
   const out: Array<{ ticketNumber: number; questions: any[] }> = [];
   for (let k = 0; k < T; k++) {
     const qs = [...tests[k], ...matching[k], ...open[k]];

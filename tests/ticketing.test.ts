@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import JSZip from 'jszip';
 import {
-  TG_LIMITS, preferUnused, buildTickets, checkSettings, fitSettings, parseCount, parseNumbers, pickParallel, poolStats, toSnapshot, DEFAULT_SETTINGS,
+  TG_LIMITS, preferUnused, buildTickets, checkSettings, fitSettings, parseCount, parseNumbers, pickParallel, poolStats, separateLinked, toSnapshot, DEFAULT_SETTINGS,
 } from '../supabase/functions/_shared/ticketing';
 import { buildSingleTicketBlob, buildTicketsFile } from '../src/lib/docxExport';
 import { buildAnswerKeyDocx, keyKindOf, matchingAnswer, openAnswer, selectionInfo, testAnswer } from '../src/lib/answerKey';
@@ -365,5 +365,29 @@ describe('preferUnused (кластер: без повторов с прошлы�
     const r = preferUnused(pool, new Set(['q0', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6']), 5);
     expect(r.fresh).toBe(false);
     expect(r.pool).toHaveLength(10);
+  });
+});
+
+describe('separateLinked', () => {
+  it('открытый вопрос, сделанный из теста, не попадает в билет с этим тестом', () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const tests = makePool('test', 2, 12);
+      const opens = makePool('open', 2, 12).map((o, i) => ({ ...o, linked_ids: [tests[i].id] }));
+      const matchings = makePool('matching', 2, 12).map((m, i) => ({ ...m, linked_ids: [tests[i].id, tests[(i + 5) % 24].id] }));
+      const pool = [...tests, ...matchings, ...opens];
+      const out = buildTickets(pool, { ...DEFAULT_SETTINGS, ticketCount: 2, testCount: 10, matchingCount: 2, openCount: 3 }, rng(seed));
+      for (const t of out) {
+        const ids = new Set(t.questions.map((q) => q.question_id));
+        for (const q of pool) if (ids.has(q.id)) for (const l of q.linked_ids ?? []) expect(ids.has(l)).toBe(false);
+      }
+    }
+  });
+
+  it('без связей ничего не меняет', () => {
+    const pool = makePool('open', 2, 6);
+    const lists = [pickParallel(pool, 3, 2, rng(4))];
+    const before = JSON.stringify(lists);
+    separateLinked(lists, pool, rng(5));
+    expect(JSON.stringify(lists)).toBe(before);
   });
 });
