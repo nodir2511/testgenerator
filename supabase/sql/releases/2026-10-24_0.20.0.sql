@@ -5,5 +5,5 @@ select public.add_site_release(
   jsonb_build_array(
     jsonb_build_object('kind','improved','min_rank',1,'text','Список вопросов, генератор билетов и экспорт открываются и работают заметно быстрее')
   ),
-  '2026-10-24 12:00:00+05'
+  '2026-10-24 00:15:00+05'
 );

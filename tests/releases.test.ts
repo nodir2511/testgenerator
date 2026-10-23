@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rankOf, unreadReleases, visibleItems, visibleReleases } from '../src/lib/releases';
+import { compareSemver, rankOf, unreadReleases, visibleItems, visibleReleases } from '../src/lib/releases';
 import { ReleaseRank, SiteRelease, SiteReleaseItem } from '../src/types/database';
 
 const item = (id: string, min_rank: ReleaseRank, order_index = 0): SiteReleaseItem =>
@@ -15,6 +15,16 @@ describe('rankOf', () => {
     expect(rankOf('user', false)).toBe(1);
     expect(rankOf('subject_teacher', false)).toBe(1);
     expect(rankOf(undefined, false)).toBe(1);
+  });
+});
+
+describe('compareSemver', () => {
+  it('корректно сравнивает семантические версии', () => {
+    expect(compareSemver('0.23.1', '0.23.0')).toBeGreaterThan(0);
+    expect(compareSemver('0.23.0', '0.20.4')).toBeGreaterThan(0);
+    expect(compareSemver('0.20.4', '0.20.4')).toBe(0);
+    expect(compareSemver('0.20.0', '0.21.0')).toBeLessThan(0);
+    expect(compareSemver('v0.23.1', '0.23.0')).toBeGreaterThan(0);
   });
 });
 
@@ -40,12 +50,21 @@ describe('видимость обновлений', () => {
     expect(visibleReleases(list, 3).map((r) => r.id)).toEqual(['new', 'adminOnly', 'old']);
   });
 
+  it('сортирует версии по SemVer даже если дата более старой версии позже по времени', () => {
+    const list = [
+      release('0.20.4', '2026-10-24T18:00:00Z', [item('x', 1)]),
+      release('0.23.1', '2026-10-23T21:27:00Z', [item('y', 1)]),
+      release('0.22.0', '2026-10-23T21:10:00Z', [item('z', 1)]),
+    ];
+    const res = visibleReleases(list, 1);
+    expect(res.map((r) => r.version)).toEqual(['0.23.1', '0.22.0', '0.20.4']);
+  });
+
   it('определяет непрочитанные версии', () => {
     const list = [release('a', '2026-02-01T00:00:00Z', [item('x', 1)]), release('b', '2026-01-01T00:00:00Z', [item('y', 1)])];
     expect(unreadReleases(list, new Set(['b'])).map((r) => r.id)).toEqual(['a']);
   });
 });
-
 
 describe('файлы миграций релизов (SQL)', () => {
   it('все пункты релизов используют допустимый kind: new, fixed, improved', async () => {

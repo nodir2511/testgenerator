@@ -22,12 +22,46 @@ export function visibleItems(items: SiteReleaseItem[], rank: ReleaseRank): SiteR
   return items.filter((i) => i.min_rank <= rank).sort((a, b) => a.order_index - b.order_index);
 }
 
+/** Сравнение версий SemVer (например, 0.23.1 > 0.20.4) */
+export function compareSemver(a: string, b: string): number {
+  const parse = (v: string) =>
+    v
+      .trim()
+      .replace(/^v/i, '')
+      .split(/[-+]/)[0]
+      .split('.')
+      .map((part) => {
+        const n = parseInt(part, 10);
+        return isNaN(n) ? 0 : n;
+      });
+
+  const pa = parse(a);
+  const pb = parse(b);
+
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] ?? 0;
+    const nb = pb[i] ?? 0;
+    if (na !== nb) return na - nb;
+  }
+  return 0;
+}
+
+/** Сортировка релизов от новых к старым: по SemVer, а при равенстве или не-semver — по дате */
+export function compareReleaseOrder(a: SiteRelease, b: SiteRelease): number {
+  const isSemver = (v: string) => /^\s*v?\d+(\.\d+)*/i.test(v);
+  if (isSemver(a.version) && isSemver(b.version)) {
+    const cmp = compareSemver(b.version, a.version);
+    if (cmp !== 0) return cmp;
+  }
+  return b.released_at.localeCompare(a.released_at);
+}
+
 /** Версии, у которых есть хотя бы один доступный пункт, от новых к старым */
 export function visibleReleases(releases: SiteRelease[], rank: ReleaseRank): SiteRelease[] {
   return releases
     .map((r) => ({ ...r, site_release_items: visibleItems(r.site_release_items ?? [], rank) }))
     .filter((r) => r.site_release_items.length > 0)
-    .sort((a, b) => b.released_at.localeCompare(a.released_at));
+    .sort(compareReleaseOrder);
 }
 
 export function unreadReleases(releases: SiteRelease[], readIds: Set<string>): SiteRelease[] {

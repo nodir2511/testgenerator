@@ -5,5 +5,5 @@ select public.add_site_release(
   jsonb_build_array(
     jsonb_build_object('kind','fixed','min_rank',1,'text','В файлах Word серая плашка с номером вопроса теперь закрашена без белых зазоров')
   ),
-  '2026-10-24 17:00:00+05'
+  '2026-10-24 00:32:00+05'
 );
