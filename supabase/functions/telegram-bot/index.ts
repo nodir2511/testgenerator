@@ -203,13 +203,26 @@ async function screenStart(chat: number, user: any) {
     `👇 Выберите действие в нижнем меню:`
   );
 
+  // Сначала отправляем сообщение с Reply Keyboard, чтобы обновить нижнее меню
+  await tg('sendMessage', {
+    chat_id: chat,
+    text,
+    parse_mode: 'HTML',
+    reply_markup: MAIN_KEYBOARD,
+  });
+
   const kb = [
     [{ text: '🚀 Открыть конструктор билетов', web_app: { url: APP_URL } }],
     [{ text: '⚡ Быстрый билет в 1 клик', callback_data: 'ACT:QUICK' }],
     [{ text: '📂 Мои билеты (История)', callback_data: 'ACT:HISTORY' }],
   ];
 
-  return send(chat, text, kb, MAIN_KEYBOARD);
+  return tg('sendMessage', {
+    chat_id: chat,
+    text: '⚡ <b>Быстрый доступ:</b>',
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard: kb },
+  });
 }
 
 async function screenProfile(chat: number, user: any) {
@@ -587,7 +600,8 @@ async function onMessage(m: any) {
       chat_id: chat,
       text: (
         '🚀 <b>Конструктор экзаменационных билетов</b>\n\n' +
-        'Нажмите кнопку ниже, чтобы открыть интерактивное приложение прямо в Telegram:'
+        'Нажмите кнопку ниже, чтобы открыть приложение прямо в Telegram:\n\n' +
+        '💡 <i>Также можно нажать синюю кнопку «🚀 Конструктор» в левом нижнем углу экрана.</i>'
       ),
       parse_mode: 'HTML',
       reply_markup: {

@@ -116,6 +116,18 @@ function loadTelegramScript(): Promise<void> {
   });
 }
 
+// На некоторых мобильных клиентах Telegram initData может внедряться в WebView с задержкой в несколько миллисекунд
+async function getTelegramAppWithRetry(maxWaitMs = 800): Promise<WebApp | undefined> {
+  await loadTelegramScript();
+  const start = Date.now();
+  while (Date.now() - start < maxWaitMs) {
+    const app = wa();
+    if (app?.initData) return app;
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  return wa();
+}
+
 function subjectIcon(name: string): string {
   const n = (name || '').toLowerCase();
   if (n.includes('хим')) return '🧪';
@@ -154,8 +166,7 @@ export default function TgApp() {
   // ---- загрузка ----
   useEffect(() => {
     (async () => {
-      await loadTelegramScript();
-      const app = wa();
+      const app = await getTelegramAppWithRetry();
       app?.ready();
       app?.expand();
       if (!app?.initData) {
@@ -434,11 +445,29 @@ export default function TgApp() {
 
   // ---- экраны ----
   if (fatal) {
+    const isBadInit = fatal.code === 'bad_init_data';
+    const isNotLinked = fatal.code === 'not_linked';
     return (
       <Shell>
-        <div className="tg-card">
-          <h1>{fatal.code === 'not_linked' ? 'Нужна привязка' : 'Не удалось войти'}</h1>
-          <p>{fatal.message}</p>
+        <div className="tg-card" style={{ textAlign: 'center', padding: '32px 16px' }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>
+            {isNotLinked ? '🔐' : isBadInit ? '📱' : '⚠️'}
+          </div>
+          <h1 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>
+            {isNotLinked ? 'Нужна привязка аккаунта' : isBadInit ? 'Вход через Telegram' : 'Не удалось войти'}
+          </h1>
+          <p style={{ color: 'var(--tg-theme-hint-color, #64748b)', fontSize: '14px', lineHeight: 1.5, marginBottom: '24px' }}>
+            {isBadInit
+              ? 'Чтобы открыть конструктор билетов, перейдите в чат с ботом и нажмите синюю кнопку «🚀 Конструктор» в левом нижнем углу или отправьте команду /app.'
+              : fatal.message}
+          </p>
+          <a
+            href="https://t.me/testgenerrepbot"
+            className="tg-btn tg-btn-primary"
+            style={{ display: 'inline-block', textDecoration: 'none', padding: '12px 24px', borderRadius: '12px', fontWeight: 600 }}
+          >
+            💬 Открыть чат с ботом
+          </a>
         </div>
       </Shell>
     );
