@@ -45,3 +45,22 @@ describe('видимость обновлений', () => {
     expect(unreadReleases(list, new Set(['b'])).map((r) => r.id)).toEqual(['a']);
   });
 });
+
+
+describe('файлы миграций релизов (SQL)', () => {
+  it('все пункты релизов используют допустимый kind: new, fixed, improved', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const dir = path.join(process.cwd(), 'supabase', 'sql', 'releases');
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql'));
+    const validKinds = new Set(['new', 'fixed', 'improved']);
+    for (const f of files) {
+      const sql = fs.readFileSync(path.join(dir, f), 'utf8');
+      const matches = sql.matchAll(/'kind'\s*,\s*'([^']+)'/g);
+      for (const m of matches) {
+        expect(validKinds.has(m[1]), `${f}: неизвестный kind "${m[1]}" (разрешены: new, fixed, improved)`).toBe(true);
+      }
+    }
+  });
+});
