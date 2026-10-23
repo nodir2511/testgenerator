@@ -110,6 +110,7 @@ export function cleanXmlRunsToFormattedText(xml: string): string {
     const isSup = rXml.includes('w:val="superscript"') || rXml.includes('<m:sup>');
     const isBold = /<w:b(?:\s+w:val="(?:true|1)")?\s*\/>/.test(rXml);
     const isItalic = /<w:i(?:\s+w:val="(?:true|1)")?\s*\/>/.test(rXml);
+    const isUnder = /<w:u\s+w:val="(?!none")[^"]+"/.test(rXml);
 
     const tMatches = [...rXml.matchAll(/<w:tab\s*\/>|<w:br\s*\/>|<[wm]:t(?:\s[^>]*)?>([\s\S]*?)<\/[wm]:t>/g)];
     let t = tMatches.map((m) => (m[1] === undefined ? ' ' : m[1])).join('');
@@ -119,6 +120,7 @@ export function cleanXmlRunsToFormattedText(xml: string): string {
     if (isSup) t = `<sup>${t}</sup>`;
     if (isBold) t = `<b>${t}</b>`;
     if (isItalic) t = `<i>${t}</i>`;
+    if (isUnder) t = `<u>${t}</u>`;
     result += t;
   }
 
@@ -127,7 +129,7 @@ export function cleanXmlRunsToFormattedText(xml: string): string {
   }
 
   // Склеиваем соседние одинаковые теги, возникающие из-за дробления текста на пробежки
-  result = result.replace(/<\/(b|i|sub|sup)><\1>/g, '');
+  result = result.replace(/<\/(b|i|u|sub|sup)><\1>/g, '');
 
   // Удаляем внешнее оборачивание всего текста в <b>...</b> если оно сплошное
   result = result.trim();

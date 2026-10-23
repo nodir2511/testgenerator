@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Bold, Italic, Subscript, Superscript } from 'lucide-react';
+import { Bold, Italic, Underline, Subscript, Superscript } from 'lucide-react';
 import { splitFractions, hasFraction, newFmtState, tokenizeFormatted, type MathNode, type FmtState, type FmtToken } from '../lib/fractions';
 
 interface FormulaEditorProps {
@@ -106,6 +106,14 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
         >
           <Italic className="w-3.5 h-3.5" />
         </button>
+        <button
+          type="button"
+          onClick={() => wrapSelection('<u>', '</u>')}
+          title="Подчёркнутый"
+          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center"
+        >
+          <Underline className="w-3.5 h-3.5" />
+        </button>
 
         <span className="h-4 w-px bg-slate-300 mx-1" />
 
@@ -202,10 +210,11 @@ const renderTokens = (tokens: FmtToken[]) =>
     if (t.sup) el = <sup className="font-semibold">{el}</sup>;
     if (t.b) el = <strong>{el}</strong>;
     if (t.i) el = <em>{el}</em>;
+    if (t.u) el = <u className="underline underline-offset-2">{el}</u>;
     return <React.Fragment key={idx}>{el}</React.Fragment>;
   });
 
-// Обычный текст с тегами b, i, sub, sup (вложенные теги поддерживаются)
+// Обычный текст с тегами b, i, u, sub, sup (вложенные теги поддерживаются)
 const InlineTags: React.FC<{ text: string; className?: string; state?: FmtState }> = ({ text, className, state }) => (
   <span className={className}>{renderTokens(tokenizeFormatted(text, state || newFmtState()))}</span>
 );

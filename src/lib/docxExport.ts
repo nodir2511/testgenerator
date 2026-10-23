@@ -55,10 +55,10 @@ function charEm(c: string): number {
 function textWidthEm(text: string): number {
   let w = 0;
   let scale = 1;
-  for (const part of (text || '').split(/(<\/?(?:sub|sup|b|i)>)/)) {
+  for (const part of (text || '').split(/(<\/?(?:sub|sup|b|i|u)>)/)) {
     if (part === '<sub>' || part === '<sup>') { scale = 0.6; continue; }
     if (part === '</sub>' || part === '</sup>') { scale = 1; continue; }
-    if (/^<\/?[bi]>$/.test(part)) continue;
+    if (/^<\/?[biu]>$/.test(part)) continue;
     for (const c of part) w += charEm(c) * scale;
   }
   return w;
@@ -206,14 +206,14 @@ function buildMathRuns(text: string): MathComponent[] {
 }
 
 function buildMathNodes(nodes: MathNode[]): MathComponent[] {
-  return nodes.flatMap((n) => (typeof n === 'string' ? buildMathRuns(n.replace(/<\/?(b|i)>/g, '')) : [buildMathFraction(n)]));
+  return nodes.flatMap((n) => (typeof n === 'string' ? buildMathRuns(n.replace(/<\/?(b|i|u)>/g, '')) : [buildMathFraction(n)]));
 }
 
 function buildMathFraction(node: Exclude<MathNode, string>): MathFraction {
   return new MathFraction({ numerator: buildMathNodes(node.num), denominator: buildMathNodes(node.den) });
 }
 
-// Парсер форматированного текста (sub, sup, b, i); дроби (a/b) становятся формулами Word
+// Парсер форматированного текста (sub, sup, b, i, u); дроби (a/b) становятся формулами Word
 export function parseFormattedTextRuns(
   text: string,
   isItalic = false,
@@ -233,6 +233,7 @@ export function parseFormattedTextRuns(
             size: fontSize,
             bold: isBold || t.b,
             italics: isItalic || t.i,
+            underline: t.u ? {} : undefined,
             subScript: t.sub || undefined,
             superScript: t.sup || undefined,
           })
