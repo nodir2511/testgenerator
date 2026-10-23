@@ -435,6 +435,23 @@ export default function TgApp() {
           <Stepper label="Соответствия" value={nums.matching} have={pool.matching} max={limits.perType} min={0} onChange={(v) => setNums({ ...nums, matching: v })} />
           <Stepper label="Открытые" value={nums.open} have={pool.open} max={limits.perType} min={0} onChange={(v) => setNums({ ...nums, open: v })} />
           <Stepper label="Вариантов (билетов)" value={nums.tickets} max={limits.tickets} min={1} onChange={(v) => setNums({ ...nums, tickets: v })} />
+          <div className="tg-chips">
+            {(limits.tickets <= 4 ? [1, 2, 4] : [1, 2, 4, 10, 20, 50])
+              .filter((n) => n <= limits.tickets)
+              .map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  className={`tg-chip ${nums.tickets === String(n) ? 'on' : ''}`}
+                  onClick={() => {
+                    wa()?.HapticFeedback?.impactOccurred('light');
+                    setNums({ ...nums, tickets: String(n) });
+                  }}
+                >
+                  {n} вар.
+                </button>
+              ))}
+          </div>
           <p className="tg-hint">Лимиты: до {limits.tickets} вариантов за раз{limits.total ? `, до ${limits.total} вопросов в билете` : ''}.</p>
           {settingsError && <div className="tg-warn">{settingsError}</div>}
           {!settingsError && fit.error && <div className="tg-warn">{fit.error}</div>}

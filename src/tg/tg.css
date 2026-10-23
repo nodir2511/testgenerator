@@ -46,3 +46,11 @@ body.tg-body {
 .tg-field span { display: block; font-size: 13px; color: var(--hint); margin: 0 4px 4px; }
 .tg-field input { width: 100%; box-sizing: border-box; height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: var(--bg); color: var(--fg); font: inherit; }
 .tg-sub { display: block; font-size: 12px; color: var(--hint); margin-top: 2px; }
+.tg-chips { display: flex; gap: 8px; margin: 6px 0 10px; }
+.tg-chip {
+  flex: 1; border: 0; background: var(--bg); color: var(--fg);
+  border-radius: 10px; padding: 10px 4px; font: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all .15s ease;
+}
+.tg-chip:active { transform: scale(0.96); }
+.tg-chip.on { background: var(--btn); color: var(--btn-fg); }

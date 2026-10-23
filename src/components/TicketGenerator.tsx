@@ -108,6 +108,13 @@ export const TicketGenerator: React.FC = () => {
     localStorage.setItem('examiner_tg_ticket_count', String(ticketCount));
   }, [ticketCount]);
 
+  // Защита: не даём числу вариантов превышать лимит пользователя (для обычных пользователей — макс. 4)
+  React.useEffect(() => {
+    if (ticketCount > limits.tickets) {
+      setTicketCount(limits.tickets);
+    }
+  }, [limits.tickets, ticketCount]);
+
   React.useEffect(() => {
     localStorage.setItem('examiner_tg_shuffle_options', String(shuffleOptions));
   }, [shuffleOptions]);
@@ -1136,23 +1143,25 @@ export const TicketGenerator: React.FC = () => {
                     +
                   </button>
                 </div>
-                {/* Быстрые пресеты количества вариантов */}
+                {/* Быстрые пресеты количества вариантов: для обычных пользователей 1, 2, 4; для админа — до 50 */}
                 <div className="flex items-center gap-1.5 mt-2.5">
                   <span className="text-[10px] text-slate-400 font-semibold uppercase mr-0.5">Вариантов:</span>
-                  {[2, 5, 10, 20, Math.min(50, limits.tickets)].filter((v, idx, arr) => arr.indexOf(v) === idx && v <= limits.tickets).map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setTicketCount(n)}
-                      className={`px-2 py-0.5 rounded-lg text-xs font-bold transition active:scale-95 ${
-                        ticketCount === n
-                          ? 'bg-indigo-600 text-white shadow-2xs'
-                          : 'bg-white border border-indigo-200/70 text-indigo-700 hover:bg-indigo-50'
-                      }`}
-                    >
-                      {n}
-                    </button>
-                  ))}
+                  {(isAdmin ? [1, 2, 4, 10, 20, 50] : [1, 2, 4])
+                    .filter((n) => n <= limits.tickets)
+                    .map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setTicketCount(n)}
+                        className={`px-2 py-0.5 rounded-lg text-xs font-bold transition active:scale-95 ${
+                          ticketCount === n
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : 'bg-white border border-indigo-200/70 text-indigo-700 hover:bg-indigo-50'
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
                 </div>
 
                 {!isAdmin && (
