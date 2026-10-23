@@ -12,7 +12,7 @@ export const formatReleaseDate = (iso: string) =>
   new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 
 /** Версия со списком пунктов; showAudience — подпись уровня для главного админа */
-export const ReleaseCard: React.FC<{ release: SiteRelease; showAudience?: boolean; unread?: boolean }> = ({ release, showAudience, unread }) => (
+export const ReleaseCard: React.FC<{ release: SiteRelease; showAudience?: boolean; unread?: boolean; subjectNames?: Record<string, string> }> = ({ release, showAudience, unread, subjectNames }) => (
   <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5">
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
       <span className="text-sm font-bold text-slate-900">v{release.version}</span>
@@ -26,7 +26,11 @@ export const ReleaseCard: React.FC<{ release: SiteRelease; showAudience?: boolea
           <span className={`shrink-0 mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded ${KIND_STYLES[i.kind]}`}>{KIND_LABELS[i.kind]}</span>
           <span className="min-w-0 break-words">
             {i.text}
-            {showAudience && i.min_rank > 1 && <span className="ml-2 text-[11px] text-slate-400">({RANK_LABELS[i.min_rank]})</span>}
+            {showAudience && (i.min_rank > 1 || i.subject_id) && (
+              <span className="ml-2 text-[11px] text-slate-400">
+                ({[i.min_rank > 1 ? RANK_LABELS[i.min_rank] : '', i.subject_id ? 'предмет: ' + (subjectNames?.[i.subject_id] ?? '—') : ''].filter(Boolean).join(', ')})
+              </span>
+            )}
           </span>
         </li>
       ))}

@@ -200,6 +200,8 @@ export interface SiteReleaseItem {
   kind: ReleaseItemKind;
   text: string;
   min_rank: ReleaseRank;
+  /** Если задан, пункт видят только те, кому доступен этот предмет */
+  subject_id?: string | null;
   order_index: number;
 }
 

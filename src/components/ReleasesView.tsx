@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -8,14 +8,15 @@ import { KIND_LABELS, RANK_LABELS } from '../lib/releases';
 import { ReleaseItemKind, ReleaseRank, SiteRelease } from '../types/database';
 import { ReleaseCard } from './ReleaseCard';
 
-interface DraftItem { kind: ReleaseItemKind; text: string; min_rank: ReleaseRank }
+interface DraftItem { kind: ReleaseItemKind; text: string; min_rank: ReleaseRank; subject_id: string }
+type SubjectOpt = { id: string; name: string };
 interface Draft { id?: string; version: string; title: string; released_at: string; items: DraftItem[] }
 
 const today = () => new Date().toISOString().slice(0, 10);
-const emptyDraft = (): Draft => ({ version: '', title: '', released_at: today(), items: [{ kind: 'new', text: '', min_rank: 1 }] });
+const emptyDraft = (): Draft => ({ version: '', title: '', released_at: today(), items: [{ kind: 'new', text: '', min_rank: 1, subject_id: '' }] });
 
 /** Форма главного админа: добавление и правка записей об обновлениях */
-const ReleaseEditor: React.FC<{ initial: Draft; onClose: () => void }> = ({ initial, onClose }) => {
+const ReleaseEditor: React.FC<{ initial: Draft; subjects: SubjectOpt[]; onClose: () => void }> = ({ initial, subjects, onClose }) => {
   const qc = useQueryClient();
   const [draft, setDraft] = useState<Draft>(initial);
   const items = draft.items.filter((i) => i.text.trim());
@@ -36,7 +37,7 @@ const ReleaseEditor: React.FC<{ initial: Draft; onClose: () => void }> = ({ init
         id = data.id as string;
       }
       const { error } = await supabase.from('site_release_items').insert(
-        items.map((i, n) => ({ release_id: id, kind: i.kind, text: i.text.trim(), min_rank: i.min_rank, order_index: n })),
+        items.map((i, n) => ({ release_id: id, kind: i.kind, text: i.text.trim(), min_rank: i.min_rank, subject_id: i.subject_id || null, order_index: n })),
       );
       if (error) throw error;
     },
@@ -64,7 +65,7 @@ const ReleaseEditor: React.FC<{ initial: Draft; onClose: () => void }> = ({ init
       </div>
       <div className="space-y-2">
         {draft.items.map((it, n) => (
-          <div key={n} className="grid grid-cols-1 sm:grid-cols-[8rem_1fr_16rem_auto] gap-2 items-start">
+          <div key={n} className="grid grid-cols-1 sm:grid-cols-[8rem_1fr_14rem_10rem_auto] gap-2 items-start">
             <select className={field} value={it.kind} onChange={(e) => setItem(n, { kind: e.target.value as ReleaseItemKind })}>
               {(Object.keys(KIND_LABELS) as ReleaseItemKind[]).map((k) => <option key={k} value={k}>{KIND_LABELS[k]}</option>)}
             </select>
@@ -72,13 +73,17 @@ const ReleaseEditor: React.FC<{ initial: Draft; onClose: () => void }> = ({ init
             <select className={field} value={it.min_rank} onChange={(e) => setItem(n, { min_rank: Number(e.target.value) as ReleaseRank })}>
               {([1, 2, 3, 4] as ReleaseRank[]).map((r) => <option key={r} value={r}>{RANK_LABELS[r]}</option>)}
             </select>
+            <select className={field} value={it.subject_id} onChange={(e) => setItem(n, { subject_id: e.target.value })}>
+              <option value="">Любой предмет</option>
+              {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
             <button
               onClick={() => setDraft((d) => ({ ...d, items: d.items.filter((_, k) => k !== n) }))}
               className="p-2 text-slate-400 hover:text-red-600" aria-label="Удалить пункт"
             ><Trash2 className="w-4 h-4" /></button>
           </div>
         ))}
-        <button onClick={() => setDraft((d) => ({ ...d, items: [...d.items, { kind: 'new', text: '', min_rank: 1 }] }))} className="text-xs font-semibold text-blue-600 hover:underline">
+        <button onClick={() => setDraft((d) => ({ ...d, items: [...d.items, { kind: 'new', text: '', min_rank: 1, subject_id: '' }] }))} className="text-xs font-semibold text-blue-600 hover:underline">
           + Добавить пункт
         </button>
       </div>
@@ -98,6 +103,17 @@ export const ReleasesView: React.FC = () => {
   const qc = useQueryClient();
   const { releases, unread, isLoading, markRead } = useReleases();
   const [draft, setDraft] = useState<Draft | null>(null);
+  const subjectsQ = useQuery({
+    queryKey: ['subjects-for-releases'],
+    enabled: isOwner,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('subjects').select('id, name').eq('is_deleted', false).order('name');
+      if (error) throw error;
+      return (data ?? []) as SubjectOpt[];
+    },
+  });
+  const subjects = subjectsQ.data ?? [];
+  const subjectNames = Object.fromEntries(subjects.map((s) => [s.id, s.name]));
   const unreadIds = new Set(unread.map((r) => r.id));
 
   React.useEffect(() => {
@@ -119,7 +135,7 @@ export const ReleasesView: React.FC = () => {
   const edit = (r: SiteRelease) =>
     setDraft({
       id: r.id, version: r.version, title: r.title, released_at: r.released_at.slice(0, 10),
-      items: [...r.site_release_items].sort((a, b) => a.order_index - b.order_index).map((i) => ({ kind: i.kind, text: i.text, min_rank: i.min_rank })),
+      items: [...r.site_release_items].sort((a, b) => a.order_index - b.order_index).map((i) => ({ kind: i.kind, text: i.text, min_rank: i.min_rank, subject_id: i.subject_id ?? '' })),
     });
 
   return (
@@ -136,7 +152,7 @@ export const ReleasesView: React.FC = () => {
         )}
       </div>
 
-      {draft && <ReleaseEditor key={draft.id ?? 'new'} initial={draft} onClose={() => setDraft(null)} />}
+      {draft && <ReleaseEditor key={draft.id ?? 'new'} initial={draft} subjects={subjects} onClose={() => setDraft(null)} />}
 
       {isLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 text-blue-600 animate-spin" /></div>
@@ -145,7 +161,7 @@ export const ReleasesView: React.FC = () => {
       ) : (
         releases.map((r) => (
           <div key={r.id} className="relative">
-            <ReleaseCard release={r} showAudience={isOwner} unread={unreadIds.has(r.id)} />
+            <ReleaseCard release={r} showAudience={isOwner} subjectNames={subjectNames} unread={unreadIds.has(r.id)} />
             {isOwner && (
               <div className="absolute top-3 right-3 flex gap-1">
                 <button onClick={() => edit(r)} className="p-1.5 text-slate-400 hover:text-blue-600" aria-label="Править"><Pencil className="w-4 h-4" /></button>
