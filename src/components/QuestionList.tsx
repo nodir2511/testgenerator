@@ -20,7 +20,9 @@ import {
   Plus,
   Loader2,
   X,
-  RotateCcw
+  RotateCcw,
+  SlidersHorizontal,
+  Check
 } from 'lucide-react';
 
 interface QuestionListProps {
@@ -52,6 +54,13 @@ export const QuestionList: React.FC<QuestionListProps> = ({
     () => (localStorage.getItem('examiner_ql_display_lang') as 'ru' | 'tg' | 'both') || 'ru'
   );
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
+
+  const activeFiltersCount = 
+    (filterSubjectId ? 1 : 0) + 
+    (filterChapterId ? 1 : 0) + 
+    (filterTopicId ? 1 : 0) + 
+    (filterIssue !== 'all' ? 1 : 0);
 
   React.useEffect(() => {
     localStorage.setItem('examiner_ql_subject_id', filterSubjectId);
@@ -280,24 +289,28 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Верхняя панель: Заголовок, поиск и кнопка добавления */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center">
-            <FileText className="w-5 h-5 mr-2 text-blue-600" />
-            Банк вопросов
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Всего в базе: {totalCount} вопросов • Страница {page + 1} из {Math.max(1, totalPages)}
-          </p>
+    <div className="space-y-4 sm:space-y-6">
+      {/* Верхняя панель в стиле Bento: Заголовок и кнопка добавления */}
+      <div className="bento-card p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
+            <FileText className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
+              Банк вопросов
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Всего в базе: <strong className="text-slate-700 font-semibold">{totalCount}</strong> вопросов • Стр. {page + 1} из {Math.max(1, totalPages)}
+            </p>
+          </div>
         </div>
 
         {isStaff && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={onAddQuestion}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-sm flex items-center space-x-1 transition"
+              className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-500/20 flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
             >
               <Plus className="w-4 h-4" />
               <span>Добавить вопрос</span>
@@ -306,14 +319,231 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         )}
       </div>
 
-      {/* Панель фильтров */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+      {/* Быстрые фильтры: Горизонтальные свайп-чипсы типов вопросов */}
+      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5 px-0.5">
+        {[
+          { id: 'all', label: 'Все вопросы' },
+          { id: 'test', label: 'Тестовые' },
+          { id: 'matching', label: 'Соответствие' },
+          { id: 'open', label: 'Открытые' },
+        ].map(t => (
+          <button
+            key={t.id}
+            onClick={() => { setFilterType(t.id); setPage(0); setExtra(0); }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-150 active:scale-95 ${
+              filterType === t.id
+                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 font-bold'
+                : 'bg-white border border-slate-200/90 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+
+        {filterIssue !== 'all' && (
+          <span className="px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold whitespace-nowrap flex items-center space-x-1">
+            <span>⚠ {ISSUE_FILTER_LABELS[filterIssue]}</span>
+            <button onClick={() => { setFilterIssue('all'); setPage(0); setExtra(0); }} className="hover:text-amber-950">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </span>
+        )}
+      </div>
+
+      {/* Мобильная панель поиска и вызова шторки фильтров */}
+      <div className="md:hidden flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(0); setExtra(0);
+            }}
+            placeholder="Поиск вопросов по тексту..."
+            className="w-full text-xs pl-9 pr-8 py-2.5 bg-white border border-slate-200/90 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+          />
+          {searchQuery && (
+            <button 
+              onClick={() => { setSearchQuery(''); setPage(0); setExtra(0); }} 
+              className="absolute right-2.5 top-2.5 p-1 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+        <button
+          onClick={() => setIsFilterSheetOpen(true)}
+          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition active:scale-95 shadow-xs border ${
+            activeFiltersCount > 0
+              ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+              : 'bg-white text-slate-700 border-slate-200/90'
+          }`}
+        >
+          <SlidersHorizontal className="w-4 h-4" />
+          <span>Фильтры</span>
+          {activeFiltersCount > 0 && (
+            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center font-bold">
+              {activeFiltersCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Мобильная шторка фильтров (Bottom Sheet) */}
+      {isFilterSheetOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end">
+          <div 
+            className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs transition-opacity animate-in fade-in" 
+            onClick={() => setIsFilterSheetOpen(false)} 
+          />
+          <div className="relative bg-white rounded-t-3xl border-t border-slate-200 shadow-2xl p-5 max-h-[85vh] overflow-y-auto pb-[calc(2rem+env(safe-area-inset-bottom))] z-10 animate-in slide-in-from-bottom duration-200 space-y-4">
+            <div className="w-12 h-1 bg-slate-200 rounded-full mx-auto mb-2" />
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center space-x-2">
+                <SlidersHorizontal className="w-4 h-4 text-indigo-600" />
+                <h3 className="font-bold text-base text-slate-900">Фильтры банка</h3>
+              </div>
+              <button 
+                onClick={() => setIsFilterSheetOpen(false)} 
+                className="w-8 h-8 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Предмет</label>
+                <select
+                  value={filterSubjectId}
+                  onChange={(e) => {
+                    setFilterSubjectId(e.target.value);
+                    setFilterChapterId('');
+                    setFilterTopicId('');
+                    setPage(0); setExtra(0);
+                  }}
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">Все предметы</option>
+                  {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Глава</label>
+                <select
+                  disabled={!filterSubjectId}
+                  value={filterChapterId}
+                  onChange={(e) => {
+                    setFilterChapterId(e.target.value);
+                    setFilterTopicId('');
+                    setPage(0); setExtra(0);
+                  }}
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                >
+                  <option value="">Все главы</option>
+                  {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Тема</label>
+                <select
+                  disabled={!filterChapterId}
+                  value={filterTopicId}
+                  onChange={(e) => {
+                    setFilterTopicId(e.target.value);
+                    setPage(0); setExtra(0);
+                  }}
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                >
+                  <option value="">Все темы</option>
+                  {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Проблемные вопросы</label>
+                <select
+                  value={filterIssue}
+                  onChange={(e) => {
+                    setFilterIssue(e.target.value as IssueFilter);
+                    setPage(0); setExtra(0);
+                  }}
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500"
+                >
+                  {(Object.keys(ISSUE_FILTER_LABELS) as IssueFilter[]).map((k) => (
+                    <option key={k} value={k}>{ISSUE_FILTER_LABELS[k]}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Язык отображения</label>
+                <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setDisplayLang('ru')}
+                    className={`py-2 rounded-lg transition ${displayLang === 'ru' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'}`}
+                  >
+                    Русский
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDisplayLang('tg')}
+                    className={`py-2 rounded-lg transition ${displayLang === 'tg' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'}`}
+                  >
+                    Тоҷикӣ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDisplayLang('both')}
+                    className={`py-2 rounded-lg transition ${displayLang === 'both' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'}`}
+                  >
+                    RU + TJ
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterIssue('all');
+                  setFilterSubjectId('');
+                  setFilterChapterId('');
+                  setFilterTopicId('');
+                  setFilterType('all');
+                  setSearchQuery('');
+                  setPage(0); setExtra(0);
+                }}
+                className="py-3 px-4 rounded-xl text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 transition active:scale-95"
+              >
+                Сбросить
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFilterSheetOpen(false)}
+                className="flex-1 py-3 px-4 rounded-xl text-xs font-bold text-white bg-indigo-600 shadow-md shadow-indigo-500/20 transition active:scale-95"
+              >
+                Показать вопросы ({totalCount})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Десктопная панель фильтров (в стиле Bento) */}
+      <div className="hidden md:block bento-card p-4 rounded-2xl space-y-3">
         <div className="flex items-center text-xs font-bold text-slate-700 uppercase tracking-wider">
-          <Filter className="w-3.5 h-3.5 mr-1 text-slate-400" />
+          <Filter className="w-3.5 h-3.5 mr-1.5 text-indigo-500" />
           Фильтры и поиск
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
           {/* Поиск */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -325,7 +555,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 setPage(0); setExtra(0);
               }}
               placeholder="Поиск по тексту..."
-              className="w-full text-xs pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full text-xs pl-9 pr-3 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
 
@@ -338,7 +568,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterTopicId('');
               setPage(0); setExtra(0);
             }}
-            className="text-xs px-2.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="text-xs px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             <option value="">Все предметы</option>
             {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -353,7 +583,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterTopicId('');
               setPage(0); setExtra(0);
             }}
-            className="text-xs px-2.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+            className="text-xs px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
           >
             <option value="">Все главы</option>
             {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -367,7 +597,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterTopicId(e.target.value);
               setPage(0); setExtra(0);
             }}
-            className="text-xs px-2.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+            className="text-xs px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
           >
             <option value="">Все темы</option>
             {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -380,7 +610,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterType(e.target.value);
               setPage(0); setExtra(0);
             }}
-            className="text-xs px-2.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="text-xs px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             <option value="all">Все типы вопросов</option>
             <option value="test">Тестовые</option>
@@ -395,7 +625,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterIssue(e.target.value as IssueFilter);
               setPage(0); setExtra(0);
             }}
-            className={`text-xs px-2.5 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${filterIssue !== 'all' ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}
+            className={`text-xs px-2.5 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 ${filterIssue !== 'all' ? 'border-amber-400 bg-amber-50' : 'bg-slate-50/70 border-slate-200'}`}
           >
             {(Object.keys(ISSUE_FILTER_LABELS) as IssueFilter[]).map((k) => (
               <option key={k} value={k}>{ISSUE_FILTER_LABELS[k]}</option>
@@ -407,13 +637,13 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-100 gap-2">
           <div className="flex items-center space-x-2">
             <span className="text-xs font-semibold text-slate-500">Язык вопросов:</span>
-            <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 text-xs">
+            <div className="inline-flex rounded-xl border border-slate-200/90 p-0.5 bg-slate-100/70 text-xs">
               <button
                 type="button"
                 onClick={() => setDisplayLang('ru')}
-                className={`px-2.5 py-1 rounded-md font-medium transition ${
+                className={`px-3 py-1 rounded-lg font-medium transition ${
                   displayLang === 'ru'
-                    ? 'bg-blue-600 text-white shadow-sm'
+                    ? 'bg-indigo-600 text-white shadow-xs font-bold'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -422,9 +652,9 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               <button
                 type="button"
                 onClick={() => setDisplayLang('tg')}
-                className={`px-2.5 py-1 rounded-md font-medium transition ${
+                className={`px-3 py-1 rounded-lg font-medium transition ${
                   displayLang === 'tg'
-                    ? 'bg-emerald-600 text-white shadow-sm'
+                    ? 'bg-emerald-600 text-white shadow-xs font-bold'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -433,9 +663,9 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               <button
                 type="button"
                 onClick={() => setDisplayLang('both')}
-                className={`px-2.5 py-1 rounded-md font-medium transition ${
+                className={`px-3 py-1 rounded-lg font-medium transition ${
                   displayLang === 'both'
-                    ? 'bg-purple-600 text-white shadow-sm'
+                    ? 'bg-purple-600 text-white shadow-xs font-bold'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -456,7 +686,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   setSearchQuery('');
                   setPage(0); setExtra(0);
                 }}
-                className="inline-flex items-center space-x-1.5 text-xs text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg transition font-medium border border-rose-200 shadow-sm"
+                className="inline-flex items-center space-x-1.5 text-xs text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-xl transition font-medium border border-rose-200 shadow-xs"
                 title="Сбросить все установленные фильтры и поиск"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
@@ -474,14 +704,14 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
       {/* Список карточек вопросов */}
       {isLoading ? (
-        <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-500 flex flex-col items-center justify-center">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600 mb-2" />
-          <p className="text-sm">Загрузка вопросов...</p>
+        <div className="bento-card p-12 rounded-2xl text-center text-slate-500 flex flex-col items-center justify-center">
+          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-2" />
+          <p className="text-xs font-semibold text-slate-600">Загрузка вопросов...</p>
         </div>
       ) : questions.length === 0 ? (
-        <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center space-y-3">
+        <div className="bento-card p-12 rounded-2xl text-center space-y-3">
           <HelpCircle className="w-10 h-10 text-slate-300 mx-auto" />
-          <h3 className="font-semibold text-slate-800 text-base">Вопросы не найдены</h3>
+          <h3 className="font-bold text-slate-800 text-base">Вопросы не найдены</h3>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
             {searchQuery || filterSubjectId || filterType !== 'all'
               ? 'По заданным фильтрам ничего не найдено. Попробуйте сбросить фильтры.'
@@ -489,53 +719,59 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3.5">
           {questions.map((q) => (
             <div
               key={q.id}
-              className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition space-y-4"
+              className={`bento-card bento-card-interactive p-4 sm:p-5 rounded-2xl relative overflow-hidden transition-all space-y-3.5 border-l-4 ${
+                q.type === 'test'
+                  ? 'border-l-indigo-500'
+                  : q.type === 'matching'
+                  ? 'border-l-purple-500'
+                  : 'border-l-emerald-500'
+              }`}
             >
               {/* Верхняя строка карточки: метки и действия */}
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md ${
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <span className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg ${
                     q.type === 'test'
-                      ? 'bg-blue-100 text-blue-800'
+                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
                       : q.type === 'matching'
-                      ? 'bg-purple-100 text-purple-800'
-                      : 'bg-emerald-100 text-emerald-800'
+                      ? 'bg-purple-50 text-purple-700 border border-purple-100'
+                      : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
                   }`}>
                     {q.type === 'test' ? 'Тест' : q.type === 'matching' ? 'Соответствие' : 'Открытый'}
                   </span>
 
                   {q.num != null && (
-                    <span className="text-xs font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded" title="Номер вопроса в теме">
+                    <span className="text-xs font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200/60" title="Номер вопроса в теме">
                       № {q.num}
                     </span>
                   )}
 
                   {q.chapter && (
-                    <span className="text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
+                    <span className="text-xs text-slate-600 bg-slate-100/90 px-2 py-0.5 rounded-lg">
                       Гл: {(q.chapter as any).name}
                     </span>
                   )}
                   {q.topic && (
-                    <span className="text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
+                    <span className="text-xs text-slate-600 bg-slate-100/90 px-2 py-0.5 rounded-lg">
                       Тема: {(q.topic as any).name}
                     </span>
                   )}
                   {q.source && (
-                    <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                    <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
                       {(q.source as any).name}
                     </span>
                   )}
                   {questionIssues(q).map((code) => (
-                    <span key={code} className="text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+                    <span key={code} className="text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-lg">
                       ⚠ {ISSUE_LABELS[code]}
                     </span>
                   ))}
                   {(links?.get(q.id) || []).length > 0 && (
-                    <span className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded" title="Эти вопросы не попадут в один билет">
+                    <span className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg" title="Эти вопросы не попадут в один билет">
                       🔗 Связан: {(links?.get(q.id) || []).join(', ')}
                     </span>
                   )}
@@ -544,11 +780,11 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   </span>
                 </div>
 
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1">
                   {canManage(q.subject_id) && (
                     <button
                       onClick={() => onEditQuestion(q)}
-                      className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                      className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:scale-90 transition"
                       title="Редактировать"
                     >
                       <Edit3 className="w-4 h-4" />
@@ -561,7 +797,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                           deleteMutation.mutate(q.id);
                         }
                       }}
-                      className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                      className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-slate-500 hover:text-red-600 hover:bg-red-50 active:scale-90 transition"
                       title="Удалить"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -573,27 +809,27 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               {/* Тело вопроса */}
               <div className="space-y-3">
                 {displayLang === 'ru' && (
-                  <div className="text-sm font-medium text-slate-900 leading-relaxed">
+                  <div className="text-[15px] sm:text-base font-medium text-slate-900 leading-relaxed">
                     <FormattedText text={q.content_ru || q.content} />
                   </div>
                 )}
                 {displayLang === 'tg' && (
-                  <div className="text-sm font-medium text-slate-900 leading-relaxed">
+                  <div className="text-[15px] sm:text-base font-medium text-slate-900 leading-relaxed">
                     <FormattedText text={q.content_tg || q.content} />
                   </div>
                 )}
                 {displayLang === 'both' && (
-                  <div className="space-y-2 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="space-y-2 p-3 sm:p-4 rounded-xl bg-slate-50 border border-slate-200/80">
                     <div>
-                      <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block mb-0.5">Русский:</span>
-                      <div className="text-sm font-medium text-slate-900 leading-relaxed">
+                      <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider block mb-0.5">Русский:</span>
+                      <div className="text-[15px] sm:text-base font-medium text-slate-900 leading-relaxed">
                         <FormattedText text={q.content_ru || q.content} />
                       </div>
                     </div>
                     {q.content_tg && (
                       <div className="pt-2 border-t border-slate-200">
                         <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block mb-0.5">Тоҷикӣ:</span>
-                        <div className="text-sm font-medium text-slate-900 leading-relaxed">
+                        <div className="text-[15px] sm:text-base font-medium text-slate-900 leading-relaxed">
                           <FormattedText text={q.content_tg} />
                         </div>
                       </div>
@@ -616,22 +852,22 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
                 {/* Варианты для тестового вопроса */}
                 {q.type === 'test' && q.options && q.options.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                     {q.options
                       .sort((a, b) => a.order_index - b.order_index)
                       .map((opt, i) => (
                         <div
                           key={opt.id || i}
-                          className={`flex items-start space-x-2 p-2 rounded-lg border text-xs text-slate-700 transition ${
+                          className={`flex items-start space-x-2.5 p-2.5 rounded-xl border text-xs text-slate-700 transition ${
                             opt.is_correct
-                              ? 'bg-emerald-50/70 border-emerald-300 ring-1 ring-emerald-200'
-                              : 'bg-slate-50 border-slate-200'
+                              ? 'bg-emerald-50/80 border-emerald-300 ring-1 ring-emerald-200/60 text-emerald-950 font-medium'
+                              : 'bg-slate-50/70 border-slate-200/70'
                           }`}
                         >
-                          <span className={`w-5 h-5 rounded-full font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5 ${
+                          <span className={`w-5 h-5 rounded-lg font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5 ${
                             opt.is_correct
-                              ? 'bg-emerald-600 text-white shadow-sm'
-                              : 'bg-slate-200 text-slate-700'
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'bg-slate-200/80 text-slate-700'
                           }`}>
                             {['A', 'B', 'C', 'D', 'E', 'F'][i] || String.fromCharCode(65 + i)}
                           </span>
@@ -658,7 +894,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                               src={opt.image_url}
                               alt=""
                               onClick={() => setPreviewImage(opt.image_url || null)}
-                              className="w-9 h-9 object-cover rounded-lg border border-slate-200 shrink-0 cursor-pointer hover:opacity-90 hover:scale-105 transition shadow-sm bg-white"
+                              className="w-10 h-10 object-cover rounded-lg border border-slate-200 shrink-0 cursor-pointer hover:opacity-90 hover:scale-105 transition shadow-xs bg-white"
                               title="Нажмите для увеличения"
                             />
                           )}
@@ -761,24 +997,24 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         </div>
       )}
 
-      {/* Пагинация */}
+      {/* Пагинация в Bento-стиле */}
       {totalPages > 1 && (
         <div className="space-y-3">
           {lastShown < totalPages - 1 && (
             <button
               onClick={() => setExtra((x) => x + 1)}
               disabled={loadingMore}
-              className="w-full bg-white p-3 rounded-2xl border border-slate-200 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition disabled:opacity-60"
+              className="w-full bento-card p-3.5 rounded-2xl text-xs font-bold text-indigo-700 hover:bg-indigo-50/70 border-indigo-200/80 active:scale-98 transition shadow-xs disabled:opacity-60"
             >
               {loadingMore ? 'Загрузка…' : `Показать ещё (следующие ${Math.min(PAGE_SIZE, totalCount - (lastShown + 1) * PAGE_SIZE)} вопросов, страница ${lastShown + 2})`}
             </button>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200">
+          <div className="flex flex-wrap items-center justify-between gap-3 bento-card p-3.5 sm:p-4 rounded-2xl">
             <button
               onClick={() => goToPage(page - 1)}
               disabled={page === 0}
-              className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1"
+              className="px-3.5 py-2 border border-slate-200/90 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1 active:scale-95 transition"
             >
               <ChevronLeft className="w-4 h-4" />
               <span>Назад</span>
@@ -801,12 +1037,12 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   value={jumpTo}
                   onChange={(ev) => setJumpTo(ev.target.value)}
                   placeholder="№ стр."
-                  className="w-20 px-2 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-18 px-2.5 py-1.5 border border-slate-200/90 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/80"
                 />
                 <button
                   type="submit"
                   disabled={!jumpTo}
-                  className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                  className="px-3 py-1.5 border border-slate-200/90 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 active:scale-95 transition"
                 >
                   Перейти
                 </button>
@@ -816,7 +1052,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             <button
               onClick={() => goToPage(lastShown + 1)}
               disabled={lastShown >= totalPages - 1}
-              className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1"
+              className="px-3.5 py-2 border border-slate-200/90 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1 active:scale-95 transition"
             >
               <span>Вперед</span>
               <ChevronRight className="w-4 h-4" />

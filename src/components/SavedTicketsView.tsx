@@ -138,34 +138,38 @@ export const SavedTicketsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center">
-            <FileCheck2 className="w-5 h-5 mr-2 text-blue-600" />
-            Сохраненные экзаменационные билеты
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Архив сгенерированных билетов с зафиксированным содержанием вопросов
-          </p>
+    <div className="space-y-4 sm:space-y-6 max-w-5xl mx-auto">
+      <div className="bento-card p-4 sm:p-6 rounded-2xl flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
+            <FileCheck2 className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
+              Сохраненные экзаменационные билеты
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Архив сгенерированных билетов с зафиксированным содержанием вопросов
+            </p>
+          </div>
         </div>
       </div>
 
       {isLoading ? (
-        <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-500">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-2" />
-          <p className="text-sm">Загрузка архива билетов...</p>
+        <div className="bento-card p-12 rounded-2xl text-center text-slate-500">
+          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto mb-2" />
+          <p className="text-xs font-semibold text-slate-600">Загрузка архива билетов...</p>
         </div>
       ) : batches.length === 0 ? (
-        <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center space-y-2">
+        <div className="bento-card p-12 rounded-2xl text-center space-y-2">
           <BookOpen className="w-10 h-10 text-slate-300 mx-auto" />
-          <h3 className="font-semibold text-slate-800 text-base">Нет сохраненных билетов</h3>
+          <h3 className="font-bold text-slate-800 text-base">Нет сохраненных билетов</h3>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
             Перейдите во вкладку «Генератор билетов», чтобы составить первую партию билетов.
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3.5">
           {batches.filter((b: any) => isOwner || !isClusterBatch(b)).map((batch: any) => {
             const cluster = isClusterBatch(batch);
             const clusterSubjects: Array<{ name: string; count: number }> = batch.generation_params?.cluster?.subjects ?? [];
@@ -177,7 +181,7 @@ export const SavedTicketsView: React.FC = () => {
             return (
               <div
                 key={batch.id}
-                className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden transition"
+                className="bento-card bento-card-interactive rounded-2xl overflow-hidden transition-all"
               >
                 <div className={`h-1 ${accent.bar}`} />
                 <div className="p-5 flex flex-col lg:flex-row lg:items-start justify-between gap-4 bg-white">

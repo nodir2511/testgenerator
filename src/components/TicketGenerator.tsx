@@ -492,24 +492,28 @@ export const TicketGenerator: React.FC = () => {
   ) : null;
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      {/* Шапка генератора */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center">
-            <Sparkles className="w-5 h-5 mr-2 text-blue-600" />
-            Конструктор экзаменационных билетов
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Параллельная генерация одинаковых вариантов на русском и таджикском языках
-          </p>
+    <div className="space-y-4 sm:space-y-6 max-w-5xl mx-auto">
+      {/* Шапка генератора в Bento-стиле */}
+      <div className="bento-card p-4 sm:p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
+              Конструктор экзаменационных билетов
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Параллельная генерация одинаковых вариантов на русском и таджикском языках
+            </p>
+          </div>
         </div>
 
         {generatedBatch && (
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => handleExportWord('ru')}
-              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow flex items-center space-x-1 transition"
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1.5 transition active:scale-95"
               title="Скачать варианты на русском языке"
             >
               <Download className="w-3.5 h-3.5" />
@@ -517,7 +521,7 @@ export const TicketGenerator: React.FC = () => {
             </button>
             <button
               onClick={() => handleExportWord('tg')}
-              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow flex items-center space-x-1 transition"
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1.5 transition active:scale-95"
               title="Скачать варианты на таджикском языке"
             >
               <Download className="w-3.5 h-3.5" />
@@ -525,7 +529,7 @@ export const TicketGenerator: React.FC = () => {
             </button>
             <button
               onClick={() => handleExportWord('both')}
-              className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow flex items-center space-x-1 transition"
+              className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1.5 transition active:scale-95"
               title="Скачать двуязычные билеты (RU + TJ)"
             >
               <Download className="w-3.5 h-3.5" />
@@ -534,7 +538,7 @@ export const TicketGenerator: React.FC = () => {
             {hasKeyTemplate(generatedSubjectName) && (
               <button
                 onClick={handleExportKey}
-                className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow flex items-center space-x-1 transition"
+                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1.5 transition active:scale-95"
                 title="Ключи ответов по шаблону (Word)"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -547,23 +551,23 @@ export const TicketGenerator: React.FC = () => {
       </div>
 
       {recentBatches.length > 0 && (
-        <div className="bg-white px-4 py-3 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center gap-2">
+        <div className="bento-card px-4 py-3 rounded-2xl flex flex-wrap items-center gap-2">
           <span className="text-xs font-bold text-slate-500">Повторить прошлый набор:</span>
           {recentBatches.map((b) => (
             <button
               key={b.id}
               onClick={() => repeatBatch(b)}
-              className="px-2.5 py-1 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 rounded-lg text-xs font-semibold text-slate-700 transition"
+              className="px-2.5 py-1.5 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl text-xs font-semibold text-slate-700 transition active:scale-95"
               title={`${b.subject?.name || ''} · ${b.generation_params?.ticket_count ?? '?'} вариантов`}
             >
-              {b.title} · {new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              {b.title} · {new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
             </button>
           ))}
         </div>
       )}
 
       {generationError && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-3 text-xs text-red-700">
+        <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start space-x-3 text-xs text-red-700 shadow-xs animate-in fade-in">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
           <div>
             <span className="font-bold">Генерация остановлена: </span>
@@ -573,17 +577,17 @@ export const TicketGenerator: React.FC = () => {
       )}
 
       {/* Панель настроек состава билета */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
         {/* 1. Выбор предмета, глав и тем */}
-        <div className="md:col-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div className="md:col-span-2 bento-card p-4 sm:p-6 rounded-2xl space-y-4">
           <h3 className="font-bold text-slate-900 text-sm flex items-center">
             <BookOpen className="w-4 h-4 mr-2 text-indigo-600" />
             1. Выбор диапазона глав и тем
           </h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
                 Предмет
               </label>
               <select
@@ -593,14 +597,14 @@ export const TicketGenerator: React.FC = () => {
                   setSelectedChapterIds([]);
                   setSelectedTopicIds([]);
                 }}
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                className="w-full text-xs p-2.5 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-900"
               >
                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase mb-1">
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
                 Название пакета билетов
               </label>
               <input
@@ -608,7 +612,7 @@ export const TicketGenerator: React.FC = () => {
                 value={batchTitle}
                 onChange={(e) => setBatchTitle(e.target.value)}
                 placeholder="Экзамен по неорганической химии"
-                className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                className="w-full text-xs p-2.5 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
               />
             </div>
           </div>
@@ -762,89 +766,177 @@ export const TicketGenerator: React.FC = () => {
         </div>
 
         {/* 2. Квоты вопросов и статистика пула */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
+        <div className="bento-card p-4 sm:p-6 rounded-2xl flex flex-col justify-between space-y-4">
           <div>
             <h3 className="font-bold text-slate-900 text-sm flex items-center mb-3">
-              <Layers className="w-4 h-4 mr-2 text-blue-600" />
+              <Layers className="w-4 h-4 mr-2 text-indigo-600" />
               2. Состав каждого билета
             </h3>
 
             <div className="space-y-3">
-              <div>
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-700">Тестовых вопросов:</span>
-                  <span className="text-slate-400">В пуле: {poolStats?.test || 0}</span>
+              {/* Тестовые вопросы */}
+              <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/80">
+                <div className="flex items-center justify-between text-xs mb-1.5">
+                  <span className="font-bold text-slate-800">Тестовые вопросы:</span>
+                  <span className="text-slate-400 font-medium">В пуле: {poolStats?.test || 0}</span>
                 </div>
-                <input
-                  type="number"
-                  min="0"
-                  value={testCount}
-                  onChange={(e) => setTestCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
-                  className="w-full text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
-                />
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setTestCount(Math.max(0, testCount - 1))}
+                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min="0"
+                    value={testCount}
+                    onChange={(e) => setTestCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
+                    className="flex-1 text-center text-sm font-bold p-1.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setTestCount(Math.min(limits.perType, testCount + 1))}
+                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
 
-              <div>
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-700">Заданий на соответствие:</span>
-                  <span className="text-slate-400">В пуле: {poolStats?.matching || 0}</span>
+              {/* На соответствие */}
+              <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/80">
+                <div className="flex items-center justify-between text-xs mb-1.5">
+                  <span className="font-bold text-slate-800">На соответствие:</span>
+                  <span className="text-slate-400 font-medium">В пуле: {poolStats?.matching || 0}</span>
                 </div>
-                <input
-                  type="number"
-                  min="0"
-                  value={matchingCount}
-                  onChange={(e) => setMatchingCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
-                  className="w-full text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
-                />
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setMatchingCount(Math.max(0, matchingCount - 1))}
+                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min="0"
+                    value={matchingCount}
+                    onChange={(e) => setMatchingCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
+                    className="flex-1 text-center text-sm font-bold p-1.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setMatchingCount(Math.min(limits.perType, matchingCount + 1))}
+                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
 
-              <div>
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-700">Открытых вопросов:</span>
-                  <span className="text-slate-400">В пуле: {poolStats?.open || 0}</span>
+              {/* Открытые вопросы */}
+              <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/80">
+                <div className="flex items-center justify-between text-xs mb-1.5">
+                  <span className="font-bold text-slate-800">Открытые вопросы:</span>
+                  <span className="text-slate-400 font-medium">В пуле: {poolStats?.open || 0}</span>
                 </div>
-                <input
-                  type="number"
-                  min="0"
-                  value={openCount}
-                  onChange={(e) => setOpenCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
-                  className="w-full text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold"
-                />
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setOpenCount(Math.max(0, openCount - 1))}
+                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min="0"
+                    value={openCount}
+                    onChange={(e) => setOpenCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
+                    className="flex-1 text-center text-sm font-bold p-1.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setOpenCount(Math.min(limits.perType, openCount + 1))}
+                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
 
-              <div className="pt-2 border-t border-slate-100">
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-bold text-slate-900">Количество вариантов:</span>
+              {/* Количество вариантов с пресетами */}
+              <div className="bg-indigo-50/50 p-3.5 rounded-2xl border border-indigo-100">
+                <div className="flex items-center justify-between text-xs mb-1.5">
+                  <span className="font-bold text-indigo-950">Количество вариантов:</span>
+                  <span className="text-indigo-600 font-semibold text-[11px]">макс. {limits.tickets}</span>
                 </div>
-                <input
-                  type="number"
-                  min="1"
-                  max={limits.tickets}
-                  value={ticketCount}
-                  onChange={(e) => setTicketCount(Math.min(limits.tickets, Math.max(1, parseInt(e.target.value) || 1)))}
-                  className="w-full text-xs p-2 border border-blue-400 bg-blue-50/50 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-blue-900"
-                />
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setTicketCount(Math.max(1, ticketCount - 1))}
+                    className="w-9 h-9 rounded-xl bg-white border border-indigo-200 text-indigo-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-indigo-50 shadow-2xs"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min="1"
+                    max={limits.tickets}
+                    value={ticketCount}
+                    onChange={(e) => setTicketCount(Math.min(limits.tickets, Math.max(1, parseInt(e.target.value) || 1)))}
+                    className="flex-1 text-center text-sm font-bold p-1.5 bg-white border border-indigo-200 text-indigo-950 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setTicketCount(Math.min(limits.tickets, ticketCount + 1))}
+                    className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-indigo-700 shadow-xs"
+                  >
+                    +
+                  </button>
+                </div>
+                {/* Быстрые пресеты */}
+                <div className="flex items-center gap-1.5 mt-2.5">
+                  <span className="text-[10px] text-slate-400 font-semibold uppercase mr-0.5">Быстро:</span>
+                  {[2, 5, 10, 20, Math.min(50, limits.tickets)].filter((v, idx, arr) => arr.indexOf(v) === idx && v <= limits.tickets).map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setTicketCount(n)}
+                      className={`px-2 py-0.5 rounded-lg text-xs font-bold transition active:scale-95 ${
+                        ticketCount === n
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'bg-white border border-indigo-200/70 text-indigo-700 hover:bg-indigo-50'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+
                 {!isAdmin && (
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Лимиты: до {limits.tickets} вариантов за раз, до {userLimits.total} вопросов в билете, до {userLimits.perDay} наборов в сутки, генерировать можно {formatCooldown(userLimits.cooldownSeconds)}.
+                  <p className="text-[11px] text-slate-400 mt-2">
+                    Лимиты: до {limits.tickets} вариантов за раз, до {userLimits.total} вопросов в билете.
                   </p>
                 )}
-                <p className="text-[11px] text-slate-400 mt-1">
+                <p className="text-[11px] text-slate-500 mt-1 font-medium">
                   Будет создано {ticketCount} параллельных билетов по {fitted.settings.testCount + fitted.settings.matchingCount + fitted.settings.openCount} вопросов
                 </p>
                 {fitted.notes.length > 0 && !fitted.error && (
-                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2 mt-2">
                     Вопросов не хватает — билеты составятся из того, что есть:<br />
                     {fitted.notes.map((n) => <span key={n} className="block">• {n}</span>)}
                   </p>
                 )}
                 {fitted.error && poolStats && (
-                  <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg p-2 mt-2">{fitted.error}</p>
+                  <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-xl p-2 mt-2">{fitted.error}</p>
                 )}
               </div>
 
               {/* Настройки перемешивания (анти-списывание) */}
-              <div className="pt-3 border-t border-slate-100 space-y-2">
+              <div className="pt-2 border-t border-slate-100 space-y-2">
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
                   Перемешивание (анти-списывание):
                 </span>
@@ -853,7 +945,7 @@ export const TicketGenerator: React.FC = () => {
                     type="checkbox"
                     checked={shuffleOptions}
                     onChange={(e) => setShuffleOptions(e.target.checked)}
-                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
                   />
                   <span className="font-medium">Перемешать варианты ответов (A, B, C, D)</span>
                 </label>
@@ -862,9 +954,9 @@ export const TicketGenerator: React.FC = () => {
                     type="checkbox"
                     checked={shuffleMatching}
                     onChange={(e) => setShuffleMatching(e.target.checked)}
-                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
                   />
-                  <span className="font-medium">Перемешать варианты соответствия (1, 2, 3, 4, 5)</span>
+                  <span className="font-medium">Перемешать варианты соответствия (1, 2, 3...)</span>
                 </label>
               </div>
             </div>
@@ -873,7 +965,7 @@ export const TicketGenerator: React.FC = () => {
           <button
             onClick={handleGenerate}
             disabled={isGenerating}
-            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow flex items-center justify-center space-x-2 transition disabled:opacity-50"
+            className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-2xl text-xs font-bold shadow-md shadow-indigo-500/25 flex items-center justify-center space-x-2 transition active:scale-[0.98] disabled:opacity-50"
           >
             {isGenerating ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -887,8 +979,8 @@ export const TicketGenerator: React.FC = () => {
 
       {/* Результаты генерации (предпросмотр созданных вариантов) */}
       {generatedBatch && (
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="bento-card p-4 sm:p-6 rounded-2xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-3">
             <div>
               <div className="flex items-center space-x-3">
                 <h3 className="font-bold text-slate-900 text-base">
@@ -909,21 +1001,21 @@ export const TicketGenerator: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => handleExportWord('ru')}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1 shadow-sm transition"
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1 shadow-xs transition active:scale-95"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Русский (.docx)</span>
               </button>
               <button
                 onClick={() => handleExportWord('tg')}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1 shadow-sm transition"
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1 shadow-xs transition active:scale-95"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Тоҷикӣ (.docx)</span>
               </button>
               <button
                 onClick={() => handleExportWord('both')}
-                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1 shadow-sm transition"
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1 shadow-xs transition active:scale-95"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>RU + TJ</span>
@@ -932,23 +1024,23 @@ export const TicketGenerator: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
             {generatedBatch.tickets.map((t: any) => (
-              <div key={t.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
+              <div key={t.id} className="p-4 rounded-2xl border border-slate-200/80 bg-slate-50/70 space-y-2.5">
                 <div className="font-bold text-sm text-slate-900 flex items-center justify-between">
                   <span>Вариант {t.ticket_number}</span>
                   <div className="flex items-center space-x-1.5">
                     <span className="text-xs font-normal text-slate-500 mr-1">Вопросов: {t.questions.length}</span>
                     <button
                       onClick={() => exportSingleWithKey(t, 'ru')}
-                      className="px-2 py-0.5 text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded border border-blue-200 transition"
+                      className="px-2 py-0.5 text-[11px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold rounded-lg border border-indigo-200/70 transition active:scale-95"
                       title="Скачать Вариант на русском"
                     >
                       RU (.docx)
                     </button>
                     <button
                       onClick={() => exportSingleWithKey(t, 'tg')}
-                      className="px-2 py-0.5 text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded border border-emerald-200 transition"
+                      className="px-2 py-0.5 text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-lg border border-emerald-200/70 transition active:scale-95"
                       title="Скачать Вариант на таджикском"
                     >
                       TJ (.docx)
@@ -957,7 +1049,7 @@ export const TicketGenerator: React.FC = () => {
                 </div>
                 <div className="space-y-1 text-xs text-slate-700 max-h-48 overflow-y-auto pr-1">
                   {t.questions.map((tq: any, i: number) => (
-                    <div key={i} className="p-1.5 bg-white rounded border border-slate-100 truncate">
+                    <div key={i} className="p-2 bg-white rounded-xl border border-slate-100 truncate shadow-2xs">
                       <span className="font-bold text-slate-400 mr-1.5">{i + 1}.</span>
                       <span className="font-medium text-slate-800">
                         {tq.question_snapshot.content.replace(/<.*?>/g, '')}
