@@ -380,6 +380,18 @@ export function chapterTotals(rows: Array<{ chapter_id: string; type: string }>)
   return out;
 }
 
+/** То же из готовых счётчиков { chapter_id, type, cnt } (функция базы question_counts) */
+export function chapterTotalsFromCounts(rows: Array<{ chapter_id: string | null; type: string; cnt: number }>, chapterIds?: string[]): ChapterTotals {
+  const only = chapterIds ? new Set(chapterIds) : null;
+  const out: ChapterTotals = {};
+  for (const r of rows) {
+    if (!r.chapter_id || (only && !only.has(r.chapter_id))) continue;
+    const c = (out[r.chapter_id] ??= { test: 0, matching: 0, open: 0 });
+    if (r.type === 'test' || r.type === 'matching' || r.type === 'open') c[r.type] += r.cnt;
+  }
+  return out;
+}
+
 export const totalsOf = (t: ChapterTotals | undefined, type: 'test' | 'matching' | 'open') =>
   t ? Object.fromEntries(Object.entries(t).map(([k, v]) => [k, v[type]])) : undefined;
 

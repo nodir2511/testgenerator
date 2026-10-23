@@ -128,10 +128,11 @@ async function screenChapters(chat: number, msgId: number | undefined, st: State
 }
 
 async function screenTopics(chat: number, msgId: number | undefined, st: State) {
-  const chs = await chaptersOf(st.subjectId!);
-  const ch = chs.find((c) => c.id === st.chapterIds[st.topicCh ?? 0]);
+  const chId = st.chapterIds[st.topicCh ?? 0];
+  // Темы главы не зависят от списка глав предмета: читаем одновременно
+  const [chs, list] = await Promise.all([chaptersOf(st.subjectId!), chId ? topicsOf([chId]) : Promise.resolve([] as any[])]);
+  const ch = chs.find((c) => c.id === chId);
   if (!ch) return screenChapters(chat, msgId, st);
-  const list = await topicsOf([ch.id]);
   st.step = 'topics';
   await saveState(chat, st);
   const last = (st.topicCh ?? 0) >= st.chapterIds.length - 1;

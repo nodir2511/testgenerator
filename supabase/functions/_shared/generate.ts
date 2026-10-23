@@ -19,10 +19,13 @@ export interface Selection {
 export async function linkedUser(sb: any, chat: number) {
   const { data: link } = await sb.from('telegram_links').select('user_id').eq('chat_id', chat).maybeSingle();
   if (!link) return null;
-  const { data: au } = await sb.auth.admin.getUserById(link.user_id);
+  // Статус блокировки и профиль независимы: читаем одновременно
+  const [{ data: au }, { data: profile }] = await Promise.all([
+    sb.auth.admin.getUserById(link.user_id),
+    sb.from('profiles').select('id, full_name, email, role').eq('id', link.user_id).maybeSingle(),
+  ]);
   const bannedUntil = (au?.user as { banned_until?: string | null } | undefined)?.banned_until;
   if (!au?.user || (bannedUntil && new Date(bannedUntil).getTime() > Date.now())) return null;
-  const { data: profile } = await sb.from('profiles').select('id, full_name, email, role').eq('id', link.user_id).maybeSingle();
   return profile ?? null;
 }
 
@@ -98,15 +101,9 @@ async function loadSelectionInfos(sb: any, sel: Selection): Promise<{ ru: string
 export async function loadChapterTotals(sb: any, subjectId: string, pool: any[]): Promise<T.ChapterTotals> {
   const ids = [...new Set(pool.map((q) => q.chapter_id).filter(Boolean))];
   if (!ids.length) return {};
-  const rows: any[] = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from('questions').select('chapter_id, type')
-      .eq('subject_id', subjectId).eq('is_deleted', false).in('chapter_id', ids).order('id').range(from, from + 999);
-    if (error) throw error;
-    rows.push(...(data ?? []));
-    if (!data || data.length < 1000) break;
-  }
-  return T.chapterTotals(rows);
+  const { data, error } = await sb.rpc('question_counts', { p_subject_id: subjectId });
+  if (error) throw error;
+  return T.chapterTotalsFromCounts(data ?? [], ids);
 }
 
 async function sendDocument(botToken: string, chat: number, bytes: Uint8Array, filename: string, caption: string) {
@@ -224,9 +221,9 @@ export async function generateAndSend(opts: {
   onNotes?: (notes: string[]) => Promise<void>;
 }): Promise<{ missingAnswers: number; keySent: boolean }> {
   const { sb, botToken, chat, user, sel, settings: s, lang, source } = opts;
-  const allowed = await allowedSubjectIds(sb, user);
+  const [allowed, limits] = await Promise.all([allowedSubjectIds(sb, user), limitsFor(sb, user)]);
   if (allowed && !allowed.includes(sel.subjectId)) throw new Error('Этот предмет вам не назначен');
-  const bad = T.checkSettings(s, await limitsFor(sb, user));
+  const bad = T.checkSettings(s, limits);
   if (bad) throw new Error(bad);
   const dayErr = await dailyLimitError(sb, user);
   if (dayErr) throw new Error(dayErr);

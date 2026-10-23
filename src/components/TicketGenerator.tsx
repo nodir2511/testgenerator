@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo, describeError } from '../lib/errors';
-import { fitSettings, pickParallel, separateLinked, chapterTotals, totalsOf,poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
+import { fitSettings, pickParallel, separateLinked, chapterTotalsFromCounts, totalsOf,poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
 import { Subject, Chapter, Topic, Question, TicketBatch, Ticket, TicketQuestion } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -254,32 +254,30 @@ export const TicketGenerator: React.FC = () => {
     }));
   };
 
-  // 4. Подсчет доступного пула вопросов для проверки дефицита
-  const { data: poolStats } = useQuery({
-    queryKey: ['pool_stats', subjectId, selectedChapterIds, selectedTopicIds],
+  // 4. Подсчет доступного пула вопросов для проверки дефицита.
+  // Счётчики предмета считает база одним запросом; при смене выбора глав и тем запрос не повторяется.
+  const { data: poolCounts } = useQuery({
+    queryKey: ['question_counts', subjectId],
     staleTime: 0,
     enabled: Boolean(subjectId),
     queryFn: async () => {
-      const { data } = await fetchAllPages<any>(() => {
-        let q = supabase
-          .from('questions')
-          .select('id, type, topic_id, chapter_id')
-          .eq('subject_id', subjectId)
-          .eq('is_deleted', false);
-        if (selectedTopicIds.length > 0) q = q.in('topic_id', selectedTopicIds);
-        else if (selectedChapterIds.length > 0) q = q.in('chapter_id', selectedChapterIds);
-        return q;
-      });
-      const all = data || [];
-
-      return {
-        total: all.length,
-        test: all.filter(x => x.type === 'test').length,
-        matching: all.filter(x => x.type === 'matching').length,
-        open: all.filter(x => x.type === 'open').length,
-      };
+      const { data, error } = await supabase.rpc('question_counts', { p_subject_id: subjectId });
+      if (error) throw error;
+      return (data || []) as Array<{ chapter_id: string | null; topic_id: string | null; type: string; cnt: number }>;
     },
   });
+  const poolStats = React.useMemo(() => {
+    if (!poolCounts) return undefined;
+    const topicSet = new Set(selectedTopicIds);
+    const chapterSet = new Set(selectedChapterIds);
+    const out = { total: 0, test: 0, matching: 0, open: 0 };
+    for (const r of poolCounts) {
+      if (topicSet.size > 0 ? !(r.topic_id && topicSet.has(r.topic_id)) : chapterSet.size > 0 && !(r.chapter_id && chapterSet.has(r.chapter_id))) continue;
+      out.total += r.cnt;
+      if (r.type === 'test' || r.type === 'matching' || r.type === 'open') out[r.type] += r.cnt;
+    }
+    return out;
+  }, [poolCounts, selectedTopicIds, selectedChapterIds]);
 
   // Состав билета с учётом того, что реально есть в выбранных темах
   const fitted = fitSettings(
@@ -335,11 +333,9 @@ export const TicketGenerator: React.FC = () => {
       // без повторов, пока хватает вопросов
       // Охват глав: сколько вопросов главы выбрано от всех её вопросов (неполный выбор уменьшает долю главы)
       const chapterIds = Array.from(new Set(allQuestionsRaw.map(q => q.chapter_id).filter(Boolean)));
-      const { data: totalRows, error: totErr } = await fetchAllPages<any>(() =>
-        supabase.from('questions').select('chapter_id, type').eq('subject_id', subjectId).eq('is_deleted', false).in('chapter_id', chapterIds)
-      );
+      const { data: countRows, error: totErr } = await supabase.rpc('question_counts', { p_subject_id: subjectId });
       if (totErr) throw totErr;
-      const totals = chapterTotals(totalRows || []);
+      const totals = chapterTotalsFromCounts(countRows || [], chapterIds);
       const tests = pickParallel(allQuestionsRaw.filter(q => q.type === 'test'), useTest, ticketCount, Math.random, totalsOf(totals, 'test'));
       const matchings = pickParallel(allQuestionsRaw.filter(q => q.type === 'matching'), useMatching, ticketCount, Math.random, totalsOf(totals, 'matching'));
       const opens = pickParallel(allQuestionsRaw.filter(q => q.type === 'open'), useOpen, ticketCount, Math.random, totalsOf(totals, 'open'));

@@ -66,6 +66,18 @@ async function api<T>(action: string, payload: Record<string, unknown> = {}): Pr
   return data as T;
 }
 
+// Дерево предмета на время сессии: повторный выбор предмета мгновенный, сбрасывается после генерации
+const treeCache = new Map<string, Promise<ChapterRow[]>>();
+function loadTree(subjectId: string): Promise<ChapterRow[]> {
+  let p = treeCache.get(subjectId);
+  if (!p) {
+    p = api<{ chapters: ChapterRow[] }>('tree', { subjectId }).then((r) => r.chapters);
+    treeCache.set(subjectId, p);
+    p.catch(() => treeCache.delete(subjectId));
+  }
+  return p;
+}
+
 const total = (c: Counts) => c.test + c.matching + c.open;
 const sum = (items: Counts[]): Counts => items.reduce((a, c) => ({ test: a.test + c.test, matching: a.matching + c.matching, open: a.open + c.open }), { test: 0, matching: 0, open: 0 });
 const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -148,7 +160,13 @@ export default function TgApp() {
         if (prefs.title) setTitle(prefs.title);
         if (typeof prefs.shuffleOptions === 'boolean') setShuffleOptions(prefs.shuffleOptions);
         if (typeof prefs.shuffleMatching === 'boolean') setShuffleMatching(prefs.shuffleMatching);
-        api<{ batches: HistoryBatch[] }>('history').then((h) => setHistory(h.batches)).catch(() => {});
+        api<{ batches: HistoryBatch[] }>('history').then((h) => {
+          setHistory(h.batches);
+          const last = h.batches.find((b) => me.subjects.some((s) => s.id === b.subject_id));
+          if (last && me.subjects.length > 1) void loadTree(last.subject_id).catch(() => {});
+        }).catch(() => {});
+        // Остальные предметы грузятся в фоне, пока пользователь выбирает
+        if (me.subjects.length > 1) me.subjects.forEach((s) => void loadTree(s.id).catch(() => {}));
         if (me.subjects.length === 1) await pickSubject(me.subjects[0], true);
         setReady(true);
       } catch (e) {
@@ -163,7 +181,7 @@ export default function TgApp() {
     setBusy(true);
     setError('');
     try {
-      const { chapters: ch } = await api<{ chapters: ChapterRow[] }>('tree', { subjectId: s.id });
+      const ch = await loadTree(s.id);
       setSubject(s);
       setChapters(ch);
       if (preset) {
@@ -248,6 +266,7 @@ export default function TgApp() {
       });
       wa()?.HapticFeedback?.notificationOccurred('success');
       savePrefs({ nums, lang, title, shuffleOptions, shuffleMatching });
+      treeCache.clear();
       setResult(r);
       setStep('done');
     } catch (e) {
@@ -344,28 +363,6 @@ export default function TgApp() {
   }
   if (!ready) return <Shell><p className="tg-hint">Загрузка…</p></Shell>;
 
-  function Recent() {
-    const items = history.filter((b) => subjects.some((s) => s.id === b.subject_id)).slice(0, 4);
-    if (!items.length) return null;
-    return (
-      <section>
-        <h2>Повторить прошлый набор</h2>
-        {items.map((b) => (
-          <React.Fragment key={b.id}>
-          <button className="tg-row" disabled={busy} onClick={() => pickSubject(subjects.find((s) => s.id === b.subject_id)!, false, b)}>
-            <span className="tg-grow">
-              {shortName(b.title, 50)}
-              <span className="tg-sub">{new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · {b.generation_params.ticket_count ?? '?'} шт. · {shortName(b.subject?.name ?? '', 30)}</span>
-            </span>
-            <span className="tg-chev">↻</span>
-          </button>
-          <button className="tg-link" disabled={busy} onClick={() => resend(b)}>Прислать файл ещё раз</button>
-          </React.Fragment>
-        ))}
-      </section>
-    );
-  }
-
   const count = (c: Counts) => `${c.test} / ${c.matching} / ${c.open}`;
 
   return (
@@ -376,7 +373,7 @@ export default function TgApp() {
         <>
           <h1>Предмет</h1>
           <p className="tg-hint">{name ? `Вы вошли как ${name}.` : ''} Выберите предмет.</p>
-          <Recent />
+          <Recent history={history} subjects={subjects} busy={busy} onRepeat={(b) => pickSubject(subjects.find((s) => s.id === b.subject_id)!, false, b)} onResend={resend} />
           {subjects.map((s) => (
             <button key={s.id} className="tg-row" disabled={busy} onClick={() => pickSubject(s)}>
               <span>{shortName(s.name, 80)}</span><span className="tg-chev">›</span>
@@ -389,7 +386,7 @@ export default function TgApp() {
         <>
           <h1>Главы</h1>
           <p className="tg-hint">{shortName(subject?.name ?? '', 60)} · цифры: тесты / соответствия / открытые</p>
-          <Recent />
+          <Recent history={history} subjects={subjects} busy={busy} onRepeat={(b) => pickSubject(subjects.find((s) => s.id === b.subject_id)!, false, b)} onResend={resend} />
           <div className="tg-actions">
             <button className="tg-link" onClick={() => setChapterIds(chapters.map((c) => c.id))}>Все</button>
             <button className="tg-link" onClick={() => setChapterIds([])}>Сбросить</button>
@@ -488,6 +485,28 @@ export default function TgApp() {
         </div>
       )}
     </Shell>
+  );
+}
+
+function Recent(p: { history: HistoryBatch[]; subjects: Subject[]; busy: boolean; onRepeat: (b: HistoryBatch) => void; onResend: (b: HistoryBatch) => void }) {
+  const items = p.history.filter((b) => p.subjects.some((s) => s.id === b.subject_id)).slice(0, 4);
+  if (!items.length) return null;
+  return (
+    <section>
+      <h2>Повторить прошлый набор</h2>
+      {items.map((b) => (
+        <React.Fragment key={b.id}>
+          <button className="tg-row" disabled={p.busy} onClick={() => p.onRepeat(b)}>
+            <span className="tg-grow">
+              {shortName(b.title, 50)}
+              <span className="tg-sub">{new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · {b.generation_params.ticket_count ?? '?'} шт. · {shortName(b.subject?.name ?? '', 30)}</span>
+            </span>
+            <span className="tg-chev">↻</span>
+          </button>
+          <button className="tg-link" disabled={p.busy} onClick={() => p.onResend(b)}>Прислать файл ещё раз</button>
+        </React.Fragment>
+      ))}
+    </section>
   );
 }
 

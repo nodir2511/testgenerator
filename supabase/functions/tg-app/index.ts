@@ -62,23 +62,29 @@ async function verifyInitData(raw: string): Promise<{ id: number } | null> {
 // ---------------- Данные ----------------
 type Counts = { test: number; matching: number; open: number };
 const zero = (): Counts => ({ test: 0, matching: 0, open: 0 });
-const bump = (c: Counts, type: string) => {
-  if (type === 'test' || type === 'matching' || type === 'open') c[type]++;
-};
 
 async function subjectList(user: { id: string; role?: string }) {
-  const { data } = await sb.from('subjects').select('id, name').eq('is_deleted', false).order('name');
-  const allowed = await allowedSubjectIds(sb, user);
+  const [{ data }, allowed] = await Promise.all([
+    sb.from('subjects').select('id, name').eq('is_deleted', false).order('name'),
+    allowedSubjectIds(sb, user),
+  ]);
   return (data ?? []).filter((s: any) => !allowed || allowed.includes(s.id));
 }
 
-// Главы и темы предмета с числом вопросов каждого вида
+// Главы и темы предмета с числом вопросов каждого вида (счётчики считает база одним запросом)
 async function tree(subjectId: string) {
-  const { data: chapters } = await sb.from('chapters').select('id, name').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
-  const { data: topics } = (chapters ?? []).length
-    ? await sb.from('topics').select('id, name, chapter_id').in('chapter_id', chapters!.map((c: any) => c.id)).eq('is_deleted', false).order('order_index')
-    : { data: [] as any[] };
-  const chById = new Map((chapters ?? []).map((c: any) => [c.id, { id: c.id, name: c.name, counts: zero(), topics: [] as any[] }]));
+  const [chRes, cntRes] = await Promise.all([
+    sb.from('chapters').select('id, name').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index'),
+    sb.rpc('question_counts', { p_subject_id: subjectId }),
+  ]);
+  if (chRes.error) throw chRes.error;
+  if (cntRes.error) throw cntRes.error;
+  const chapters = chRes.data ?? [];
+  const { data: topics, error: tErr } = chapters.length
+    ? await sb.from('topics').select('id, name, chapter_id').in('chapter_id', chapters.map((c: any) => c.id)).eq('is_deleted', false).order('order_index')
+    : { data: [] as any[], error: null };
+  if (tErr) throw tErr;
+  const chById = new Map(chapters.map((c: any) => [c.id, { id: c.id, name: c.name, counts: zero(), topics: [] as any[] }]));
   const tById = new Map<string, any>();
   for (const t of topics ?? []) {
     const ch = chById.get(t.chapter_id);
@@ -87,17 +93,12 @@ async function tree(subjectId: string) {
     ch.topics.push(row);
     tById.set(t.id, row);
   }
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from('questions').select('chapter_id, topic_id, type')
-      .eq('subject_id', subjectId).eq('is_deleted', false).order('id').range(from, from + 999);
-    if (error) throw error;
-    for (const q of data ?? []) {
-      const ch = chById.get(q.chapter_id);
-      if (ch) bump(ch.counts, q.type);
-      const tp = q.topic_id ? tById.get(q.topic_id) : null;
-      if (tp) bump(tp.counts, q.type);
+  for (const r of cntRes.data ?? []) {
+    const ch = chById.get(r.chapter_id);
+    const tp = r.topic_id ? tById.get(r.topic_id) : null;
+    for (const c of [ch?.counts, tp?.counts]) {
+      if (c && (r.type === 'test' || r.type === 'matching' || r.type === 'open')) c[r.type as keyof Counts] += r.cnt;
     }
-    if (!data || data.length < 1000) break;
   }
   return [...chById.values()];
 }
@@ -159,7 +160,10 @@ Deno.serve(async (req) => {
 
     switch (body?.action) {
       case 'me':
-        return json({ name: user.full_name || user.email, subjects: await subjectList(user), limits: await limitsFor(sb, user) });
+        {
+        const [subjects, limits] = await Promise.all([subjectList(user), limitsFor(sb, user)]);
+        return json({ name: user.full_name || user.email, subjects, limits });
+      }
       case 'history': {
         const { data } = await sb.from('ticket_batches').select('id, title, created_at, subject_id, generation_params, subject:subjects(name)')
           .eq('created_by', user.id).order('created_at', { ascending: false }).limit(24);
