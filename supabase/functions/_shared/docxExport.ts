@@ -248,9 +248,9 @@ export function parseFormattedTextRuns(
 }
 
 // Создание ячейки номера вопроса (серая плашка в одну строку).
-// topPt — верхний/нижний внутренний отступ ячейки с текстом вопроса (pt): плашка растягивается на эту же величину
-// невидимой верхней рамкой того же серого цвета и отступом нижней рамки, поэтому закрашена вся высота строки
-// у вопроса из одной строки (у длинного вопроса плашка остаётся в одну строку).
+// topPt — отступ сверху и снизу у текста вопроса (pt). Плашка упирается в линию сверху и доходит до низа строки:
+// невидимая верхняя рамка того же серого цвета и отступ нижней рамки добавляют по topPt, цифра стоит на уровне
+// текста вопроса (у длинного вопроса плашка остаётся в одну строку).
 function createNumberCell(qNumber: number, topPt = 0): TableCell {
   const pad = Math.ceil(topPt);
   return new TableCell({
@@ -431,10 +431,11 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
             new TableCell({
               columnSpan: 4,
               width: { size: 8848, type: WidthType.DXA },
-              margins: cm,
+              margins: { ...cm, top: 0 }, // верхний отступ — у абзаца (spacing.before): Word берёт одинаковый верх у всех ячеек строки, и плашка с номером не доходила до линии
               borders: QUESTION_TOP_BORDERS,
               children: [
                 new Paragraph({
+                  spacing: { before: cm.top },
                   children: parseFormattedTextRuns(qText, false, FONT_SIZE, true), // Текст вопроса жирный
                 }),
               ],
@@ -504,10 +505,11 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
             new TableCell({
               columnSpan: 2,
               width: { size: 8848, type: WidthType.DXA },
-              margins: cm,
+              margins: { ...cm, top: 0 }, // верхний отступ — у абзаца (spacing.before): Word берёт одинаковый верх у всех ячеек строки, и плашка с номером не доходила до линии
               borders: QUESTION_TOP_BORDERS,
               children: [
                 new Paragraph({
+                  spacing: { before: cm.top },
                   children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
                 }),
               ],
@@ -653,10 +655,11 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
             createNumberCell(qNumber, cm.top / 20),
             new TableCell({
               width: { size: 8848, type: WidthType.DXA },
-              margins: cm,
+              margins: { ...cm, top: 0 }, // верхний отступ — у абзаца (spacing.before): Word берёт одинаковый верх у всех ячеек строки, и плашка с номером не доходила до линии
               borders: QUESTION_TOP_BORDERS,
               children: [
                 new Paragraph({
+                  spacing: { before: cm.top },
                   children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
                 }),
               ],
@@ -755,10 +758,11 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
           new TableCell({
             columnSpan: spanCols,
             width: { size: 8848, type: WidthType.DXA },
-            margins: cm,
+            margins: { ...cm, top: 0 }, // верхний отступ — у абзаца (spacing.before): Word берёт одинаковый верх у всех ячеек строки, и плашка с номером не доходила до линии
             borders: QUESTION_TOP_BORDERS,
             children: [
               new Paragraph({
+                spacing: { before: cm.top },
                 children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
               }),
             ],
@@ -896,10 +900,11 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
         createNumberCell(qNumber, cm.top / 20),
         new TableCell({
           width: { size: 8848, type: WidthType.DXA },
-          margins: cm,
+          margins: { ...cm, top: 0 }, // верхний отступ — у абзаца (spacing.before): Word берёт одинаковый верх у всех ячеек строки, и плашка с номером не доходила до линии
           borders: QUESTION_TOP_BORDERS,
           children: [
             new Paragraph({
+              spacing: { before: cm.top },
               children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
             }),
           ],

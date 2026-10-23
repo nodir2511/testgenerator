@@ -24,3 +24,14 @@ describe('плашка с номером вопроса', () => {
     expect(xml).not.toContain('w:after="40"');
   });
 });
+
+describe('плашка и линия над вопросом', () => {
+  it('верхний отступ текста вопроса сделан абзацем, а у ячейки он нулевой (плашка доходит до линии)', async () => {
+    const q = { type: 'open', content: 'Вопрос', content_ru: 'Вопрос' };
+    const blob = await buildSingleTicketBlob('Э', { ticket_number: 1, questions: [{ question_snapshot: q }] }, 'Химия', false);
+    const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
+    // ячейка вопроса: верхний отступ 0, у абзаца spacing before = 80
+    expect(xml).toMatch(/<w:tcMar><w:top w:type="dxa" w:w="0"\/><w:left w:type="dxa" w:w="100"\/>/);
+    expect(xml).toContain('w:before="80"');
+  });
+});
