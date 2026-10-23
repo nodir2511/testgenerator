@@ -184,3 +184,13 @@ describe('химия и физика: надпись под последним �
     expect(labels).toBe(breaks - 1 + 2);
   });
 });
+
+
+describe('дата на обложке', () => {
+  it('преобразует ГГГГ-ММ-ДД в ДД.ММ', async () => {
+    const { coverDate } = await import('../src/components/ClusterExam');
+    expect(coverDate('2026-10-24')).toBe('24.10');
+    expect(coverDate('2026-09-01')).toBe('01.09');
+    expect(coverDate('invalid-date')).toBe('');
+  });
+});

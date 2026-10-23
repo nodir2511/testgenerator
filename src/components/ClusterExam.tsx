@@ -35,27 +35,39 @@ interface Saved {
   avoidRepeats?: boolean;
 }
 
-const defaults = (): Saved => ({
-  settings: { code: 'А.5', exam: 'Авг', date: '' },
-  variants: 4,
-  subjectIds: CLUSTER_SLOTS.map(() => ''),
-  counts: CLUSTER_SLOTS.map((s) => ({ ...s.counts })),
-  enabled: CLUSTER_SLOTS.map(() => true),
-  topicIds: CLUSTER_SLOTS.map(() => []),
-  chapterIds: CLUSTER_SLOTS.map(() => []),
-  avoidRepeats: true,
-});
+// 2026-09-27 → «27.09»
+export const coverDate = (iso: string) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}` : '');
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const defaults = (): Saved => {
+  const iso = todayIso();
+  return {
+    settings: { code: 'А.5', exam: 'Авг', date: coverDate(iso) },
+    dateIso: iso,
+    variants: 4,
+    subjectIds: CLUSTER_SLOTS.map(() => ''),
+    counts: CLUSTER_SLOTS.map((s) => ({ ...s.counts })),
+    enabled: CLUSTER_SLOTS.map(() => true),
+    topicIds: CLUSTER_SLOTS.map(() => []),
+    chapterIds: CLUSTER_SLOTS.map(() => []),
+    avoidRepeats: true,
+  };
+};
 
 function load(): Saved {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (raw && raw.settings && Array.isArray(raw.subjectIds) && Array.isArray(raw.counts)) return { ...defaults(), ...raw };
+    if (raw && raw.settings && Array.isArray(raw.subjectIds) && Array.isArray(raw.counts)) {
+      const merged: Saved = { ...defaults(), ...raw };
+      if (!merged.settings.date && merged.dateIso) {
+        merged.settings.date = coverDate(merged.dateIso);
+      }
+      return merged;
+    }
   } catch { /* ignore */ }
   return defaults();
 }
-
-// 2026-09-27 → «27.09»
-const coverDate = (iso: string) => (/^d{4}-d{2}-d{2}$/.test(iso) ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}` : '');
 
 const PREFS_KEY = 'cluster_v1';
 
@@ -231,7 +243,13 @@ export const ClusterExam: React.FC = () => {
     supabase.from('user_prefs').select('value').eq('user_id', user.id).eq('key', PREFS_KEY).maybeSingle().then(({ data, error }) => {
       if (cancelled || error) return;
       const v = data?.value as Saved | undefined;
-      if (v && v.settings && Array.isArray(v.subjectIds) && Array.isArray(v.counts)) setState({ ...defaults(), ...v });
+      if (v && v.settings && Array.isArray(v.subjectIds) && Array.isArray(v.counts)) {
+        const merged: Saved = { ...defaults(), ...v };
+        if (!merged.settings.date && merged.dateIso) {
+          merged.settings.date = coverDate(merged.dateIso);
+        }
+        setState(merged);
+      }
       prefsReady.current = true;
     });
     return () => { cancelled = true; };
@@ -298,9 +316,12 @@ export const ClusterExam: React.FC = () => {
       const { settings, variants: V, subjectIds, counts } = state;
       const enabled = CLUSTER_SLOTS.map((_, i) => state.enabled?.[i] !== false);
       if (!enabled.some(Boolean)) throw new Error('Включите хотя бы один предмет');
-      if (!settings.code.trim() || !settings.exam.trim() || !settings.date.trim()) throw new Error('Заполните код кластера, название экзамена и дату');
+      if (!settings.code.trim()) throw new Error('Укажите код кластера (например, А.5)');
+      if (!settings.exam.trim()) throw new Error('Укажите название экзамена (например, Авг)');
+      if (!settings.date.trim()) throw new Error('Выберите дату экзамена в календаре');
       if (V < 1 || V > MAX_VARIANTS) throw new Error(`Вариантов может быть от 1 до ${MAX_VARIANTS}`);
-      if (subjectIds.some((id, i) => enabled[i] && !id)) throw new Error('Выберите предмет для каждого включённого субтеста');
+      const missingSlot = CLUSTER_SLOTS.find((_, i) => enabled[i] && !subjectIds[i]);
+      if (missingSlot) throw new Error(`Выберите предмет из базы для субтеста «${missingSlot.name}» или снимите с него галочку`);
 
       const variants: ClusterVariant[] = Array.from({ length: V }, (_, k) => ({ number: k + 1, subjects: [] }));
       const notes: string[] = [];
@@ -318,10 +339,14 @@ export const ClusterExam: React.FC = () => {
       }
       const perSlot = await Promise.all(CLUSTER_SLOTS.map(async (slot, s) => {
         if (!enabled[s]) return null;
-        const r = await pickForSlot(subjectIds[s], state.topicIds?.[s] ?? [], state.chapterIds?.[s] ?? [], counts[s], V, used);
-        r.notes.forEach((n) => notes.push(`${slot.name} — ${n}`));
-        if (r.repeats > 0) repeatNotes.push(`${slot.name}: ${r.repeats} из ${r.picked}`);
-        return r.perVariant;
+        try {
+          const r = await pickForSlot(subjectIds[s], state.topicIds?.[s] ?? [], state.chapterIds?.[s] ?? [], counts[s], V, used);
+          r.notes.forEach((n) => notes.push(`${slot.name} — ${n}`));
+          if (r.repeats > 0) repeatNotes.push(`${slot.name}: ${r.repeats} из ${r.picked}`);
+          return r.perVariant;
+        } catch (slotErr: any) {
+          throw new Error(`Субтест «${slot.name}»: ${describeError(slotErr, 'ошибка подбора вопросов')}`);
+        }
       }));
       perSlot.forEach((pv) => variants.forEach((v, k) => v.subjects.push(pv ? pv[k] : null)));
 
@@ -388,9 +413,13 @@ export const ClusterExam: React.FC = () => {
             <span>Дата экзамена</span>
             <input
               type="date" className={input} value={state.dateIso ?? ''}
-              onChange={(e) => setState((st) => ({ ...st, dateIso: e.target.value, settings: { ...st.settings, date: coverDate(e.target.value) } }))}
+              onChange={(e) => {
+                const iso = e.target.value;
+                const formatted = coverDate(iso);
+                setState((st) => ({ ...st, dateIso: iso, settings: { ...st.settings, date: formatted || st.settings.date } }));
+              }}
             />
-            <span className="block text-[11px] font-normal text-slate-400">На обложке: {state.settings.date || '—'}</span>
+            <span className="block text-[11px] font-normal text-slate-500">На обложке: <strong className="text-slate-700">{state.settings.date || '—'}</strong></span>
           </label>
           <label className="text-xs font-semibold text-slate-600 space-y-1">
             <span>Вариантов (1–{MAX_VARIANTS})</span>
@@ -426,10 +455,18 @@ export const ClusterExam: React.FC = () => {
                   <input type="checkbox" checked={on} onChange={(e) => setEnabled(i, e.target.checked)} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
                   <span>{i + 1}. {slot.name}</span>
                 </label>
-                <select disabled={!on} className={input} value={state.subjectIds[i]} onChange={(e) => setSubject(i, e.target.value)}>
+                <select
+                  disabled={!on}
+                  className={`${input} ${on && !state.subjectIds[i] ? 'border-amber-400 bg-amber-50/40 focus:ring-amber-500' : ''}`}
+                  value={state.subjectIds[i]}
+                  onChange={(e) => setSubject(i, e.target.value)}
+                >
                   <option value="">— выберите предмет —</option>
                   {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
+                {on && !state.subjectIds[i] && (
+                  <p className="text-[11px] text-amber-700 font-medium">Предмет не выбран. Выберите предмет из списка или снимите галочку.</p>
+                )}
               </div>
               <div className="flex items-end gap-2 flex-wrap">
                 {([['test', 'Тестов'], ['matching', 'Соответствий'], ['open', 'Открытых']] as const).map(([k, label]) => (
