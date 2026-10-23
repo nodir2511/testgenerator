@@ -17,7 +17,8 @@ import {
   Download,
   Info,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Share2
 } from 'lucide-react';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/exportLazy';
 import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo } from '../lib/exportLazy';
@@ -72,6 +73,9 @@ export const TicketGenerator: React.FC = () => {
   const [batchTitle, setBatchTitle] = useState<string>(() => getStorageString('examiner_tg_batch_title', 'Экзаменационные билеты'));
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [genProgress, setGenProgress] = useState<{ percent: number; stage: string }>({ percent: 0, stage: '' });
+  const [isSharing, setIsSharing] = useState(false);
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [generatedBatch, setGeneratedBatch] = useState<any | null>(() => getStorageJSON('examiner_tg_generated_batch', null));
 
@@ -310,12 +314,66 @@ export const TicketGenerator: React.FC = () => {
     { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }
   );
 
+  // Живой индикатор готовности пула вопросов (Traffic Light): хватает ли вопросов без повторов
+  const healthStats = React.useMemo(() => {
+    if (!poolStats) return null;
+    const testPer = testCount;
+    const matchingPer = matchingCount;
+    const openPer = openCount;
+
+    if (testPer + matchingPer + openPer === 0) return null;
+
+    const maxTestVariants = testPer > 0 ? Math.floor(poolStats.test / testPer) : Infinity;
+    const maxMatchingVariants = matchingPer > 0 ? Math.floor(poolStats.matching / matchingPer) : Infinity;
+    const maxOpenVariants = openPer > 0 ? Math.floor(poolStats.open / openPer) : Infinity;
+
+    const safeVariants = Math.min(maxTestVariants, maxMatchingVariants, maxOpenVariants);
+    const effectiveSafe = safeVariants === Infinity ? 0 : safeVariants;
+
+    const bottlenecks: string[] = [];
+    if (testPer > 0 && maxTestVariants < ticketCount) {
+      bottlenecks.push(`тестовых (хватит на ${maxTestVariants} вар.)`);
+    }
+    if (matchingPer > 0 && maxMatchingVariants < ticketCount) {
+      bottlenecks.push(`на соответствие (хватит на ${maxMatchingVariants} вар.)`);
+    }
+    if (openPer > 0 && maxOpenVariants < ticketCount) {
+      bottlenecks.push(`открытых (хватит на ${maxOpenVariants} вар.)`);
+    }
+
+    if (effectiveSafe >= ticketCount) {
+      return {
+        status: 'green' as const,
+        title: `Отлично: вопросов хватает на ${effectiveSafe} вариантов без повторов`,
+        desc: `Вы запросили ${ticketCount} вариантов. Все вопросы будут уникальными и сбалансированными по темам.`,
+        safeVariants: effectiveSafe
+      };
+    } else if (effectiveSafe > 0) {
+      return {
+        status: 'yellow' as const,
+        title: `Внимание: без повторов хватит только на ${effectiveSafe} вар.`,
+        desc: `Узкое место: ${bottlenecks.join(', ')}. При генерации ${ticketCount} вариантов вопросы будут повторяться.`,
+        safeVariants: effectiveSafe
+      };
+    } else {
+      return {
+        status: 'red' as const,
+        title: `Недостаточно вопросов в выбранных темах`,
+        desc: bottlenecks.length > 0
+          ? `Дефицит: ${bottlenecks.join(', ')}. Выберите больше глав/тем или уменьшите количество вопросов в билете.`
+          : 'В выбранных темах нет вопросов требуемых типов.',
+        safeVariants: 0
+      };
+    }
+  }, [poolStats, testCount, matchingCount, openCount, ticketCount]);
+
   // Алгоритм параллельной генерации билетов
   const handleGenerate = async () => {
     if (generatingRef.current) return; // защита от двойного нажатия
     generatingRef.current = true;
     setGenerationError(null);
     setIsGenerating(true);
+    setGenProgress({ percent: 15, stage: 'Загрузка вопросов пула...' });
 
     try {
       if (!subjectId) throw new Error('Выберите предмет');
@@ -344,6 +402,8 @@ export const TicketGenerator: React.FC = () => {
       });
       if (qErr || !allQuestionsRaw) throw qErr || new Error('Ошибка загрузки вопросов');
 
+      setGenProgress({ percent: 45, stage: 'Распределение тем без повторов...' });
+
       // 2. Если вопросов какого-то вида не хватает, берём сколько есть (считаем по реально загруженным вопросам)
       const fit = fitSettings(
         calcPoolStats(allQuestionsRaw),
@@ -370,6 +430,8 @@ export const TicketGenerator: React.FC = () => {
         ticketsData.push({ ticketNumber: k + 1, questions: [...tests[k], ...matchings[k], ...opens[k]] });
       }
 
+      setGenProgress({ percent: 75, stage: 'Создание снимков вариантов...' });
+
       // 4. Сохранение одной транзакцией: партия, билеты и вопросы билетов (см. supabase/sql/save_ticket_batch.sql).
       // При любой ошибке база откатывает всё — недосозданных наборов не остаётся.
       const snapOpts = { shuffleOptions, shuffleMatching };
@@ -381,6 +443,9 @@ export const TicketGenerator: React.FC = () => {
           question_snapshot: toSnapshot(q, snapOpts),
         })),
       }));
+
+      setGenProgress({ percent: 90, stage: 'Запись в базу данных...' });
+
       const { data: saved, error: sErr } = await supabase.rpc('save_ticket_batch', {
         p_batch: {
           title: batchTitle.trim() || 'Экзаменационные билеты',
@@ -401,6 +466,9 @@ export const TicketGenerator: React.FC = () => {
         p_tickets: ticketsPayload,
       });
       if (sErr || !saved) throw sErr || new Error('Не удалось сохранить билеты');
+
+      setGenProgress({ percent: 100, stage: 'Готово!' });
+
       const batch = (saved as any).batch;
       const createdTicketsWithQuestions = ((saved as any).tickets as any[]).map((t, i) => ({
         ...t,
@@ -419,6 +487,7 @@ export const TicketGenerator: React.FC = () => {
     } finally {
       generatingRef.current = false;
       setIsGenerating(false);
+      setGenProgress({ percent: 0, stage: '' });
     }
   };
 
@@ -497,6 +566,54 @@ export const TicketGenerator: React.FC = () => {
     }
   };
 
+  // Поделиться билетами через Web Share API (Telegram, WhatsApp, AirDrop и т.д.)
+  const handleShareTickets = async (lang: 'ru' | 'tg' = 'ru') => {
+    if (!generatedBatch || !generatedBatch.tickets) return;
+    setIsSharing(true);
+    try {
+      const subj = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Предмет';
+      const extras = await keyArchiveExtras(
+        generatedBatch.title,
+        generatedBatch.tickets,
+        subj,
+        { subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params },
+        lang
+      );
+      const file = await buildTicketsFile(
+        generatedBatch.title,
+        generatedBatch.tickets,
+        subj,
+        lang,
+        extras
+      );
+      if (!file) return;
+
+      const wordFile = new File([file.blob], file.fileName, {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+
+      if (navigator.canShare && navigator.canShare({ files: [wordFile] })) {
+        await navigator.share({
+          title: generatedBatch.title,
+          text: `Экзаменационные билеты (${subj}) — ${generatedBatch.tickets.length} вар.`,
+          files: [wordFile],
+        });
+      } else {
+        await navigator.share({
+          title: generatedBatch.title,
+          text: `Экзаменационные билеты (${subj}) — ${generatedBatch.tickets.length} вар.`,
+          url: window.location.href,
+        });
+      }
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        notifyError(err, 'Не удалось поделиться билетами');
+      }
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
   // Тот же файл, но отправляется в Telegram владельца аккаунта
   const telegramButton = generatedBatch?.tickets ? (
     <SendToTelegramButton
@@ -571,6 +688,21 @@ export const TicketGenerator: React.FC = () => {
               </button>
             )}
             {telegramButton}
+            {canShare && (
+              <button
+                onClick={() => handleShareTickets('ru')}
+                disabled={isSharing}
+                className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1.5 transition active:scale-95 disabled:opacity-50"
+                title="Поделиться в Telegram, WhatsApp или сохранить"
+              >
+                {isSharing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+                ) : (
+                  <Share2 className="w-3.5 h-3.5 text-sky-400" />
+                )}
+                <span>Поделиться ↗</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1066,20 +1198,80 @@ export const TicketGenerator: React.FC = () => {
                   <span className="font-medium">Перемешать варианты соответствия (1, 2, 3...)</span>
                 </label>
               </div>
+
+              {/* Живой индикатор готовности пула вопросов (Traffic Light) */}
+              {healthStats && (
+                <div
+                  className={`p-3.5 rounded-2xl border transition-all ${
+                    healthStats.status === 'green'
+                      ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+                      : healthStats.status === 'yellow'
+                      ? 'bg-amber-50/80 border-amber-200 text-amber-950'
+                      : 'bg-rose-50/80 border-rose-200 text-rose-950'
+                  }`}
+                >
+                  <div className="flex items-start space-x-2.5">
+                    <div
+                      className={`w-3 h-3 rounded-full mt-0.5 shrink-0 ${
+                        healthStats.status === 'green'
+                          ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50'
+                          : healthStats.status === 'yellow'
+                          ? 'bg-amber-500 shadow-sm shadow-amber-500/50 animate-pulse'
+                          : 'bg-rose-500 shadow-sm shadow-rose-500/50 animate-pulse'
+                      }`}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold leading-tight">
+                        {healthStats.title}
+                      </div>
+                      <p className="text-[11px] mt-1 leading-snug opacity-90">
+                        {healthStats.desc}
+                      </p>
+
+                      {/* Сводка по пулу вопросов */}
+                      <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-black/5 text-[10px] font-semibold">
+                        <span className="px-1.5 py-0.5 rounded-md bg-white/70 border border-black/5">
+                          Тесты: {poolStats?.test || 0} {testCount > 0 ? `(до ${Math.floor((poolStats?.test || 0) / testCount)} в.)` : ''}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded-md bg-white/70 border border-black/5">
+                          Соответствия: {poolStats?.matching || 0} {matchingCount > 0 ? `(до ${Math.floor((poolStats?.matching || 0) / matchingCount)} в.)` : ''}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded-md bg-white/70 border border-black/5">
+                          Открытые: {poolStats?.open || 0} {openCount > 0 ? `(до ${Math.floor((poolStats?.open || 0) / openCount)} в.)` : ''}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
           <button
             onClick={handleGenerate}
             disabled={isGenerating}
-            className="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-2xl text-xs font-bold shadow-md shadow-indigo-500/25 flex items-center justify-center space-x-2 transition active:scale-[0.98] disabled:opacity-50"
+            className="relative overflow-hidden w-full py-3.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-2xl text-xs font-bold shadow-md shadow-indigo-500/25 flex items-center justify-center space-x-2 transition active:scale-[0.98] disabled:opacity-90"
           >
-            {isGenerating ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Sparkles className="w-4 h-4" />
+            {/* Анимированный индикатор наполнения слева направо */}
+            {isGenerating && (
+              <div
+                className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-500 opacity-90 transition-all duration-300 ease-out"
+                style={{ width: `${Math.max(10, genProgress.percent)}%` }}
+              />
             )}
-            <span>{isGenerating ? 'Составление билетов...' : 'Сгенерировать билеты'}</span>
+            <div className="relative z-10 flex items-center justify-center space-x-2">
+              {isGenerating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span className="truncate">{genProgress.stage || 'Составление билетов...'} ({genProgress.percent}%)</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  <span>Сгенерировать билеты</span>
+                </>
+              )}
+            </div>
           </button>
         </div>
       </div>
@@ -1128,6 +1320,21 @@ export const TicketGenerator: React.FC = () => {
                 <span>RU + TJ</span>
               </button>
               {telegramButton}
+              {canShare && (
+                <button
+                  onClick={() => handleShareTickets('ru')}
+                  disabled={isSharing}
+                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1 transition active:scale-95 disabled:opacity-50"
+                  title="Поделиться в Telegram, WhatsApp или сохранить"
+                >
+                  {isSharing ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+                  ) : (
+                    <Share2 className="w-3.5 h-3.5 text-sky-400" />
+                  )}
+                  <span>Поделиться ↗</span>
+                </button>
+              )}
             </div>
           </div>
 
