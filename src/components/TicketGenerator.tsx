@@ -147,6 +147,31 @@ export const TicketGenerator: React.FC = () => {
     }
   }, [subjects, subjectId]);
 
+  const SUBJECT_PRESETS = [
+    { label: 'Физика', match: 'физ', test: 18, matching: 2, open: 7 },
+    { label: 'Химия', match: 'хим', test: 18, matching: 2, open: 7 },
+    { label: 'Биология', match: 'био', test: 20, matching: 4, open: 2 },
+    { label: 'Тадж. язык (Гос)', match: 'тадж', test: 20, matching: 4, open: 2 },
+  ];
+
+  const applyPresetForSubject = (sId: string) => {
+    setSubjectId(sId);
+    setSelectedChapterIds([]);
+    setSelectedTopicIds([]);
+    const s = subjects.find(x => x.id === sId);
+    if (!s) return;
+    const n = s.name.toLowerCase();
+    if (n.includes('хим') || n.includes('физ')) {
+      setTestCount(18);
+      setMatchingCount(2);
+      setOpenCount(7);
+    } else if (n.includes('био') || n.includes('тадж') || n.includes('гос')) {
+      setTestCount(20);
+      setMatchingCount(4);
+      setOpenCount(2);
+    }
+  };
+
   // 2. Главы
   const { data: chapters = [] } = useQuery({
     queryKey: ['chapters', subjectId],
@@ -592,15 +617,44 @@ export const TicketGenerator: React.FC = () => {
               </label>
               <select
                 value={subjectId}
-                onChange={(e) => {
-                  setSubjectId(e.target.value);
-                  setSelectedChapterIds([]);
-                  setSelectedTopicIds([]);
-                }}
+                onChange={(e) => applyPresetForSubject(e.target.value)}
                 className="w-full text-xs p-2.5 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-900"
               >
                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
+
+              {/* Быстрые кнопки выбора предметов со стандартами */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Быстро:</span>
+                {SUBJECT_PRESETS.map((p) => {
+                  const s = subjects.find(x => x.name.toLowerCase().includes(p.match));
+                  const isSelected = s && subjectId === s.id;
+                  return (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => {
+                        if (s) {
+                          setSubjectId(s.id);
+                          setSelectedChapterIds([]);
+                          setSelectedTopicIds([]);
+                        }
+                        setTestCount(p.test);
+                        setMatchingCount(p.matching);
+                        setOpenCount(p.open);
+                      }}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition active:scale-95 border ${
+                        isSelected
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold shadow-2xs'
+                          : 'bg-white border-slate-200/90 text-slate-700 hover:bg-slate-50'
+                      }`}
+                      title={`${p.label}: ${p.test} тестов, ${p.matching} соотв., ${p.open} откр.`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div>
@@ -773,6 +827,59 @@ export const TicketGenerator: React.FC = () => {
               2. Состав каждого билета
             </h3>
 
+            {/* Быстрые шаблоны составов билета под предметы */}
+            <div className="bg-slate-100/80 p-2.5 rounded-2xl border border-slate-200/80 mb-3 space-y-1.5">
+              <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider px-1">
+                <span>Быстрый стандарт:</span>
+                <span className="text-slate-400 font-normal">1 клик</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTestCount(18);
+                    setMatchingCount(2);
+                    setOpenCount(7);
+                  }}
+                  className={`p-2 rounded-xl text-left border transition active:scale-95 ${
+                    testCount === 18 && matchingCount === 2 && openCount === 7
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                  title="Физика и Химия: 18 тестов, 2 соответствия, 7 открытых (всего 27 вопросов)"
+                >
+                  <div className="font-bold text-xs truncate">
+                    🧪 Физ / Хим
+                  </div>
+                  <div className={`text-[10px] mt-0.5 ${testCount === 18 && matchingCount === 2 && openCount === 7 ? 'text-indigo-100 font-medium' : 'text-slate-400'}`}>
+                    18 + 2 + 7 (27 в.)
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTestCount(20);
+                    setMatchingCount(4);
+                    setOpenCount(2);
+                  }}
+                  className={`p-2 rounded-xl text-left border transition active:scale-95 ${
+                    testCount === 20 && matchingCount === 4 && openCount === 2
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                  title="Биология и Гос (Таджикский язык): 20 тестов, 4 соответствия, 2 открытых (всего 26 вопросов)"
+                >
+                  <div className="font-bold text-xs truncate">
+                    🧬 Био / Гос
+                  </div>
+                  <div className={`text-[10px] mt-0.5 ${testCount === 20 && matchingCount === 4 && openCount === 2 ? 'text-indigo-100 font-medium' : 'text-slate-400'}`}>
+                    20 + 4 + 2 (26 в.)
+                  </div>
+                </button>
+              </div>
+            </div>
+
             <div className="space-y-3">
               {/* Тестовые вопросы */}
               <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/80">
@@ -897,9 +1004,9 @@ export const TicketGenerator: React.FC = () => {
                     +
                   </button>
                 </div>
-                {/* Быстрые пресеты */}
+                {/* Быстрые пресеты количества вариантов */}
                 <div className="flex items-center gap-1.5 mt-2.5">
-                  <span className="text-[10px] text-slate-400 font-semibold uppercase mr-0.5">Быстро:</span>
+                  <span className="text-[10px] text-slate-400 font-semibold uppercase mr-0.5">Вариантов:</span>
                   {[2, 5, 10, 20, Math.min(50, limits.tickets)].filter((v, idx, arr) => arr.indexOf(v) === idx && v <= limits.tickets).map((n) => (
                     <button
                       key={n}
