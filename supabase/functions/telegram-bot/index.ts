@@ -50,13 +50,17 @@ async function tg(method: string, body: Record<string, unknown>) {
   return json;
 }
 
-const send = (chat: number, text: string, kb?: T.Kb, replyMarkup?: Record<string, unknown>) =>
-  tg('sendMessage', {
+const send = (chat: number, text: string, kb?: T.Kb, replyMarkup?: Record<string, unknown>) => {
+  const markup = kb && kb.length > 0
+    ? { inline_keyboard: kb }
+    : (replyMarkup || MAIN_KEYBOARD);
+  return tg('sendMessage', {
     chat_id: chat,
     text,
     parse_mode: 'HTML',
-    ...(replyMarkup ? { reply_markup: replyMarkup } : kb ? { reply_markup: { inline_keyboard: kb } } : {}),
+    reply_markup: markup,
   });
+};
 
 async function show(chat: number, msgId: number | undefined, text: string, kb?: T.Kb, replyMarkup?: Record<string, unknown>) {
   if (msgId) {
@@ -65,7 +69,7 @@ async function show(chat: number, msgId: number | undefined, text: string, kb?: 
       message_id: msgId,
       text,
       parse_mode: 'HTML',
-      ...(kb ? { reply_markup: { inline_keyboard: kb } } : {}),
+      ...(kb && kb.length > 0 ? { reply_markup: { inline_keyboard: kb } } : {}),
     });
     if (r.ok || /not modified/i.test(r.description || '')) return;
   }
@@ -641,10 +645,10 @@ async function onMessage(m: any) {
 }
 
 async function onCallback(cb: any) {
-  const chat: number = cb.message.chat.id;
-  const msgId: number = cb.message.message_id;
+  const chat: number = cb.message?.chat?.id || cb.from?.id;
+  const msgId: number = cb.message?.message_id;
   const data: string = cb.data ?? '';
-  await tg('answerCallbackQuery', { callback_query_id: cb.id });
+  await tg('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
 
   const user = await linkedUser(chat);
   if (!user) return send(chat, 'Сначала привяжите аккаунт: <code>/start КОД</code>');
@@ -799,6 +803,10 @@ async function handle(update: any) {
     else if (update.callback_query) await onCallback(update.callback_query);
   } catch (e) {
     console.error('update failed', e);
+    const chat = update.message?.chat?.id || update.callback_query?.message?.chat?.id || update.callback_query?.from?.id;
+    if (chat) {
+      await send(chat, `⚠️ Произошла ошибка: ${(e as Error).message || e}`);
+    }
   }
 }
 
@@ -809,9 +817,6 @@ Deno.serve(async (req) => {
   }
   const update = await req.json().catch(() => null);
   if (!update) return new Response('bad request', { status: 400 });
-  const work = handle(update);
-  // @ts-ignore EdgeRuntime есть в среде Supabase
-  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(work);
-  else await work;
+  await handle(update);
   return new Response('ok');
 });
