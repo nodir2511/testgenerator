@@ -114,9 +114,14 @@ export async function loadChapterTotals(sb: any, subjectId: string, pool: any[])
   return T.chapterTotalsFromCounts(data ?? [], ids);
 }
 
+function escapeHtml(s: string): string {
+  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 async function sendDocument(botToken: string, chat: number, bytes: Uint8Array, filename: string, caption: string) {
   const form = new FormData();
   form.append('chat_id', String(chat));
+  form.append('parse_mode', 'HTML');
   form.append('caption', caption);
   form.append('document', new Blob([bytes]), filename);
   const res = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, { method: 'POST', body: form });
@@ -174,7 +179,21 @@ export async function deliverBatch(opts: {
     }
   }
 
-  const caption = `${title}: ${tickets.length} шт. (${lang === 'both' ? 'RU + TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase())})`;
+  const langLabel = lang === 'both' ? 'RU + TJ (Двуязычные)' : (lang === 'tg' ? 'Тоҷикӣ' : 'Русский');
+  const qCount = tickets[0]?.questions?.length ?? 0;
+  const caption = [
+    `📄 <b>${escapeHtml(title)}</b>`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `📚 <b>Предмет:</b> ${escapeHtml(subjectName)}`,
+    `👥 <b>Вариантов:</b> ${tickets.length} параллельных билетов`,
+    `❓ <b>Вопросов в билете:</b> ${qCount} шт.`,
+    `🌐 <b>Язык:</b> ${langLabel}`,
+    key ? `🔑 <b>Ключи ответов:</b> включены в архив` : '',
+    key?.note ? `⚠️ ${escapeHtml(key.note)}` : '',
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `✨ Готово к печати и проведению экзамена`
+  ].filter(Boolean).join('\n');
+
   if (files.length === 1 && !key) {
     await sendDocument(botToken, chat, files[0].data, files[0].name, caption);
   } else {
@@ -183,7 +202,7 @@ export async function deliverBatch(opts: {
     if (key) zip.file(key.name, key.data);
     const zbytes = await zip.generateAsync({ type: 'uint8array' });
     const suffix = lang === 'both' ? 'RU_TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase());
-    await sendDocument(botToken, chat, zbytes, `${T.safeFileName(title)}_${suffix}.zip`, `${caption}${key ? '\nВ архиве: ключи ответов.' : ''}${key?.note ? '\n' + key.note : ''}`);
+    await sendDocument(botToken, chat, zbytes, `${T.safeFileName(title)}_${suffix}.zip`, caption);
     keySent = Boolean(key);
   }
   return { missingAnswers, keySent };
