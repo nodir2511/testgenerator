@@ -429,7 +429,7 @@ const chunk = <T,>(a: T[], n: number): T[][] => {
   for (let i = 0; i < a.length; i += n) r.push(a.slice(i, i + n));
   return r;
 };
-const clip = (s: string, n = 48) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+export const clip = (s: string, n = 48) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
 export function kbSubjects(subjects: Array<{ name: string }>): Kb {
   return subjects.map((s, i) => [{ text: clip(s.name), callback_data: `S:${i}` }]);
