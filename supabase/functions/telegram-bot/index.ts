@@ -26,7 +26,7 @@ const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 // ---------------- Постоянное нижнее меню (Reply Keyboard) ----------------
 const MAIN_KEYBOARD = {
   keyboard: [
-    [{ text: '🚀 Конструктор билетов', web_app: { url: APP_URL } }],
+    [{ text: '🚀 Конструктор билетов' }],
     [{ text: '⚡ Быстрый билет' }, { text: '📂 Мои билеты' }],
     [{ text: 'ℹ️ Профиль и лимиты' }, { text: '❓ Помощь' }],
   ],
@@ -585,7 +585,11 @@ async function onMessage(m: any) {
   if (text === '🚀 Конструктор билетов' || text === '/app') {
     return tg('sendMessage', {
       chat_id: chat,
-      text: '🚀 Нажмите кнопку ниже, чтобы открыть конструктор билетов:',
+      text: (
+        '🚀 <b>Конструктор экзаменационных билетов</b>\n\n' +
+        'Нажмите кнопку ниже, чтобы открыть интерактивное приложение прямо в Telegram:'
+      ),
+      parse_mode: 'HTML',
       reply_markup: {
         inline_keyboard: [[{ text: '📝 Открыть конструктор билетов', web_app: { url: APP_URL } }]],
       },
