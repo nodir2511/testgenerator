@@ -247,8 +247,12 @@ export function parseFormattedTextRuns(
   return out;
 }
 
-// Создание ячейки номера вопроса (серая плашка в одну строку)
-function createNumberCell(qNumber: number): TableCell {
+// Создание ячейки номера вопроса (серая плашка в одну строку).
+// topPt — верхний/нижний внутренний отступ ячейки с текстом вопроса (pt): плашка растягивается на эту же величину
+// невидимой верхней рамкой того же серого цвета и отступом нижней рамки, поэтому закрашена вся высота строки
+// у вопроса из одной строки (у длинного вопроса плашка остаётся в одну строку).
+function createNumberCell(qNumber: number, topPt = 0): TableCell {
+  const pad = Math.ceil(topPt);
   return new TableCell({
     width: { size: 500, type: WidthType.DXA },
     margins: NUMBER_CELL_MARGINS,
@@ -258,8 +262,13 @@ function createNumberCell(qNumber: number): TableCell {
         alignment: AlignmentType.CENTER,
         // Серая плашка задана у абзаца, а не у ячейки: она остаётся в одну строку, даже если вопрос длинный
         shading: NUMBER_SHADING,
-        border: { bottom: NUMBER_PLATE_LINE, left: NUMBER_PLATE_LINE, right: NUMBER_PLATE_LINE },
-        spacing: { before: 0, after: 40 },
+        border: {
+          top: { style: BorderStyle.SINGLE, size: 4, color: NUMBER_SHADING.fill, space: pad },
+          bottom: { ...NUMBER_PLATE_LINE, space: pad },
+          left: NUMBER_PLATE_LINE,
+          right: NUMBER_PLATE_LINE,
+        },
+        spacing: { before: 0, after: 0 },
         children: [
           new TextRun({ text: String(qNumber), bold: true, font: 'Times New Roman', size: 28 }),
         ],
@@ -418,7 +427,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
       const rows: TableRow[] = [
         new TableRow({ cantSplit: true,
           children: [
-            createNumberCell(qNumber),
+            createNumberCell(qNumber, cm.top / 20),
             new TableCell({
               columnSpan: 4,
               width: { size: 8848, type: WidthType.DXA },
@@ -491,7 +500,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
       const rows: TableRow[] = [
         new TableRow({ cantSplit: true,
           children: [
-            createNumberCell(qNumber),
+            createNumberCell(qNumber, cm.top / 20),
             new TableCell({
               columnSpan: 2,
               width: { size: 8848, type: WidthType.DXA },
@@ -641,7 +650,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
       const rows: TableRow[] = [
         new TableRow({ cantSplit: true,
           children: [
-            createNumberCell(qNumber),
+            createNumberCell(qNumber, cm.top / 20),
             new TableCell({
               width: { size: 8848, type: WidthType.DXA },
               margins: cm,
@@ -742,7 +751,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
     const rows: TableRow[] = [
       new TableRow({ cantSplit: true,
         children: [
-          createNumberCell(qNumber),
+          createNumberCell(qNumber, cm.top / 20),
           new TableCell({
             columnSpan: spanCols,
             width: { size: 8848, type: WidthType.DXA },
@@ -884,7 +893,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
   const rows: TableRow[] = [
     new TableRow({ cantSplit: true,
       children: [
-        createNumberCell(qNumber),
+        createNumberCell(qNumber, cm.top / 20),
         new TableCell({
           width: { size: 8848, type: WidthType.DXA },
           margins: cm,
