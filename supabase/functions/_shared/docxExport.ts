@@ -14,6 +14,7 @@ import {
   BorderStyle,
   ShadingType,
   HeightRule,
+  LineRuleType,
   VerticalAlign,
   Math as DocxMath,
   MathFraction,
@@ -989,10 +990,10 @@ export async function buildSingleTicketBlob(
     const q = ticket.questions[qIdx].question_snapshot;
     const table = await createQuestionTable(q, qIdx + 1, isTg);
     docChildren.push(table);
-    // Отступ между таблицами
+    // Отступ между вопросами: пустой абзац фиксированной высоты 10 pt (раньше строка 14 pt + 9 pt — слишком много)
     docChildren.push(
       new Paragraph({
-        spacing: { after: 180 },
+        spacing: { before: 0, after: 0, line: 200, lineRule: LineRuleType.EXACT },
         children: [],
       })
     );
