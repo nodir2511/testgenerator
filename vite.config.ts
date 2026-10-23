@@ -22,7 +22,7 @@ export default defineConfig({
           vendor: ['react', 'react-dom'],
           supabase: ['@supabase/supabase-js'],
           query: ['@tanstack/react-query'],
-          docx: ['docx', 'file-saver'],
+          docx: ['docx'],
           sheets: ['xlsx', 'papaparse'],
         },
       },

@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { fetchAllPages } from './fetchAllPages';
-import { CLUSTER_SLOTS, type ClusterSettings, type ClusterVariant } from './clusterExport';
+import { CLUSTER_SLOTS, type ClusterSettings } from './clusterSlots';
+import type { ClusterVariant } from './clusterExport';
 
 // Хранение экзамена-кластера в «Сохранённых билетах»: обычная партия (ticket_batches) с пометкой
 // generation_params.source = 'cluster'. Вариант = билет; вопросы лежат снимками с полем cluster_slot

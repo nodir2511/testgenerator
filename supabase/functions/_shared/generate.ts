@@ -67,17 +67,25 @@ async function dailyLimitError(sb: any, user: { id: string; role?: string }): Pr
 }
 
 export async function loadPool(sb: any, sel: Selection) {
-  const all: any[] = [];
-  for (let from = 0; ; from += 1000) {
+  const PAGE = 1000;
+  const PARALLEL = 4;
+  const page = async (from: number): Promise<any[]> => {
     let q = sb.from('questions')
       .select('*, chapter:chapters(name, order_index), topic:topics(name, order_index), options:question_options(*), matching_items:matching_items(*)')
       .eq('subject_id', sel.subjectId).eq('is_deleted', false).order('id');
     if (sel.topicIds.length) q = q.in('topic_id', sel.topicIds);
     else q = q.in('chapter_id', sel.chapterIds);
-    const { data, error } = await q.range(from, from + 999);
+    const { data, error } = await q.range(from, from + PAGE - 1);
     if (error) throw error;
-    all.push(...(data ?? []));
-    if (!data || data.length < 1000) break;
+    return data ?? [];
+  };
+  // Первая страница одна; если она полная, следующие читаем пачками одновременно (порядок строк сохраняется)
+  const all: any[] = await page(0);
+  if (all.length < PAGE) return all;
+  for (let from = PAGE; ; from += PAGE * PARALLEL) {
+    const parts = await Promise.all(Array.from({ length: PARALLEL }, (_, i) => page(from + i * PAGE)));
+    for (const p of parts) all.push(...p);
+    if (parts.some((p) => p.length < PAGE)) break;
   }
   return all;
 }

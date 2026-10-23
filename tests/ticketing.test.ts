@@ -411,3 +411,24 @@ describe('перенос вопроса между страницами', () => 
     }
   });
 });
+
+describe('ленивые обёртки экспорта (exportLazy)', () => {
+  it('buildTicketsFile через обёртку даёт тот же архив, что напрямую', async () => {
+    const { buildTicketsFile: lazy } = await import('../src/lib/exportLazy');
+    const tickets = [1, 2].map((n) => ({ ticket_number: n, questions: [] }));
+    const direct = await buildTicketsFile('Экзамен', tickets, 'Химия', 'both');
+    const viaLazy = await lazy('Экзамен', tickets, 'Химия', 'both');
+    expect(viaLazy!.fileName).toBe(direct!.fileName);
+    const names = async (f: typeof direct) => Object.keys((await JSZip.loadAsync(await f!.blob.arrayBuffer())).files).sort();
+    expect(await names(viaLazy)).toEqual(await names(direct));
+    expect(await lazy('Экзамен', [], 'Химия', 'ru')).toBeNull();
+  });
+
+  it('загрузчик описания выбора и withSelectionInfo работают без предмета', async () => {
+    const { makeSelectionInfoLoader, withSelectionInfo } = await import('../src/lib/exportLazy');
+    const load = makeSelectionInfoLoader();
+    expect(await load(null, {})).toEqual({ ru: null, tg: null });
+    const t = await withSelectionInfo([{ ticket_number: 1 }], null, {}, load);
+    expect(t[0].selection_info).toEqual({ ru: null, tg: null });
+  });
+});

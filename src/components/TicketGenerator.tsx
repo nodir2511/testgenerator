@@ -19,8 +19,8 @@ import {
   ChevronDown,
   ChevronRight
 } from 'lucide-react';
-import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/docxExport';
-import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo } from '../lib/answerKeyExport';
+import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/exportLazy';
+import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo } from '../lib/exportLazy';
 import { SendToTelegramButton } from './SendToTelegramButton';
 import { fetchAllPages } from '../lib/fetchAllPages';
 import { useUserLimits, formatCooldown } from '../lib/generationLimits';

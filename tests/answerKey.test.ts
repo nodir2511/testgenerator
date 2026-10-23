@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import JSZip from 'jszip';
-import { buildAnswerKeyDocx } from '../src/lib/answerKey';
+import { buildAnswerKeyDocx, keyKindOf } from '../src/lib/answerKey';
 
 // Ключ по шаблону химии: вопросы без верного ответа должны попасть в stats.missing
 // и быть видны в файле (красная заливка клетки), а вопросы с ответом — нет.
@@ -33,5 +33,14 @@ describe('ключи ответов: пропуски', () => {
     const { bytes, stats } = await buildAnswerKeyDocx(template, [{ ticket_number: 1, questions: [open] }]);
     expect(stats.missing).toBe(1);
     expect(await fills(bytes)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('hasKeyTemplate (ленивый фасад)', () => {
+  it('совпадает с keyKindOf', async () => {
+    const { hasKeyTemplate } = await import('../src/lib/exportLazy');
+    for (const n of ['Химия', 'химия', 'Физика', 'Биология', 'Таджикский язык', 'Забони тоҷикӣ', 'Тоҷикӣ', 'Математика', 'История', 'English', '', 'ХИМИЯ 11']) {
+      expect(hasKeyTemplate(n)).toBe(keyKindOf(n) !== null);
+    }
   });
 });
