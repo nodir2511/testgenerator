@@ -116,6 +116,20 @@ function loadTelegramScript(): Promise<void> {
   });
 }
 
+function subjectIcon(name: string): string {
+  const n = (name || '').toLowerCase();
+  if (n.includes('хим')) return '🧪';
+  if (n.includes('физ')) return '⚡';
+  if (n.includes('биол')) return '🧬';
+  if (n.includes('тадж') || n.includes('тоҷик') || n.includes('забон')) return '📖';
+  if (n.includes('мат') || n.includes('алгебр') || n.includes('геом')) return '📐';
+  if (n.includes('геогр')) return '🌍';
+  if (n.includes('истор') || n.includes('таърих')) return '🏛️';
+  if (n.includes('информ') || n.includes('комп')) return '💻';
+  if (n.includes('англ') || n.includes('рус')) return '🌐';
+  return '📚';
+}
+
 export default function TgApp() {
   const [ready, setReady] = useState(false);
   const [fatal, setFatal] = useState<{ code: string; message: string } | null>(null);
@@ -243,6 +257,74 @@ export default function TgApp() {
   const settingsError = checkSettings(settings, limits);
   const fit = useMemo(() => fitSettings({ total: total(pool), ...pool }, settings), [pool, settings]);
 
+  // Светофор пула вопросов в Telegram (Traffic Light)
+  const healthStats = useMemo(() => {
+    const testPer = settings.testCount;
+    const matchingPer = settings.matchingCount;
+    const openPer = settings.openCount;
+    const tickets = settings.ticketCount;
+
+    if (testPer + matchingPer + openPer === 0 || tickets <= 0) return null;
+
+    const maxTestVariants = testPer > 0 ? Math.floor(pool.test / testPer) : Infinity;
+    const maxMatchingVariants = matchingPer > 0 ? Math.floor(pool.matching / matchingPer) : Infinity;
+    const maxOpenVariants = openPer > 0 ? Math.floor(pool.open / openPer) : Infinity;
+
+    const safeVariants = Math.min(maxTestVariants, maxMatchingVariants, maxOpenVariants);
+    const effectiveSafe = safeVariants === Infinity ? 0 : safeVariants;
+
+    const bottlenecks: string[] = [];
+    if (testPer > 0 && maxTestVariants < tickets) {
+      bottlenecks.push(`тестовых (хватит на ${maxTestVariants})`);
+    }
+    if (matchingPer > 0 && maxMatchingVariants < tickets) {
+      bottlenecks.push(`соответствий (хватит на ${maxMatchingVariants})`);
+    }
+    if (openPer > 0 && maxOpenVariants < tickets) {
+      bottlenecks.push(`открытых (хватит на ${maxOpenVariants})`);
+    }
+
+    if (effectiveSafe >= tickets) {
+      return {
+        status: 'green' as const,
+        title: `Отлично: хватает на ${effectiveSafe} вар. без повторов`,
+        desc: `Вы запросили ${tickets} вар. Все вопросы будут уникальными.`,
+      };
+    } else if (effectiveSafe > 0) {
+      return {
+        status: 'yellow' as const,
+        title: `Внимание: без повторов хватит на ${effectiveSafe} вар.`,
+        desc: `Узкое место: ${bottlenecks.join(', ')}. Вопросы начнут повторяться.`,
+      };
+    } else {
+      return {
+        status: 'red' as const,
+        title: `Недостаточно вопросов в выбранных темах`,
+        desc: bottlenecks.length ? `Дефицит: ${bottlenecks.join(', ')}.` : 'Нет вопросов требуемых типов.',
+      };
+    }
+  }, [pool, settings]);
+
+  // Навигатор шагов (Step Indicator / Breadcrumbs)
+  const stepsList: Array<{ id: Step; label: string }> = useMemo(() => {
+    return subjects.length > 1
+      ? [
+          { id: 'subject', label: 'Предмет' },
+          { id: 'chapters', label: 'Главы' },
+          { id: 'topics', label: 'Темы' },
+          { id: 'counts', label: 'Состав билета' },
+          { id: 'final', label: 'Параметры' },
+        ]
+      : [
+          { id: 'chapters', label: 'Главы' },
+          { id: 'topics', label: 'Темы' },
+          { id: 'counts', label: 'Состав билета' },
+          { id: 'final', label: 'Параметры' },
+        ];
+  }, [subjects.length]);
+
+  const curStepIdx = stepsList.findIndex((s) => s.id === step);
+
   // ---- навигация ----
   const back = useCallback(() => {
     setError('');
@@ -367,6 +449,21 @@ export default function TgApp() {
 
   return (
     <Shell>
+      {step !== 'done' && curStepIdx !== -1 && (
+        <div className="tg-nav">
+          <div className="tg-nav-head">
+            <span className="tg-nav-badge">Шаг {curStepIdx + 1} из {stepsList.length}</span>
+            <span className="tg-nav-title">{stepsList[curStepIdx].label}</span>
+          </div>
+          <div className="tg-progress-track">
+            <div
+              className="tg-progress-fill"
+              style={{ width: `${Math.round(((curStepIdx + 1) / stepsList.length) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {error && <div className="tg-error" role="alert">{error}</div>}
 
       {step === 'subject' && (
@@ -375,8 +472,18 @@ export default function TgApp() {
           <p className="tg-hint">{name ? `Вы вошли как ${name}.` : ''} Выберите предмет.</p>
           <Recent history={history} subjects={subjects} busy={busy} onRepeat={(b) => pickSubject(subjects.find((s) => s.id === b.subject_id)!, false, b)} onResend={resend} />
           {subjects.map((s) => (
-            <button key={s.id} className="tg-row" disabled={busy} onClick={() => pickSubject(s)}>
-              <span>{shortName(s.name, 80)}</span><span className="tg-chev">›</span>
+            <button
+              key={s.id}
+              className="tg-row tg-subject-row"
+              disabled={busy}
+              onClick={() => {
+                wa()?.HapticFeedback?.impactOccurred('light');
+                pickSubject(s);
+              }}
+            >
+              <span className="tg-subject-icon">{subjectIcon(s.name)}</span>
+              <span className="tg-grow" style={{ fontWeight: 600 }}>{shortName(s.name, 80)}</span>
+              <span className="tg-chev">›</span>
             </button>
           ))}
         </>
@@ -393,7 +500,14 @@ export default function TgApp() {
           </div>
           {chapters.map((c) => (
             <label key={c.id} className={`tg-row tg-check ${chapterIds.includes(c.id) ? 'on' : ''}`}>
-              <input type="checkbox" checked={chapterIds.includes(c.id)} onChange={() => setChapterIds(toggle(chapterIds, c.id))} />
+              <input
+                type="checkbox"
+                checked={chapterIds.includes(c.id)}
+                onChange={() => {
+                  wa()?.HapticFeedback?.impactOccurred('light');
+                  setChapterIds(toggle(chapterIds, c.id));
+                }}
+              />
               <span className="tg-grow">{shortName(c.name, 80)}</span>
               <span className="tg-badge">{count(c.counts)}</span>
             </label>
@@ -417,7 +531,14 @@ export default function TgApp() {
               {c.topics.length === 0 && <p className="tg-hint">В главе нет тем — берутся все вопросы главы.</p>}
               {c.topics.map((t, i) => (
                 <label key={t.id} className={`tg-row tg-check ${topicSel.includes(t.id) ? 'on' : ''}`}>
-                  <input type="checkbox" checked={topicSel.includes(t.id)} onChange={() => setTopicSel(toggle(topicSel, t.id))} />
+                  <input
+                    type="checkbox"
+                    checked={topicSel.includes(t.id)}
+                    onChange={() => {
+                      wa()?.HapticFeedback?.impactOccurred('light');
+                      setTopicSel(toggle(topicSel, t.id));
+                    }}
+                  />
                   <span className="tg-grow">{i + 1}. {shortName(t.name, 80)}</span>
                   <span className="tg-badge">{count(t.counts)}</span>
                 </label>
@@ -431,6 +552,39 @@ export default function TgApp() {
       {step === 'counts' && (
         <>
           <h1>Состав билета</h1>
+
+          {/* Быстрые пресеты стандартов */}
+          <div className="tg-presets">
+            <div className="tg-presets-head">
+              <span>Быстрый стандарт:</span>
+              <span style={{ fontWeight: 500, opacity: 0.65 }}>1 тап</span>
+            </div>
+            <div className="tg-presets-grid">
+              <button
+                type="button"
+                className={`tg-preset-btn ${nums.test === '18' && nums.matching === '2' && nums.open === '7' ? 'on' : ''}`}
+                onClick={() => {
+                  wa()?.HapticFeedback?.impactOccurred('medium');
+                  setNums((cur) => ({ ...cur, test: '18', matching: '2', open: '7' }));
+                }}
+              >
+                <span className="tg-preset-title">🧪 Физ / Хим</span>
+                <span className="tg-preset-sub">18 + 2 + 7 (27 в.)</span>
+              </button>
+              <button
+                type="button"
+                className={`tg-preset-btn ${nums.test === '20' && nums.matching === '4' && nums.open === '2' ? 'on' : ''}`}
+                onClick={() => {
+                  wa()?.HapticFeedback?.impactOccurred('medium');
+                  setNums((cur) => ({ ...cur, test: '20', matching: '4', open: '2' }));
+                }}
+              >
+                <span className="tg-preset-title">🧬 Био / Гос</span>
+                <span className="tg-preset-sub">20 + 4 + 2 (26 в.)</span>
+              </button>
+            </div>
+          </div>
+
           <Stepper label="Тесты" value={nums.test} have={pool.test} max={limits.perType} min={0} onChange={(v) => setNums({ ...nums, test: v })} />
           <Stepper label="Соответствия" value={nums.matching} have={pool.matching} max={limits.perType} min={0} onChange={(v) => setNums({ ...nums, matching: v })} />
           <Stepper label="Открытые" value={nums.open} have={pool.open} max={limits.perType} min={0} onChange={(v) => setNums({ ...nums, open: v })} />
@@ -452,6 +606,18 @@ export default function TgApp() {
                 </button>
               ))}
           </div>
+
+          {/* Светофор пула вопросов (Traffic Light) */}
+          {healthStats && (
+            <div className={`tg-health ${healthStats.status}`}>
+              <div className="tg-health-dot" />
+              <div>
+                <div className="tg-health-title">{healthStats.title}</div>
+                <div className="tg-health-desc">{healthStats.desc}</div>
+              </div>
+            </div>
+          )}
+
           <p className="tg-hint">Лимиты: до {limits.tickets} вариантов за раз{limits.total ? `, до ${limits.total} вопросов в билете` : ''}.</p>
           {settingsError && <div className="tg-warn">{settingsError}</div>}
           {!settingsError && fit.error && <div className="tg-warn">{fit.error}</div>}
@@ -469,7 +635,17 @@ export default function TgApp() {
           <h1>Язык и параметры</h1>
           <div className="tg-seg">
             {([['ru', 'Русский'], ['tg', 'Тоҷикӣ'], ['both', 'Оба']] as Array<[Lang, string]>).map(([v, l]) => (
-              <button key={v} className={lang === v ? 'on' : ''} onClick={() => setLang(v)}>{l}</button>
+              <button
+                key={v}
+                type="button"
+                className={lang === v ? 'on' : ''}
+                onClick={() => {
+                  wa()?.HapticFeedback?.impactOccurred('light');
+                  setLang(v);
+                }}
+              >
+                {l}
+              </button>
             ))}
           </div>
           <label className="tg-field">
@@ -477,11 +653,25 @@ export default function TgApp() {
             <input value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} />
           </label>
           <label className="tg-row tg-check">
-            <input type="checkbox" checked={shuffleOptions} onChange={(e) => setShuffleOptions(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={shuffleOptions}
+              onChange={(e) => {
+                wa()?.HapticFeedback?.impactOccurred('light');
+                setShuffleOptions(e.target.checked);
+              }}
+            />
             <span className="tg-grow">Перемешать варианты ответов</span>
           </label>
           <label className="tg-row tg-check">
-            <input type="checkbox" checked={shuffleMatching} onChange={(e) => setShuffleMatching(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={shuffleMatching}
+              onChange={(e) => {
+                wa()?.HapticFeedback?.impactOccurred('light');
+                setShuffleMatching(e.target.checked);
+              }}
+            />
             <span className="tg-grow">Перемешать соответствия</span>
           </label>
           <p className="tg-hint">
@@ -493,12 +683,65 @@ export default function TgApp() {
 
       {step === 'done' && (
         <div className="tg-card">
-          <h1>✅ Отправлено в чат</h1>
-          <p>Файл с билетами {result?.keySent ? 'и ключи ответов ' : ''}пришли в чат с ботом.</p>
+          <div className="tg-done-hero">
+            <div className="tg-done-icon">✓</div>
+            <h1 className="tg-done-title">Билеты готовы!</h1>
+            <p className="tg-done-sub">
+              Файл с билетами {result?.keySent ? 'и ключи ответов ' : ''}успешно сформированы и отправлены в ваш чат с ботом.
+            </p>
+          </div>
+
+          <div className="tg-done-summary">
+            {subject && (
+              <div className="tg-done-row">
+                <span className="tg-done-label">Предмет</span>
+                <span className="tg-done-val">{subjectIcon(subject.name)} {subject.name}</span>
+              </div>
+            )}
+            <div className="tg-done-row">
+              <span className="tg-done-label">Вариантов</span>
+              <span className="tg-done-val">{settings.ticketCount}</span>
+            </div>
+            <div className="tg-done-row">
+              <span className="tg-done-label">Вопросов в билете</span>
+              <span className="tg-done-val">
+                {fit.settings.testCount + fit.settings.matchingCount + fit.settings.openCount} ({fit.settings.testCount} тест, {fit.settings.matchingCount} соотв., {fit.settings.openCount} откр.)
+              </span>
+            </div>
+            <div className="tg-done-row">
+              <span className="tg-done-label">Язык</span>
+              <span className="tg-done-val">{lang === 'ru' ? 'Русский' : lang === 'tg' ? 'Тоҷикӣ' : 'RU + TJ'}</span>
+            </div>
+          </div>
+
           {!!result?.missingAnswers && (
-            <div className="tg-warn">В базе нет верного ответа у вопросов: {result.missingAnswers}. В ключах эти клетки отмечены красным.</div>
+            <div className="tg-warn">
+              В базе нет верного ответа у вопросов: {result.missingAnswers}. В ключах эти клетки отмечены красным.
+            </div>
           )}
-          <button className="tg-link" onClick={() => { setResult(null); setStep(subjects.length > 1 ? 'subject' : 'chapters'); }}>Создать ещё</button>
+
+          <button
+            type="button"
+            className="tg-btn-primary"
+            onClick={() => {
+              wa()?.HapticFeedback?.impactOccurred('medium');
+              wa()?.close();
+            }}
+          >
+            💬 Открыть чат с ботом
+          </button>
+
+          <button
+            type="button"
+            className="tg-btn-secondary"
+            onClick={() => {
+              wa()?.HapticFeedback?.impactOccurred('light');
+              setResult(null);
+              setStep(subjects.length > 1 ? 'subject' : 'chapters');
+            }}
+          >
+            🔄 Создать ещё один набор
+          </button>
         </div>
       )}
     </Shell>
@@ -511,18 +754,42 @@ function Recent(p: { history: HistoryBatch[]; subjects: Subject[]; busy: boolean
   return (
     <section>
       <h2>Повторить прошлый набор</h2>
-      {items.map((b) => (
-        <React.Fragment key={b.id}>
-          <button className="tg-row" disabled={p.busy} onClick={() => p.onRepeat(b)}>
-            <span className="tg-grow">
-              {shortName(b.title, 50)}
-              <span className="tg-sub">{new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · {b.generation_params.ticket_count ?? '?'} шт. · {shortName(b.subject?.name ?? '', 30)}</span>
-            </span>
-            <span className="tg-chev">↻</span>
-          </button>
-          <button className="tg-link" disabled={p.busy} onClick={() => p.onResend(b)}>Прислать файл ещё раз</button>
-        </React.Fragment>
-      ))}
+      {items.map((b) => {
+        const subjName = b.subject?.name ?? '';
+        return (
+          <React.Fragment key={b.id}>
+            <button
+              type="button"
+              className="tg-row"
+              disabled={p.busy}
+              onClick={() => {
+                wa()?.HapticFeedback?.impactOccurred('light');
+                p.onRepeat(b);
+              }}
+            >
+              <span className="tg-subject-icon">{subjectIcon(subjName)}</span>
+              <span className="tg-grow">
+                {shortName(b.title, 50)}
+                <span className="tg-sub">
+                  {new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · {b.generation_params.ticket_count ?? '?'} шт. · {shortName(subjName, 30)}
+                </span>
+              </span>
+              <span className="tg-chev">↻</span>
+            </button>
+            <button
+              type="button"
+              className="tg-link"
+              disabled={p.busy}
+              onClick={() => {
+                wa()?.HapticFeedback?.impactOccurred('light');
+                p.onResend(b);
+              }}
+            >
+              Прислать файл ещё раз
+            </button>
+          </React.Fragment>
+        );
+      })}
     </section>
   );
 }
@@ -537,7 +804,10 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function Stepper(p: { label: string; value: string; have?: number; min: number; max: number; onChange: (v: string) => void }) {
   const n = parseInt(p.value, 10);
-  const set = (v: number) => p.onChange(String(Math.min(p.max, Math.max(p.min, v))));
+  const set = (v: number) => {
+    wa()?.HapticFeedback?.impactOccurred('light');
+    p.onChange(String(Math.min(p.max, Math.max(p.min, v))));
+  };
   const short = p.have !== undefined && Number.isFinite(n) && n > p.have;
   return (
     <div className="tg-step">
@@ -546,14 +816,14 @@ function Stepper(p: { label: string; value: string; have?: number; min: number; 
         {p.have !== undefined && <span className={`tg-badge ${short ? 'warn' : ''}`}>В пуле: {p.have}</span>}
       </div>
       <div className="tg-stepper">
-        <button onClick={() => set((Number.isFinite(n) ? n : 0) - 1)} aria-label="Меньше">−</button>
+        <button type="button" onClick={() => set((Number.isFinite(n) ? n : 0) - 1)} aria-label="Меньше">−</button>
         <input
           inputMode="numeric"
           value={p.value}
           onChange={(e) => p.onChange(e.target.value.replace(/\D/g, '').slice(0, 3))}
           onBlur={() => set(Number.isFinite(n) ? n : p.min)}
         />
-        <button onClick={() => set((Number.isFinite(n) ? n : 0) + 1)} aria-label="Больше">+</button>
+        <button type="button" onClick={() => set((Number.isFinite(n) ? n : 0) + 1)} aria-label="Больше">+</button>
       </div>
     </div>
   );
