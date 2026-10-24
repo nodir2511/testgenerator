@@ -171,7 +171,7 @@ export async function deliverBatch(opts: {
         name: `Ключи – ${T.safeFileName(title)}.docx`,
         note: [
           stats.missing ? `⚠️ В базе нет верного ответа у вопросов: ${stats.missing} — эти клетки в ключе отмечены красным.` : '',
-          stats.overflow ? `В шаблоне не хватило места для вопросов: ${stats.overflow}.` : '',
+          stats.universal ? 'Состав вопросов не поместился в шаблон — ключ собран в универсальной таблице.' : '',
         ].filter(Boolean).join(' '),
       };
     } catch (e) {

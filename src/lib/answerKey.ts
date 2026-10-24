@@ -26,6 +26,8 @@ export interface KeyStats {
   missing: number;
   /** Вопросы, которым не нашлось места в шаблоне */
   overflow: number;
+  /** Вопросов оказалось больше, чем мест в шаблоне: ключ собран в универсальной таблице без потери ответов */
+  universal?: boolean;
 }
 
 const LETTERS = 'ABCDE';
@@ -285,6 +287,68 @@ function setParagraphText(xml: string, marker: string, text: string, size?: numb
   return xml.slice(0, ps) + para + xml.slice(pe);
 }
 
+// Универсальный ключ: простая таблица «№ — тип — ответ» на каждый вариант. Подстраивается под любое число вопросов.
+// Нужен, когда состав билета не помещается в Word-шаблон предмета.
+const TYPE_LABEL: Record<string, string> = { test: 'Тест', matching: 'Соответствие', open: 'Открытый' };
+const COL_W = [900, 2400, 6338];
+
+function uCell(text: string, w: number, o: { bold?: boolean; fill?: string; center?: boolean } = {}): string {
+  const shd = o.fill ? `<w:shd w:val="clear" w:color="auto" w:fill="${o.fill}"/>` : '';
+  const rPr = `<w:rPr>${o.bold ? '<w:b/>' : ''}<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/></w:rPr>`;
+  return `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>${shd}<w:vAlign w:val="center"/></w:tcPr>` +
+    `<w:p><w:pPr><w:spacing w:before="40" w:after="40"/>${o.center ? '<w:jc w:val="center"/>' : ''}</w:pPr><w:r>${rPr}<w:t xml:space="preserve">${esc(text)}</w:t></w:r></w:p></w:tc>`;
+}
+
+function uRow(cells: string[], header = false): string {
+  return `<w:tr><w:trPr><w:cantSplit/>${header ? '<w:tblHeader/>' : ''}</w:trPr>${cells.join('')}</w:tr>`;
+}
+
+function uPara(text: string, o: { size: number; bold?: boolean; center?: boolean; pageBreak?: boolean; after?: number }): string {
+  const rPr = `<w:rPr>${o.bold ? '<w:b/>' : ''}<w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="${o.size}"/></w:rPr>`;
+  return `<w:p><w:pPr>${o.pageBreak ? '<w:pageBreakBefore/>' : ''}<w:spacing w:before="0" w:after="${o.after ?? 120}"/>${o.center ? '<w:jc w:val="center"/>' : ''}</w:pPr><w:r>${rPr}<w:t xml:space="preserve">${esc(text)}</w:t></w:r></w:p>`;
+}
+
+export async function buildUniversalKeyDocx(
+  tickets: KeyTicket[],
+  info?: string | null,
+): Promise<{ bytes: Uint8Array; stats: KeyStats }> {
+  const stats: KeyStats = { missing: 0, overflow: 0, universal: true };
+  const border = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']
+    .map((s) => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="808080"/>`).join('');
+  const body = tickets.map((t, idx) => {
+    const rows = [uRow([uCell('№', COL_W[0], { bold: true, center: true, fill: 'E7E6E6' }), uCell('Тип', COL_W[1], { bold: true, fill: 'E7E6E6' }), uCell('Ответ', COL_W[2], { bold: true, fill: 'E7E6E6' })], true)];
+    t.questions.forEach((q, i) => {
+      const s = q.question_snapshot;
+      if (!s) return;
+      let ans: string | null = null;
+      if (s.type === 'test') ans = testAnswer(s);
+      else if (s.type === 'open') ans = openAnswer(s);
+      else if (s.type === 'matching') {
+        const m = matchingAnswer(s);
+        if (m.length) ans = m.map((a, k) => `${LETTERS[k] ?? k + 1}–${a ?? '?'}`).join('   ');
+        if (!m.length || m.some((a) => a === null)) stats.missing++;
+        rows.push(uRow([uCell(String(i + 1), COL_W[0], { center: true }), uCell(TYPE_LABEL.matching, COL_W[1]), uCell(ans ?? '?', COL_W[2], { bold: true, fill: ans && !m.some((a) => a === null) ? undefined : MISSING_FILL })]));
+        return;
+      } else return;
+      if (ans === null) stats.missing++;
+      rows.push(uRow([uCell(String(i + 1), COL_W[0], { center: true }), uCell(TYPE_LABEL[s.type] ?? '', COL_W[1]), uCell(ans ?? '?', COL_W[2], { bold: true, fill: ans === null ? MISSING_FILL : undefined })]));
+    });
+    return uPara(`Ключи – Вариант ${t.ticket_number}`, { size: 32, bold: true, center: true, pageBreak: idx > 0, after: info ? 60 : 160 }) +
+      (info ? uPara(info, { size: 22, center: true, after: 160 }) : '') +
+      `<w:tbl><w:tblPr><w:tblW w:w="${COL_W.reduce((a, b) => a + b, 0)}" w:type="dxa"/><w:tblBorders>${border}</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>` +
+      `<w:tblGrid>${COL_W.map((w) => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>${rows.join('')}</w:tbl>`;
+  }).join('');
+
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const doc = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="${W}"><w:body>${body}` +
+    `<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>`;
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+  zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  zip.file('word/document.xml', doc);
+  return { bytes: await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }), stats };
+}
+
 export async function buildAnswerKeyDocx(
   templateBytes: Uint8Array | ArrayBuffer,
   tickets: KeyTicket[],
@@ -342,6 +406,9 @@ export async function buildAnswerKeyDocx(
     if (idx === tickets.length - 1 && breakPara) b = b.replace(breakPara, '');
     return b;
   });
+
+  // Состав билета не поместился в шаблон — вместо потери ответов собираем универсальную таблицу
+  if (stats.overflow > 0) return buildUniversalKeyDocx(tickets, info);
 
   zip.file('word/document.xml', head + blocks.join('') + tail);
   const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });

@@ -368,8 +368,8 @@ export const ClusterExam: React.FC = () => {
       setResult({ blob: file.blob, fileName: file.fileName, saved });
       if (repeatNotes.length) notifyInfo(`Новых вопросов не хватило, часть вопросов повторяет прошлые экзамены: ${repeatNotes.join('; ')}`);
       if (notes.length) notifyInfo(`Вопросов не хватило, книжки составлены из того, что есть. ${notes.join('; ')}`);
-      if (file.keyOverflow) {
-        notifyError(new Error(`В шаблонах ключей не нашлось мест для вопросов: ${file.keyOverflow}. Проверьте состав субтестов.`), 'Ключи заполнены не полностью');
+      if (file.keyUniversal) {
+        notifyInfo(`Ключей в универсальной таблице (состав субтестов не поместился в шаблон): ${file.keyUniversal}.`);
       }
       if (file.missingAnswers) {
         notifyError(new Error(`В базе нет верного ответа у вопросов: ${file.missingAnswers} — клетки в ключах отмечены красным.`), 'Кластер готов, но ключи не полные');

@@ -101,7 +101,7 @@ async function loadSelectionInfo(subjectId: string, params: any): Promise<string
   return (await makeSelectionInfoLoader()(subjectId, params)).ru;
 }
 
-export interface KeyFile { blob: Blob; fileName: string; stats: { missing: number; overflow: number } }
+export interface KeyFile { blob: Blob; fileName: string; stats: { missing: number; overflow: number; universal?: boolean } }
 type KeySelection = { subjectId?: string | null; params?: any };
 
 export async function buildAnswerKeyFile(
@@ -129,7 +129,7 @@ export async function exportAnswerKey(
   title: string, tickets: KeyTicket[], subjectName: string,
   /** Предмет и выбор глав/тем партии (subject_id + generation_params) — для шапки ключей */
   selection?: KeySelection,
-): Promise<{ missing: number; overflow: number }> {
+): Promise<{ missing: number; overflow: number; universal?: boolean }> {
   const file = await buildAnswerKeyFile(title, tickets, subjectName, selection);
   saveAs(file.blob, file.fileName);
   return file.stats;

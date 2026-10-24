@@ -433,7 +433,7 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
   return Packer.toBlob(doc);
 }
 
-export interface ClusterFile { blob: Blob; fileName: string; missingAnswers: number; keyOverflow: number }
+export interface ClusterFile { blob: Blob; fileName: string; missingAnswers: number; keyOverflow: number; keyUniversal: number }
 
 /** ZIP: Русский/Вариант N.docx, Тоҷикӣ/Варианти N.docx и Ключи/Ключи – <предмет>.docx (все варианты) */
 export async function buildClusterZip(settings: ClusterSettings, variants: ClusterVariant[]): Promise<ClusterFile> {
@@ -446,6 +446,7 @@ export async function buildClusterZip(settings: ClusterSettings, variants: Clust
   // Ключи по каждому предмету: все варианты на отдельных страницах (шаблоны ключей)
   let missingAnswers = 0;
   let overflow = 0;
+  let universal = 0;
   for (let s = 0; s < CLUSTER_SLOTS.length; s++) {
     if (variants.some((v) => v.subjects[s] == null)) continue;
     const tickets = variants.map((v) => ({
@@ -457,9 +458,10 @@ export async function buildClusterZip(settings: ClusterSettings, variants: Clust
     const key = await buildAnswerKeyFile(`${settings.code}-${settings.exam} – ${slot.name}`, tickets, slot.name, undefined, slot.kind === 'taj' ? 'taj-cluster' : undefined);
     missingAnswers += key.stats.missing;
     overflow += key.stats.overflow;
+    if (key.stats.universal) universal++;
     zip.file(`Ключи/${key.fileName}`, key.blob);
   }
 
   const safe = `${settings.code}-${settings.exam}`.replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim() || 'Кластер';
-  return { blob: await zip.generateAsync({ type: 'blob' }), fileName: `Кластер ${safe}.zip`, missingAnswers, keyOverflow: overflow };
+  return { blob: await zip.generateAsync({ type: 'blob' }), fileName: `Кластер ${safe}.zip`, missingAnswers, keyOverflow: overflow, keyUniversal: universal };
 }
