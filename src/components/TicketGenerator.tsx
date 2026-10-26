@@ -1,33 +1,58 @@
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { notifyError, notifyInfo, describeError } from '../lib/errors';
-import { fitSettings, pickParallel, separateLinked, chapterTotalsFromCounts, totalsOf,poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
-import { Subject, Chapter, Topic, Question, TicketBatch, Ticket, TicketQuestion } from '../types/database';
+import { notifyError, notifyInfo } from '../lib/errors';
+import { fitSettings, pickParallel, separateLinked, chapterTotalsFromCounts, totalsOf, poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
+import { Subject, Chapter, Topic, Question } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
-import { 
-  Sparkles, 
-  AlertCircle, 
-  CheckCircle2, 
-  BookOpen, 
-  Layers, 
-  FileCheck2, 
-  Loader2, 
-  Printer, 
+import {
+  Sparkles,
+  CheckCircle2,
+  Loader2,
   Download,
-  Info,
   ChevronDown,
   ChevronRight,
-  Share2
+  Share2,
+  SlidersHorizontal,
+  X,
+  History,
 } from 'lucide-react';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/exportLazy';
 import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo } from '../lib/exportLazy';
 import { SendToTelegramButton } from './SendToTelegramButton';
 import { fetchAllPages } from '../lib/fetchAllPages';
-import { useUserLimits, formatCooldown } from '../lib/generationLimits';
+import { useUserLimits } from '../lib/generationLimits';
 
 // Администратору на сайте можно до 50 вариантов; обычным пользователям — те же лимиты, что в Telegram (их же проверяет база)
 const ADMIN_SITE_LIMITS = { ...LIMITS, tickets: 50 };
+
+type Lang = 'ru' | 'tg' | 'both';
+type ScopeMode = 'all' | 'pick';
+const LANG_LABEL: Record<Lang, string> = { ru: 'Русский', tg: 'Тоҷикӣ', both: 'RU + TJ' };
+
+// Стандартный состав билета по предмету: подставляется сам при выборе предмета
+const STANDARDS = [
+  { match: ['хим', 'физ'], test: 18, matching: 2, open: 7 },
+  { match: ['био', 'тадж', 'тоҷик', 'гос'], test: 20, matching: 4, open: 2 },
+];
+const standardFor = (name?: string) => {
+  const n = (name || '').toLowerCase();
+  return STANDARDS.find((s) => s.match.some((m) => n.includes(m))) ?? null;
+};
+
+const plural = (n: number, one: string, few: string, many: string) => {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+};
+
+// Начало суток по Душанбе (UTC+5) — так же считает дневной лимит база
+const dushanbeDayStart = () => {
+  const off = 5 * 3600_000;
+  return Math.floor((Date.now() + off) / 86400_000) * 86400_000 - off;
+};
+const formatWait = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 const getStorageJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -52,6 +77,53 @@ const getStorageBool = (key: string, fallback: boolean): boolean => {
   return val === 'true';
 };
 
+// Галочка с промежуточным состоянием (выбрана часть тем главы)
+const TriCheckbox: React.FC<{ checked: boolean; indeterminate: boolean; onChange: (v: boolean) => void; className?: string }> = ({ checked, indeterminate, onChange, className }) => {
+  const ref = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate && !checked;
+  }, [indeterminate, checked]);
+  return <input ref={ref} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className={className} />;
+};
+
+// Счётчик «− число +» с крупными кнопками под палец
+const Stepper: React.FC<{ label: string; hint?: string; value: number; min: number; max: number; onChange: (v: number) => void }> = ({ label, hint, value, min, max, onChange }) => (
+  <div className="flex items-center justify-between gap-3 py-2">
+    <div className="min-w-0">
+      <div className="text-sm font-semibold text-slate-800">{label}</div>
+      {hint && <div className="text-xs text-slate-500">{hint}</div>}
+    </div>
+    <div className="flex items-center gap-1.5 shrink-0">
+      <button
+        type="button"
+        onClick={() => onChange(Math.max(min, value - 1))}
+        className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-lg active:scale-90 transition hover:bg-slate-50"
+        aria-label={`${label}: меньше`}
+      >
+        −
+      </button>
+      <input
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(Math.min(max, Math.max(min, parseInt(e.target.value) || min)))}
+        className="w-14 h-10 text-center text-base font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        aria-label={label}
+      />
+      <button
+        type="button"
+        onClick={() => onChange(Math.min(max, value + 1))}
+        className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-lg active:scale-90 transition hover:bg-slate-50"
+        aria-label={`${label}: больше`}
+      >
+        +
+      </button>
+    </div>
+  </div>
+);
+
 export const TicketGenerator: React.FC = () => {
   const queryClient = useQueryClient();
   const { user, isAdmin } = useAuth();
@@ -63,6 +135,12 @@ export const TicketGenerator: React.FC = () => {
   const [subjectId, setSubjectId] = useState<string>(() => getStorageString('examiner_tg_subject_id', ''));
   const [selectedChapterIds, setSelectedChapterIds] = useState<string[]>(() => getStorageJSON('examiner_tg_selected_chapter_ids', []));
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>(() => getStorageJSON('examiner_tg_selected_topic_ids', []));
+  // «Весь предмет» или «Выбрать главы»: выбор глав сохраняется, даже когда включён весь предмет
+  const [scopeMode, setScopeMode] = useState<ScopeMode>(() => {
+    const saved = localStorage.getItem('examiner_tg_scope_mode');
+    if (saved === 'all' || saved === 'pick') return saved;
+    return getStorageJSON<string[]>('examiner_tg_selected_topic_ids', []).length || getStorageJSON<string[]>('examiner_tg_selected_chapter_ids', []).length ? 'pick' : 'all';
+  });
 
   const [testCount, setTestCount] = useState<number>(() => getStorageNumber('examiner_tg_test_count', 10));
   const [matchingCount, setMatchingCount] = useState<number>(() => getStorageNumber('examiner_tg_matching_count', 2));
@@ -71,13 +149,24 @@ export const TicketGenerator: React.FC = () => {
   const [shuffleOptions, setShuffleOptions] = useState<boolean>(() => getStorageBool('examiner_tg_shuffle_options', true));
   const [shuffleMatching, setShuffleMatching] = useState<boolean>(() => getStorageBool('examiner_tg_shuffle_matching', true));
   const [batchTitle, setBatchTitle] = useState<string>(() => getStorageString('examiner_tg_batch_title', 'Экзаменационные билеты'));
+  const [exportLang, setExportLang] = useState<Lang>(() => {
+    const v = localStorage.getItem('examiner_tg_export_lang');
+    return v === 'tg' || v === 'both' ? v : 'ru';
+  });
+
+  const [editComposition, setEditComposition] = useState(false);
+  const [showExtra, setShowExtra] = useState(false);
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
+  const [showVariants, setShowVariants] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [genProgress, setGenProgress] = useState<{ percent: number; stage: string }>({ percent: 0, stage: '' });
   const [isSharing, setIsSharing] = useState(false);
   const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
-  const [generationError, setGenerationError] = useState<string | null>(null);
   const [generatedBatch, setGeneratedBatch] = useState<any | null>(() => getStorageJSON('examiner_tg_generated_batch', null));
+  const resultRef = React.useRef<HTMLDivElement>(null);
+  const [scrollToResult, setScrollToResult] = useState(false);
 
   // Автосохранение настроек в localStorage
   React.useEffect(() => {
@@ -91,6 +180,10 @@ export const TicketGenerator: React.FC = () => {
   React.useEffect(() => {
     localStorage.setItem('examiner_tg_selected_topic_ids', JSON.stringify(selectedTopicIds));
   }, [selectedTopicIds]);
+
+  React.useEffect(() => {
+    localStorage.setItem('examiner_tg_scope_mode', scopeMode);
+  }, [scopeMode]);
 
   React.useEffect(() => {
     localStorage.setItem('examiner_tg_test_count', String(testCount));
@@ -128,6 +221,10 @@ export const TicketGenerator: React.FC = () => {
   }, [batchTitle]);
 
   React.useEffect(() => {
+    localStorage.setItem('examiner_tg_export_lang', exportLang);
+  }, [exportLang]);
+
+  React.useEffect(() => {
     if (generatedBatch) {
       try {
         localStorage.setItem('examiner_tg_generated_batch', JSON.stringify(generatedBatch));
@@ -140,6 +237,14 @@ export const TicketGenerator: React.FC = () => {
     }
   }, [generatedBatch]);
 
+  // После генерации сразу показываем результат (на телефоне он иначе оказывается далеко внизу)
+  React.useEffect(() => {
+    if (scrollToResult && resultRef.current) {
+      resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setScrollToResult(false);
+    }
+  }, [scrollToResult, generatedBatch]);
+
   // 1. Предметы
   const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
@@ -149,39 +254,32 @@ export const TicketGenerator: React.FC = () => {
     },
   });
 
-  // Автоматический выбор предмета
-  React.useEffect(() => {
-    if (subjects.length > 0) {
-      if (!subjectId || !subjects.some(s => s.id === subjectId)) {
-        setSubjectId(subjects[0].id);
-      }
-    }
-  }, [subjects, subjectId]);
+  const subjectName = subjects.find((s) => s.id === subjectId)?.name || '';
+  const standard = standardFor(subjectName);
+  const isStandard = !!standard && testCount === standard.test && matchingCount === standard.matching && openCount === standard.open;
 
-  const SUBJECT_PRESETS = [
-    { label: 'Физика', match: 'физ', test: 18, matching: 2, open: 7 },
-    { label: 'Химия', match: 'хим', test: 18, matching: 2, open: 7 },
-    { label: 'Биология', match: 'био', test: 20, matching: 4, open: 2 },
-    { label: 'Тадж. язык (Гос)', match: 'тадж', test: 20, matching: 4, open: 2 },
-  ];
-
+  // Смена предмета: выбор глав сбрасывается, состав билета — стандартный для предмета
   const applyPresetForSubject = (sId: string) => {
     setSubjectId(sId);
     setSelectedChapterIds([]);
     setSelectedTopicIds([]);
-    const s = subjects.find(x => x.id === sId);
-    if (!s) return;
-    const n = s.name.toLowerCase();
-    if (n.includes('хим') || n.includes('физ')) {
-      setTestCount(18);
-      setMatchingCount(2);
-      setOpenCount(7);
-    } else if (n.includes('био') || n.includes('тадж') || n.includes('гос')) {
-      setTestCount(20);
-      setMatchingCount(4);
-      setOpenCount(2);
+    setScopeMode('all');
+    const st = standardFor(subjects.find(x => x.id === sId)?.name);
+    if (st) {
+      setTestCount(st.test);
+      setMatchingCount(st.matching);
+      setOpenCount(st.open);
     }
   };
+
+  // Автоматический выбор предмета (вместе с его стандартным составом билета)
+  React.useEffect(() => {
+    if (subjects.length > 0) {
+      if (!subjectId || !subjects.some(s => s.id === subjectId)) {
+        applyPresetForSubject(subjects[0].id);
+      }
+    }
+  }, [subjects, subjectId]);
 
   // 2. Главы
   const { data: chapters = [] } = useQuery({
@@ -210,44 +308,14 @@ export const TicketGenerator: React.FC = () => {
     },
   });
 
-  // Состояние раскрытых глав (аккордеон)
+  // Раскрытые главы (список тем). По умолчанию все свёрнуты: на телефоне так короче
   const [expandedChapterIds, setExpandedChapterIds] = useState<Record<string, boolean>>(() =>
-    getStorageJSON('examiner_tg_expanded_chapters_v2', {})
+    getStorageJSON('examiner_tg_expanded_chapters_v3', {})
   );
 
-  // Новые главы: на узком экране свёрнуты (показываем только заголовки), на широком раскрыты
   React.useEffect(() => {
-    if (chapters.length > 0) {
-      const expandByDefault = window.innerWidth >= 640;
-      setExpandedChapterIds(prev => {
-        let changed = false;
-        const next = { ...prev };
-        chapters.forEach(ch => {
-          if (next[ch.id] === undefined) {
-            next[ch.id] = expandByDefault;
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
-    }
-  }, [chapters]);
-
-  React.useEffect(() => {
-    localStorage.setItem('examiner_tg_expanded_chapters_v2', JSON.stringify(expandedChapterIds));
+    localStorage.setItem('examiner_tg_expanded_chapters_v3', JSON.stringify(expandedChapterIds));
   }, [expandedChapterIds]);
-
-  // Выбрать все темы по всему предмету
-  const handleSelectAllTopics = () => {
-    setSelectedTopicIds(allTopics.map(t => t.id));
-    setSelectedChapterIds(chapters.map(c => c.id));
-  };
-
-  // Снять выбор всех тем
-  const handleDeselectAllTopics = () => {
-    setSelectedTopicIds([]);
-    setSelectedChapterIds([]);
-  };
 
   // Выбрать все темы конкретной главы
   const handleSelectChapterTopics = (chId: string) => {
@@ -290,6 +358,11 @@ export const TicketGenerator: React.FC = () => {
     }));
   };
 
+  // Что реально идёт в генерацию: при «Весь предмет» — без фильтра по главам и темам
+  const effTopicIds = scopeMode === 'pick' ? selectedTopicIds : [];
+  const effChapterIds = scopeMode === 'pick' ? selectedChapterIds : [];
+  const pickEmpty = scopeMode === 'pick' && effTopicIds.length === 0 && effChapterIds.length === 0;
+
   // 4. Подсчет доступного пула вопросов для проверки дефицита.
   // Счётчики предмета считает база одним запросом; при смене выбора глав и тем запрос не повторяется.
   const { data: poolCounts } = useQuery({
@@ -304,8 +377,8 @@ export const TicketGenerator: React.FC = () => {
   });
   const poolStats = React.useMemo(() => {
     if (!poolCounts) return undefined;
-    const topicSet = new Set(selectedTopicIds);
-    const chapterSet = new Set(selectedChapterIds);
+    const topicSet = new Set(effTopicIds);
+    const chapterSet = new Set(effChapterIds);
     const out = { total: 0, test: 0, matching: 0, open: 0 };
     for (const r of poolCounts) {
       if (topicSet.size > 0 ? !(r.topic_id && topicSet.has(r.topic_id)) : chapterSet.size > 0 && !(r.chapter_id && chapterSet.has(r.chapter_id))) continue;
@@ -313,77 +386,94 @@ export const TicketGenerator: React.FC = () => {
       if (r.type === 'test' || r.type === 'matching' || r.type === 'open') out[r.type] += r.cnt;
     }
     return out;
-  }, [poolCounts, selectedTopicIds, selectedChapterIds]);
+  }, [poolCounts, effTopicIds.join(','), effChapterIds.join(',')]);
 
   // Состав билета с учётом того, что реально есть в выбранных темах
   const fitted = fitSettings(
     { total: poolStats?.total || 0, test: poolStats?.test || 0, matching: poolStats?.matching || 0, open: poolStats?.open || 0 },
     { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }
   );
+  const fittedTotal = fitted.settings.testCount + fitted.settings.matchingCount + fitted.settings.openCount;
 
-  // Живой индикатор готовности пула вопросов (Traffic Light): хватает ли вопросов без повторов
-  const healthStats = React.useMemo(() => {
-    if (!poolStats) return null;
-    const testPer = testCount;
-    const matchingPer = matchingCount;
-    const openPer = openCount;
-
-    if (testPer + matchingPer + openPer === 0) return null;
-
-    const maxTestVariants = testPer > 0 ? Math.floor(poolStats.test / testPer) : Infinity;
-    const maxMatchingVariants = matchingPer > 0 ? Math.floor(poolStats.matching / matchingPer) : Infinity;
-    const maxOpenVariants = openPer > 0 ? Math.floor(poolStats.open / openPer) : Infinity;
-
-    const safeVariants = Math.min(maxTestVariants, maxMatchingVariants, maxOpenVariants);
-    const effectiveSafe = safeVariants === Infinity ? 0 : safeVariants;
-
-    const bottlenecks: string[] = [];
-    if (testPer > 0 && maxTestVariants < ticketCount) {
-      bottlenecks.push(`тестовых (хватит на ${maxTestVariants} вар.)`);
+  // Единый индикатор готовности: хватает ли вопросов, и одна кнопка, которая это исправляет
+  const health = React.useMemo(() => {
+    if (!poolStats || pickEmpty) return null;
+    const { testCount: t, matchingCount: m, openCount: o } = fitted.settings;
+    const maxBy = (pool: number, n: number) => (n > 0 ? Math.floor(pool / n) : Infinity);
+    const safeRaw = Math.min(maxBy(poolStats.test, t), maxBy(poolStats.matching, m), maxBy(poolStats.open, o));
+    const safe = safeRaw === Infinity ? 0 : safeRaw;
+    if (fitted.error) {
+      return { status: 'red' as const, title: 'В выбранных главах нет нужных вопросов', desc: 'Выберите другие главы или возьмите весь предмет.', safe: 0 };
     }
-    if (matchingPer > 0 && maxMatchingVariants < ticketCount) {
-      bottlenecks.push(`на соответствие (хватит на ${maxMatchingVariants} вар.)`);
-    }
-    if (openPer > 0 && maxOpenVariants < ticketCount) {
-      bottlenecks.push(`открытых (хватит на ${maxOpenVariants} вар.)`);
-    }
-
-    if (effectiveSafe >= ticketCount) {
+    if (fitted.notes.length > 0) {
       return {
-        status: 'green' as const,
-        title: `Отлично: вопросов хватает на ${effectiveSafe} вариантов без повторов`,
-        desc: `Вы запросили ${ticketCount} вариантов. Все вопросы будут уникальными и сбалансированными по темам.`,
-        safeVariants: effectiveSafe
-      };
-    } else if (effectiveSafe > 0) {
-      return {
-        status: 'yellow' as const,
-        title: `Внимание: без повторов хватит только на ${effectiveSafe} вар.`,
-        desc: `Узкое место: ${bottlenecks.join(', ')}. При генерации ${ticketCount} вариантов вопросы будут повторяться.`,
-        safeVariants: effectiveSafe
-      };
-    } else {
-      return {
-        status: 'red' as const,
-        title: `Недостаточно вопросов в выбранных темах`,
-        desc: bottlenecks.length > 0
-          ? `Дефицит: ${bottlenecks.join(', ')}. Выберите больше глав/тем или уменьшите количество вопросов в билете.`
-          : 'В выбранных темах нет вопросов требуемых типов.',
-        safeVariants: 0
+        status: 'amber' as const,
+        title: `Вопросов хватит только на билет из ${fittedTotal}`,
+        desc: fitted.notes.join('; ') + '.',
+        safe,
+        fixCounts: true,
       };
     }
-  }, [poolStats, testCount, matchingCount, openCount, ticketCount]);
+    if (safe < ticketCount) {
+      return {
+        status: 'amber' as const,
+        title: `Без повторов хватит на ${safe} ${plural(safe, 'вариант', 'варианта', 'вариантов')}`,
+        desc: `При ${ticketCount} вариантах часть вопросов повторится.`,
+        safe,
+        fixTickets: safe >= 1,
+      };
+    }
+    return { status: 'green' as const, title: `Вопросов хватает: до ${safe} ${plural(safe, 'варианта', 'вариантов', 'вариантов')} без повторов`, desc: '', safe };
+  }, [poolStats, pickEmpty, fitted.error, fitted.notes.join('|'), fittedTotal, ticketCount, fitted.settings.testCount, fitted.settings.matchingCount, fitted.settings.openCount]);
+
+  // 5. Лимиты обычного пользователя: сколько генераций осталось сегодня и когда можно следующую
+  const { data: usage } = useQuery({
+    queryKey: ['generation_usage_today', user?.id, userLimits.cooldownSeconds],
+    enabled: Boolean(user?.id) && !isAdmin,
+    staleTime: 0,
+    queryFn: async () => {
+      const dayStart = dushanbeDayStart();
+      const since = Math.min(dayStart, Date.now() - userLimits.cooldownSeconds * 1000);
+      const { data, error } = await supabase
+        .from('generation_usage')
+        .select('created_at')
+        .eq('user_id', user!.id)
+        .gte('created_at', new Date(since).toISOString())
+        .order('created_at', { ascending: false });
+      if (error) return null;
+      const rows = (data || []) as Array<{ created_at: string }>;
+      return {
+        today: rows.filter((r) => new Date(r.created_at).getTime() >= dayStart).length,
+        last: rows[0] ? new Date(rows[0].created_at).getTime() : null,
+      };
+    },
+  });
+  const cooldownUntil = !isAdmin && usage?.last ? usage.last + userLimits.cooldownSeconds * 1000 : 0;
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  React.useEffect(() => {
+    if (cooldownUntil <= Date.now()) return;
+    setNowTick(Date.now());
+    const timer = setInterval(() => {
+      const n = Date.now();
+      setNowTick(n);
+      if (n >= cooldownUntil) clearInterval(timer);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldownUntil]);
+  const cooldownLeft = cooldownUntil > nowTick ? Math.ceil((cooldownUntil - nowTick) / 1000) : 0;
+  const leftToday = !isAdmin && usage ? Math.max(0, userLimits.perDay - usage.today) : null;
+  const dayExhausted = leftToday === 0;
 
   // Алгоритм параллельной генерации билетов
   const handleGenerate = async () => {
     if (generatingRef.current) return; // защита от двойного нажатия
     generatingRef.current = true;
-    setGenerationError(null);
     setIsGenerating(true);
-    setGenProgress({ percent: 15, stage: 'Загрузка вопросов пула...' });
+    setGenProgress({ percent: 15, stage: 'Загрузка вопросов...' });
 
     try {
       if (!subjectId) throw new Error('Выберите предмет');
+      if (pickEmpty) throw new Error('Отметьте хотя бы одну главу или выберите «Весь предмет»');
       if (testCount + matchingCount + openCount === 0) throw new Error('Задайте хотя бы один вопрос в билете');
       if (ticketCount < 1) throw new Error('Количество билетов должно быть не менее 1');
 
@@ -403,13 +493,13 @@ export const TicketGenerator: React.FC = () => {
           `)
           .eq('subject_id', subjectId)
           .eq('is_deleted', false);
-        if (selectedTopicIds.length > 0) query = query.in('topic_id', selectedTopicIds);
-        else if (selectedChapterIds.length > 0) query = query.in('chapter_id', selectedChapterIds);
+        if (effTopicIds.length > 0) query = query.in('topic_id', effTopicIds);
+        else if (effChapterIds.length > 0) query = query.in('chapter_id', effChapterIds);
         return query;
       });
       if (qErr || !allQuestionsRaw) throw qErr || new Error('Ошибка загрузки вопросов');
 
-      setGenProgress({ percent: 45, stage: 'Распределение тем без повторов...' });
+      setGenProgress({ percent: 45, stage: 'Подбор вопросов...' });
 
       // 2. Если вопросов какого-то вида не хватает, берём сколько есть (считаем по реально загруженным вопросам)
       const fit = fitSettings(
@@ -437,7 +527,7 @@ export const TicketGenerator: React.FC = () => {
         ticketsData.push({ ticketNumber: k + 1, questions: [...tests[k], ...matchings[k], ...opens[k]] });
       }
 
-      setGenProgress({ percent: 75, stage: 'Создание снимков вариантов...' });
+      setGenProgress({ percent: 75, stage: 'Сборка вариантов...' });
 
       // 4. Сохранение одной транзакцией: партия, билеты и вопросы билетов (см. supabase/sql/save_ticket_batch.sql).
       // При любой ошибке база откатывает всё — недосозданных наборов не остаётся.
@@ -451,15 +541,15 @@ export const TicketGenerator: React.FC = () => {
         })),
       }));
 
-      setGenProgress({ percent: 90, stage: 'Запись в базу данных...' });
+      setGenProgress({ percent: 90, stage: 'Сохранение...' });
 
       const { data: saved, error: sErr } = await supabase.rpc('save_ticket_batch', {
         p_batch: {
           title: batchTitle.trim() || 'Экзаменационные билеты',
           subject_id: subjectId,
           generation_params: {
-            chapter_ids: selectedChapterIds,
-            topic_ids: selectedTopicIds,
+            chapter_ids: effChapterIds,
+            topic_ids: effTopicIds,
             test_count: useTest,
             matching_count: useMatching,
             open_count: useOpen,
@@ -486,12 +576,16 @@ export const TicketGenerator: React.FC = () => {
         ...batch,
         tickets: await withSelectionInfo(createdTicketsWithQuestions, batch.subject_id, batch.generation_params),
       });
+      setShowVariants(false);
+      setScrollToResult(true);
 
       queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
       queryClient.invalidateQueries({ queryKey: ['recent_batches'] });
     } catch (err: any) {
-      setGenerationError(describeError(err, 'Ошибка генерации билетов'));
+      notifyError(err, 'Не удалось сгенерировать билеты');
     } finally {
+      // Лимиты могли измениться (в том числе генерацией из Telegram) — перечитываем
+      queryClient.invalidateQueries({ queryKey: ['generation_usage_today'] });
       generatingRef.current = false;
       setIsGenerating(false);
       setGenProgress({ percent: 0, stage: '' });
@@ -520,6 +614,7 @@ export const TicketGenerator: React.FC = () => {
     setSubjectId(b.subject_id);
     setSelectedChapterIds(p.chapter_ids ?? []);
     setSelectedTopicIds(p.topic_ids ?? []);
+    setScopeMode((p.chapter_ids?.length || p.topic_ids?.length) ? 'pick' : 'all');
     setTestCount(Math.min(limits.perType, r.test));
     setMatchingCount(Math.min(limits.perType, r.matching));
     setOpenCount(Math.min(limits.perType, r.open));
@@ -529,20 +624,29 @@ export const TicketGenerator: React.FC = () => {
     setBatchTitle(b.title || 'Экзаменационные билеты');
   };
 
-  // Экспорт созданных билетов в Word на выбранном языке
-  const handleExportWord = async (lang: 'ru' | 'tg' | 'both') => {
-    if (!generatedBatch || !generatedBatch.tickets) return;
+  const generatedSubjectName = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || '';
+  const generatedHasKey = hasKeyTemplate(generatedSubjectName);
+  const selectionOf = () => ({ subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params });
+
+  // Экспорт созданных билетов в Word на выбранном языке (ключи ответов кладутся в тот же архив)
+  const handleDownload = async (lang: Lang) => {
+    if (!generatedBatch || !generatedBatch.tickets || isDownloading) return;
+    setExportLang(lang);
+    setLangMenuOpen(false);
+    setIsDownloading(true);
     try {
-      const subj = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия';
+      const subj = generatedSubjectName || 'Экзамен';
       await exportTicketsToDocx(
         generatedBatch.title,
         generatedBatch.tickets,
         subj,
         lang,
-        await keyArchiveExtras(generatedBatch.title, generatedBatch.tickets, subj, { subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params }, lang)
+        await keyArchiveExtras(generatedBatch.title, generatedBatch.tickets, subj, selectionOf(), lang)
       );
     } catch (err: any) {
-      notifyError(err, 'Ошибка экспорта в Word');
+      notifyError(err, 'Не удалось скачать билеты');
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -550,68 +654,46 @@ export const TicketGenerator: React.FC = () => {
   const exportSingleWithKey = async (t: any, lang: 'ru' | 'tg') => {
     if (!generatedBatch) return;
     try {
-      const subj = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия';
+      const subj = generatedSubjectName || 'Экзамен';
       await exportSingleTicketDocx(
         generatedBatch.title || batchTitle, t, subj, lang,
-        await keyArchiveExtras(generatedBatch.title || batchTitle, [t], subj, { subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params }, lang)
+        await keyArchiveExtras(generatedBatch.title || batchTitle, [t], subj, selectionOf(), lang)
       );
     } catch (err: any) {
-      notifyError(err, 'Ошибка экспорта в Word');
+      notifyError(err, 'Не удалось скачать вариант');
     }
   };
 
-  const generatedSubjectName = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || '';
   const handleExportKey = async () => {
     if (!generatedBatch || !generatedBatch.tickets) return;
     try {
-      const stats = await exportAnswerKey(generatedBatch.title, generatedBatch.tickets, generatedSubjectName, {
-        subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params,
-      });
+      const stats = await exportAnswerKey(generatedBatch.title, generatedBatch.tickets, generatedSubjectName, selectionOf());
       if (stats.universal) notifyInfo('Состав вопросов не поместился в шаблон ключей, поэтому ключ собран в универсальной таблице — все ответы на месте.');
       if (stats.missing) notifyError(new Error(`В базе нет верного ответа у вопросов: ${stats.missing} — клетки в ключе отмечены красным.`), 'Ключи готовы, но не полные');
     } catch (err: any) {
-      notifyError(err, 'Ошибка при создании ключей');
+      notifyError(err, 'Не удалось скачать ключи');
     }
   };
 
   // Поделиться билетами через Web Share API (Telegram, WhatsApp, AirDrop и т.д.)
-  const handleShareTickets = async (lang: 'ru' | 'tg' = 'ru') => {
+  const handleShareTickets = async () => {
     if (!generatedBatch || !generatedBatch.tickets) return;
     setIsSharing(true);
     try {
-      const subj = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Предмет';
-      const extras = await keyArchiveExtras(
-        generatedBatch.title,
-        generatedBatch.tickets,
-        subj,
-        { subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params },
-        lang
-      );
-      const file = await buildTicketsFile(
-        generatedBatch.title,
-        generatedBatch.tickets,
-        subj,
-        lang,
-        extras
-      );
+      const subj = generatedSubjectName || 'Предмет';
+      const extras = await keyArchiveExtras(generatedBatch.title, generatedBatch.tickets, subj, selectionOf(), exportLang);
+      const file = await buildTicketsFile(generatedBatch.title, generatedBatch.tickets, subj, exportLang, extras);
       if (!file) return;
 
-      const wordFile = new File([file.blob], file.fileName, {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      const shareFile = new File([file.blob], file.fileName, {
+        type: file.fileName.endsWith('.zip') ? 'application/zip' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
+      const text = `Экзаменационные билеты (${subj}) — ${generatedBatch.tickets.length} вар.`;
 
-      if (navigator.canShare && navigator.canShare({ files: [wordFile] })) {
-        await navigator.share({
-          title: generatedBatch.title,
-          text: `Экзаменационные билеты (${subj}) — ${generatedBatch.tickets.length} вар.`,
-          files: [wordFile],
-        });
+      if (navigator.canShare && navigator.canShare({ files: [shareFile] })) {
+        await navigator.share({ title: generatedBatch.title, text, files: [shareFile] });
       } else {
-        await navigator.share({
-          title: generatedBatch.title,
-          text: `Экзаменационные билеты (${subj}) — ${generatedBatch.tickets.length} вар.`,
-          url: window.location.href,
-        });
+        await navigator.share({ title: generatedBatch.title, text, url: window.location.href });
       }
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
@@ -622,770 +704,567 @@ export const TicketGenerator: React.FC = () => {
     }
   };
 
-  // Тот же файл, но отправляется в Telegram владельца аккаунта
-  const telegramButton = generatedBatch?.tickets ? (
-    <SendToTelegramButton
-      title={generatedBatch.title}
-      batchId={generatedBatch.id}
-      ticketCount={generatedBatch.tickets.length}
-      build={async (lang) => {
-        const subj = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || 'Химия';
-        return buildTicketsFile(
-          generatedBatch.title,
-          generatedBatch.tickets,
-          subj,
-          lang,
-          await keyArchiveExtras(generatedBatch.title, generatedBatch.tickets, subj, { subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params }, lang)
-        );
-      }}
-    />
-  ) : null;
+  // Кнопка генерации: что мешает нажать и что на ней написать
+  const blockReason = pickEmpty
+    ? 'Отметьте главы'
+    : poolStats && fitted.error
+    ? 'Нет вопросов'
+    : dayExhausted
+    ? 'Лимит на сегодня исчерпан'
+    : cooldownLeft > 0
+    ? `Можно через ${formatWait(cooldownLeft)}`
+    : null;
+  const healthDot = !health ? 'bg-slate-300' : health.status === 'green' ? 'bg-emerald-500' : health.status === 'amber' ? 'bg-amber-500' : 'bg-rose-500';
+
+  const variantChoices = isAdmin
+    ? [1, 2, 4, 10, 20, 50].filter((n) => n <= limits.tickets)
+    : Array.from({ length: Math.min(limits.tickets, 6) }, (_, i) => i + 1);
+
+  const selectedChaptersCount = chapters.filter((ch) => {
+    const chTopics = allTopics.filter((t) => t.chapter_id === ch.id);
+    return chTopics.some((t) => selectedTopicIds.includes(t.id)) || (chTopics.length === 0 && selectedChapterIds.includes(ch.id));
+  }).length;
 
   return (
-    <div className="space-y-4 sm:space-y-6 max-w-5xl mx-auto">
-      {/* Шапка генератора в Bento-стиле */}
-      <div className="bento-card p-4 sm:p-6 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
-            <Sparkles className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
-              Конструктор экзаменационных билетов
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Параллельная генерация одинаковых вариантов на русском и таджикском языках
-            </p>
-          </div>
-        </div>
-
-        {generatedBatch && (
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handleExportWord('ru')}
-              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1.5 transition active:scale-95"
-              title="Скачать варианты на русском языке"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Русский (.docx)</span>
-            </button>
-            <button
-              onClick={() => handleExportWord('tg')}
-              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1.5 transition active:scale-95"
-              title="Скачать варианты на таджикском языке"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Тоҷикӣ (.docx)</span>
-            </button>
-            <button
-              onClick={() => handleExportWord('both')}
-              className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1.5 transition active:scale-95"
-              title="Скачать двуязычные билеты (RU + TJ)"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>RU + TJ</span>
-            </button>
-            {hasKeyTemplate(generatedSubjectName) && (
-              <button
-                onClick={handleExportKey}
-                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1.5 transition active:scale-95"
-                title="Ключи ответов по шаблону (Word)"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Ключи (.docx)</span>
-              </button>
-            )}
-            {telegramButton}
-            {canShare && (
-              <button
-                onClick={() => handleShareTickets('ru')}
-                disabled={isSharing}
-                className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1.5 transition active:scale-95 disabled:opacity-50"
-                title="Поделиться в Telegram, WhatsApp или сохранить"
-              >
-                {isSharing ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
-                ) : (
-                  <Share2 className="w-3.5 h-3.5 text-sky-400" />
-                )}
-                <span>Поделиться ↗</span>
-              </button>
-            )}
-          </div>
-        )}
+    <div className="space-y-4 sm:space-y-5 max-w-5xl mx-auto">
+      {/* Заголовок */}
+      <div className="px-1">
+        <h2 className="text-xl font-bold text-slate-900 leading-tight">Генератор билетов</h2>
+        <p className="text-sm text-slate-600 mt-1">
+          Выберите предмет и нажмите «Сгенерировать» — получите Word с билетами и ключами.
+        </p>
       </div>
 
-      {recentBatches.length > 0 && (
-        <div className="bento-card px-4 py-3 rounded-2xl flex flex-wrap items-center gap-2">
-          <span className="text-xs font-bold text-slate-500">Повторить прошлый набор:</span>
-          {recentBatches.map((b) => (
-            <button
-              key={b.id}
-              onClick={() => repeatBatch(b)}
-              className="px-2.5 py-1.5 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 rounded-xl text-xs font-semibold text-slate-700 transition active:scale-95"
-              title={`${b.subject?.name || ''} · ${b.generation_params?.ticket_count ?? '?'} вариантов`}
-            >
-              {b.title} · {new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {generationError && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start space-x-3 text-xs text-red-700 shadow-xs animate-in fade-in">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <div>
-            <span className="font-bold">Генерация остановлена: </span>
-            {generationError}
-          </div>
-        </div>
-      )}
-
-      {/* Панель настроек состава билета */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
-        {/* 1. Выбор предмета, глав и тем */}
-        <div className="md:col-span-2 bento-card p-4 sm:p-6 rounded-2xl space-y-4">
-          <h3 className="font-bold text-slate-900 text-sm flex items-center">
-            <BookOpen className="w-4 h-4 mr-2 text-indigo-600" />
-            1. Выбор диапазона глав и тем
-          </h3>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                Предмет
-              </label>
-              <select
-                value={subjectId}
-                onChange={(e) => applyPresetForSubject(e.target.value)}
-                className="w-full text-xs p-2.5 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-900"
-              >
-                {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-
-              {/* Быстрые кнопки выбора предметов со стандартами */}
-              <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Быстро:</span>
-                {SUBJECT_PRESETS.map((p) => {
-                  const s = subjects.find(x => x.name.toLowerCase().includes(p.match));
-                  const isSelected = s && subjectId === s.id;
-                  return (
-                    <button
-                      key={p.label}
-                      type="button"
-                      onClick={() => {
-                        if (s) {
-                          setSubjectId(s.id);
-                          setSelectedChapterIds([]);
-                          setSelectedTopicIds([]);
-                        }
-                        setTestCount(p.test);
-                        setMatchingCount(p.matching);
-                        setOpenCount(p.open);
-                      }}
-                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition active:scale-95 border ${
-                        isSelected
-                          ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold shadow-2xs'
-                          : 'bg-white border-slate-200/90 text-slate-700 hover:bg-slate-50'
-                      }`}
-                      title={`${p.label}: ${p.test} тестов, ${p.matching} соотв., ${p.open} откр.`}
-                    >
-                      {p.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                Название пакета билетов
-              </label>
-              <input
-                type="text"
-                value={batchTitle}
-                onChange={(e) => setBatchTitle(e.target.value)}
-                placeholder="Экзамен по неорганической химии"
-                className="w-full text-xs p-2.5 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
-              />
-            </div>
-          </div>
-
-          {/* Иерархический выбор: Главы и раскрывающиеся темы */}
-          <div className="space-y-3 pt-2 border-t border-slate-100">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  Главы и темы:
-                </span>
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-semibold border border-blue-200">
-                  {selectedTopicIds.length === 0
-                    ? `Все темы включены (${allTopics.length})`
-                    : `Выбрано: ${selectedTopicIds.length} из ${allTopics.length}`}
-                </span>
-              </div>
-              <div className="flex items-center space-x-1.5 text-xs">
-                <button
-                  type="button"
-                  onClick={handleSelectAllTopics}
-                  className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold rounded-lg transition"
-                >
-                  Выбрать все
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDeselectAllTopics}
-                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-lg transition"
-                >
-                  Снять всё
-                </button>
-              </div>
-            </div>
-
-            {/* Нехватка вопросов в выбранных темах — сразу рядом с выбором */}
-            {poolStats && fitted.error && (
-              <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-lg p-2 mb-2">⚠ {fitted.error}</p>
-            )}
-            {poolStats && !fitted.error && fitted.notes.length > 0 && (
-              <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 mb-2">
-                <span className="block font-semibold">Вопросов в выбранных темах не хватает на заданный состав билета:</span>
-                {fitted.notes.map((n) => <span key={n} className="block">• {n}</span>)}
-                <span className="block mt-0.5 text-amber-700">Выберите больше тем или уменьшите число вопросов.</span>
-              </div>
-            )}
-
-            {/* Список глав в виде раскрывающегося аккордеона */}
-            <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
-              {chapters.map(ch => {
-                const chTopics = allTopics.filter(t => t.chapter_id === ch.id);
-                const chSelectedTopics = chTopics.filter(t => selectedTopicIds.includes(t.id));
-                const isAllSelected = chTopics.length > 0 && chSelectedTopics.length === chTopics.length;
-                const isExpanded = expandedChapterIds[ch.id] ?? false;
-
-                return (
-                  <div
-                    key={ch.id}
-                    className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm transition"
-                  >
-                    {/* Заголовок главы (аккордеон) */}
-                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 p-2.5 bg-slate-50 hover:bg-slate-100/70 transition select-none">
-                      <div className="flex items-start space-x-2 flex-1 min-w-[12rem]">
-                        <button
-                          type="button"
-                          onClick={() => toggleChapterExpanded(ch.id)}
-                          className="p-1 text-slate-500 hover:text-slate-800 rounded transition shrink-0"
-                          title={isExpanded ? 'Свернуть список тем' : 'Раскрыть список тем'}
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="w-4 h-4 text-blue-600" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4 text-slate-400" />
-                          )}
-                        </button>
-
-                        <label className="flex items-start space-x-2 cursor-pointer min-w-0 flex-1">
-                          <input
-                            type="checkbox"
-                            checked={isAllSelected}
-                            onChange={(e) => {
-                              if (e.target.checked) handleSelectChapterTopics(ch.id);
-                              else handleDeselectChapterTopics(ch.id);
-                            }}
-                            className="mt-0.5 w-4 h-4 rounded text-blue-600 focus:ring-blue-500 shrink-0"
-                          />
-                          <span className="font-bold text-xs text-slate-900 break-words leading-snug">
-                            {ch.name}
-                          </span>
-                        </label>
-
-                        <span className="text-[11px] text-slate-400 font-medium shrink-0 mt-0.5">
-                          ({chSelectedTopics.length}/{chTopics.length} тем)
-                        </span>
-                      </div>
-
-                      <div className="flex items-center space-x-1 shrink-0 ml-8 sm:ml-2">
-                        <button
-                          type="button"
-                          onClick={() => handleSelectChapterTopics(ch.id)}
-                          className="text-[11px] text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded hover:bg-blue-50 font-medium"
-                        >
-                          Выбрать все
-                        </button>
-                        <span className="text-slate-300">·</span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeselectChapterTopics(ch.id)}
-                          className="text-[11px] text-slate-500 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-slate-200/50"
-                        >
-                          Снять всё
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Раскрывающийся список тем главы */}
-                    {isExpanded && (
-                      <div className="p-2.5 bg-white border-t border-slate-100 space-y-1">
-                        {chTopics.length === 0 ? (
-                          <div className="text-xs text-slate-400 italic p-2">В этой главе пока нет тем</div>
-                        ) : (
-                          chTopics.map((tp, tpIdx) => {
-                            const isChecked = selectedTopicIds.includes(tp.id);
-                            return (
-                              <label
-                                key={tp.id}
-                                className={`flex items-start space-x-2.5 p-2 rounded-lg cursor-pointer transition text-xs ${
-                                  isChecked
-                                    ? 'bg-blue-50/70 text-slate-900 font-medium border border-blue-200/60'
-                                    : 'hover:bg-slate-50 text-slate-700 border border-transparent'
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={(e) => handleToggleTopic(tp.id, ch.id, e.target.checked)}
-                                  className="mt-0.5 w-3.5 h-3.5 rounded text-blue-600 focus:ring-blue-500 shrink-0"
-                                />
-                                <span className="leading-snug">{tpIdx + 1}. {tp.name}</span>
-                              </label>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* 2. Квоты вопросов и статистика пула */}
-        <div className="bento-card p-4 sm:p-6 rounded-2xl flex flex-col justify-between space-y-4">
-          <div>
-            <h3 className="font-bold text-slate-900 text-sm flex items-center mb-3">
-              <Layers className="w-4 h-4 mr-2 text-indigo-600" />
-              2. Состав каждого билета
-            </h3>
-
-            {/* Быстрые шаблоны составов билета под предметы */}
-            <div className="bg-slate-100/80 p-2.5 rounded-2xl border border-slate-200/80 mb-3 space-y-1.5">
-              <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider px-1">
-                <span>Быстрый стандарт:</span>
-                <span className="text-slate-400 font-normal">1 клик</span>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTestCount(18);
-                    setMatchingCount(2);
-                    setOpenCount(7);
-                  }}
-                  className={`p-2 rounded-xl text-left border transition active:scale-95 ${
-                    testCount === 18 && matchingCount === 2 && openCount === 7
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
-                  title="Физика и Химия: 18 тестов, 2 соответствия, 7 открытых (всего 27 вопросов)"
-                >
-                  <div className="font-bold text-xs truncate">
-                    🧪 Физ / Хим
-                  </div>
-                  <div className={`text-[10px] mt-0.5 ${testCount === 18 && matchingCount === 2 && openCount === 7 ? 'text-indigo-100 font-medium' : 'text-slate-400'}`}>
-                    18 + 2 + 7 (27 в.)
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTestCount(20);
-                    setMatchingCount(4);
-                    setOpenCount(2);
-                  }}
-                  className={`p-2 rounded-xl text-left border transition active:scale-95 ${
-                    testCount === 20 && matchingCount === 4 && openCount === 2
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
-                  title="Биология и Гос (Таджикский язык): 20 тестов, 4 соответствия, 2 открытых (всего 26 вопросов)"
-                >
-                  <div className="font-bold text-xs truncate">
-                    🧬 Био / Гос
-                  </div>
-                  <div className={`text-[10px] mt-0.5 ${testCount === 20 && matchingCount === 4 && openCount === 2 ? 'text-indigo-100 font-medium' : 'text-slate-400'}`}>
-                    20 + 4 + 2 (26 в.)
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {/* Тестовые вопросы */}
-              <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/80">
-                <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="font-bold text-slate-800">Тестовые вопросы:</span>
-                  <span className="text-slate-400 font-medium">В пуле: {poolStats?.test || 0}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setTestCount(Math.max(0, testCount - 1))}
-                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
-                  >
-                    −
-                  </button>
-                  <input
-                    type="number"
-                    min="0"
-                    value={testCount}
-                    onChange={(e) => setTestCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
-                    className="flex-1 text-center text-sm font-bold p-1.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setTestCount(Math.min(limits.perType, testCount + 1))}
-                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              {/* На соответствие */}
-              <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/80">
-                <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="font-bold text-slate-800">На соответствие:</span>
-                  <span className="text-slate-400 font-medium">В пуле: {poolStats?.matching || 0}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setMatchingCount(Math.max(0, matchingCount - 1))}
-                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
-                  >
-                    −
-                  </button>
-                  <input
-                    type="number"
-                    min="0"
-                    value={matchingCount}
-                    onChange={(e) => setMatchingCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
-                    className="flex-1 text-center text-sm font-bold p-1.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setMatchingCount(Math.min(limits.perType, matchingCount + 1))}
-                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              {/* Открытые вопросы */}
-              <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/80">
-                <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="font-bold text-slate-800">Открытые вопросы:</span>
-                  <span className="text-slate-400 font-medium">В пуле: {poolStats?.open || 0}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setOpenCount(Math.max(0, openCount - 1))}
-                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
-                  >
-                    −
-                  </button>
-                  <input
-                    type="number"
-                    min="0"
-                    value={openCount}
-                    onChange={(e) => setOpenCount(Math.min(limits.perType, Math.max(0, parseInt(e.target.value) || 0)))}
-                    className="flex-1 text-center text-sm font-bold p-1.5 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setOpenCount(Math.min(limits.perType, openCount + 1))}
-                    className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-slate-50 shadow-2xs"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              {/* Количество вариантов с пресетами */}
-              <div className="bg-indigo-50/50 p-3.5 rounded-2xl border border-indigo-100">
-                <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="font-bold text-indigo-950">Количество вариантов:</span>
-                  <span className="text-indigo-600 font-semibold text-[11px]">макс. {limits.tickets}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setTicketCount(Math.max(1, ticketCount - 1))}
-                    className="w-9 h-9 rounded-xl bg-white border border-indigo-200 text-indigo-700 flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-indigo-50 shadow-2xs"
-                  >
-                    −
-                  </button>
-                  <input
-                    type="number"
-                    min="1"
-                    max={limits.tickets}
-                    value={ticketCount}
-                    onChange={(e) => setTicketCount(Math.min(limits.tickets, Math.max(1, parseInt(e.target.value) || 1)))}
-                    className="flex-1 text-center text-sm font-bold p-1.5 bg-white border border-indigo-200 text-indigo-950 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setTicketCount(Math.min(limits.tickets, ticketCount + 1))}
-                    className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-base active:scale-90 transition hover:bg-indigo-700 shadow-xs"
-                  >
-                    +
-                  </button>
-                </div>
-                {/* Быстрые пресеты количества вариантов: для обычных пользователей 1, 2, 4; для админа — до 50 */}
-                <div className="flex items-center gap-1.5 mt-2.5">
-                  <span className="text-[10px] text-slate-400 font-semibold uppercase mr-0.5">Вариантов:</span>
-                  {(isAdmin ? [1, 2, 4, 10, 20, 50] : [1, 2, 4])
-                    .filter((n) => n <= limits.tickets)
-                    .map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => setTicketCount(n)}
-                        className={`px-2 py-0.5 rounded-lg text-xs font-bold transition active:scale-95 ${
-                          ticketCount === n
-                            ? 'bg-indigo-600 text-white shadow-2xs'
-                            : 'bg-white border border-indigo-200/70 text-indigo-700 hover:bg-indigo-50'
-                        }`}
-                      >
-                        {n}
-                      </button>
-                    ))}
-                </div>
-
-                {!isAdmin && (
-                  <p className="text-[11px] text-slate-400 mt-2">
-                    Лимиты: до {limits.tickets} вариантов за раз, до {userLimits.total} вопросов в билете.
-                  </p>
-                )}
-                <p className="text-[11px] text-slate-500 mt-1 font-medium">
-                  Будет создано {ticketCount} параллельных билетов по {fitted.settings.testCount + fitted.settings.matchingCount + fitted.settings.openCount} вопросов
-                </p>
-                {fitted.notes.length > 0 && !fitted.error && (
-                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2 mt-2">
-                    Вопросов не хватает — билеты составятся из того, что есть:<br />
-                    {fitted.notes.map((n) => <span key={n} className="block">• {n}</span>)}
-                  </p>
-                )}
-                {fitted.error && poolStats && (
-                  <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-xl p-2 mt-2">{fitted.error}</p>
-                )}
-              </div>
-
-              {/* Настройки перемешивания (анти-списывание) */}
-              <div className="pt-2 border-t border-slate-100 space-y-2">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                  Перемешивание (анти-списывание):
-                </span>
-                <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer select-none hover:text-slate-900 transition">
-                  <input
-                    type="checkbox"
-                    checked={shuffleOptions}
-                    onChange={(e) => setShuffleOptions(e.target.checked)}
-                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
-                  />
-                  <span className="font-medium">Перемешать варианты ответов (A, B, C, D)</span>
-                </label>
-                <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer select-none hover:text-slate-900 transition">
-                  <input
-                    type="checkbox"
-                    checked={shuffleMatching}
-                    onChange={(e) => setShuffleMatching(e.target.checked)}
-                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
-                  />
-                  <span className="font-medium">Перемешать варианты соответствия (1, 2, 3...)</span>
-                </label>
-              </div>
-
-              {/* Живой индикатор готовности пула вопросов (Traffic Light) */}
-              {healthStats && (
-                <div
-                  className={`p-3.5 rounded-2xl border transition-all ${
-                    healthStats.status === 'green'
-                      ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
-                      : healthStats.status === 'yellow'
-                      ? 'bg-amber-50/80 border-amber-200 text-amber-950'
-                      : 'bg-rose-50/80 border-rose-200 text-rose-950'
-                  }`}
-                >
-                  <div className="flex items-start space-x-2.5">
-                    <div
-                      className={`w-3 h-3 rounded-full mt-0.5 shrink-0 ${
-                        healthStats.status === 'green'
-                          ? 'bg-emerald-500 shadow-sm shadow-emerald-500/50'
-                          : healthStats.status === 'yellow'
-                          ? 'bg-amber-500 shadow-sm shadow-amber-500/50 animate-pulse'
-                          : 'bg-rose-500 shadow-sm shadow-rose-500/50 animate-pulse'
-                      }`}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-bold leading-tight">
-                        {healthStats.title}
-                      </div>
-                      <p className="text-[11px] mt-1 leading-snug opacity-90">
-                        {healthStats.desc}
-                      </p>
-
-                      {/* Сводка по пулу вопросов */}
-                      <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-black/5 text-[10px] font-semibold">
-                        <span className="px-1.5 py-0.5 rounded-md bg-white/70 border border-black/5">
-                          Тесты: {poolStats?.test || 0} {testCount > 0 ? `(до ${Math.floor((poolStats?.test || 0) / testCount)} в.)` : ''}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded-md bg-white/70 border border-black/5">
-                          Соответствия: {poolStats?.matching || 0} {matchingCount > 0 ? `(до ${Math.floor((poolStats?.matching || 0) / matchingCount)} в.)` : ''}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded-md bg-white/70 border border-black/5">
-                          Открытые: {poolStats?.open || 0} {openCount > 0 ? `(до ${Math.floor((poolStats?.open || 0) / openCount)} в.)` : ''}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <button
-            onClick={handleGenerate}
-            disabled={isGenerating}
-            className="relative overflow-hidden w-full py-3.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-2xl text-xs font-bold shadow-md shadow-indigo-500/25 flex items-center justify-center space-x-2 transition active:scale-[0.98] disabled:opacity-90"
-          >
-            {/* Анимированный индикатор наполнения слева направо */}
-            {isGenerating && (
-              <div
-                className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-500 opacity-90 transition-all duration-300 ease-out"
-                style={{ width: `${Math.max(10, genProgress.percent)}%` }}
-              />
-            )}
-            <div className="relative z-10 flex items-center justify-center space-x-2">
-              {isGenerating ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span className="truncate">{genProgress.stage || 'Составление билетов...'} ({genProgress.percent}%)</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4" />
-                  <span>Сгенерировать билеты</span>
-                </>
-              )}
-            </div>
-          </button>
-        </div>
-      </div>
-
-      {/* Результаты генерации (предпросмотр созданных вариантов) */}
+      {/* Результат генерации — первым, чтобы сразу было видно, что всё готово */}
       {generatedBatch && (
-        <div className="bento-card p-4 sm:p-6 rounded-2xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-3">
-            <div>
-              <div className="flex items-center space-x-3">
-                <h3 className="font-bold text-slate-900 text-base">
-                  Сгенерировано вариантов: {generatedBatch.tickets.length}
+        <div ref={resultRef} className="scroll-mt-24 bento-card rounded-2xl p-4 sm:p-5 border-emerald-200 space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
+              <CheckCircle2 className="w-7 h-7 text-emerald-600 shrink-0" />
+              <div className="min-w-0">
+                <h3 className="font-bold text-slate-900 text-base leading-tight">
+                  Готово: {generatedBatch.tickets.length} {plural(generatedBatch.tickets.length, 'вариант', 'варианта', 'вариантов')}
+                  {generatedBatch.tickets[0] ? ` по ${generatedBatch.tickets[0].questions.length} вопр.` : ''}
                 </h3>
-                <button
-                  onClick={() => setGeneratedBatch(null)}
-                  className="text-xs text-slate-400 hover:text-slate-600 underline font-medium"
-                  title="Скрыть блок предпросмотра"
-                >
-                  Скрыть
-                </button>
+                <p className="text-sm text-slate-600 mt-0.5 truncate">
+                  {generatedSubjectName}{generatedBatch.title ? ` · ${generatedBatch.title}` : ''}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">Копия сохранена в архиве билетов</p>
               </div>
-              <p className="text-xs text-slate-500">
-                Все билеты сохранены в базу с неизменяемыми снимками (snapshots).
-              </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => handleExportWord('ru')}
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1 shadow-xs transition active:scale-95"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Русский (.docx)</span>
-              </button>
-              <button
-                onClick={() => handleExportWord('tg')}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1 shadow-xs transition active:scale-95"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Тоҷикӣ (.docx)</span>
-              </button>
-              <button
-                onClick={() => handleExportWord('both')}
-                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1 shadow-xs transition active:scale-95"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>RU + TJ</span>
-              </button>
-              {telegramButton}
-              {canShare && (
-                <button
-                  onClick={() => handleShareTickets('ru')}
-                  disabled={isSharing}
-                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1 transition active:scale-95 disabled:opacity-50"
-                  title="Поделиться в Telegram, WhatsApp или сохранить"
-                >
-                  {isSharing ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
-                  ) : (
-                    <Share2 className="w-3.5 h-3.5 text-sky-400" />
-                  )}
-                  <span>Поделиться ↗</span>
-                </button>
-              )}
-            </div>
+            <button
+              onClick={() => setGeneratedBatch(null)}
+              className="w-10 h-10 -mr-2 -mt-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center shrink-0"
+              aria-label="Закрыть результат"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-            {generatedBatch.tickets.map((t: any) => (
-              <div key={t.id} className="p-4 rounded-2xl border border-slate-200/80 bg-slate-50/70 space-y-2.5">
-                <div className="font-bold text-sm text-slate-900 flex items-center justify-between">
-                  <span>Вариант {t.ticket_number}</span>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="text-xs font-normal text-slate-500 mr-1">Вопросов: {t.questions.length}</span>
+          {/* Главное действие: скачать на запомненном языке; стрелка — выбрать другой язык */}
+          <div className="sm:max-w-md sm:mx-auto">
+            <div className="relative">
+              <div className="flex">
+                <button
+                  onClick={() => handleDownload(exportLang)}
+                  disabled={isDownloading}
+                  className="flex-1 min-h-[52px] px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-l-2xl font-bold text-base flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-70"
+                >
+                  {isDownloading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+                  <span>{isDownloading ? 'Готовим файл…' : `Скачать · ${LANG_LABEL[exportLang]}`}</span>
+                </button>
+                <button
+                  onClick={() => setLangMenuOpen((v) => !v)}
+                  disabled={isDownloading}
+                  className="w-14 min-h-[52px] bg-indigo-600 hover:bg-indigo-700 text-white rounded-r-2xl border-l border-indigo-400/60 flex items-center justify-center transition disabled:opacity-70"
+                  aria-label="Выбрать язык"
+                  aria-expanded={langMenuOpen}
+                >
+                  <ChevronDown className={`w-5 h-5 transition-transform ${langMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+              {langMenuOpen && (
+                <div className="mt-2 bg-white border border-slate-200 rounded-2xl shadow-lg overflow-hidden">
+                  <div className="px-4 pt-3 pb-1 text-xs font-semibold text-slate-500">Язык билетов</div>
+                  {(Object.keys(LANG_LABEL) as Lang[]).map((l) => (
                     <button
-                      onClick={() => exportSingleWithKey(t, 'ru')}
-                      className="px-2 py-0.5 text-[11px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold rounded-lg border border-indigo-200/70 transition active:scale-95"
-                      title="Скачать Вариант на русском"
+                      key={l}
+                      onClick={() => handleDownload(l)}
+                      className={`w-full min-h-[48px] px-4 text-left text-base flex items-center justify-between hover:bg-indigo-50 ${l === exportLang ? 'font-bold text-indigo-700' : 'text-slate-800'}`}
                     >
-                      RU (.docx)
+                      <span>{l === 'both' ? 'Русский + Тоҷикӣ' : LANG_LABEL[l]}</span>
+                      {l === exportLang && <CheckCircle2 className="w-5 h-5 text-indigo-600" />}
                     </button>
-                    <button
-                      onClick={() => exportSingleWithKey(t, 'tg')}
-                      className="px-2 py-0.5 text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold rounded-lg border border-emerald-200/70 transition active:scale-95"
-                      title="Скачать Вариант на таджикском"
-                    >
-                      TJ (.docx)
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-1 text-xs text-slate-700 max-h-48 overflow-y-auto pr-1">
-                  {t.questions.map((tq: any, i: number) => (
-                    <div key={i} className="p-2 bg-white rounded-xl border border-slate-100 truncate shadow-2xs">
-                      <span className="font-bold text-slate-400 mr-1.5">{i + 1}.</span>
-                      <span className="font-medium text-slate-800">
-                        {tq.question_snapshot.content.replace(/<.*?>/g, '')}
-                      </span>
-                    </div>
                   ))}
                 </div>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-2 text-center">
+              {generatedHasKey ? 'В архиве: билеты + ключи ответов' : 'Билеты в формате Word'}
+            </p>
+          </div>
+
+          {/* Второстепенные действия */}
+          <div className="flex flex-wrap items-center gap-2">
+            <SendToTelegramButton
+              title={generatedBatch.title}
+              batchId={generatedBatch.id}
+              ticketCount={generatedBatch.tickets.length}
+              build={async (lang) => buildTicketsFile(
+                generatedBatch.title,
+                generatedBatch.tickets,
+                generatedSubjectName || 'Экзамен',
+                lang,
+                await keyArchiveExtras(generatedBatch.title, generatedBatch.tickets, generatedSubjectName, selectionOf(), lang)
+              )}
+            />
+            {canShare && (
+              <button
+                onClick={handleShareTickets}
+                disabled={isSharing}
+                className="min-h-[40px] px-3.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-sm font-semibold flex items-center gap-1.5 transition active:scale-95 disabled:opacity-50"
+              >
+                {isSharing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
+                <span>Поделиться</span>
+              </button>
+            )}
+            {generatedHasKey && (
+              <button
+                onClick={handleExportKey}
+                className="min-h-[40px] px-2 text-sm font-semibold text-slate-600 hover:text-indigo-700 underline-offset-2 hover:underline"
+              >
+                Только ключи
+              </button>
+            )}
+          </div>
+
+          {/* Просмотр вариантов — по запросу, чтобы не растягивать экран */}
+          <div className="border-t border-slate-100 pt-2">
+            <button
+              onClick={() => setShowVariants((v) => !v)}
+              className="w-full min-h-[44px] flex items-center justify-between text-sm font-semibold text-slate-700"
+            >
+              <span>Посмотреть варианты</span>
+              <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showVariants ? 'rotate-180' : ''}`} />
+            </button>
+            {showVariants && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+                {generatedBatch.tickets.map((t: any) => (
+                  <div key={t.id} className="p-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-sm text-slate-900">Вариант {t.ticket_number}</span>
+                      <div className="flex items-center gap-1.5">
+                        {(exportLang === 'both' ? (['ru', 'tg'] as const) : [exportLang]).map((l) => (
+                          <button
+                            key={l}
+                            onClick={() => exportSingleWithKey(t, l)}
+                            className="min-h-[36px] px-2.5 text-xs bg-white hover:bg-indigo-50 text-indigo-700 font-semibold rounded-lg border border-indigo-200/70 flex items-center gap-1 transition active:scale-95"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            {l === 'tg' ? 'TJ' : 'RU'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-1 text-sm text-slate-700 max-h-48 overflow-y-auto pr-1">
+                      {t.questions.map((tq: any, i: number) => (
+                        <div key={i} className="px-2 py-1.5 bg-white rounded-lg border border-slate-100 truncate">
+                          <span className="font-bold text-slate-400 mr-1.5">{i + 1}.</span>
+                          {tq.question_snapshot.content.replace(/<.*?>/g, '')}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Повторить прошлый набор: на телефоне — лента, листается пальцем */}
+      {recentBatches.length > 0 && (
+        <div>
+          <div className="flex items-center gap-1.5 px-1 mb-2 text-sm font-semibold text-slate-600">
+            <History className="w-4 h-4" />
+            <span>Повторить прошлый набор</span>
+          </div>
+          <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap">
+            {recentBatches.map((b) => (
+              <button
+                key={b.id}
+                onClick={() => repeatBatch(b)}
+                className="shrink-0 text-left px-3.5 py-2 bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 rounded-2xl transition active:scale-95"
+                title={b.title}
+              >
+                <div className="text-sm font-semibold text-slate-800 whitespace-nowrap">
+                  {b.subject?.name || b.title} · {b.generation_params?.ticket_count ?? '?'} вар.
+                </div>
+                <div className="text-xs text-slate-500 whitespace-nowrap">
+                  {new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </button>
             ))}
           </div>
         </div>
       )}
+
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 sm:gap-5 items-start">
+        <div className="md:col-span-3 space-y-4 sm:space-y-5">
+          {/* 1. Предмет */}
+          <section className="bento-card p-4 sm:p-5 rounded-2xl space-y-3">
+            <h3 className="font-bold text-slate-900 text-base">1. Предмет</h3>
+            {subjects.length <= 8 ? (
+              <div className="flex flex-wrap gap-2">
+                {subjects.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => s.id !== subjectId && applyPresetForSubject(s.id)}
+                    className={`min-h-[44px] px-4 rounded-xl text-sm font-semibold border transition active:scale-95 ${
+                      s.id === subjectId
+                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                    aria-pressed={s.id === subjectId}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <select
+                value={subjectId}
+                onChange={(e) => applyPresetForSubject(e.target.value)}
+                className="w-full min-h-[44px] text-base px-3 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-900"
+              >
+                {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            )}
+          </section>
+
+          {/* 2. Что включить: весь предмет или выбранные главы */}
+          <section className="bento-card p-4 sm:p-5 rounded-2xl space-y-3">
+            <h3 className="font-bold text-slate-900 text-base">2. Какие главы</h3>
+            <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-2xl" role="radiogroup" aria-label="Какие главы">
+              {([['all', 'Весь предмет'], ['pick', 'Выбрать главы']] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={scopeMode === mode}
+                  onClick={() => setScopeMode(mode)}
+                  className={`min-h-[44px] rounded-xl text-sm font-semibold transition ${
+                    scopeMode === mode ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {scopeMode === 'all' ? (
+              <p className="text-sm text-slate-600 px-1">
+                В билеты войдут все {chapters.length} {plural(chapters.length, 'глава', 'главы', 'глав')} и {allTopics.length} {plural(allTopics.length, 'тема', 'темы', 'тем')}.
+              </p>
+            ) : (
+              <>
+                <div className="flex items-center justify-between gap-2 px-1">
+                  <span className="text-sm text-slate-600">
+                    {pickEmpty ? 'Отметьте нужные главы' : `Выбрано глав: ${selectedChaptersCount} из ${chapters.length}`}
+                  </span>
+                  {!pickEmpty && (
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedTopicIds([]); setSelectedChapterIds([]); }}
+                      className="min-h-[36px] px-2 text-sm font-semibold text-slate-500 hover:text-slate-800"
+                    >
+                      Снять всё
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-2 md:max-h-[60vh] md:overflow-y-auto md:pr-1">
+                  {chapters.map((ch, chIdx) => {
+                    const chTopics = allTopics.filter(t => t.chapter_id === ch.id);
+                    const chSelected = chTopics.filter(t => selectedTopicIds.includes(t.id)).length;
+                    const isAll = chTopics.length > 0 ? chSelected === chTopics.length : selectedChapterIds.includes(ch.id);
+                    const isExpanded = expandedChapterIds[ch.id] ?? false;
+                    return (
+                      <div key={ch.id} className={`border rounded-2xl overflow-hidden transition ${chSelected > 0 || isAll ? 'border-indigo-200 bg-indigo-50/40' : 'border-slate-200 bg-white'}`}>
+                        <div className="flex items-stretch">
+                          <label className="flex items-start gap-3 flex-1 min-w-0 p-3 cursor-pointer select-none">
+                            <TriCheckbox
+                              checked={isAll}
+                              indeterminate={chSelected > 0}
+                              onChange={(v) => (v ? handleSelectChapterTopics(ch.id) : handleDeselectChapterTopics(ch.id))}
+                              className="mt-0.5 w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 shrink-0"
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-sm font-semibold text-slate-900 leading-snug break-words">{ch.name}</span>
+                              <span className="block text-xs text-slate-500 mt-0.5">
+                                {chSelected > 0 && !isAll ? `Тем: ${chSelected} из ${chTopics.length}` : `${chTopics.length} ${plural(chTopics.length, 'тема', 'темы', 'тем')}`}
+                              </span>
+                            </span>
+                          </label>
+                          {chTopics.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => toggleChapterExpanded(ch.id)}
+                              className="w-12 shrink-0 flex items-center justify-center text-slate-400 hover:text-slate-700 border-l border-slate-100"
+                              aria-label={isExpanded ? `Свернуть темы главы ${chIdx + 1}` : `Показать темы главы ${chIdx + 1}`}
+                              aria-expanded={isExpanded}
+                            >
+                              {isExpanded ? <ChevronDown className="w-5 h-5 text-indigo-600" /> : <ChevronRight className="w-5 h-5" />}
+                            </button>
+                          )}
+                        </div>
+                        {isExpanded && (
+                          <div className="px-2 pb-2 space-y-1 border-t border-slate-100 bg-white">
+                            {chTopics.map((tp, tpIdx) => {
+                              const isChecked = selectedTopicIds.includes(tp.id);
+                              return (
+                                <label
+                                  key={tp.id}
+                                  className={`flex items-start gap-3 px-2.5 py-2.5 mt-1 rounded-xl cursor-pointer text-sm transition ${
+                                    isChecked ? 'bg-indigo-50 text-slate-900 font-medium' : 'hover:bg-slate-50 text-slate-700'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => handleToggleTopic(tp.id, ch.id, e.target.checked)}
+                                    className="mt-0.5 w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 shrink-0"
+                                  />
+                                  <span className="leading-snug">{tpIdx + 1}. {tp.name}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+
+        <div className="md:col-span-2 space-y-4 sm:space-y-5">
+          {/* 3. Состав билета: по умолчанию — стандарт предмета одной строкой */}
+          <section className="bento-card p-4 sm:p-5 rounded-2xl space-y-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h3 className="font-bold text-slate-900 text-base">3. Состав билета</h3>
+                {!editComposition && (
+                  <p className="text-sm text-slate-700 mt-1">
+                    <b>{testCount + matchingCount + openCount}</b> {plural(testCount + matchingCount + openCount, 'вопрос', 'вопроса', 'вопросов')}: {testCount} тест. · {matchingCount} соотв. · {openCount} откр.
+                  </p>
+                )}
+                {!editComposition && isStandard && (
+                  <span className="inline-block mt-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    Стандарт для предмета «{subjectName}»
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditComposition((v) => !v)}
+                className="min-h-[40px] px-3 rounded-xl text-sm font-semibold text-indigo-700 hover:bg-indigo-50 shrink-0"
+              >
+                {editComposition ? 'Готово' : 'Изменить'}
+              </button>
+            </div>
+
+            {editComposition && (
+              <div className="divide-y divide-slate-100 -mt-1">
+                <Stepper label="Тестовые" hint={`Доступно: ${poolStats?.test ?? 0}`} value={testCount} min={0} max={limits.perType} onChange={setTestCount} />
+                <Stepper label="На соответствие" hint={`Доступно: ${poolStats?.matching ?? 0}`} value={matchingCount} min={0} max={limits.perType} onChange={setMatchingCount} />
+                <Stepper label="Открытые" hint={`Доступно: ${poolStats?.open ?? 0}`} value={openCount} min={0} max={limits.perType} onChange={setOpenCount} />
+                {standard && !isStandard && (
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setTestCount(standard.test); setMatchingCount(standard.matching); setOpenCount(standard.open); }}
+                      className="min-h-[40px] text-sm font-semibold text-indigo-700"
+                    >
+                      Вернуть стандарт: {standard.test} + {standard.matching} + {standard.open}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Число вариантов — меняют чаще всего, поэтому всегда на виду */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-slate-800">Вариантов</span>
+                {isAdmin && <span className="text-xs text-slate-500">до {limits.tickets}</span>}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {variantChoices.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setTicketCount(n)}
+                    className={`min-w-[48px] min-h-[44px] px-3 rounded-xl text-base font-bold border transition active:scale-95 ${
+                      ticketCount === n ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                    aria-pressed={ticketCount === n}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+              {isAdmin && (
+                <Stepper label="Другое число" value={ticketCount} min={1} max={limits.tickets} onChange={setTicketCount} />
+              )}
+            </div>
+
+            {/* Готовность: один блок и одна кнопка, которая исправляет проблему */}
+            {pickEmpty ? (
+              <div className="p-3 rounded-2xl border border-slate-200 bg-slate-50 text-sm text-slate-600">
+                Отметьте хотя бы одну главу — или выберите «Весь предмет».
+              </div>
+            ) : health && (
+              <div className={`p-3 rounded-2xl border ${
+                health.status === 'green' ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : health.status === 'amber' ? 'bg-amber-50 border-amber-200 text-amber-900'
+                : 'bg-rose-50 border-rose-200 text-rose-900'
+              }`}>
+                <div className="flex items-start gap-2.5">
+                  <span className={`w-3 h-3 rounded-full mt-1 shrink-0 ${healthDot}`} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-bold leading-snug">{health.title}</div>
+                    {health.desc && <p className="text-sm mt-0.5 leading-snug opacity-90">{health.desc}</p>}
+                    {health.status !== 'green' && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {'fixTickets' in health && health.fixTickets && (
+                          <button
+                            type="button"
+                            onClick={() => setTicketCount(health.safe)}
+                            className="min-h-[40px] px-3 rounded-xl bg-white border border-black/10 text-sm font-semibold active:scale-95"
+                          >
+                            Сделать {health.safe} {plural(health.safe, 'вариант', 'варианта', 'вариантов')}
+                          </button>
+                        )}
+                        {'fixCounts' in health && health.fixCounts && (
+                          <button
+                            type="button"
+                            onClick={() => { setTestCount(fitted.settings.testCount); setMatchingCount(fitted.settings.matchingCount); setOpenCount(fitted.settings.openCount); }}
+                            className="min-h-[40px] px-3 rounded-xl bg-white border border-black/10 text-sm font-semibold active:scale-95"
+                          >
+                            Сделать билет из {fittedTotal} вопр.
+                          </button>
+                        )}
+                        {scopeMode === 'pick' && (
+                          <button
+                            type="button"
+                            onClick={() => setScopeMode('all')}
+                            className="min-h-[40px] px-3 rounded-xl bg-white border border-black/10 text-sm font-semibold active:scale-95"
+                          >
+                            Взять весь предмет
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Дополнительно: название и перемешивание — нужны редко */}
+            <div className="border-t border-slate-100 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowExtra((v) => !v)}
+                className="w-full min-h-[44px] flex items-center justify-between text-sm font-semibold text-slate-600"
+              >
+                <span className="flex items-center gap-2"><SlidersHorizontal className="w-4 h-4" /> Дополнительно</span>
+                <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showExtra ? 'rotate-180' : ''}`} />
+              </button>
+              {showExtra && (
+                <div className="space-y-3 pb-1">
+                  <label className="block">
+                    <span className="block text-sm font-semibold text-slate-700 mb-1">Название набора</span>
+                    <input
+                      type="text"
+                      value={batchTitle}
+                      onChange={(e) => setBatchTitle(e.target.value)}
+                      placeholder="Экзамен по химии, 9 класс"
+                      className="w-full min-h-[44px] text-base px-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                  <label className="flex items-center gap-3 min-h-[40px] text-sm text-slate-700 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={shuffleOptions}
+                      onChange={(e) => setShuffleOptions(e.target.checked)}
+                      className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                    />
+                    <span>Перемешать варианты ответов (A, B, C, D)</span>
+                  </label>
+                  <label className="flex items-center gap-3 min-h-[40px] text-sm text-slate-700 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={shuffleMatching}
+                      onChange={(e) => setShuffleMatching(e.target.checked)}
+                      className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                    />
+                    <span>Перемешать пары в заданиях на соответствие</span>
+                  </label>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Кнопка генерации: на телефоне закреплена над нижним меню, на компьютере — под настройками */}
+          <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 px-3 pb-2 pt-2 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent md:static md:inset-auto md:z-auto md:p-0 md:bg-none">
+            <div className="max-w-5xl mx-auto bento-card rounded-2xl p-2 pl-3.5 flex items-center gap-3 shadow-lg md:shadow-sm md:p-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
+                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${healthDot}`} />
+                  <span className="truncate">{ticketCount} вар. × {fittedTotal} вопр.</span>
+                </div>
+                <div className="text-xs text-slate-500 leading-tight">
+                  {leftToday !== null
+                    ? `Сегодня ещё ${leftToday} из ${userLimits.perDay}`
+                    : subjectName}
+                </div>
+              </div>
+              <button
+                onClick={handleGenerate}
+                disabled={isGenerating || !!blockReason}
+                className={`relative overflow-hidden min-h-[52px] px-5 rounded-xl text-base font-bold flex ${generatedBatch && !isGenerating ? 'bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/25'} items-center justify-center gap-2 transition active:scale-[0.98] disabled:bg-slate-300 disabled:border-transparent disabled:text-slate-600 disabled:shadow-none shrink-0 max-w-[60%]`}
+              >
+                {isGenerating && (
+                  <div
+                    className="absolute left-0 top-0 bottom-0 bg-indigo-400/60 transition-all duration-300 ease-out"
+                    style={{ width: `${Math.max(10, genProgress.percent)}%` }}
+                  />
+                )}
+                <span className="relative z-10 flex items-center gap-2 min-w-0">
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin shrink-0" />
+                      <span className="truncate">{genProgress.percent}%</span>
+                    </>
+                  ) : blockReason ? (
+                    <span className="truncate text-sm">{blockReason}</span>
+                  ) : (
+                    <>
+                      <Sparkles className="w-5 h-5 shrink-0" />
+                      <span className="truncate">{generatedBatch ? 'Ещё набор' : 'Сгенерировать'}</span>
+                    </>
+                  )}
+                </span>
+              </button>
+            </div>
+          </div>
+          {/* Место под закреплённой кнопкой, чтобы она не закрывала конец страницы */}
+          <div className="h-20 md:hidden" aria-hidden />
+        </div>
+      </div>
     </div>
   );
 };

@@ -59,7 +59,7 @@ export const SendToTelegramButton: React.FC<Props> = ({ build, title, batchId, t
   const toggle = () => {
     if (!open && ref.current) {
       const r = ref.current.getBoundingClientRect();
-      const menuH = LANGS.length * 32 + 12;
+      const menuH = LANGS.length * 40 + 12;
       const top = r.bottom + 4 + menuH > window.innerHeight ? Math.max(8, r.top - 4 - menuH) : r.bottom + 4;
       setPos({ top, right: Math.max(8, window.innerWidth - r.right) });
     }
@@ -100,13 +100,13 @@ export const SendToTelegramButton: React.FC<Props> = ({ build, title, batchId, t
     }
   };
 
-  const pad = compact ? 'px-2.5 py-1.5' : 'px-3 py-2';
+  const pad = compact ? 'px-2.5 py-1.5' : 'min-h-[40px] px-3.5';
   return (
     <div className="relative" ref={ref}>
       <button
         onClick={toggle}
         disabled={Boolean(sending)}
-        className={`${pad} bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-xs font-bold shadow-sm flex items-center space-x-1 transition disabled:opacity-60`}
+        className={`${pad} bg-white border border-sky-200 hover:bg-sky-50 text-sky-700 rounded-xl ${compact ? 'text-xs' : 'text-sm'} font-semibold flex items-center space-x-1.5 transition disabled:opacity-60`}
         title="Отправить файл в ваш Telegram через бота (вместо скачивания)"
       >
         {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : sent ? <Check className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
@@ -123,7 +123,7 @@ export const SendToTelegramButton: React.FC<Props> = ({ build, title, batchId, t
             <button
               key={l.lang}
               onClick={() => send(l.lang)}
-              className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-sky-50 hover:text-sky-700"
+              className="w-full text-left px-3 py-2.5 text-sm text-slate-700 hover:bg-sky-50 hover:text-sky-700"
             >
               {l.label}
             </button>

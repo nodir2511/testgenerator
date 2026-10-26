@@ -140,11 +140,8 @@ export const App: React.FC = () => {
                 <h1 className="font-bold text-base sm:text-lg text-slate-900 leading-tight tracking-tight">
                   Экзаменатор
                 </h1>
-                <span className="hidden sm:inline-flex px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-indigo-50 text-indigo-700 rounded-md border border-indigo-100">
-                  EdTech
-                </span>
               </div>
-              <p className="text-[11px] text-slate-400 font-medium">Банк вопросов и генератор билетов</p>
+              <p className="hidden sm:block text-[11px] text-slate-400 font-medium">Банк вопросов и генератор билетов</p>
             </div>
           </div>
 
@@ -415,7 +412,7 @@ export const App: React.FC = () => {
 
       {/* Подтверждение сохранения */}
       {saveToast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2 bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div className="fixed left-1/2 -translate-x-1/2 top-[calc(env(safe-area-inset-top)+4.5rem)] md:left-auto md:translate-x-0 md:top-auto md:bottom-6 md:right-6 z-50 flex items-center space-x-2 bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200">
           <CheckCircle2 className="w-5 h-5 shrink-0" />
           <span className="text-sm font-medium">{saveToast}</span>
         </div>
@@ -423,11 +420,11 @@ export const App: React.FC = () => {
 
       {/* Футер (десктоп) */}
       <footer className="hidden md:block bg-white/70 border-t border-slate-200/80 py-4 text-center text-xs text-slate-400">
-        Система экзаменационных билетов • Десктопная и мобильная версии • Supabase RLS
+        Экзаменатор — банк вопросов и генератор билетов
       </footer>
 
       {/* Мобильная нижняя навигация (Floating Bottom Bar под большой палец) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/92 backdrop-blur-xl border-t border-slate-200/80 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(15,23,42,0.06)]">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-slate-200/80 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(15,23,42,0.06)]">
         <div className="grid grid-cols-4 h-16 items-center px-2">
           {/* Генератор */}
           <button

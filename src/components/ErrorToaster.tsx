@@ -34,7 +34,7 @@ export default function ErrorToaster() {
   if (!items.length) return null;
   const close = (id: number) => setItems((p) => p.filter((x) => x.id !== id));
   return (
-    <div className="fixed bottom-4 right-4 z-[100] flex w-[min(92vw,26rem)] flex-col gap-3">
+    <div className="fixed left-1/2 -translate-x-1/2 top-[calc(env(safe-area-inset-top)+4.5rem)] md:left-auto md:translate-x-0 md:top-auto md:bottom-4 md:right-4 z-[100] flex w-[min(92vw,26rem)] flex-col gap-3">
       {items.map((it) =>
         it.kind !== 'error' ? (
           <div key={it.id} role="status" className={`rounded-xl border bg-white p-4 shadow-lg ${it.kind === 'info' ? 'border-amber-200' : 'border-emerald-200'}`}>
