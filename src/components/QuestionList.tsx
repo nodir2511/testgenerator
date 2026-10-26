@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { assertRowsChanged } from '../lib/errors';
+import { assertRowsChanged, withUndo } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { FormattedText } from './FormulaEditor';
@@ -229,6 +229,16 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const isLoading = pageResults[0]?.isLoading ?? true;
   const loadingMore = pageResults.slice(1).some((r) => r.isLoading);
 
+  const resetFilters = () => {
+    setFilterIssue('all');
+    setFilterSubjectId('');
+    setFilterChapterId('');
+    setFilterTopicId('');
+    setFilterType('all');
+    setSearchQuery('');
+    setPage(0); setExtra(0);
+  };
+
   // Мягкое удаление вопроса
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -240,13 +250,21 @@ export const QuestionList: React.FC<QuestionListProps> = ({
       if (error) throw error;
       assertRowsChanged(data, 'вопрос');
     },
-    meta: { action: 'Не удалось удалить вопрос', success: 'Вопрос удалён из базы' },
+    meta: { action: 'Не удалось удалить вопрос' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
     },
+    onError: (_e, id) => setHiddenIds((prev) => prev.filter((x) => x !== id)),
   });
 
-  const questions = pageResults.flatMap((r) => r.data?.questions || []);
+  // Удаление с отменой: вопрос сразу скрывается, а в базе удаляется через 5 секунд
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+  const removeQuestion = (id: string) => {
+    setHiddenIds((prev) => [...prev, id]);
+    withUndo('Вопрос удалён', () => deleteMutation.mutate(id), () => setHiddenIds((prev) => prev.filter((x) => x !== id)));
+  };
+
+  const questions = pageResults.flatMap((r) => r.data?.questions || []).filter((q) => !hiddenIds.includes(q.id));
   const totalCount = data?.totalCount || 0;
 
   // Связи «тест ↔ открытый вопрос / соответствие»: показываем, где ещё используется вопрос
@@ -367,7 +385,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           {searchQuery && (
             <button 
               onClick={() => { setSearchQuery(''); setPage(0); setExtra(0); }} 
-              className="absolute right-2.5 top-2.5 p-1 text-slate-400 hover:text-slate-600"
+              className="absolute right-2.5 top-2.5 p-1 text-slate-500 hover:text-slate-600"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -384,7 +402,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           <SlidersHorizontal className="w-4 h-4" />
           <span>Фильтры</span>
           {activeFiltersCount > 0 && (
-            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center font-bold">
+            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-bold">
               {activeFiltersCount}
             </span>
           )}
@@ -415,7 +433,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
             <div className="space-y-3">
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Предмет</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Предмет</label>
                 <select
                   value={filterSubjectId}
                   onChange={(e) => {
@@ -432,7 +450,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Глава</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Глава</label>
                 <select
                   disabled={!filterSubjectId}
                   value={filterChapterId}
@@ -449,7 +467,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Тема</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Тема</label>
                 <select
                   disabled={!filterChapterId}
                   value={filterTopicId}
@@ -465,7 +483,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Проблемные вопросы</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Проблемные вопросы</label>
                 <select
                   value={filterIssue}
                   onChange={(e) => {
@@ -481,7 +499,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Язык отображения</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Язык отображения</label>
                 <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
                   <button
                     type="button"
@@ -677,16 +695,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             {(filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || filterIssue !== 'all' || searchQuery) && (
               <button
                 type="button"
-                onClick={() => {
-                  setFilterIssue('all');
-                  setFilterSubjectId('');
-                  setFilterChapterId('');
-                  setFilterTopicId('');
-                  setFilterType('all');
-                  setSearchQuery('');
-                  setPage(0); setExtra(0);
-                }}
-                className="inline-flex items-center space-x-1.5 text-xs text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded-xl transition font-medium border border-rose-200 shadow-xs"
+                onClick={resetFilters}
+                className="inline-flex items-center space-x-1.5 text-sm text-slate-800 bg-white hover:bg-slate-50 min-h-[40px] px-3 rounded-xl transition font-semibold border border-slate-300"
                 title="Сбросить все установленные фильтры и поиск"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
@@ -694,7 +704,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               </button>
             )}
             {data?.totalCount !== undefined && (
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-500">
                 Всего в базе: <strong className="text-slate-700">{data.totalCount}</strong>
               </span>
             )}
@@ -712,11 +722,23 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         <div className="bento-card p-12 rounded-2xl text-center space-y-3">
           <HelpCircle className="w-10 h-10 text-slate-300 mx-auto" />
           <h3 className="font-bold text-slate-800 text-base">Вопросы не найдены</h3>
-          <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            {searchQuery || filterSubjectId || filterType !== 'all'
-              ? 'По заданным фильтрам ничего не найдено. Попробуйте сбросить фильтры.'
-              : 'В банке еще нет вопросов. Нажмите "Добавить вопрос", чтобы создать первый.'}
-          </p>
+          {searchQuery || filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || filterIssue !== 'all' ? (
+            <>
+              <p className="text-sm text-slate-600 max-w-sm mx-auto">По заданным фильтрам ничего не найдено.</p>
+              <button onClick={resetFilters} className="min-h-[44px] px-4 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-800">
+                Сбросить фильтры
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-slate-600 max-w-sm mx-auto">В банке ещё нет вопросов.</p>
+              {isStaff && (
+                <button onClick={onAddQuestion} className="min-h-[44px] px-5 rounded-xl bg-indigo-600 text-white text-sm font-bold inline-flex items-center gap-2">
+                  <Plus className="w-4 h-4" /> Добавить первый вопрос
+                </button>
+              )}
+            </>
+          )}
         </div>
       ) : (
         <div className="space-y-3.5">
@@ -734,7 +756,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               {/* Верхняя строка карточки: метки и действия */}
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                  <span className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg ${
+                  <span className={`text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg ${
                     q.type === 'test'
                       ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
                       : q.type === 'matching'
@@ -766,7 +788,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     </span>
                   )}
                   {questionIssues(q).map((code) => (
-                    <span key={code} className="text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-lg">
+                    <span key={code} className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-lg">
                       ⚠ {ISSUE_LABELS[code]}
                     </span>
                   ))}
@@ -775,7 +797,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                       🔗 Связан: {(links?.get(q.id) || []).join(', ')}
                     </span>
                   )}
-                  <span className="text-[10px] text-slate-400 font-mono">
+                  <span className="text-xs text-slate-500 font-mono">
                     v{q.version}
                   </span>
                 </div>
@@ -792,11 +814,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   )}
                   {canManage(q.subject_id) && (
                     <button
-                      onClick={() => {
-                        if (confirm('Вы уверены, что хотите удалить этот вопрос?')) {
-                          deleteMutation.mutate(q.id);
-                        }
-                      }}
+                      onClick={() => removeQuestion(q.id)}
                       className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-slate-500 hover:text-red-600 hover:bg-red-50 active:scale-90 transition"
                       title="Удалить"
                     >
@@ -821,14 +839,14 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 {displayLang === 'both' && (
                   <div className="space-y-2 p-3 sm:p-4 rounded-xl bg-slate-50 border border-slate-200/80">
                     <div>
-                      <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider block mb-0.5">Русский:</span>
+                      <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider block mb-0.5">Русский:</span>
                       <div className="text-[15px] sm:text-base font-medium text-slate-900 leading-relaxed">
                         <FormattedText text={q.content_ru || q.content} />
                       </div>
                     </div>
                     {q.content_tg && (
                       <div className="pt-2 border-t border-slate-200">
-                        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block mb-0.5">Тоҷикӣ:</span>
+                        <span className="text-xs font-bold text-emerald-600 uppercase tracking-wider block mb-0.5">Тоҷикӣ:</span>
                         <div className="text-[15px] sm:text-base font-medium text-slate-900 leading-relaxed">
                           <FormattedText text={q.content_tg} />
                         </div>
@@ -864,7 +882,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                               : 'bg-slate-50/70 border-slate-200/70'
                           }`}
                         >
-                          <span className={`w-5 h-5 rounded-lg font-bold text-[11px] flex items-center justify-center shrink-0 mt-0.5 ${
+                          <span className={`w-5 h-5 rounded-lg font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 ${
                             opt.is_correct
                               ? 'bg-emerald-600 text-white shadow-xs'
                               : 'bg-slate-200/80 text-slate-700'
@@ -908,7 +926,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                     {/* Левая часть */}
                     <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 border border-slate-200">
-                      <span className="text-[11px] font-bold uppercase text-slate-500 block mb-1">
+                      <span className="text-xs font-bold uppercase text-slate-500 block mb-1">
                         Левая колонка:
                       </span>
                       {q.matching_items
@@ -923,7 +941,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                               {displayLang === 'both' && (
                                 <>
                                   <div><FormattedText text={m.text_ru || m.text} /></div>
-                                  {m.text_tg && <div className="text-emerald-700 text-[11px] pt-0.5">{m.text_tg}</div>}
+                                  {m.text_tg && <div className="text-emerald-700 text-xs pt-0.5">{m.text_tg}</div>}
                                 </>
                               )}
                             </div>
@@ -931,9 +949,9 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                               const rights = q.matching_items!.filter(r => r.side === 'right').sort((x, y) => x.order_index - y.order_index);
                               const k = rights.findIndex(r => !!m.correct_match_id && r.id === m.correct_match_id);
                               return k >= 0 ? (
-                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold text-[11px] shadow-sm" title="Правильный ответ">→ {k + 1}</span>
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold text-xs shadow-sm" title="Правильный ответ">→ {k + 1}</span>
                               ) : (
-                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-600 font-semibold text-[10px]" title="Ответ не задан">нет ответа</span>
+                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-600 font-semibold text-xs" title="Ответ не задан">нет ответа</span>
                               );
                             })()}
                             {m.image_url && (
@@ -951,7 +969,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
                     {/* Правая часть */}
                     <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 border border-slate-200">
-                      <span className="text-[11px] font-bold uppercase text-slate-500 block mb-1">
+                      <span className="text-xs font-bold uppercase text-slate-500 block mb-1">
                         Правая колонка:
                       </span>
                       {q.matching_items
@@ -966,7 +984,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                               {displayLang === 'both' && (
                                 <>
                                   <div><FormattedText text={m.text_ru || m.text} /></div>
-                                  {m.text_tg && <div className="text-emerald-700 text-[11px] pt-0.5">{m.text_tg}</div>}
+                                  {m.text_tg && <div className="text-emerald-700 text-xs pt-0.5">{m.text_tg}</div>}
                                 </>
                               )}
                             </div>

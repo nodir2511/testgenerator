@@ -97,3 +97,46 @@ export const INFO_EVENT = 'app:info';
 export function notifyInfo(message: string) {
   window.dispatchEvent(new CustomEvent<string>(INFO_EVENT, { detail: message }));
 }
+
+// Действие с отменой: «Удалено · Отменить». Само действие (commit) выполняется через ms,
+// если за это время не нажали «Отменить». Если вкладку закрывают или сворачивают раньше —
+// выполняется сразу, чтобы удаление не потерялось.
+export const UNDO_EVENT = 'app:undo';
+export interface UndoToast { id: number; title: string; ms: number; undo: () => void }
+const pendingUndo = new Map<number, () => void>();
+let undoSeq = 0;
+const flushUndo = () => { for (const run of Array.from(pendingUndo.values())) run(); };
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushUndo);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushUndo(); });
+}
+export function withUndo(title: string, commit: () => void, onUndo: () => void, ms = 5000) {
+  const id = ++undoSeq;
+  const run = () => {
+    if (!pendingUndo.delete(id)) return;
+    clearTimeout(timer);
+    commit();
+  };
+  const timer = setTimeout(run, ms);
+  pendingUndo.set(id, run);
+  const undo = () => {
+    if (!pendingUndo.delete(id)) return;
+    clearTimeout(timer);
+    onUndo();
+  };
+  window.dispatchEvent(new CustomEvent<UndoToast>(UNDO_EVENT, { detail: { id, title, ms, undo } }));
+}
+
+// Ошибка входа (Supabase Auth) — по-русски и без технических подробностей
+export function authErrorText(err: unknown): string {
+  const raw = errText(err);
+  const low = raw.toLowerCase();
+  const status = Number((err as { status?: number } | null)?.status ?? 0);
+  if (low.includes('invalid login credentials')) return 'Неверная эл. почта или пароль. Проверьте раскладку клавиатуры и Caps Lock.';
+  if (low.includes('email not confirmed')) return 'Почта ещё не подтверждена. Обратитесь к администратору.';
+  if (low.includes('banned')) return 'Доступ к аккаунту отключён. Обратитесь к администратору.';
+  if (status === 429 || low.includes('too many') || low.includes('rate limit') || low.includes('for security purposes')) return 'Слишком много попыток входа. Подождите минуту и попробуйте снова.';
+  if (low.includes('failed to fetch') || low.includes('network') || low.includes('load failed')) return 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.';
+  if (/[а-яё]/i.test(raw)) return raw;
+  return 'Не удалось войти. Попробуйте ещё раз или обратитесь к администратору.';
+}

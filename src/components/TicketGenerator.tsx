@@ -16,19 +16,20 @@ import {
   SlidersHorizontal,
   X,
   History,
+  RotateCcw,
 } from 'lucide-react';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/exportLazy';
 import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo } from '../lib/exportLazy';
 import { SendToTelegramButton } from './SendToTelegramButton';
 import { fetchAllPages } from '../lib/fetchAllPages';
 import { useUserLimits } from '../lib/generationLimits';
+import { autoBatchTitle, DEFAULT_BATCH_TITLE } from '../lib/batchTitle';
+import { DownloadButton, useExportLang, type Lang } from './DownloadButton';
 
 // Администратору на сайте можно до 50 вариантов; обычным пользователям — те же лимиты, что в Telegram (их же проверяет база)
 const ADMIN_SITE_LIMITS = { ...LIMITS, tickets: 50 };
 
-type Lang = 'ru' | 'tg' | 'both';
 type ScopeMode = 'all' | 'pick';
-const LANG_LABEL: Record<Lang, string> = { ru: 'Русский', tg: 'Тоҷикӣ', both: 'RU + TJ' };
 
 // Стандартный состав билета по предмету: подставляется сам при выборе предмета
 const STANDARDS = [
@@ -53,6 +54,25 @@ const dushanbeDayStart = () => {
   return Math.floor((Date.now() + off) / 86400_000) * 86400_000 - off;
 };
 const formatWait = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+const fetchChapters = async (subjectId: string) => {
+  const { data } = await supabase.from('chapters').select('*').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
+  return (data || []) as Chapter[];
+};
+
+// Всё, что нужно для одной генерации; title === null — название подставится само
+interface GenCfg {
+  subjectId: string;
+  chapterIds: string[];
+  topicIds: string[];
+  test: number;
+  matching: number;
+  open: number;
+  tickets: number;
+  shuffleOptions: boolean;
+  shuffleMatching: boolean;
+  title: string | null;
+}
 
 const getStorageJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -148,15 +168,15 @@ export const TicketGenerator: React.FC = () => {
   const [ticketCount, setTicketCount] = useState<number>(() => getStorageNumber('examiner_tg_ticket_count', 2));
   const [shuffleOptions, setShuffleOptions] = useState<boolean>(() => getStorageBool('examiner_tg_shuffle_options', true));
   const [shuffleMatching, setShuffleMatching] = useState<boolean>(() => getStorageBool('examiner_tg_shuffle_matching', true));
-  const [batchTitle, setBatchTitle] = useState<string>(() => getStorageString('examiner_tg_batch_title', 'Экзаменационные билеты'));
-  const [exportLang, setExportLang] = useState<Lang>(() => {
-    const v = localStorage.getItem('examiner_tg_export_lang');
-    return v === 'tg' || v === 'both' ? v : 'ru';
+  // Своё название набора; пусто — подставляется само («Химия — гл. 1–3 — 26.10»)
+  const [customTitle, setCustomTitle] = useState<string>(() => {
+    const v = getStorageString('examiner_tg_batch_title', '');
+    return v === DEFAULT_BATCH_TITLE ? '' : v;
   });
+  const [exportLang, setExportLang] = useExportLang();
 
   const [editComposition, setEditComposition] = useState(false);
   const [showExtra, setShowExtra] = useState(false);
-  const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [showVariants, setShowVariants] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -217,12 +237,8 @@ export const TicketGenerator: React.FC = () => {
   }, [shuffleMatching]);
 
   React.useEffect(() => {
-    localStorage.setItem('examiner_tg_batch_title', batchTitle);
-  }, [batchTitle]);
-
-  React.useEffect(() => {
-    localStorage.setItem('examiner_tg_export_lang', exportLang);
-  }, [exportLang]);
+    localStorage.setItem('examiner_tg_batch_title', customTitle);
+  }, [customTitle]);
 
   React.useEffect(() => {
     if (generatedBatch) {
@@ -264,6 +280,7 @@ export const TicketGenerator: React.FC = () => {
     setSelectedChapterIds([]);
     setSelectedTopicIds([]);
     setScopeMode('all');
+    setCustomTitle('');
     const st = standardFor(subjects.find(x => x.id === sId)?.name);
     if (st) {
       setTestCount(st.test);
@@ -285,10 +302,7 @@ export const TicketGenerator: React.FC = () => {
   const { data: chapters = [] } = useQuery({
     queryKey: ['chapters', subjectId],
     enabled: Boolean(subjectId),
-    queryFn: async () => {
-      const { data } = await supabase.from('chapters').select('*').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
-      return (data || []) as Chapter[];
-    },
+    queryFn: () => fetchChapters(subjectId),
   });
 
   // 3. Все темы предмета (для древовидного раскрытия по главам)
@@ -391,7 +405,7 @@ export const TicketGenerator: React.FC = () => {
   // Состав билета с учётом того, что реально есть в выбранных темах
   const fitted = fitSettings(
     { total: poolStats?.total || 0, test: poolStats?.test || 0, matching: poolStats?.matching || 0, open: poolStats?.open || 0 },
-    { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }
+    { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: '' }
   );
   const fittedTotal = fitted.settings.testCount + fitted.settings.matchingCount + fitted.settings.openCount;
 
@@ -464,20 +478,34 @@ export const TicketGenerator: React.FC = () => {
   const leftToday = !isAdmin && usage ? Math.max(0, userLimits.perDay - usage.today) : null;
   const dayExhausted = leftToday === 0;
 
+  // Номера выбранных глав (по порядку в предмете) — для названия набора
+  const chapterNumsOf = (list: Chapter[], ids: string[]) =>
+    list.map((ch, i) => (ids.includes(ch.id) ? i + 1 : 0)).filter(Boolean);
+  const autoTitle = autoBatchTitle(subjectName, scopeMode === 'pick' ? chapterNumsOf(chapters, selectedChapterIds) : null);
+
+  const currentCfg = (): GenCfg => ({
+    subjectId, chapterIds: effChapterIds, topicIds: effTopicIds,
+    test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount,
+    shuffleOptions, shuffleMatching, title: customTitle.trim() || null,
+  });
+
   // Алгоритм параллельной генерации билетов
-  const handleGenerate = async () => {
+  const handleGenerate = async (cfg: GenCfg = currentCfg()) => {
     if (generatingRef.current) return; // защита от двойного нажатия
     generatingRef.current = true;
     setIsGenerating(true);
     setGenProgress({ percent: 15, stage: 'Загрузка вопросов...' });
+    const { test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount, shuffleOptions, shuffleMatching } = cfg;
+    const subjectId = cfg.subjectId;
+    const effTopicIds = cfg.topicIds;
+    const effChapterIds = cfg.chapterIds;
 
     try {
       if (!subjectId) throw new Error('Выберите предмет');
-      if (pickEmpty) throw new Error('Отметьте хотя бы одну главу или выберите «Весь предмет»');
       if (testCount + matchingCount + openCount === 0) throw new Error('Задайте хотя бы один вопрос в билете');
       if (ticketCount < 1) throw new Error('Количество билетов должно быть не менее 1');
 
-      const limitErr = checkSettings({ testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }, limits);
+      const limitErr = checkSettings({ testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: '' }, limits);
       if (limitErr) throw new Error(limitErr);
 
       // 1. Загружаем все доступные вопросы пула с деталями для снимков
@@ -504,7 +532,7 @@ export const TicketGenerator: React.FC = () => {
       // 2. Если вопросов какого-то вида не хватает, берём сколько есть (считаем по реально загруженным вопросам)
       const fit = fitSettings(
         calcPoolStats(allQuestionsRaw),
-        { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: batchTitle }
+        { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: '' }
       );
       if (fit.error) throw new Error(fit.error);
       if (fit.notes.length) notifyInfo(`Вопросов не хватает, билеты составлены из того, что есть. ${fit.notes.join('; ')}`);
@@ -543,9 +571,17 @@ export const TicketGenerator: React.FC = () => {
 
       setGenProgress({ percent: 90, stage: 'Сохранение...' });
 
+      const subjChapters = chapters.length && chapters[0].subject_id === subjectId
+        ? chapters
+        : await queryClient.fetchQuery({ queryKey: ['chapters', subjectId], queryFn: () => fetchChapters(subjectId) });
+      const title = cfg.title?.trim() || autoBatchTitle(
+        subjects.find((s) => s.id === subjectId)?.name || '',
+        effChapterIds.length ? chapterNumsOf(subjChapters, effChapterIds) : null,
+      );
+
       const { data: saved, error: sErr } = await supabase.rpc('save_ticket_batch', {
         p_batch: {
-          title: batchTitle.trim() || 'Экзаменационные билеты',
+          title,
           subject_id: subjectId,
           generation_params: {
             chapter_ids: effChapterIds,
@@ -557,6 +593,7 @@ export const TicketGenerator: React.FC = () => {
             shuffle_options: shuffleOptions,
             shuffle_matching: shuffleMatching,
             requested: { test: testCount, matching: matchingCount, open: openCount },
+            auto_title: !cfg.title?.trim(),
             source: 'site',
           },
         },
@@ -593,7 +630,7 @@ export const TicketGenerator: React.FC = () => {
   };
 
   // Последние наборы пользователя — чтобы повторить с теми же настройками
-  const { data: recentBatches = [] } = useQuery({
+  const { data: recentBatches = [], isFetched: recentFetched } = useQuery({
     queryKey: ['recent_batches', user?.id],
     enabled: Boolean(user?.id),
     queryFn: async () => {
@@ -608,20 +645,46 @@ export const TicketGenerator: React.FC = () => {
     },
   });
 
+  // Подсказка «3 шага» — пока пользователь не создал ни одного набора и не закрыл её
+  const [introDismissed, setIntroDismissed] = useState(() => getStorageBool('examiner_intro_done', false));
+  const dismissIntro = () => {
+    setIntroDismissed(true);
+    localStorage.setItem('examiner_intro_done', 'true');
+  };
+  const showIntro = !introDismissed && recentFetched && recentBatches.length === 0 && !generatedBatch;
+
+  // Повторить прошлый набор одним нажатием: те же настройки — и сразу генерация
   const repeatBatch = (b: any) => {
     const p = b.generation_params || {};
     const r = p.requested ?? { test: p.test_count ?? 0, matching: p.matching_count ?? 0, open: p.open_count ?? 0 };
-    setSubjectId(b.subject_id);
-    setSelectedChapterIds(p.chapter_ids ?? []);
-    setSelectedTopicIds(p.topic_ids ?? []);
-    setScopeMode((p.chapter_ids?.length || p.topic_ids?.length) ? 'pick' : 'all');
-    setTestCount(Math.min(limits.perType, r.test));
-    setMatchingCount(Math.min(limits.perType, r.matching));
-    setOpenCount(Math.min(limits.perType, r.open));
-    setTicketCount(Math.min(limits.tickets, Math.max(1, p.ticket_count ?? 1)));
-    if (typeof p.shuffle_options === 'boolean') setShuffleOptions(p.shuffle_options);
-    if (typeof p.shuffle_matching === 'boolean') setShuffleMatching(p.shuffle_matching);
-    setBatchTitle(b.title || 'Экзаменационные билеты');
+    const keepTitle = !p.auto_title && b.title && b.title !== DEFAULT_BATCH_TITLE;
+    const cfg: GenCfg = {
+      subjectId: b.subject_id,
+      chapterIds: p.chapter_ids ?? [],
+      topicIds: p.topic_ids ?? [],
+      test: Math.min(limits.perType, r.test ?? 0),
+      matching: Math.min(limits.perType, r.matching ?? 0),
+      open: Math.min(limits.perType, r.open ?? 0),
+      tickets: Math.min(limits.tickets, Math.max(1, p.ticket_count ?? 1)),
+      shuffleOptions: typeof p.shuffle_options === 'boolean' ? p.shuffle_options : shuffleOptions,
+      shuffleMatching: typeof p.shuffle_matching === 'boolean' ? p.shuffle_matching : shuffleMatching,
+      title: keepTitle ? b.title : null,
+    };
+    // Форма показывает те же настройки, что ушли в генерацию
+    setSubjectId(cfg.subjectId);
+    setSelectedChapterIds(cfg.chapterIds);
+    setSelectedTopicIds(cfg.topicIds);
+    setScopeMode(cfg.chapterIds.length || cfg.topicIds.length ? 'pick' : 'all');
+    setTestCount(cfg.test);
+    setMatchingCount(cfg.matching);
+    setOpenCount(cfg.open);
+    setTicketCount(cfg.tickets);
+    setShuffleOptions(cfg.shuffleOptions);
+    setShuffleMatching(cfg.shuffleMatching);
+    setCustomTitle(keepTitle ? b.title : '');
+    if (dayExhausted) return notifyInfo('Настройки подставлены, но лимит генераций на сегодня исчерпан. Попробуйте завтра.');
+    if (cooldownLeft > 0) return notifyInfo(`Настройки подставлены. Сгенерировать можно через ${formatWait(cooldownLeft)}.`);
+    handleGenerate(cfg);
   };
 
   const generatedSubjectName = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || '';
@@ -632,7 +695,6 @@ export const TicketGenerator: React.FC = () => {
   const handleDownload = async (lang: Lang) => {
     if (!generatedBatch || !generatedBatch.tickets || isDownloading) return;
     setExportLang(lang);
-    setLangMenuOpen(false);
     setIsDownloading(true);
     try {
       const subj = generatedSubjectName || 'Экзамен';
@@ -656,8 +718,8 @@ export const TicketGenerator: React.FC = () => {
     try {
       const subj = generatedSubjectName || 'Экзамен';
       await exportSingleTicketDocx(
-        generatedBatch.title || batchTitle, t, subj, lang,
-        await keyArchiveExtras(generatedBatch.title || batchTitle, [t], subj, selectionOf(), lang)
+        generatedBatch.title || autoTitle, t, subj, lang,
+        await keyArchiveExtras(generatedBatch.title || autoTitle, [t], subj, selectionOf(), lang)
       );
     } catch (err: any) {
       notifyError(err, 'Не удалось скачать вариант');
@@ -763,42 +825,7 @@ export const TicketGenerator: React.FC = () => {
 
           {/* Главное действие: скачать на запомненном языке; стрелка — выбрать другой язык */}
           <div className="sm:max-w-md sm:mx-auto">
-            <div className="relative">
-              <div className="flex">
-                <button
-                  onClick={() => handleDownload(exportLang)}
-                  disabled={isDownloading}
-                  className="flex-1 min-h-[52px] px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-l-2xl font-bold text-base flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-70"
-                >
-                  {isDownloading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
-                  <span>{isDownloading ? 'Готовим файл…' : `Скачать · ${LANG_LABEL[exportLang]}`}</span>
-                </button>
-                <button
-                  onClick={() => setLangMenuOpen((v) => !v)}
-                  disabled={isDownloading}
-                  className="w-14 min-h-[52px] bg-indigo-600 hover:bg-indigo-700 text-white rounded-r-2xl border-l border-indigo-400/60 flex items-center justify-center transition disabled:opacity-70"
-                  aria-label="Выбрать язык"
-                  aria-expanded={langMenuOpen}
-                >
-                  <ChevronDown className={`w-5 h-5 transition-transform ${langMenuOpen ? 'rotate-180' : ''}`} />
-                </button>
-              </div>
-              {langMenuOpen && (
-                <div className="mt-2 bg-white border border-slate-200 rounded-2xl shadow-lg overflow-hidden">
-                  <div className="px-4 pt-3 pb-1 text-xs font-semibold text-slate-500">Язык билетов</div>
-                  {(Object.keys(LANG_LABEL) as Lang[]).map((l) => (
-                    <button
-                      key={l}
-                      onClick={() => handleDownload(l)}
-                      className={`w-full min-h-[48px] px-4 text-left text-base flex items-center justify-between hover:bg-indigo-50 ${l === exportLang ? 'font-bold text-indigo-700' : 'text-slate-800'}`}
-                    >
-                      <span>{l === 'both' ? 'Русский + Тоҷикӣ' : LANG_LABEL[l]}</span>
-                      {l === exportLang && <CheckCircle2 className="w-5 h-5 text-indigo-600" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <DownloadButton lang={exportLang} busy={isDownloading} onDownload={handleDownload} />
             <p className="text-xs text-slate-500 mt-2 text-center">
               {generatedHasKey ? 'В архиве: билеты + ключи ответов' : 'Билеты в формате Word'}
             </p>
@@ -845,7 +872,7 @@ export const TicketGenerator: React.FC = () => {
               className="w-full min-h-[44px] flex items-center justify-between text-sm font-semibold text-slate-700"
             >
               <span>Посмотреть варианты</span>
-              <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showVariants ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-5 h-5 text-slate-500 transition-transform ${showVariants ? 'rotate-180' : ''}`} />
             </button>
             {showVariants && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
@@ -869,7 +896,7 @@ export const TicketGenerator: React.FC = () => {
                     <div className="space-y-1 text-sm text-slate-700 max-h-48 overflow-y-auto pr-1">
                       {t.questions.map((tq: any, i: number) => (
                         <div key={i} className="px-2 py-1.5 bg-white rounded-lg border border-slate-100 truncate">
-                          <span className="font-bold text-slate-400 mr-1.5">{i + 1}.</span>
+                          <span className="font-bold text-slate-500 mr-1.5">{i + 1}.</span>
                           {tq.question_snapshot.content.replace(/<.*?>/g, '')}
                         </div>
                       ))}
@@ -882,29 +909,65 @@ export const TicketGenerator: React.FC = () => {
         </div>
       )}
 
-      {/* Повторить прошлый набор: на телефоне — лента, листается пальцем */}
+      {/* Первый вход: как получить билеты за 3 шага */}
+      {showIntro && (
+        <div className="bento-card rounded-2xl p-4 sm:p-5 border-indigo-200 bg-indigo-50/50">
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="font-bold text-slate-900 text-base">Как получить билеты за 3 шага</h3>
+            <button
+              onClick={dismissIntro}
+              className="w-10 h-10 -mr-2 -mt-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-white flex items-center justify-center shrink-0"
+              aria-label="Скрыть подсказку"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <ol className="mt-2 space-y-2 text-sm text-slate-700">
+            {[
+              ['Выберите предмет', 'состав билета подставится сам'],
+              ['Оставьте «Весь предмет»', 'или отметьте нужные главы'],
+              ['Нажмите «Сгенерировать» внизу', 'и скачайте Word с билетами и ключами'],
+            ].map(([a, b], i) => (
+              <li key={a} className="flex items-start gap-3">
+                <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
+                <span><b className="text-slate-900">{a}</b> — {b}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {/* Повторить прошлый набор: одно нажатие — тот же набор заново. На телефоне — лента, листается пальцем */}
       {recentBatches.length > 0 && (
         <div>
-          <div className="flex items-center gap-1.5 px-1 mb-2 text-sm font-semibold text-slate-600">
+          <div className="flex items-center gap-1.5 px-1 mb-2 text-sm font-semibold text-slate-700">
             <History className="w-4 h-4" />
-            <span>Повторить прошлый набор</span>
+            <span>Собрать заново в одно нажатие</span>
           </div>
           <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap">
-            {recentBatches.map((b) => (
-              <button
-                key={b.id}
-                onClick={() => repeatBatch(b)}
-                className="shrink-0 text-left px-3.5 py-2 bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 rounded-2xl transition active:scale-95"
-                title={b.title}
-              >
-                <div className="text-sm font-semibold text-slate-800 whitespace-nowrap">
-                  {b.subject?.name || b.title} · {b.generation_params?.ticket_count ?? '?'} вар.
-                </div>
-                <div className="text-xs text-slate-500 whitespace-nowrap">
-                  {new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                </div>
-              </button>
-            ))}
+            {recentBatches.map((b) => {
+              const p = b.generation_params || {};
+              const scope = p.chapter_ids?.length ? `${p.chapter_ids.length} гл.` : 'весь предмет';
+              return (
+                <button
+                  key={b.id}
+                  onClick={() => repeatBatch(b)}
+                  disabled={isGenerating}
+                  className="shrink-0 text-left pl-3 pr-3.5 py-2 bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 rounded-2xl transition active:scale-95 disabled:opacity-50 flex items-center gap-2.5"
+                  title={`${b.title} — сгенерировать заново с теми же настройками`}
+                >
+                  <RotateCcw className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-800 whitespace-nowrap">
+                      {b.subject?.name || b.title} · {scope}
+                    </span>
+                    <span className="block text-xs text-slate-600 whitespace-nowrap">
+                      {p.ticket_count ?? '?'} вар. · {new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1010,7 +1073,7 @@ export const TicketGenerator: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => toggleChapterExpanded(ch.id)}
-                              className="w-12 shrink-0 flex items-center justify-center text-slate-400 hover:text-slate-700 border-l border-slate-100"
+                              className="w-12 shrink-0 flex items-center justify-center text-slate-500 hover:text-slate-700 border-l border-slate-100"
                               aria-label={isExpanded ? `Свернуть темы главы ${chIdx + 1}` : `Показать темы главы ${chIdx + 1}`}
                               aria-expanded={isExpanded}
                             >
@@ -1181,7 +1244,7 @@ export const TicketGenerator: React.FC = () => {
                 className="w-full min-h-[44px] flex items-center justify-between text-sm font-semibold text-slate-600"
               >
                 <span className="flex items-center gap-2"><SlidersHorizontal className="w-4 h-4" /> Дополнительно</span>
-                <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showExtra ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-5 h-5 text-slate-500 transition-transform ${showExtra ? 'rotate-180' : ''}`} />
               </button>
               {showExtra && (
                 <div className="space-y-3 pb-1">
@@ -1189,11 +1252,19 @@ export const TicketGenerator: React.FC = () => {
                     <span className="block text-sm font-semibold text-slate-700 mb-1">Название набора</span>
                     <input
                       type="text"
-                      value={batchTitle}
-                      onChange={(e) => setBatchTitle(e.target.value)}
-                      placeholder="Экзамен по химии, 9 класс"
+                      value={customTitle}
+                      onChange={(e) => setCustomTitle(e.target.value)}
+                      placeholder={autoTitle}
+                      maxLength={100}
                       className="w-full min-h-[44px] text-base px-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
+                    <span className="block text-xs text-slate-600 mt-1">
+                      {customTitle.trim() ? (
+                        <button type="button" onClick={() => setCustomTitle('')} className="font-semibold text-indigo-700 min-h-[32px]">
+                          Вернуть автоматическое название
+                        </button>
+                      ) : 'Можно не заполнять — название подставится само'}
+                    </span>
                   </label>
                   <label className="flex items-center gap-3 min-h-[40px] text-sm text-slate-700 cursor-pointer select-none">
                     <input
@@ -1233,7 +1304,7 @@ export const TicketGenerator: React.FC = () => {
                 </div>
               </div>
               <button
-                onClick={handleGenerate}
+                onClick={() => handleGenerate()}
                 disabled={isGenerating || !!blockReason}
                 className={`relative overflow-hidden min-h-[52px] px-5 rounded-xl text-base font-bold flex ${generatedBatch && !isGenerating ? 'bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/25'} items-center justify-center gap-2 transition active:scale-[0.98] disabled:bg-slate-300 disabled:border-transparent disabled:text-slate-600 disabled:shadow-none shrink-0 max-w-[60%]`}
               >

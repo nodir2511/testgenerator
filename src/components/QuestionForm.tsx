@@ -22,6 +22,8 @@ interface QuestionFormProps {
   initialData?: Question | null;
   onSuccess: () => void;
   onCancel: () => void;
+  /** Есть ли несохранённые изменения (App спрашивает перед закрытием формы) */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 interface TestOptionState {
@@ -48,10 +50,33 @@ interface MatchingItemState {
 const ruOf = (ru?: string | null, base?: string | null, tg?: string | null): string =>
   ru || (base && base !== tg ? base : '') || '';
 
+// Пустые варианты для нового вопроса
+const emptyOptions = (): TestOptionState[] => [
+  { text: '', text_ru: '', text_tg: '', is_correct: true },
+  { text: '', text_ru: '', text_tg: '', is_correct: false },
+  { text: '', text_ru: '', text_tg: '', is_correct: false },
+  { text: '', text_ru: '', text_tg: '', is_correct: false },
+];
+const emptySide = (side: 'left' | 'right', n: number): MatchingItemState[] =>
+  Array.from({ length: n }, () => ({ side, text: '', text_ru: '', text_tg: '' }));
+
+// Черновик нового вопроса: переживает случайное закрытие вкладки или перезагрузку
+const DRAFT_KEY = 'examiner_qf_draft';
+interface Draft { savedAt: number; type: QuestionType; contentRu: string; contentTg: string; imageUrl: string | null; correctNumeric: string; options: TestOptionState[]; leftItems: MatchingItemState[]; rightItems: MatchingItemState[] }
+const readDraft = (): Draft | null => {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
+    return d && typeof d.savedAt === 'number' ? d : null;
+  } catch {
+    return null;
+  }
+};
+
 export const QuestionForm: React.FC<QuestionFormProps> = ({
   initialData,
   onSuccess,
   onCancel,
+  onDirtyChange,
 }) => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -98,12 +123,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           image_url: o.image_url,
           is_correct: o.is_correct || false,
         }))
-      : [
-          { text: '', text_ru: '', text_tg: '', is_correct: true },
-          { text: '', text_ru: '', text_tg: '', is_correct: false },
-          { text: '', text_ru: '', text_tg: '', is_correct: false },
-          { text: '', text_ru: '', text_tg: '', is_correct: false },
-        ]
+      : emptyOptions()
   );
 
   // Элементы на соответствие с поддержкой RU + TG
@@ -121,12 +141,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             return k >= 0 ? k : null;
           })(),
         }))
-      : [
-          { side: 'left', text: '', text_ru: '', text_tg: '' },
-          { side: 'left', text: '', text_ru: '', text_tg: '' },
-          { side: 'left', text: '', text_ru: '', text_tg: '' },
-          { side: 'left', text: '', text_ru: '', text_tg: '' },
-        ]
+      : emptySide('left', 4)
   );
 
   const [rightItems, setRightItems] = useState<MatchingItemState[]>(
@@ -139,17 +154,58 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           text_tg: m.text_tg || '',
           image_url: m.image_url,
         }))
-      : [
-          { side: 'right', text: '', text_ru: '', text_tg: '' },
-          { side: 'right', text: '', text_ru: '', text_tg: '' },
-          { side: 'right', text: '', text_ru: '', text_tg: '' },
-          { side: 'right', text: '', text_ru: '', text_tg: '' },
-          { side: 'right', text: '', text_ru: '', text_tg: '' },
-        ]
+      : emptySide('right', 5)
   );
 
   const [uploadingImage, setUploadingImage] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const topRef = React.useRef<HTMLDivElement>(null);
+
+  // Несохранённые изменения: сравниваем содержимое с тем, что было при открытии формы
+  const contentState = { type, contentRu, contentTg, imageUrl, correctNumeric, options, leftItems, rightItems };
+  const contentJson = JSON.stringify(contentState);
+  const [baseline, setBaseline] = useState(contentJson);
+  const dirty = contentJson !== baseline;
+  React.useEffect(() => { onDirtyChange?.(dirty); }, [dirty]);
+  React.useEffect(() => () => onDirtyChange?.(false), []);
+
+  // Черновик (только для нового вопроса): сохраняем через секунду после последней правки
+  const [draft, setDraft] = useState<Draft | null>(() => (initialData ? null : readDraft()));
+  React.useEffect(() => {
+    if (initialData || !dirty) return;
+    const t = setTimeout(() => {
+      try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...contentState, savedAt: Date.now() })); } catch { /* нет места — без черновика */ }
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [contentJson]);
+  const clearDraft = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    setDraft(null);
+  };
+  const restoreDraft = (d: Draft) => {
+    setType(d.type);
+    setContentRu(d.contentRu);
+    setContentTg(d.contentTg);
+    setImageUrl(d.imageUrl);
+    setCorrectNumeric(d.correctNumeric);
+    setOptions(d.options);
+    setLeftItems(d.leftItems);
+    setRightItems(d.rightItems);
+    setDraft(null);
+  };
+  // Очистить содержимое для следующего вопроса (привязка к теме и тип остаются)
+  const resetForNext = () => {
+    setContentRu('');
+    setContentTg('');
+    setImageUrl(null);
+    setCorrectNumeric('');
+    setOptions(emptyOptions());
+    setLeftItems(emptySide('left', 4));
+    setRightItems(emptySide('right', 5));
+    setBaseline(JSON.stringify({ type, contentRu: '', contentTg: '', imageUrl: null, correctNumeric: '', options: emptyOptions(), leftItems: emptySide('left', 4), rightItems: emptySide('right', 5) }));
+    setErrorMsg(null);
+    topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   // Загрузка списков таксономии
   const { data: subjects = [] } = useQuery({
@@ -261,7 +317,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
   // Сохранение вопроса (Create / Update)
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    // next — «Сохранить и добавить следующий»: форма остаётся открытой и очищается
+    mutationFn: async (_next: boolean = false) => {
       if (!subjectId || !chapterId || !topicId) {
         throw new Error('Пожалуйста, выберите предмет, главу и тему');
       }
@@ -458,9 +515,11 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       }
     },
     meta: { success: initialData?.id ? 'Изменения вопроса сохранены в базе' : 'Новый вопрос добавлен в базу' },
-    onSuccess: () => {
+    onSuccess: (_data, next) => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
-      onSuccess();
+      clearDraft();
+      if (next) resetForNext();
+      else onSuccess();
     },
     onError: (err: any) => {
       setErrorMsg(describeError(err, 'Ошибка сохранения вопроса'));
@@ -469,28 +528,43 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
   return (
     <div 
+      ref={topRef}
       onPaste={handlePaste}
-      className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-w-4xl mx-auto my-6"
+      className="scroll-mt-24 bg-white rounded-2xl border border-slate-200 shadow-xl max-w-4xl mx-auto my-2 sm:my-6"
     >
       {/* Header */}
-      <div className="p-6 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900">
+      <div className="p-4 sm:p-6 bg-slate-50 border-b border-slate-200 rounded-t-2xl flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg sm:text-xl font-bold text-slate-900">
             {initialData ? 'Редактирование вопроса' : 'Добавление нового вопроса'}
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Укажите привязку к теме, тип вопроса, текст и варианты на русском и таджикском языках
+          <p className="text-sm text-slate-600 mt-0.5">
+            {dirty ? 'Есть несохранённые изменения' : 'Привязка к теме, тип, текст и варианты на русском и таджикском'}
           </p>
         </div>
         <button
           onClick={onCancel}
-          className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200 transition"
+          className="w-11 h-11 shrink-0 flex items-center justify-center text-slate-500 hover:text-slate-700 rounded-xl hover:bg-slate-200 transition"
+          aria-label="Закрыть"
         >
           <X className="w-5 h-5" />
         </button>
       </div>
 
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-6">
+        {draft && !dirty && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex flex-wrap items-center gap-2 text-sm text-amber-900">
+            <span className="flex-1 min-w-[12rem]">
+              Есть несохранённый черновик от {new Date(draft.savedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+            </span>
+            <button type="button" onClick={() => restoreDraft(draft)} className="min-h-[40px] px-3 rounded-lg bg-amber-600 text-white font-semibold">
+              Восстановить
+            </button>
+            <button type="button" onClick={clearDraft} className="min-h-[40px] px-3 rounded-lg bg-white border border-amber-200 font-semibold">
+              Удалить
+            </button>
+          </div>
+        )}
         {errorMsg && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-3 text-sm text-red-700">
             <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
@@ -588,7 +662,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 }`}
               >
                 <div className="font-bold text-sm text-slate-900">{t.title}</div>
-                <div className="text-[11px] text-slate-500">{t.desc}</div>
+                <div className="text-xs text-slate-500">{t.desc}</div>
               </button>
             ))}
           </div>
@@ -619,7 +693,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               onClick={() => setFormMode('ru')}
               className={`px-3 py-1.5 rounded-lg transition ${
                 formMode === 'ru'
-                  ? 'bg-blue-600 text-white shadow-sm'
+                  ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -700,7 +774,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 <span className="font-medium text-slate-700 block">
                   {imageUrl ? 'Изображение прикреплено' : 'Добавить схему, рисунок или формулу'}
                 </span>
-                <span className="text-slate-400">
+                <span className="text-slate-500">
                   Можно нажать Ctrl+V для вставки скриншота или загрузить файл (WebP, PNG, JPG)
                 </span>
               </div>
@@ -759,13 +833,13 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             updated[idx].is_correct = !updated[idx].is_correct;
                             setOptions(updated);
                           }}
-                          className={`px-2 py-0.5 rounded text-[11px] font-semibold border flex items-center space-x-1 transition ${
+                          className={`px-2 py-0.5 rounded text-xs font-semibold border flex items-center space-x-1 transition ${
                             opt.is_correct
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
                               : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
                           }`}
                         >
-                          <CheckCircle2 className={`w-3.5 h-3.5 ${opt.is_correct ? 'text-emerald-600' : 'text-slate-300'}`} />
+                          <CheckCircle2 className={`w-3.5 h-3.5 ${opt.is_correct ? 'text-emerald-600' : 'text-slate-500'}`} />
                           <span>{opt.is_correct ? 'Верный ответ' : 'Отметить как верный'}</span>
                         </button>
                       </div>
@@ -787,7 +861,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                           <button
                             type="button"
                             onClick={() => setOptions(options.filter((_, i) => i !== idx))}
-                            className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition"
+                            className="p-1.5 text-slate-500 hover:text-red-600 rounded-lg transition"
                             title="Удалить вариант"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -800,7 +874,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                     {formMode === 'both' ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         <div>
-                          <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-0.5">Русский (RU)</label>
+                          <label className="block text-xs font-semibold text-slate-500 uppercase mb-0.5">Русский (RU)</label>
                           <input
                             type="text"
                             value={opt.text_ru ?? opt.text ?? ''}
@@ -815,7 +889,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-semibold text-emerald-600 uppercase mb-0.5">Тоҷикӣ (TJ)</label>
+                          <label className="block text-xs font-semibold text-emerald-600 uppercase mb-0.5">Тоҷикӣ (TJ)</label>
                           <input
                             type="text"
                             value={opt.text_tg ?? ''}
@@ -919,7 +993,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                           <span className="font-bold text-xs text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
                             {letter}
                           </span>
-                          <label className="flex items-center gap-1 text-[11px] text-slate-500">
+                          <label className="flex items-center gap-1 text-xs text-slate-500">
                             <span>ответ →</span>
                             <select
                               value={item.match ?? ''}
@@ -938,7 +1012,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                           </label>
                         </div>
                         <div className="flex items-center space-x-1">
-                          <label className="cursor-pointer p-1 text-slate-400 hover:text-slate-600 rounded border border-slate-200" title="Картинка">
+                          <label className="cursor-pointer p-1 text-slate-500 hover:text-slate-600 rounded border border-slate-200" title="Картинка">
                             <ImageIcon className="w-3 h-3" />
                             <input
                               type="file"
@@ -951,7 +1025,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             <button
                               type="button"
                               onClick={() => setLeftItems(leftItems.filter((_, i) => i !== idx))}
-                              className="text-slate-400 hover:text-red-500 p-1"
+                              className="text-slate-500 hover:text-red-500 p-1"
                             >
                               <Trash2 className="w-3 h-3" />
                             </button>
@@ -1022,7 +1096,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                               updated[idx].image_url = null;
                               setLeftItems(updated);
                             }}
-                            className="text-[10px] text-red-500 hover:underline"
+                            className="text-xs text-red-500 hover:underline"
                           >
                             Удалить
                           </button>
@@ -1054,7 +1128,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                         {idx + 1}
                       </span>
                       <div className="flex items-center space-x-1">
-                        <label className="cursor-pointer p-1 text-slate-400 hover:text-slate-600 rounded border border-slate-200" title="Картинка">
+                        <label className="cursor-pointer p-1 text-slate-500 hover:text-slate-600 rounded border border-slate-200" title="Картинка">
                           <ImageIcon className="w-3 h-3" />
                           <input
                             type="file"
@@ -1070,7 +1144,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                               setRightItems(rightItems.filter((_, i) => i !== idx));
                               setLeftItems(leftItems.map(l => ({ ...l, match: l.match == null ? null : l.match === idx ? null : l.match > idx ? l.match - 1 : l.match })));
                             }}
-                            className="text-slate-400 hover:text-red-500 p-1"
+                            className="text-slate-500 hover:text-red-500 p-1"
                           >
                             <Trash2 className="w-3 h-3" />
                           </button>
@@ -1141,7 +1215,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             updated[idx].image_url = null;
                             setRightItems(updated);
                           }}
-                          className="text-[10px] text-red-500 hover:underline"
+                          className="text-xs text-red-500 hover:underline"
                         >
                           Удалить
                         </button>
@@ -1171,28 +1245,38 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           </div>
         )}
 
-        {/* Действия */}
-        <div className="flex items-center justify-end space-x-3 pt-6 border-t border-slate-200">
+        {/* Действия: на телефоне закреплены над нижним меню */}
+        <div className="sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-0 z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-white/95 backdrop-blur border-t border-slate-200 rounded-b-2xl grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
           <button
             type="button"
             onClick={onCancel}
             disabled={saveMutation.isPending}
-            className="px-4 py-2 border border-slate-300 hover:bg-slate-100 text-slate-700 text-sm font-medium rounded-lg transition"
+            className="min-h-[44px] px-4 border border-slate-300 hover:bg-slate-100 text-slate-700 text-sm font-semibold rounded-xl transition"
           >
             Отмена
           </button>
+          {!initialData && (
+            <button
+              type="button"
+              onClick={() => saveMutation.mutate(true)}
+              disabled={saveMutation.isPending}
+              className="min-h-[44px] px-4 border border-indigo-200 bg-white hover:bg-indigo-50 text-indigo-700 text-sm font-semibold rounded-xl transition disabled:opacity-50"
+            >
+              Сохранить + ещё
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => saveMutation.mutate()}
+            onClick={() => saveMutation.mutate(false)}
             disabled={saveMutation.isPending}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow transition flex items-center space-x-2 disabled:opacity-50"
+            className={`${initialData ? '' : 'col-span-2 order-first sm:order-none'} min-h-[48px] px-5 bg-indigo-600 hover:bg-indigo-700 text-white text-base sm:text-sm font-bold rounded-xl shadow-sm transition flex items-center justify-center gap-2 disabled:opacity-50`}
           >
             {saveMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <CheckCircle2 className="w-4 h-4" />
             )}
-            <span>{initialData ? 'Сохранить изменения' : 'Создать вопрос'}</span>
+            <span>{initialData ? 'Сохранить' : 'Создать вопрос'}</span>
           </button>
         </div>
       </div>

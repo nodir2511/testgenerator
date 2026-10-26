@@ -360,7 +360,7 @@ export const UserManagementView: React.FC = () => {
           <button
             type="submit"
             disabled={createUserMutation.isPending}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm flex items-center space-x-2 disabled:opacity-50"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-sm flex items-center space-x-2 disabled:opacity-50"
           >
             {createUserMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -372,7 +372,7 @@ export const UserManagementView: React.FC = () => {
         </form>
 
         {loadingProfiles ? (
-          <div className="text-center py-6 text-slate-400 flex items-center justify-center">
+          <div className="text-center py-6 text-slate-500 flex items-center justify-center">
             <Loader2 className="w-5 h-5 animate-spin mr-2" /> Загрузка пользователей...
           </div>
         ) : (
@@ -383,7 +383,7 @@ export const UserManagementView: React.FC = () => {
                 <div>
                   <div className="font-semibold text-slate-900 text-sm flex items-center space-x-2">
                     <span>{p.full_name || p.email}</span>
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
                       p.role === 'admin' || p.role === 'subject_admin' ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-slate-100 text-slate-700'
                     }`}>
                       {p.is_owner ? 'Главный админ' : ROLE_LABELS[p.role]}
@@ -393,17 +393,17 @@ export const UserManagementView: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-1 mt-1">
                       <BookMarked className="w-3 h-3 text-emerald-600" />
                       {subjectsOf(p.id).length === 0 ? (
-                        <span className="text-[11px] text-red-500">предметы не назначены</span>
+                        <span className="text-xs text-red-500">предметы не назначены</span>
                       ) : (
                         subjectsOf(p.id).map((sid) => (
-                          <span key={sid} className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-semibold">
+                          <span key={sid} className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
                             {allSubjects.find((x) => x.id === sid)?.name ?? '—'}
                           </span>
                         ))
                       )}
                     </div>
                   )}
-                  <div className="text-[11px] text-slate-400 mt-0.5">
+                  <div className="text-xs text-slate-500 mt-0.5">
                     Email: {p.email} • Зарегистрирован: {new Date(p.created_at).toLocaleDateString('ru-RU')}
                   </div>
                 </div>
@@ -453,7 +453,7 @@ export const UserManagementView: React.FC = () => {
                         }
                       }}
                       disabled={deleteUserMutation.isPending}
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-40"
+                      className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-40"
                       title="Удалить пользователя"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -483,7 +483,7 @@ export const UserManagementView: React.FC = () => {
                       type="button"
                       onClick={() => saveRolesMutation.mutate(p.id)}
                       disabled={saveRolesMutation.isPending}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold text-sm disabled:opacity-50"
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-sm disabled:opacity-50"
                     >
                       Сохранить
                     </button>
@@ -536,7 +536,7 @@ export const UserManagementView: React.FC = () => {
                     <button
                       type="submit"
                       disabled={updateUserMutation.isPending}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm disabled:opacity-50"
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-sm disabled:opacity-50"
                     >
                       Сохранить
                     </button>
@@ -569,9 +569,9 @@ export const UserManagementView: React.FC = () => {
         </div>
 
         {loadingLogs ? (
-          <div className="text-center py-4 text-slate-400">Загрузка журнала...</div>
+          <div className="text-center py-4 text-slate-500">Загрузка журнала...</div>
         ) : logs.length === 0 ? (
-          <div className="text-center py-6 text-xs text-slate-400">Событий пока не зафиксировано.</div>
+          <div className="text-center py-6 text-xs text-slate-500">Событий пока не зафиксировано.</div>
         ) : (
           <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden text-xs">
             {logs.map((log) => (
@@ -580,12 +580,12 @@ export const UserManagementView: React.FC = () => {
                   <span className="font-bold text-indigo-700 font-mono mr-2">{log.action}</span>
                   <span className="text-slate-600">[{log.entity_type}]</span>
                   {log.details && (
-                    <span className="text-slate-400 ml-2 font-mono text-[10px]">
+                    <span className="text-slate-500 ml-2 font-mono text-xs">
                       {JSON.stringify(log.details)}
                     </span>
                   )}
                 </div>
-                <span className="text-[11px] text-slate-400">
+                <span className="text-xs text-slate-500">
                   {new Date(log.created_at).toLocaleString('ru-RU')}
                 </span>
               </div>

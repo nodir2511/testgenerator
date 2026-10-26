@@ -1,38 +1,186 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { Loader2, BarChart3, Users, FileText, Send, SlidersHorizontal } from 'lucide-react';
+import { Loader2, SlidersHorizontal, TrendingUp, TrendingDown } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { notifyError, notifyInfo } from '../lib/errors';
 import { useGenerationSettings, type GenerationSettings } from '../lib/generationLimits';
+import { type UserRole } from '../types/database';
 
-// Статистика использования генератора (только для администратора): RPC admin_usage_stats
+// Статистика использования (только для администратора): RPC admin_usage_stats (supabase/sql/usage_stats_v3.sql).
+// Поля, которых нет в старой версии функции, необязательны — экран работает и с ней.
 
+interface Totals { batches: number; tickets: number; users: number; telegram?: number }
 interface Stats {
   since: string;
-  totals: { batches: number; tickets: number; users: number; telegram: number };
-  users: Array<{ id: string; name: string; email: string; batches: number; tickets: number; telegram: number; last_at: string }>;
+  per_day?: number;
+  totals: Totals;
+  prev?: Totals;
+  today?: { batches: number; users: number };
+  people?: { total: number; new: number; never: number; telegram: number; limit_days: number; limit_users: number };
+  users: Array<{ id: string; name: string; email: string; role?: UserRole; batches: number; tickets: number; telegram: number; days?: number; subject?: string | null; last_at: string }>;
+  inactive?: Array<{ id: string; name: string; email: string; last_at: string }>;
+  sources?: Array<{ source: string; batches: number }>;
   subjects: Array<{ name: string; batches: number; tickets: number; tests: number; matching: number; open: number }>;
+  bank?: Array<{ name: string; total: number; added: number; test: number; matching: number; open: number }>;
+  authors?: Array<{ name: string; added: number }>;
   topics: Array<{ name: string; chapter: string; uses: number }>;
   chapters: Array<{ name: string; uses: number }>;
-  days: Array<{ day: string; batches: number }>;
+  hours?: Array<{ hour: number; batches: number }>;
+  days: Array<{ day: string; batches: number; users?: number }>;
 }
 
 const short = (s: string) => (s.split(' / ')[0] || s).trim();
 const PERIODS = [
-  { days: 7, label: '7 дней' },
-  { days: 30, label: '30 дней' },
-  { days: 90, label: '90 дней' },
-  { days: 365, label: 'Год' },
+  { days: 7, label: '7 дней', prevLabel: 'прошлой неделе' },
+  { days: 30, label: '30 дней', prevLabel: 'прошлым 30 дням' },
+  { days: 90, label: '90 дней', prevLabel: 'прошлым 90 дням' },
+  { days: 365, label: 'Год', prevLabel: 'прошлому году' },
 ];
+const SOURCE_LABEL: Record<string, string> = {
+  site: 'Сайт',
+  telegram: 'Telegram-бот',
+  'telegram-app': 'Telegram Mini App',
+  cluster: 'Экзамен-кластер',
+};
+const ROLE_SHORT: Partial<Record<UserRole, string>> = { admin: 'Админ', subject_admin: 'Админ предмета' };
+const plural = (n: number, one: string, few: string, many: string) => {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+};
+const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+const fmtDay = (iso: string) => {
+  const [, m, d] = iso.split('-').map(Number);
+  return `${d} ${MONTHS[m - 1]}`;
+};
+const ago = (iso: string) => {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400_000);
+  if (days <= 0) return 'сегодня';
+  if (days === 1) return 'вчера';
+  return `${days} ${plural(days, 'день', 'дня', 'дней')} назад`;
+};
 
+// Полоса-значение в списках (одна серия — один цвет, подпись рядом текстом)
 function Bar({ value, max }: { value: number; max: number }) {
   return (
-    <div className="h-2 bg-slate-100 rounded-full overflow-hidden flex-1 min-w-[60px]">
-      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${max ? Math.max(4, (value / max) * 100) : 0}%` }} />
+    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+      <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${max ? Math.max(3, (value / max) * 100) : 0}%` }} />
     </div>
   );
 }
+
+const Card: React.FC<{ title: string; hint?: string; children: React.ReactNode; className?: string }> = ({ title, hint, children, className = '' }) => (
+  <section className={`bg-white border border-slate-200 rounded-2xl p-4 ${className}`}>
+    <h3 className="font-bold text-slate-900 text-base">{title}</h3>
+    {hint && <p className="text-sm text-slate-600 mt-0.5">{hint}</p>}
+    <div className="mt-3">{children}</div>
+  </section>
+);
+
+const Empty = () => <p className="text-sm text-slate-600">За этот период данных нет.</p>;
+
+// Главная цифра с изменением к прошлому периоду
+const Kpi: React.FC<{ label: string; value: number; prev?: number; prevLabel: string; note?: string }> = ({ label, value, prev, prevLabel, note }) => {
+  const pct = prev !== undefined && prev > 0 ? Math.round(((value - prev) / prev) * 100) : null;
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-3.5">
+      <div className="text-sm font-semibold text-slate-600 leading-tight">{label}</div>
+      <div className="text-3xl font-bold text-slate-900 mt-1 tabular-nums">{value}</div>
+      {note ? (
+        <div className="text-xs text-slate-600 mt-1">{note}</div>
+      ) : pct !== null ? (
+        <div className={`text-xs font-semibold mt-1 flex items-center gap-1 ${pct >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+          {pct >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+          {pct >= 0 ? '+' : ''}{pct}% к {prevLabel}
+        </div>
+      ) : (
+        <div className="text-xs text-slate-500 mt-1">Раньше данных нет</div>
+      )}
+    </div>
+  );
+};
+
+// Список «название — число — полоса» с кнопкой «Показать все»
+function RankList<T>({ items, limit = 7, render, value }: { items: T[]; limit?: number; render: (it: T) => React.ReactNode; value: (it: T) => number }) {
+  const [all, setAll] = useState(false);
+  if (items.length === 0) return <Empty />;
+  const max = Math.max(1, ...items.map(value));
+  const shown = all ? items : items.slice(0, limit);
+  return (
+    <div>
+      <ul className="space-y-3">
+        {shown.map((it, i) => (
+          <li key={i}>
+            {render(it)}
+            <div className="mt-1.5"><Bar value={value(it)} max={max} /></div>
+          </li>
+        ))}
+      </ul>
+      {items.length > limit && (
+        <button onClick={() => setAll((v) => !v)} className="mt-3 min-h-[40px] text-sm font-semibold text-indigo-700">
+          {all ? 'Свернуть' : `Показать все (${items.length})`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Столбики по времени: касание столбика показывает его значение. Длинный период — по неделям или месяцам
+function TimeBars({ buckets, unit }: { buckets: Array<{ label: string; batches: number; users?: number }>; unit: string }) {
+  const [sel, setSel] = useState<number | null>(null);
+  if (buckets.every((b) => b.batches === 0)) return <Empty />;
+  const max = Math.max(1, ...buckets.map((b) => b.batches));
+  // Пока ничего не выбрано — подсвечен самый активный столбик
+  const idx = sel ?? buckets.findIndex((b) => b.batches === max);
+  const cur = buckets[idx];
+  return (
+    <div>
+      <div className="text-sm text-slate-700 min-h-[20px]">
+        {sel === null && 'Больше всего — '}<b className="text-slate-900">{cur.label}</b>: {cur.batches} {plural(cur.batches, 'генерация', 'генерации', 'генераций')}
+        {cur.users !== undefined && cur.batches > 0 ? `, ${cur.users} ${plural(cur.users, 'человек', 'человека', 'человек')}` : ''}
+      </div>
+      <div className="mt-2 flex items-end h-32 border-b border-slate-200" role="list" aria-label={`Генерации по ${unit}`}>
+        {buckets.map((b, i) => (
+          <button
+            key={i}
+            type="button"
+            role="listitem"
+            onClick={() => setSel(i)}
+            onMouseEnter={() => setSel(i)}
+            className="flex-1 h-full flex items-end justify-center px-px"
+            aria-label={`${b.label}: ${b.batches}`}
+          >
+            <span
+              className={`w-full max-w-[18px] rounded-t ${i === idx ? 'bg-indigo-700' : 'bg-indigo-400'}`}
+              style={{ height: b.batches ? `${Math.max(4, (b.batches / max) * 100)}%` : 2, opacity: b.batches ? 1 : 0.35 }}
+            />
+          </button>
+        ))}
+      </div>
+      <div className="flex justify-between text-xs text-slate-600 mt-1">
+        <span>{buckets[0].label}</span>
+        <span>{buckets[buckets.length - 1].label}</span>
+      </div>
+    </div>
+  );
+}
+
+const bucketDays = (days: Stats['days'], period: number) => {
+  if (period <= 31) return days.map((d) => ({ label: fmtDay(d.day), batches: d.batches, users: d.users }));
+  const size = period <= 120 ? 7 : 30;
+  const out: Array<{ label: string; batches: number }> = [];
+  // Считаем от сегодняшнего дня назад, чтобы последний столбик был полным периодом до сегодня
+  for (let end = days.length; end > 0; end -= size) {
+    const chunk = days.slice(Math.max(0, end - size), end);
+    out.unshift({
+      label: size === 7 ? `${fmtDay(chunk[0].day)} – ${fmtDay(chunk[chunk.length - 1].day)}` : `${fmtDay(chunk[0].day)} – ${fmtDay(chunk[chunk.length - 1].day)}`,
+      batches: chunk.reduce((s, d) => s + d.batches, 0),
+    });
+  }
+  return out;
+};
 
 // Лимиты генерации для обычных пользователей (таблица generation_settings): меняет только главный админ
 const LIMIT_FIELDS: Array<{ key: keyof GenerationSettings; label: string; min: number; max: number }> = [
@@ -42,7 +190,7 @@ const LIMIT_FIELDS: Array<{ key: keyof GenerationSettings; label: string; min: n
   { key: 'max_per_ticket', label: 'Вопросов в одном билете', min: 1, max: 200 },
 ];
 
-const GenerationLimitsCard: React.FC = () => {
+const GenerationLimitsCard: React.FC<{ hint?: string }> = ({ hint }) => {
   const { isOwner } = useAuth();
   const queryClient = useQueryClient();
   const { data } = useGenerationSettings();
@@ -69,25 +217,28 @@ const GenerationLimitsCard: React.FC = () => {
 
   return (
     <section className="bg-white border border-slate-200 rounded-2xl p-4">
-      <h3 className="font-bold text-slate-800 mb-1 flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-blue-600" /> Лимиты генерации</h3>
-      <p className="text-xs text-slate-500 mb-3">Для всех, кроме администраторов: сайт, Telegram-бот и Mini App.{isOwner ? '' : ' Менять может только главный админ.'}</p>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <h3 className="font-bold text-slate-900 text-base flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-indigo-600" /> Лимиты генерации</h3>
+      <p className="text-sm text-slate-600 mt-0.5 mb-3">
+        Для всех, кроме администраторов: сайт, Telegram-бот и Mini App.{isOwner ? '' : ' Менять может только главный админ.'}
+        {hint ? ` ${hint}` : ''}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {LIMIT_FIELDS.map((f) => (
-          <label key={f.key} className="text-xs font-semibold text-slate-600 space-y-1">
+          <label key={f.key} className="flex items-center justify-between gap-3 sm:block text-sm font-semibold text-slate-700 sm:space-y-1">
             <span>{f.label}</span>
             <input
-              type="number" min={f.min} max={f.max} disabled={!isOwner}
+              type="number" inputMode="numeric" min={f.min} max={f.max} disabled={!isOwner}
               value={Number.isNaN(draft[f.key]) ? '' : draft[f.key]}
               onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value === '' ? NaN : Number(e.target.value) })}
-              className="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg disabled:bg-slate-50 disabled:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-24 sm:w-full min-h-[44px] text-base px-3 border border-slate-300 rounded-xl disabled:bg-slate-50 disabled:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </label>
         ))}
       </div>
       {isOwner && (
         <button onClick={save} disabled={!dirty || !valid || saving}
-          className="mt-3 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold disabled:opacity-40">
-          {saving ? 'Сохранение…' : 'Сохранить'}
+          className="mt-3 w-full sm:w-auto min-h-[44px] px-5 rounded-xl bg-indigo-600 text-white text-sm font-bold disabled:opacity-40">
+          {saving ? 'Сохранение…' : 'Сохранить лимиты'}
         </button>
       )}
     </section>
@@ -95,151 +246,229 @@ const GenerationLimitsCard: React.FC = () => {
 };
 
 export const StatsView: React.FC = () => {
-  const [days, setDays] = useState(30);
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['admin-usage-stats', days],
+  const [days, setDays] = useState(() => Number(localStorage.getItem('examiner_stats_days')) || 30);
+  const [noAdmins, setNoAdmins] = useState(() => localStorage.getItem('examiner_stats_no_admins') === 'true');
+  React.useEffect(() => { localStorage.setItem('examiner_stats_days', String(days)); }, [days]);
+  React.useEffect(() => { localStorage.setItem('examiner_stats_no_admins', String(noAdmins)); }, [noAdmins]);
+
+  const { data, isLoading, isFetching, error } = useQuery({
+    queryKey: ['admin-usage-stats', days, noAdmins],
+    placeholderData: (prev) => prev,
     queryFn: async () => {
-      const { data, error } = await supabase.rpc('admin_usage_stats', { p_days: days });
-      if (error) throw error;
-      return data as Stats;
+      let res = await supabase.rpc('admin_usage_stats', { p_days: days, p_no_admins: noAdmins });
+      // Старая версия функции в базе — без фильтра «без администраторов»
+      if (res.error?.code === 'PGRST202') res = await supabase.rpc('admin_usage_stats', { p_days: days });
+      if (res.error) throw res.error;
+      return res.data as Stats;
     },
     meta: { action: 'Не удалось загрузить статистику' },
   });
+  const period = PERIODS.find((p) => p.days === days) ?? PERIODS[1];
 
-  if (isLoading) return <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-blue-600 animate-spin" /></div>;
-  if (error || !data) return <div className="p-6 text-sm text-red-600">Не удалось загрузить статистику. Убедитесь, что вы администратор.</div>;
-
-  const maxUser = Math.max(1, ...data.users.map((u) => u.batches));
-  const maxTopic = Math.max(1, ...data.topics.map((t) => t.uses));
-  const maxChapter = Math.max(1, ...data.chapters.map((c) => c.uses));
-  const maxDay = Math.max(1, ...data.days.map((d) => d.batches));
-
-  const cards = [
-    { label: 'Наборов создано', value: data.totals.batches, icon: FileText },
-    { label: 'Билетов (вариантов)', value: data.totals.tickets, icon: BarChart3 },
-    { label: 'Активных пользователей', value: data.totals.users, icon: Users },
-    { label: 'Через Telegram', value: data.totals.telegram, icon: Send },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-blue-600" /> Статистика использования</h2>
-        <div className="inline-flex rounded-xl border border-slate-200 overflow-hidden bg-white text-sm">
-          {PERIODS.map((p) => (
-            <button
-              key={p.days}
-              onClick={() => setDays(p.days)}
-              className={`px-3 py-1.5 font-semibold ${days === p.days ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <GenerationLimitsCard />
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {cards.map((c) => (
-          <div key={c.label} className="bg-white border border-slate-200 rounded-2xl p-4">
-            <div className="flex items-center gap-2 text-slate-500 text-xs font-semibold"><c.icon className="w-4 h-4" />{c.label}</div>
-            <div className="text-2xl font-bold text-slate-900 mt-1">{c.value}</div>
-          </div>
+  const header = (
+    <div className="space-y-3">
+      <div className="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-2xl" role="radiogroup" aria-label="Период">
+        {PERIODS.map((p) => (
+          <button
+            key={p.days}
+            role="radio"
+            aria-checked={days === p.days}
+            onClick={() => setDays(p.days)}
+            className={`min-h-[44px] rounded-xl text-sm font-semibold transition ${days === p.days ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}
+          >
+            {p.label}
+          </button>
         ))}
       </div>
+      <label className="flex items-center gap-3 min-h-[40px] px-1 text-sm text-slate-800 cursor-pointer select-none">
+        <input type="checkbox" checked={noAdmins} onChange={(e) => setNoAdmins(e.target.checked)} className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500" />
+        <span className="flex-1">Без администраторов (только преподаватели)</span>
+        {isFetching && !isLoading && <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />}
+      </label>
+    </div>
+  );
 
-      <div className="grid lg:grid-cols-2 gap-4">
-        <section className="bg-white border border-slate-200 rounded-2xl p-4">
-          <h3 className="font-bold text-slate-800 mb-3">Кто пользуется чаще</h3>
-          {data.users.length === 0 && <p className="text-sm text-slate-400">Пока нет данных за период.</p>}
-          <div className="space-y-2.5">
-            {data.users.map((u) => (
-              <div key={u.id ?? u.email}>
-                <div className="flex justify-between text-sm gap-2">
-                  <span className="font-semibold text-slate-800 truncate" title={u.email}>{u.name}</span>
-                  <span className="text-slate-500 shrink-0">{u.batches} наборов · {u.tickets} билетов{u.telegram ? ` · TG ${u.telegram}` : ''}</span>
-                </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <Bar value={u.batches} max={maxUser} />
-                  <span className="text-[11px] text-slate-400 shrink-0">{new Date(u.last_at).toLocaleDateString('ru-RU')}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+  if (isLoading) return <div className="space-y-4">{header}<div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-indigo-600 animate-spin" /></div></div>;
+  if (error || !data) return <div className="space-y-4">{header}<div className="p-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-2xl">Не удалось загрузить статистику. Убедитесь, что вы администратор.</div></div>;
 
-        <section className="bg-white border border-slate-200 rounded-2xl p-4">
-          <h3 className="font-bold text-slate-800 mb-3">Что генерируют</h3>
-          {data.subjects.length === 0 && <p className="text-sm text-slate-400">Пока нет данных за период.</p>}
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-slate-400">
-                <th className="font-semibold pb-1">Предмет</th><th className="font-semibold pb-1 text-right">Наборов</th>
-                <th className="font-semibold pb-1 text-right">Тестов</th><th className="font-semibold pb-1 text-right">Соотв.</th><th className="font-semibold pb-1 text-right">Откр.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.subjects.map((s) => (
-                <tr key={s.name} className="border-t border-slate-100">
-                  <td className="py-1.5 font-semibold text-slate-800">{short(s.name)}</td>
-                  <td className="py-1.5 text-right">{s.batches}</td>
-                  <td className="py-1.5 text-right">{s.tests}</td>
-                  <td className="py-1.5 text-right">{s.matching}</td>
-                  <td className="py-1.5 text-right">{s.open}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="text-[11px] text-slate-400 mt-2">Количество вопросов — всего в созданных билетах.</p>
-        </section>
+  const people = data.people;
+  const sources = data.sources ?? [];
+  const totalSrc = Math.max(1, sources.reduce((s, x) => s + x.batches, 0));
+  const hours = data.hours ?? [];
+  const peak = hours.length ? hours.reduce((a, b) => (b.batches > a.batches ? b : a)) : null;
+  const bank = data.bank ?? [];
+  const usageBySubject = new Map(data.subjects.map((s) => [s.name, s]));
+  const limitHint = people && people.limit_users > 0
+    ? `За период ${people.limit_users} ${plural(people.limit_users, 'человек', 'человека', 'человек')} упирались в дневной лимит.`
+    : undefined;
 
-        <section className="bg-white border border-slate-200 rounded-2xl p-4">
-          <h3 className="font-bold text-slate-800 mb-3">Какие темы выбирают чаще</h3>
-          {data.topics.length === 0 && <p className="text-sm text-slate-400">Нет данных по темам за период.</p>}
-          <div className="space-y-2">
-            {data.topics.map((t, i) => (
-              <div key={i}>
-                <div className="flex justify-between text-sm gap-2">
-                  <span className="text-slate-800 truncate" title={`${t.chapter} · ${t.name}`}>{short(t.name)} <span className="text-slate-400">· {short(t.chapter)}</span></span>
-                  <span className="text-slate-500 shrink-0">{t.uses}</span>
-                </div>
-                <Bar value={t.uses} max={maxTopic} />
-              </div>
-            ))}
-          </div>
-        </section>
+  return (
+    <div className="space-y-4 max-w-5xl mx-auto">
+      {header}
 
-        <section className="bg-white border border-slate-200 rounded-2xl p-4">
-          <h3 className="font-bold text-slate-800 mb-3">Какие главы выбирают чаще</h3>
-          {data.chapters.length === 0 && <p className="text-sm text-slate-400">Нет данных по главам за период.</p>}
-          <div className="space-y-2">
-            {data.chapters.map((c, i) => (
-              <div key={i}>
-                <div className="flex justify-between text-sm gap-2">
-                  <span className="text-slate-800 truncate">{short(c.name)}</span>
-                  <span className="text-slate-500 shrink-0">{c.uses}</span>
-                </div>
-                <Bar value={c.uses} max={maxChapter} />
-              </div>
-            ))}
-          </div>
-        </section>
+      {/* Главные цифры */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Kpi label="Генераций" value={data.totals.batches} prev={data.prev?.batches} prevLabel={period.prevLabel} />
+        <Kpi label="Билетов (вариантов)" value={data.totals.tickets} prev={data.prev?.tickets} prevLabel={period.prevLabel} />
+        <Kpi label="Пользовались" value={data.totals.users} prev={data.prev?.users} prevLabel={period.prevLabel} note={people ? `из ${people.total} аккаунтов` : undefined} />
+        {data.today
+          ? <Kpi label="Сегодня" value={data.today.batches} prevLabel="" note={`${data.today.users} ${plural(data.today.users, 'человек', 'человека', 'человек')}`} />
+          : <Kpi label="Через Telegram" value={data.totals.telegram ?? 0} prevLabel="" note="бот и Mini App" />}
       </div>
 
-      <section className="bg-white border border-slate-200 rounded-2xl p-4">
-        <h3 className="font-bold text-slate-800 mb-3">Активность по дням</h3>
-        {data.days.length === 0 && <p className="text-sm text-slate-400">Пока нет данных за период.</p>}
-        <div className="flex items-end gap-1 h-28 overflow-x-auto">
-          {data.days.map((d) => (
-            <div key={d.day} className="flex flex-col items-center justify-end h-full min-w-[22px]" title={`${d.day}: ${d.batches}`}>
-              <span className="text-[10px] text-slate-500">{d.batches}</span>
-              <div className="w-4 bg-blue-500 rounded-t" style={{ height: `${(d.batches / maxDay) * 80}%`, minHeight: 3 }} />
-              <span className="text-[9px] text-slate-400 mt-0.5">{d.day.slice(8)}</span>
-            </div>
-          ))}
-        </div>
-      </section>
+      <Card title="Активность" hint={days <= 31 ? 'Генерации по дням — коснитесь столбика' : days <= 120 ? 'Генерации по неделям' : 'Генерации по месяцам'}>
+        <TimeBars buckets={bucketDays(data.days, days)} unit={days <= 31 ? 'дням' : 'неделям'} />
+      </Card>
+
+      <div className="grid lg:grid-cols-2 gap-4 items-start">
+        {people && (
+          <Card title="Люди">
+            <dl className="grid grid-cols-2 gap-3">
+              {[
+                ['Аккаунтов всего', people.total, ''],
+                ['Новых за период', people.new, ''],
+                ['Ни разу не генерировали', people.never, people.never ? 'стоит напомнить или показать, как пользоваться' : ''],
+                ['Привязали Telegram', people.telegram, ''],
+                ['Упирались в дневной лимит', people.limit_users, people.limit_days ? `${people.limit_days} ${plural(people.limit_days, 'раз', 'раза', 'раз')} за период` : ''],
+                ['Перестали пользоваться', data.inactive?.length ?? 0, 'были раньше, но не в этот период'],
+              ].map(([label, value, note]) => (
+                <div key={label as string} className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                  <dt className="text-sm text-slate-600 leading-tight">{label}</dt>
+                  <dd className="text-2xl font-bold text-slate-900 tabular-nums mt-0.5">{value}</dd>
+                  {note && <dd className="text-xs text-slate-600 mt-0.5 leading-snug">{note}</dd>}
+                </div>
+              ))}
+            </dl>
+          </Card>
+        )}
+
+        <Card title="Кто пользуется чаще" hint="Сколько генераций за период">
+          <RankList
+            items={data.users}
+            value={(u) => u.batches}
+            render={(u) => (
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-900 truncate" title={u.email}>{u.name}</div>
+                  <div className="text-xs text-slate-600 leading-snug">
+                    {[u.role && u.role !== 'subject_teacher' && u.role !== 'user' ? ROLE_SHORT[u.role] : null, u.subject ? short(u.subject) : null, ago(u.last_at)].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-sm font-bold text-slate-900 tabular-nums">{u.batches}</div>
+                  <div className="text-xs text-slate-600">{u.days !== undefined ? `${u.days} ${plural(u.days, 'день', 'дня', 'дней')}` : `${u.tickets} бил.`}</div>
+                </div>
+              </div>
+            )}
+          />
+        </Card>
+
+        {data.inactive && data.inactive.length > 0 && (
+          <Card title="Перестали пользоваться" hint="Генерировали раньше, но не за этот период">
+            <ul className="divide-y divide-slate-100">
+              {data.inactive.slice(0, 15).map((u) => (
+                <li key={u.id} className="py-2 flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-slate-900 truncate" title={u.email}>{u.name}</span>
+                  <span className="text-xs text-slate-600 shrink-0">{ago(u.last_at)}</span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+
+        <Card title="Предметы" hint={bank.length ? 'Генерации за период и вопросы в банке' : 'Генерации за период'}>
+          {bank.length === 0 && data.subjects.length === 0 ? <Empty /> : (
+            <ul className="space-y-3">
+              {(bank.length ? bank.map((b) => b.name) : data.subjects.map((s) => s.name)).map((name) => {
+                const use = usageBySubject.get(name);
+                const b = bank.find((x) => x.name === name);
+                return (
+                  <li key={name} className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-semibold text-slate-900">{short(name)}</span>
+                      <span className="text-sm text-slate-700"><b className="text-slate-900 tabular-nums">{use?.batches ?? 0}</b> генер. · {use?.tickets ?? 0} бил.</span>
+                    </div>
+                    {b && (
+                      <div className="text-xs text-slate-600 mt-1">
+                        В банке {b.total.toLocaleString('ru-RU')} вопр.: {b.test} тест. · {b.matching} соотв. · {b.open} откр.
+                        {b.added > 0 && <b className="text-emerald-700"> · +{b.added.toLocaleString('ru-RU')} за период</b>}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+
+        {sources.length > 0 && (
+          <Card title="Откуда генерируют">
+            <ul className="space-y-3">
+              {sources.map((s) => (
+                <li key={s.source}>
+                  <div className="flex justify-between text-sm gap-2">
+                    <span className="font-semibold text-slate-900">{SOURCE_LABEL[s.source] ?? s.source}</span>
+                    <span className="text-slate-700 tabular-nums">{s.batches} · {Math.round((s.batches / totalSrc) * 100)}%</span>
+                  </div>
+                  <div className="mt-1.5"><Bar value={s.batches} max={totalSrc} /></div>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+
+        {hours.length > 0 && (
+          <Card title="Время активности" hint={peak && peak.batches > 0 ? `Чаще всего — около ${peak.hour}:00 (по Душанбе)` : undefined}>
+            <TimeBars buckets={hours.map((h) => ({ label: `${h.hour}:00–${h.hour + 1}:00`, batches: h.batches }))} unit="часам" />
+          </Card>
+        )}
+
+        <Card title="Главы, которые выбирают чаще" hint="Без учёта генераций «Весь предмет»">
+          <RankList
+            items={data.chapters}
+            value={(c) => c.uses}
+            render={(c) => (
+              <div className="flex justify-between text-sm gap-3">
+                <span className="text-slate-900 min-w-0">{short(c.name)}</span>
+                <span className="text-slate-700 tabular-nums shrink-0">{c.uses}</span>
+              </div>
+            )}
+          />
+        </Card>
+
+        <Card title="Темы, которые выбирают чаще">
+          <RankList
+            items={data.topics}
+            value={(t) => t.uses}
+            render={(t) => (
+              <div className="flex justify-between text-sm gap-3">
+                <span className="min-w-0">
+                  <span className="block text-slate-900">{short(t.name)}</span>
+                  <span className="block text-xs text-slate-600">{short(t.chapter)}</span>
+                </span>
+                <span className="text-slate-700 tabular-nums shrink-0">{t.uses}</span>
+              </div>
+            )}
+          />
+        </Card>
+
+        {data.authors && data.authors.length > 0 && (
+          <Card title="Кто пополнял банк вопросов" hint="Добавлено вопросов за период">
+            <RankList
+              items={data.authors}
+              value={(a) => a.added}
+              render={(a) => (
+                <div className="flex justify-between text-sm gap-3">
+                  <span className="font-semibold text-slate-900 truncate">{a.name}</span>
+                  <span className="text-slate-700 tabular-nums shrink-0">{a.added.toLocaleString('ru-RU')}</span>
+                </div>
+              )}
+            />
+          </Card>
+        )}
+      </div>
+
+      <GenerationLimitsCard hint={limitHint} />
     </div>
   );
 };

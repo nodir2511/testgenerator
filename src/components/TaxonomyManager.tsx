@@ -244,7 +244,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
             <button
               type="submit"
               disabled={addSubjectMutation.isPending || !newSubjectName.trim()}
-              className="text-xs px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1 font-medium disabled:opacity-50"
+              className="text-xs px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-1 font-medium disabled:opacity-50"
             >
               <Plus className="w-3.5 h-3.5" />
               Добавить
@@ -255,7 +255,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
         {/* Список вкладок предметов */}
         <div className="flex flex-wrap gap-2 pt-4">
           {loadingSubjects ? (
-            <div className="text-xs text-slate-400 flex items-center">
+            <div className="text-xs text-slate-500 flex items-center">
               <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> Загрузка предметов...
             </div>
           ) : subjects.length === 0 ? (
@@ -273,7 +273,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 }}
                 className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
                   activeSubjectId === sub.id
-                    ? 'bg-blue-600 text-white shadow-sm'
+                    ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                 }`}
               >
@@ -294,7 +294,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 <Layers className="w-4 h-4 mr-2 text-indigo-600" />
                 Главы
               </h3>
-              <span className="text-xs text-slate-400">{chapters.length}</span>
+              <span className="text-xs text-slate-500">{chapters.length}</span>
             </div>
 
             <form
@@ -324,9 +324,9 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
 
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
               {loadingChapters ? (
-                <div className="text-xs text-slate-400 text-center py-4">Загрузка глав...</div>
+                <div className="text-xs text-slate-500 text-center py-4">Загрузка глав...</div>
               ) : chapters.length === 0 ? (
-                <div className="text-xs text-slate-400 text-center py-8">
+                <div className="text-xs text-slate-500 text-center py-8">
                   В этом предмете пока нет глав. Добавьте первую.
                 </div>
               ) : (
@@ -341,7 +341,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                     }`}
                   >
                     <div className="flex items-center space-x-2 truncate">
-                      <span className="text-slate-400 font-mono text-[10px]">{idx + 1}.</span>
+                      <span className="text-slate-500 font-mono text-xs">{idx + 1}.</span>
                       <span className="truncate">{ch.name}</span>
                     </div>
                     <div className="flex items-center space-x-1 shrink-0">
@@ -355,12 +355,12 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                               softDeleteMutation.mutate({ table: 'chapters', id: ch.id });
                             }
                           }}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-600 rounded"
+                          className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-600 rounded"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <ChevronRight className={`w-3.5 h-3.5 ${activeChapterId === ch.id ? 'text-indigo-600' : 'text-slate-300'}`} />
+                      <ChevronRight className={`w-3.5 h-3.5 ${activeChapterId === ch.id ? 'text-indigo-600' : 'text-slate-500'}`} />
                     </div>
                   </div>
                 ))
@@ -375,11 +375,11 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 <Bookmark className="w-4 h-4 mr-2 text-emerald-600" />
                 Темы главы
               </h3>
-              <span className="text-xs text-slate-400">{topics.length}</span>
+              <span className="text-xs text-slate-500">{topics.length}</span>
             </div>
 
             {!activeChapterId ? (
-              <div className="flex-1 flex items-center justify-center text-xs text-slate-400 text-center p-4">
+              <div className="flex-1 flex items-center justify-center text-xs text-slate-500 text-center p-4">
                 Выберите главу слева, чтобы просмотреть и добавить её темы
               </div>
             ) : (
@@ -403,7 +403,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                   <button
                     type="submit"
                     disabled={addTopicMutation.isPending || !newTopicName.trim()}
-                    className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg disabled:opacity-50"
+                    className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
                   >
                     <Plus className="w-4 h-4" />
                   </button>
@@ -411,9 +411,9 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
 
                 <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
                   {loadingTopics ? (
-                    <div className="text-xs text-slate-400 text-center py-4">Загрузка тем...</div>
+                    <div className="text-xs text-slate-500 text-center py-4">Загрузка тем...</div>
                   ) : topics.length === 0 ? (
-                    <div className="text-xs text-slate-400 text-center py-8">
+                    <div className="text-xs text-slate-500 text-center py-8">
                       В этой главе пока нет тем. Добавьте первую тему.
                     </div>
                   ) : (
@@ -423,7 +423,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                         className="group flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-50 border border-slate-100 text-xs text-slate-700 font-medium transition"
                       >
                         <div className="flex items-center space-x-2 truncate">
-                          <span className="text-slate-400 font-mono text-[10px]">{idx + 1}.</span>
+                          <span className="text-slate-500 font-mono text-xs">{idx + 1}.</span>
                           <span className="truncate">{tp.name}</span>
                         </div>
                         {canManage(activeSubjectId) && (
@@ -435,7 +435,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                                 softDeleteMutation.mutate({ table: 'topics', id: tp.id });
                               }
                             }}
-                            className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-600 rounded"
+                            className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-600 rounded"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -455,7 +455,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 <Library className="w-4 h-4 mr-2 text-amber-600" />
                 Источники и сборники
               </h3>
-              <span className="text-xs text-slate-400">{sources.length}</span>
+              <span className="text-xs text-slate-500">{sources.length}</span>
             </div>
 
             <form
@@ -475,7 +475,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
               <button
                 type="submit"
                 disabled={addSourceMutation.isPending || !newSourceName.trim()}
-                className="p-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg disabled:opacity-50"
+                className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -483,7 +483,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
 
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
               {sources.length === 0 ? (
-                <div className="text-xs text-slate-400 text-center py-8">
+                <div className="text-xs text-slate-500 text-center py-8">
                   Источники не добавлены. Источник позволяет отслеживать, из какого сборника взят вопрос.
                 </div>
               ) : (
@@ -501,7 +501,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                             softDeleteMutation.mutate({ table: 'sources', id: src.id });
                           }
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-red-600 rounded"
+                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-600 rounded"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>

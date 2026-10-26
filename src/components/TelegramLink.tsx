@@ -70,7 +70,7 @@ export const TelegramLink: React.FC = () => {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg transition"
+        className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg transition"
         title="Telegram-бот"
       >
         <Send className="w-4 h-4" />
@@ -81,7 +81,7 @@ export const TelegramLink: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-slate-900 flex items-center"><Send className="w-4 h-4 mr-2 text-blue-600" />Telegram-бот</h3>
-              <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
+              <button onClick={() => setOpen(false)} className="text-slate-500 hover:text-slate-700"><X className="w-5 h-5" /></button>
             </div>
 
             <p className="text-sm text-slate-600">
@@ -111,7 +111,7 @@ export const TelegramLink: React.FC = () => {
                     <p className="text-xs text-slate-500">
                       В Telegram нажмите <strong>«Start / Запустить»</strong> — аккаунт привяжется автоматически (ссылка действует 10 минут).
                     </p>
-                    <p className="text-[11px] text-slate-400">Если ссылка не открылась — отправьте боту вручную:</p>
+                    <p className="text-xs text-slate-500">Если ссылка не открылась — отправьте боту вручную:</p>
                   </>
                 )}
                 {!deepLink && (
@@ -134,7 +134,7 @@ export const TelegramLink: React.FC = () => {
               <button
                 onClick={getCode}
                 disabled={busy}
-                className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-xl text-sm font-semibold flex items-center justify-center"
+                className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-sm font-semibold flex items-center justify-center"
               >
                 {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {linked ? 'Привязать другой чат' : 'Получить код привязки'}

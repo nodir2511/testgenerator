@@ -34,16 +34,29 @@ import {
   X,
   FileQuestion,
   Loader2,
-  CheckCircle2,
   MoreHorizontal,
   ChevronRight
 } from 'lucide-react';
 
 type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'cluster' | 'releases';
 
+// Раздел виден в адресе (#archive и т. п.): работает кнопка «Назад» на телефоне, на раздел можно дать ссылку
+const TAB_HASH: Record<TabType, string> = {
+  generator: 'generator', saved_tickets: 'archive', questions: 'questions', taxonomy: 'taxonomy',
+  bulk_import: 'import', users: 'users', stats: 'stats', cluster: 'cluster', releases: 'news',
+};
+const tabFromHash = (hash: string): TabType | null => {
+  const key = hash.replace(/^#/, '').split('/')[0];
+  return (Object.keys(TAB_HASH) as TabType[]).find((t) => TAB_HASH[t] === key) ?? null;
+};
+const isFormHash = (hash: string) => hash.startsWith('#questions/');
+const LEAVE_FORM_TEXT = 'Есть несохранённые изменения в вопросе. Закрыть без сохранения?';
+
 export const App: React.FC = () => {
   const { user, profile, isAdmin, isOwner, isStaff, signOut, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>(() => {
+    const fromHash = tabFromHash(window.location.hash);
+    if (fromHash) return fromHash;
     const saved = localStorage.getItem('examiner_active_tab');
     const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats', 'cluster', 'releases'];
     return (validTabs.includes(saved as TabType)) ? (saved as TabType) : 'generator';
@@ -62,13 +75,80 @@ export const App: React.FC = () => {
   const [isQuestionFormOpen, setIsQuestionFormOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
 
-  // Всплывающее подтверждение сохранения
-  const [saveToast, setSaveToast] = useState<string | null>(null);
+  // История браузера: разделы, форма вопроса и меню «Ещё» — отдельные шаги, «Назад» возвращает на предыдущий.
+  // Ref-ы читаются в обработчике popstate, где состояние React может быть устаревшим.
+  const formOpenRef = React.useRef(false);
+  const formDirtyRef = React.useRef(false);
+  const sheetOpenRef = React.useRef(false);
+  const hashOf = (tab: TabType) => `#${TAB_HASH[tab]}`;
+
   React.useEffect(() => {
-    if (!saveToast) return;
-    const timer = setTimeout(() => setSaveToast(null), 2500);
-    return () => clearTimeout(timer);
-  }, [saveToast]);
+    // Открыли сайт со ссылкой на форму (после перезагрузки) — формы уже нет, показываем раздел
+    window.history.replaceState(null, '', hashOf(tabFromHash(window.location.hash) ?? activeTab));
+    const onPop = () => {
+      if (sheetOpenRef.current) {
+        sheetOpenRef.current = false;
+        setMobileMenuOpen(false);
+        return;
+      }
+      const hash = window.location.hash;
+      if (formOpenRef.current && !isFormHash(hash)) {
+        if (formDirtyRef.current && !window.confirm(LEAVE_FORM_TEXT)) {
+          window.history.pushState(null, '', '#questions/edit');
+          return;
+        }
+        formOpenRef.current = false;
+        formDirtyRef.current = false;
+        setIsQuestionFormOpen(false);
+        setEditingQuestion(null);
+      }
+      const tab = tabFromHash(hash);
+      if (tab) setActiveTab(tab);
+    };
+    window.addEventListener('popstate', onPop);
+    // Закрытие вкладки с несохранённым вопросом — браузер спросит сам
+    const onUnload = (e: BeforeUnloadEvent) => {
+      if (formOpenRef.current && formDirtyRef.current) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('beforeunload', onUnload);
+    };
+  }, []);
+
+  const closeFormState = () => {
+    formOpenRef.current = false;
+    formDirtyRef.current = false;
+    setIsQuestionFormOpen(false);
+    setEditingQuestion(null);
+  };
+
+  // Переход в раздел. Из формы или меню «Ещё» — заменяем их шаг истории, чтобы «Назад» не открывал их снова
+  const goTab = (tab: TabType) => {
+    if (formOpenRef.current && formDirtyRef.current && !window.confirm(LEAVE_FORM_TEXT)) return false;
+    const replace = formOpenRef.current || sheetOpenRef.current;
+    sheetOpenRef.current = false;
+    setMobileMenuOpen(false);
+    if (formOpenRef.current) closeFormState();
+    if (replace) window.history.replaceState(null, '', hashOf(tab));
+    else if (window.location.hash !== hashOf(tab)) window.history.pushState(null, '', hashOf(tab));
+    if (tab !== activeTab) window.scrollTo({ top: 0 });
+    setActiveTab(tab);
+    return true;
+  };
+
+  const openSheet = () => {
+    sheetOpenRef.current = true;
+    window.history.pushState(null, '', window.location.hash);
+    setMobileMenuOpen(true);
+  };
+  const closeSheet = () => {
+    if (sheetOpenRef.current) window.history.back();
+  };
 
   // Обновления сайта: окно «Что нового» при входе, пока есть непрочитанные версии
   const { unread, markRead } = useReleases();
@@ -79,9 +159,7 @@ export const App: React.FC = () => {
     markRead(unread.map((r) => r.id));
   };
   const openReleases = () => {
-    setActiveTab('releases');
-    setIsQuestionFormOpen(false);
-    setMobileMenuOpen(false);
+    goTab('releases');
   };
 
   // Навигационные ссылки
@@ -97,14 +175,23 @@ export const App: React.FC = () => {
   ];
   const isAdminSection = currentTab === 'users' || currentTab === 'stats';
 
-  const handleAddQuestion = () => {
-    setEditingQuestion(null);
-    setIsQuestionFormOpen(true);
-  };
-
-  const handleEditQuestion = (q: Question) => {
+  const openForm = (q: Question | null) => {
     setEditingQuestion(q);
     setIsQuestionFormOpen(true);
+    formOpenRef.current = true;
+    formDirtyRef.current = false;
+    window.history.pushState(null, '', q ? '#questions/edit' : '#questions/new');
+    window.scrollTo({ top: 0 });
+  };
+  const handleAddQuestion = () => openForm(null);
+  const handleEditQuestion = (q: Question) => openForm(q);
+
+  // Закрыть форму: шаг формы в истории убираем «Назад»-ом (popstate закроет форму)
+  const closeForm = (force = false) => {
+    if (!force && formDirtyRef.current && !window.confirm(LEAVE_FORM_TEXT)) return;
+    formDirtyRef.current = false;
+    if (isFormHash(window.location.hash)) window.history.back();
+    else closeFormState();
   };
 
   // Пока идёт проверка сессии — показываем загрузку, не раскрывая содержимое
@@ -131,7 +218,7 @@ export const App: React.FC = () => {
       <header className="bg-white/85 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 shadow-xs pt-[env(safe-area-inset-top)]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Логотип */}
-          <div className="flex items-center space-x-3 cursor-pointer group" onClick={() => setActiveTab('generator')}>
+          <div className="flex items-center space-x-3 cursor-pointer group" onClick={() => goTab('generator')}>
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-indigo-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-transform">
               <Sparkles className="w-5 h-5" />
             </div>
@@ -141,7 +228,7 @@ export const App: React.FC = () => {
                   Экзаменатор
                 </h1>
               </div>
-              <p className="hidden sm:block text-[11px] text-slate-400 font-medium">Банк вопросов и генератор билетов</p>
+              <p className="hidden sm:block text-xs text-slate-500 font-medium">Банк вопросов и генератор билетов</p>
             </div>
           </div>
 
@@ -155,7 +242,7 @@ export const App: React.FC = () => {
                 <div className="text-xs font-bold text-slate-800 leading-tight">
                   {profile?.full_name || user.email?.split('@')[0]}
                 </div>
-                <div className="text-[10px] text-slate-500 flex items-center font-semibold">
+                <div className="text-xs text-slate-500 flex items-center font-semibold">
                   {isStaff ? (
                     <span className="text-amber-700 flex items-center">
                       <ShieldCheck className="w-3 h-3 mr-0.5" /> {isOwner ? 'Главный админ' : ROLE_LABELS[profile?.role ?? 'admin']}
@@ -168,7 +255,7 @@ export const App: React.FC = () => {
               <TelegramLink />
               <button 
                 onClick={openReleases} 
-                className="relative p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition" 
+                className="relative p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition" 
                 title="Что нового" 
                 aria-label="Что нового"
               >
@@ -181,7 +268,7 @@ export const App: React.FC = () => {
               </button>
               <button
                 onClick={() => signOut()}
-                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition"
+                className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition"
                 title="Выйти"
               >
                 <LogOut className="w-4 h-4" />
@@ -206,11 +293,11 @@ export const App: React.FC = () => {
               )}
             </button>
             <button
-              onClick={() => setMobileMenuOpen(true)}
+              onClick={openSheet}
               className="flex items-center space-x-1.5 p-1.5 pl-2.5 bg-slate-100/90 active:scale-95 border border-slate-200/80 rounded-2xl text-slate-700"
               aria-label="Открыть меню профиля"
             >
-              <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-[11px] font-bold">
+              <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">
                 {(profile?.full_name || user.email || 'U')[0].toUpperCase()}
               </div>
               <Menu className="w-4 h-4 text-slate-500" />
@@ -229,8 +316,7 @@ export const App: React.FC = () => {
                   key={item.id}
                   onClick={() => {
                     if (item.id === 'game') { window.open('/game', '_blank'); return; }
-                    setActiveTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
-                    setIsQuestionFormOpen(false);
+                    goTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
                   }}
                   className={`py-2 px-3.5 rounded-xl text-xs font-semibold flex items-center space-x-2 whitespace-nowrap transition-all duration-150 active:scale-98 ${
                     isActive
@@ -238,7 +324,7 @@ export const App: React.FC = () => {
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 border border-transparent'
                   }`}
                 >
-                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-indigo-600' : 'text-slate-500'}`} />
                   <span>{item.label}</span>
                 </button>
               );
@@ -253,7 +339,7 @@ export const App: React.FC = () => {
           {/* Затемнение фона с закрытием при тапе */}
           <div 
             className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs transition-opacity duration-200 animate-in fade-in"
-            onClick={() => setMobileMenuOpen(false)}
+            onClick={closeSheet}
           />
 
           {/* Панель-шторка снизу */}
@@ -277,8 +363,9 @@ export const App: React.FC = () => {
                 </div>
               </div>
               <button
-                onClick={() => setMobileMenuOpen(false)}
-                className="w-8 h-8 rounded-xl bg-slate-200/70 text-slate-500 flex items-center justify-center active:scale-90"
+                onClick={closeSheet}
+                aria-label="Закрыть меню"
+                className="w-10 h-10 rounded-xl bg-slate-200/70 text-slate-500 flex items-center justify-center active:scale-90"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -286,7 +373,7 @@ export const App: React.FC = () => {
 
             {/* Все разделы меню */}
             <div className="space-y-1">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1">
+              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider px-2 py-1">
                 Разделы
               </div>
               {navItems.map((item) => {
@@ -296,10 +383,8 @@ export const App: React.FC = () => {
                   <button
                     key={item.id}
                     onClick={() => {
-                      if (item.id === 'game') { window.open('/game', '_blank'); setMobileMenuOpen(false); return; }
-                      setActiveTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
-                      setIsQuestionFormOpen(false);
-                      setMobileMenuOpen(false);
+                      if (item.id === 'game') { window.open('/game', '_blank'); closeSheet(); return; }
+                      goTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
                     }}
                     className={`w-full text-left py-3 px-3.5 rounded-2xl text-xs font-semibold flex items-center justify-between transition active:scale-98 ${
                       isActive 
@@ -308,10 +393,10 @@ export const App: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center space-x-3">
-                      <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                      <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-500'}`} />
                       <span>{item.label}</span>
                     </div>
-                    <ChevronRight className={`w-4 h-4 ${isActive ? 'text-indigo-200' : 'text-slate-300'}`} />
+                    <ChevronRight className={`w-4 h-4 ${isActive ? 'text-indigo-200' : 'text-slate-500'}`} />
                   </button>
                 );
               })}
@@ -320,10 +405,7 @@ export const App: React.FC = () => {
             {/* Быстрые действия */}
             <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
               <button
-                onClick={() => {
-                  openReleases();
-                  setMobileMenuOpen(false);
-                }}
+                onClick={openReleases}
                 className="w-full py-2.5 px-3.5 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100/70 flex items-center justify-between"
               >
                 <div className="flex items-center space-x-2">
@@ -331,7 +413,7 @@ export const App: React.FC = () => {
                   <span>Что нового</span>
                 </div>
                 {unread.length > 0 && (
-                  <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-bold">
+                  <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-xs font-bold">
                     +{unread.length}
                   </span>
                 )}
@@ -339,8 +421,8 @@ export const App: React.FC = () => {
 
               <button
                 onClick={() => {
+                  closeSheet();
                   signOut();
-                  setMobileMenuOpen(false);
                 }}
                 className="w-full py-2.5 px-3.5 rounded-xl text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100/80 flex items-center justify-center space-x-2 transition active:scale-98"
               >
@@ -359,26 +441,20 @@ export const App: React.FC = () => {
         {isQuestionFormOpen && isStaff ? (
           <QuestionForm
             initialData={editingQuestion}
-            onSuccess={() => {
-              setIsQuestionFormOpen(false);
-              setEditingQuestion(null);
-              setSaveToast('Изменения сохранены в базе');
-            }}
-            onCancel={() => {
-              setIsQuestionFormOpen(false);
-              setEditingQuestion(null);
-            }}
+            onSuccess={() => closeForm(true)}
+            onCancel={() => closeForm()}
+            onDirtyChange={(d) => { formDirtyRef.current = d; }}
           />
         ) : (
           <>
             {isAdminSection && (
               <div className="flex space-x-1 mb-5 border-b border-slate-200">
-                {([['users', 'Пользователи и аудит', Users], ['stats', 'Статистика', BarChart3]] as const).map(([id, label, Icon]) => (
+                {([['users', 'Пользователи', Users], ['stats', 'Статистика', BarChart3]] as const).map(([id, label, Icon]) => (
                   <button
                     key={id}
-                    onClick={() => setActiveTab(id)}
-                    className={`py-2 px-4 text-xs font-semibold border-b-2 -mb-px flex items-center space-x-2 transition-all ${
-                      currentTab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+                    onClick={() => goTab(id)}
+                    className={`flex-1 sm:flex-none justify-center min-h-[44px] px-4 text-sm font-semibold border-b-2 -mb-px flex items-center space-x-2 transition-all ${
+                      currentTab === id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'
                     }`}
                   >
                     <Icon className="w-4 h-4" />
@@ -397,7 +473,7 @@ export const App: React.FC = () => {
             {currentTab === 'generator' && <TicketGenerator />}
             {currentTab === 'saved_tickets' && <SavedTicketsView />}
             {currentTab === 'bulk_import' && (
-              <BulkImport onSuccess={() => setActiveTab('questions')} />
+              <BulkImport onSuccess={() => goTab('questions')} />
             )}
             {currentTab === 'users' && <UserManagementView />}
             {currentTab === 'stats' && <StatsView />}
@@ -410,16 +486,8 @@ export const App: React.FC = () => {
 
       {showNews && <WhatsNewModal releases={unread} onClose={closeNews} onOpenHistory={() => { closeNews(); openReleases(); }} />}
 
-      {/* Подтверждение сохранения */}
-      {saveToast && (
-        <div className="fixed left-1/2 -translate-x-1/2 top-[calc(env(safe-area-inset-top)+4.5rem)] md:left-auto md:translate-x-0 md:top-auto md:bottom-6 md:right-6 z-50 flex items-center space-x-2 bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-200">
-          <CheckCircle2 className="w-5 h-5 shrink-0" />
-          <span className="text-sm font-medium">{saveToast}</span>
-        </div>
-      )}
-
       {/* Футер (десктоп) */}
-      <footer className="hidden md:block bg-white/70 border-t border-slate-200/80 py-4 text-center text-xs text-slate-400">
+      <footer className="hidden md:block bg-white/70 border-t border-slate-200/80 py-4 text-center text-xs text-slate-500">
         Экзаменатор — банк вопросов и генератор билетов
       </footer>
 
@@ -428,10 +496,7 @@ export const App: React.FC = () => {
         <div className="grid grid-cols-4 h-16 items-center px-2">
           {/* Генератор */}
           <button
-            onClick={() => {
-              setActiveTab('generator');
-              setIsQuestionFormOpen(false);
-            }}
+            onClick={() => goTab('generator')}
             className={`flex flex-col items-center justify-center py-1 transition-transform active:scale-90 ${
               currentTab === 'generator' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
@@ -443,15 +508,12 @@ export const App: React.FC = () => {
             }`}>
               <Sparkles className="w-5 h-5" />
             </div>
-            <span className="text-[11px] mt-0.5 tracking-tight">Билеты</span>
+            <span className="text-xs mt-0.5 tracking-tight">Билеты</span>
           </button>
 
           {/* Банк вопросов */}
           <button
-            onClick={() => {
-              setActiveTab('questions');
-              setIsQuestionFormOpen(false);
-            }}
+            onClick={() => goTab('questions')}
             className={`flex flex-col items-center justify-center py-1 transition-transform active:scale-90 ${
               currentTab === 'questions' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
@@ -463,15 +525,12 @@ export const App: React.FC = () => {
             }`}>
               <FileQuestion className="w-5 h-5" />
             </div>
-            <span className="text-[11px] mt-0.5 tracking-tight">Вопросы</span>
+            <span className="text-xs mt-0.5 tracking-tight">Вопросы</span>
           </button>
 
           {/* Сохраненные билеты */}
           <button
-            onClick={() => {
-              setActiveTab('saved_tickets');
-              setIsQuestionFormOpen(false);
-            }}
+            onClick={() => goTab('saved_tickets')}
             className={`flex flex-col items-center justify-center py-1 transition-transform active:scale-90 ${
               currentTab === 'saved_tickets' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
@@ -483,12 +542,12 @@ export const App: React.FC = () => {
             }`}>
               <FileCheck2 className="w-5 h-5" />
             </div>
-            <span className="text-[11px] mt-0.5 tracking-tight">Архив</span>
+            <span className="text-xs mt-0.5 tracking-tight">Архив</span>
           </button>
 
           {/* Меню "Ещё" */}
           <button
-            onClick={() => setMobileMenuOpen(true)}
+            onClick={openSheet}
             className={`flex flex-col items-center justify-center py-1 transition-transform active:scale-90 ${
               mobileMenuOpen || (!['generator', 'questions', 'saved_tickets'].includes(currentTab) && !isQuestionFormOpen)
                 ? 'text-indigo-600 font-bold'
@@ -500,7 +559,7 @@ export const App: React.FC = () => {
             }`}>
               <MoreHorizontal className="w-5 h-5" />
             </div>
-            <span className="text-[11px] mt-0.5 tracking-tight">Ещё</span>
+            <span className="text-xs mt-0.5 tracking-tight">Ещё</span>
           </button>
         </div>
       </nav>

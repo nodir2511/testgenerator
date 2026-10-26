@@ -184,13 +184,13 @@ const TopicPicker: React.FC<{
   return (
     <div className="md:col-span-2">
       <button type="button" disabled={disabled || !subjectId} onClick={() => setOpen((o) => !o)}
-        className="flex items-center space-x-1 text-[11px] font-semibold text-blue-700 disabled:text-slate-400">
+        className="flex items-center space-x-1 text-xs font-semibold text-blue-700 disabled:text-slate-400">
         {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
         <span>Темы: {picked === 0 ? 'весь предмет' : `выбрано ${picked}`}</span>
       </button>
       {open && (
         <div className="mt-2 space-y-2">
-          <div className="flex items-center gap-2 text-[11px]">
+          <div className="flex items-center gap-2 text-xs">
             <button type="button" className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-medium"
               onClick={() => onChange(chapters.filter((c: any) => !topics.some((t: any) => t.chapter_id === c.id)).map((c: any) => c.id), topics.map((t: any) => t.id))}>Выбрать все</button>
             <button type="button" className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium" onClick={() => onChange([], [])}>Снять всё (= весь предмет)</button>
@@ -419,7 +419,7 @@ export const ClusterExam: React.FC = () => {
                 setState((st) => ({ ...st, dateIso: iso, settings: { ...st.settings, date: formatted || st.settings.date } }));
               }}
             />
-            <span className="block text-[11px] font-normal text-slate-500">На обложке: <strong className="text-slate-700">{state.settings.date || '—'}</strong></span>
+            <span className="block text-xs font-normal text-slate-500">На обложке: <strong className="text-slate-700">{state.settings.date || '—'}</strong></span>
           </label>
           <label className="text-xs font-semibold text-slate-600 space-y-1">
             <span>Вариантов (1–{MAX_VARIANTS})</span>
@@ -437,14 +437,14 @@ export const ClusterExam: React.FC = () => {
           />
           <span>Не брать вопросы, которые уже были в сохранённых экзаменах-кластерах (если не хватает новых — берутся и старые, с предупреждением)</span>
         </label>
-        <p className="text-[11px] text-slate-400">
+        <p className="text-xs text-slate-500">
           Пример: «Компонент {state.settings.code || 'А.5'}-{state.settings.exam || 'Авг'}» на обложке и «Компонент {state.settings.code || 'А.5'}-1» в колонтитулах первого варианта.
         </p>
       </div>
 
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <h3 className="font-bold text-slate-900 text-sm">2. Субтесты</h3>
-        <p className="text-[11px] text-slate-400">Снимите галочку у предмета, чтобы не включать его в экзамен.</p>
+        <p className="text-xs text-slate-500">Снимите галочку у предмета, чтобы не включать его в экзамен.</p>
         <div className="space-y-3">
           {CLUSTER_SLOTS.map((slot, i) => {
             const on = state.enabled?.[i] !== false;
@@ -465,12 +465,12 @@ export const ClusterExam: React.FC = () => {
                   {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
                 {on && !state.subjectIds[i] && (
-                  <p className="text-[11px] text-amber-700 font-medium">Предмет не выбран. Выберите предмет из списка или снимите галочку.</p>
+                  <p className="text-xs text-amber-700 font-medium">Предмет не выбран. Выберите предмет из списка или снимите галочку.</p>
                 )}
               </div>
               <div className="flex items-end gap-2 flex-wrap">
                 {([['test', 'Тестов'], ['matching', 'Соответствий'], ['open', 'Открытых']] as const).map(([k, label]) => (
-                  <label key={k} className="text-[11px] font-semibold text-slate-500 space-y-1 block">
+                  <label key={k} className="text-xs font-semibold text-slate-500 space-y-1 block">
                     <span>{label}</span>
                     <input type="number" min={0} disabled={!on} className={num} value={state.counts[i][k]} onChange={(e) => setCount(i, k, Number(e.target.value))} />
                   </label>
@@ -494,7 +494,7 @@ export const ClusterExam: React.FC = () => {
         type="button"
         onClick={handleGenerate}
         disabled={busy}
-        className="w-full sm:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white rounded-xl text-sm font-semibold shadow-sm flex items-center justify-center space-x-2 transition"
+        className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl text-sm font-semibold shadow-sm flex items-center justify-center space-x-2 transition"
       >
         {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
         <span>{busy ? progress || 'Создание…' : 'Создать кластер'}</span>
@@ -509,7 +509,7 @@ export const ClusterExam: React.FC = () => {
           <button
             type="button"
             onClick={() => saveAs(result.blob, result.fileName)}
-            className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold shadow-sm flex items-center justify-center space-x-2 transition"
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold shadow-sm flex items-center justify-center space-x-2 transition"
           >
             <Download className="w-4 h-4" />
             <span>Скачать архив</span>

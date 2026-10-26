@@ -78,3 +78,7 @@ body {
   min-height: 44px;
   min-width: 44px;
 }
+
+/* Полоска обратного отсчёта в уведомлении «Удалено · Отменить» */
+@keyframes toast-countdown { from { width: 100%; } to { width: 0%; } }
+.toast-countdown { animation-name: toast-countdown; animation-timing-function: linear; animation-fill-mode: forwards; }

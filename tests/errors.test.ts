@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { explainError } from '../src/lib/errors';
+import { authErrorText, explainError } from '../src/lib/errors';
 
 describe('explainError', () => {
   it('показывает русское сообщение как причину, без технических подробностей', () => {
@@ -13,5 +13,14 @@ describe('explainError', () => {
     expect(e.reason).toContain('Нет связи');
     expect(e.details).toBe('Failed to fetch');
     expect(explainError(new Error('something odd')).details).toBe('something odd');
+  });
+});
+
+describe('authErrorText', () => {
+  it('переводит частые ошибки входа', () => {
+    expect(authErrorText({ message: 'Invalid login credentials' })).toMatch(/Неверная эл. почта или пароль/);
+    expect(authErrorText({ message: 'Request rate limit reached', status: 429 })).toMatch(/Слишком много попыток/);
+    expect(authErrorText(new TypeError('Failed to fetch'))).toMatch(/Нет связи/);
+    expect(authErrorText({ message: 'Something odd' })).toMatch(/Не удалось войти/);
   });
 });
