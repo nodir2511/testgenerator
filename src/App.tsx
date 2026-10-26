@@ -13,6 +13,7 @@ const ClusterExam = lazy(() => import('./components/ClusterExam').then((m) => ({
 const ReleasesView = lazy(() => import('./components/ReleasesView').then((m) => ({ default: m.ReleasesView })));
 const StatsView = lazy(() => import('./components/StatsView').then((m) => ({ default: m.StatsView })));
 import { AuthModal } from './components/AuthModal';
+import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { TelegramLink } from './components/TelegramLink';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { useReleases } from './hooks/useReleases';
@@ -210,6 +211,11 @@ export const App: React.FC = () => {
         <AuthModal isOpen={true} />
       </div>
     );
+  }
+
+  // Пароль задал администратор — сначала свой пароль, потом сайт
+  if (profile?.must_change_password) {
+    return <ChangePasswordScreen />;
   }
 
   return (

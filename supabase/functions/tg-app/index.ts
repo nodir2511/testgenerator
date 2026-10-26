@@ -11,7 +11,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
-import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser, resendBatch, type Limits } from '../_shared/generate.ts';
+import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser, resendBatch, userMessage, type Limits } from '../_shared/generate.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -191,7 +191,7 @@ Deno.serve(async (req) => {
           return json({ ok: true, missingAnswers: r.missingAnswers, keySent: r.keySent });
         } catch (e) {
           console.error('tg-app generate failed', e);
-          return json({ error: (e as Error).message || 'Не удалось создать билеты' }, 422);
+          return json({ error: userMessage(e, 'Не удалось создать билеты') }, 422);
         }
       }
       case 'resend': {
@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
           return json({ ok: true, missingAnswers: r.missingAnswers, keySent: r.keySent });
         } catch (e) {
           console.error('tg-app resend failed', e);
-          return json({ error: (e as Error).message || 'Не удалось отправить файл' }, 422);
+          return json({ error: userMessage(e, 'Не удалось отправить файл') }, 422);
         }
       }
       default:
@@ -210,6 +210,6 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     console.error('tg-app', err);
-    return json({ error: (err as Error).message || 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Внутренняя ошибка. Попробуйте ещё раз.' }, 500);
   }
 });

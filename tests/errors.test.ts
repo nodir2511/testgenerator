@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authErrorText, explainError } from '../src/lib/errors';
+import { authErrorText, explainError, passwordErrorText } from '../src/lib/errors';
 
 describe('explainError', () => {
   it('показывает русское сообщение как причину, без технических подробностей', () => {
@@ -22,5 +22,14 @@ describe('authErrorText', () => {
     expect(authErrorText({ message: 'Request rate limit reached', status: 429 })).toMatch(/Слишком много попыток/);
     expect(authErrorText(new TypeError('Failed to fetch'))).toMatch(/Нет связи/);
     expect(authErrorText({ message: 'Something odd' })).toMatch(/Не удалось войти/);
+  });
+});
+
+describe('passwordErrorText', () => {
+  it('переводит ошибки смены пароля', () => {
+    expect(passwordErrorText({ message: 'New password should be different from the old password.' })).toMatch(/отличаться/);
+    expect(passwordErrorText({ message: 'Password is known to be weak and easy to guess' })).toMatch(/слишком простой/);
+    expect(passwordErrorText({ message: 'Password should be at least 6 characters.' })).toMatch(/длиннее/);
+    expect(passwordErrorText({ message: 'boom' })).toMatch(/Не удалось сменить пароль/);
   });
 });

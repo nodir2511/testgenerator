@@ -19,7 +19,6 @@ interface AuthContextType {
   /** Можно ли редактировать содержимое предмета */
   canManage: (subjectId: string | null | undefined) => boolean;
   signIn: (email: string, pass: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, pass: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -116,21 +115,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { error: error ? new Error(error.message) : null };
   };
 
-  const signUp = async (email: string, pass: string, fullName: string) => {
-    setIsLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password: pass,
-      options: {
-        data: {
-          full_name: fullName.trim(),
-        },
-      },
-    });
-    setIsLoading(false);
-    return { error: error ? new Error(error.message) : null };
-  };
-
   const signOut = async () => {
     setIsLoading(true);
     await supabase.auth.signOut();
@@ -161,7 +145,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         subjectIds,
         canManage,
         signIn,
-        signUp,
         signOut,
         refreshProfile,
       }}

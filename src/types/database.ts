@@ -17,6 +17,8 @@ export interface Profile {
   role: UserRole;
   /** Главный администратор: видит историю создания билетов всех пользователей */
   is_owner?: boolean;
+  /** Пароль задал администратор: при входе нужно сменить его на свой */
+  must_change_password?: boolean;
   created_at: string;
   updated_at: string;
 }

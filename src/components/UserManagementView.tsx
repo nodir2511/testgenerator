@@ -207,14 +207,7 @@ export const UserManagementView: React.FC = () => {
         .select('id');
       if (error) throw error;
       assertRowsChanged(changed, 'роль пользователя');
-
-      await supabase.from('audit_logs').insert({
-        user_id: currentUser?.id,
-        action: 'CHANGE_USER_ROLE',
-        entity_type: 'profiles',
-        entity_id: userId,
-        details: { new_role: newRole },
-      });
+      // Запись в журнал аудита делает сама база (триггер на смену роли)
     },
     meta: { action: 'Не удалось изменить роль', success: 'Роль пользователя изменена в базе' },
     onSuccess: () => {
@@ -244,13 +237,6 @@ export const UserManagementView: React.FC = () => {
         const ins = await supabase.from('user_subjects').insert(rolesEditSubjects.map((subject_id) => ({ user_id: userId, subject_id })));
         if (ins.error) throw ins.error;
       }
-      await supabase.from('audit_logs').insert({
-        user_id: currentUser?.id,
-        action: 'CHANGE_USER_ROLE',
-        entity_type: 'profiles',
-        entity_id: userId,
-        details: { new_role: rolesEditRole, subject_ids: rolesEditSubjects },
-      });
     },
     meta: { action: 'Не удалось сохранить роль и предметы', success: 'Роль и предметы сохранены в базе' },
     onSuccess: () => {
@@ -260,6 +246,9 @@ export const UserManagementView: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['admin_audit_logs'] });
     },
   });
+
+  // Данные админов (и главного) меняет только главный админ; свои — каждый
+  const canEdit = (p: Profile) => isOwner || p.id === currentUser?.id || (p.role !== 'admin' && !p.is_owner);
 
   // Удаление пользователя (только главный админ)
   const deleteUserMutation = useMutation({
@@ -302,7 +291,8 @@ export const UserManagementView: React.FC = () => {
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Роли: преподаватель, администратор и роли по предметам (доступ только к назначенным предметам).
-            Роли по предметам и удаление пользователей — только у главного админа.
+            Роли, данные администраторов и удаление пользователей — только у главного админа.
+            Пароль, заданный здесь, временный: при входе человек заменит его на свой.
           </p>
         </div>
 
@@ -324,7 +314,7 @@ export const UserManagementView: React.FC = () => {
               type="password"
               required
               minLength={6}
-              placeholder="Пароль (мин. 6 символов)"
+              placeholder="Временный пароль (мин. 6 символов)"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
@@ -342,7 +332,7 @@ export const UserManagementView: React.FC = () => {
               className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
             >
               <option value="user">{ROLE_LABELS.user}</option>
-              <option value="admin">{ROLE_LABELS.admin}</option>
+              {isOwner && <option value="admin">{ROLE_LABELS.admin}</option>}
               {isOwner && <option value="subject_teacher">{ROLE_LABELS.subject_teacher}</option>}
               {isOwner && <option value="subject_admin">{ROLE_LABELS.subject_admin}</option>}
             </select>
@@ -409,6 +399,7 @@ export const UserManagementView: React.FC = () => {
                 </div>
 
                 <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                  {canEdit(p) && (
                   <button
                     onClick={() => (editingId === p.id ? setEditingId(null) : startEdit(p))}
                     className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-lg font-semibold flex items-center space-x-1"
@@ -416,7 +407,8 @@ export const UserManagementView: React.FC = () => {
                     <Pencil className="w-3.5 h-3.5" />
                     <span>Изменить</span>
                   </button>
-                  {p.role === 'user' && (
+                  )}
+                  {isOwner && p.role === 'user' && (
                     <button
                       onClick={() => changeRoleMutation.mutate({ userId: p.id, newRole: 'admin' })}
                       disabled={changeRoleMutation.isPending}
@@ -426,7 +418,7 @@ export const UserManagementView: React.FC = () => {
                       <span>Сделать админом</span>
                     </button>
                   )}
-                  {p.role === 'admin' && (
+                  {isOwner && p.role === 'admin' && !p.is_owner && (
                     <button
                       onClick={() => changeRoleMutation.mutate({ userId: p.id, newRole: 'user' })}
                       disabled={p.id === currentUser?.id || changeRoleMutation.isPending}
@@ -525,7 +517,7 @@ export const UserManagementView: React.FC = () => {
                     <input
                       type="password"
                       minLength={6}
-                      placeholder="Новый пароль (пусто — не менять)"
+                      placeholder={p.id === currentUser?.id ? 'Новый пароль (пусто — не менять)' : 'Временный пароль (пусто — не менять)'}
                       value={editPassword}
                       onChange={(e) => setEditPassword(e.target.value)}
                       className="px-3 py-2 border border-slate-300 rounded-lg text-sm"

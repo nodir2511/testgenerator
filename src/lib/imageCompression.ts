@@ -13,14 +13,15 @@ export async function compressImage(file: File): Promise<File> {
   const options = {
     maxSizeMB: 0.5, // Максимум 500 КБ
     maxWidthOrHeight: 1200, // Максимум 1200px по ширине/высоте
-    useWebWorker: true,
+    // Без web-worker: иначе библиотека подгружает свой код с cdn.jsdelivr.net (лишний внешний скрипт, его запрещает CSP)
+    useWebWorker: false,
     fileType: 'image/webp' as const,
   };
 
   try {
     return await imageCompression(file, options);
   } catch (error) {
-    console.warn('Ошибка сжатия через web-worker, используем исходный файл:', error);
+    console.warn('Ошибка сжатия, используем исходный файл:', error);
     return file;
   }
 }

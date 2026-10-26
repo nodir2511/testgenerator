@@ -45,7 +45,10 @@ Deno.serve(async (req) => {
     if (target.is_owner) return json({ error: 'Нельзя удалить главного администратора' }, 400);
 
     const { error: delError } = await adminClient.auth.admin.deleteUser(userId);
-    if (delError) return json({ error: delError.message }, 400);
+    if (delError) {
+      console.error('deleteUser', delError);
+      return json({ error: 'Не удалось удалить пользователя' }, 400);
+    }
 
     await adminClient.from('audit_logs').insert({
       user_id: callerAuth.user.id,
@@ -57,6 +60,7 @@ Deno.serve(async (req) => {
 
     return json({ ok: true, email: target.email });
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : 'Внутренняя ошибка' }, 500);
+    console.error('admin-delete-user', err);
+    return json({ error: 'Внутренняя ошибка. Попробуйте ещё раз.' }, 500);
   }
 });

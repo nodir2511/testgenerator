@@ -4,6 +4,10 @@
 // потери собственной сессии. Работает через service role key, поэтому
 // обязательно выполняется на сервере (Supabase Edge Functions), а не в браузере.
 //
+// Самостоятельная регистрация закрыта (supabase/sql/security_round3.sql): база создаёт
+// аккаунт, только если эта функция заранее записала приглашение на email (account_invites).
+// Пароль задаёт администратор, поэтому при первом входе человек обязан сменить его на свой.
+//
 // Деплой: supabase functions deploy admin-create-user
 // Секреты SUPABASE_URL и SUPABASE_SERVICE_ROLE_KEY задаются Supabase автоматически.
 
@@ -17,57 +21,69 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Понятные сообщения вместо внутренних текстов Supabase
+function createErrorText(message: string | undefined): string {
+  const m = (message || '').toLowerCase();
+  if (m.includes('already') || m.includes('registered') || m.includes('exists')) return 'Пользователь с таким email уже есть';
+  if (m.includes('email') && (m.includes('invalid') || m.includes('format'))) return 'Некорректный email';
+  if (m.includes('password')) return 'Пароль не подходит: сделайте его длиннее или сложнее';
+  return 'Не удалось создать пользователя';
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const authHeader = req.headers.get('Authorization') ?? '';
-    const callerToken = authHeader.replace('Bearer ', '');
+    const callerToken = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
     if (!callerToken) {
       return json({ error: 'Требуется авторизация' }, 401);
     }
 
-    // Клиент от имени вызывающего — чтобы проверить, что он действительно админ
-    const callerClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    });
+    const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-    const { data: callerAuth, error: callerAuthError } = await callerClient.auth.getUser(callerToken);
+    const { data: callerAuth, error: callerAuthError } = await adminClient.auth.getUser(callerToken);
     if (callerAuthError || !callerAuth?.user) {
       return json({ error: 'Недействительная сессия' }, 401);
     }
 
-    const { data: callerProfile, error: callerProfileError } = await callerClient
+    const { data: callerProfile } = await adminClient
       .from('profiles')
       .select('role, is_owner')
       .eq('id', callerAuth.user.id)
       .single();
 
-    if (callerProfileError || callerProfile?.role !== 'admin') {
+    if (callerProfile?.role !== 'admin') {
       return json({ error: 'Только администратор может создавать учётные записи' }, 403);
     }
 
     const body = await req.json();
-    const email = String(body.email ?? '').trim();
+    const email = String(body.email ?? '').trim().toLowerCase();
     const password = String(body.password ?? '');
-    const fullName = String(body.fullName ?? '').trim();
+    const fullName = String(body.fullName ?? '').trim().slice(0, 200);
     const ROLES = ['user', 'admin', 'subject_teacher', 'subject_admin'];
     const role = ROLES.includes(body.role) ? String(body.role) : 'user';
     const bySubject = role === 'subject_teacher' || role === 'subject_admin';
     const subjectIds: string[] = Array.isArray(body.subjectIds) ? body.subjectIds.filter((x: unknown) => typeof x === 'string') : [];
-    if (bySubject) {
-      if (!callerProfile.is_owner) return json({ error: 'Роли по предметам назначает только главный администратор' }, 403);
-      if (!subjectIds.length) return json({ error: 'Выберите хотя бы один предмет' }, 400);
+    // Любая роль, кроме обычного преподавателя, — только у главного администратора
+    if (role !== 'user' && !callerProfile.is_owner) {
+      return json({ error: 'Эту роль назначает только главный администратор' }, 403);
     }
+    if (bySubject && !subjectIds.length) return json({ error: 'Выберите хотя бы один предмет' }, 400);
 
     if (!email || !password || password.length < 6) {
       return json({ error: 'Укажите email и пароль (не менее 6 символов)' }, 400);
     }
 
-    // Админ-клиент с полными правами для создания пользователя
-    const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    // Приглашение на 10 минут: без него база не даст создать аккаунт
+    const { error: inviteError } = await adminClient
+      .from('account_invites')
+      .upsert({ email, expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() });
+    if (inviteError) {
+      console.error('account_invites', inviteError);
+      return json({ error: 'Не удалось создать пользователя' }, 500);
+    }
 
     const { data: created, error: createError } = await adminClient.auth.admin.createUser({
       email,
@@ -77,14 +93,14 @@ Deno.serve(async (req) => {
     });
 
     if (createError || !created?.user) {
-      return json({ error: createError?.message ?? 'Не удалось создать пользователя' }, 400);
+      await adminClient.from('account_invites').delete().eq('email', email);
+      console.error('createUser', createError);
+      return json({ error: createErrorText(createError?.message) }, 400);
     }
 
-    // Триггер on_auth_user_created уже создаёт профиль с ролью 'user' по умолчанию.
-    // Если админ запросил роль 'admin' — проставляем её отдельно.
-    if (role !== 'user') {
-      await adminClient.from('profiles').update({ role }).eq('id', created.user.id);
-    }
+    // Триггер on_auth_user_created уже создал профиль с ролью 'user'.
+    // Пароль придумал администратор — при первом входе человек сменит его на свой.
+    await adminClient.from('profiles').update({ role, must_change_password: true }).eq('id', created.user.id);
     if (bySubject) {
       await adminClient.from('user_subjects').insert(subjectIds.map((subject_id) => ({ user_id: created.user.id, subject_id })));
     }
@@ -99,7 +115,8 @@ Deno.serve(async (req) => {
 
     return json({ id: created.user.id, email: created.user.email, role });
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : 'Внутренняя ошибка' }, 500);
+    console.error('admin-create-user', err);
+    return json({ error: 'Внутренняя ошибка. Попробуйте ещё раз.' }, 500);
   }
 });
 

@@ -12,7 +12,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
-import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser as linkedUserOf } from '../_shared/generate.ts';
+import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser as linkedUserOf, userMessage } from '../_shared/generate.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -356,6 +356,9 @@ async function screenQuickVariants(chat: number, msgId: number, type: 'phys' | '
 }
 
 async function handleQuickRun(chat: number, msgId: number, type: 'phys' | 'bio', subjectId: string, count: number, user: any) {
+  // Номер предмета приходит из кнопки — проверяем, что предмет доступен пользователю
+  const allowed = await allowedSubjectIds(sb, user);
+  if (allowed && !allowed.includes(subjectId)) return show(chat, msgId, 'Этот предмет вам не назначен.');
   const chs = await chaptersOf(subjectId);
   if (!chs.length) return show(chat, msgId, 'У выбранного предмета нет доступных глав.');
 
@@ -395,11 +398,14 @@ async function handleQuickRun(chat: number, msgId: number, type: 'phys' | 'bio',
 
 async function handleQuickRepeat(chat: number, msgId: number, batchId: string, user: any) {
   const { data: batch } = await sb.from('ticket_batches')
-    .select('id, title, subject_id, generation_params')
+    .select('id, title, subject_id, created_by, generation_params')
     .eq('id', batchId)
     .maybeSingle();
 
-  if (!batch) return show(chat, msgId, 'Набор не найден.');
+  // Повторять можно только свой набор (кнопку с чужим номером можно подделать) и не кластерный
+  if (!batch || batch.created_by !== user.id || batch.generation_params?.source === 'cluster') {
+    return show(chat, msgId, 'Набор не найден.');
+  }
   const p = batch.generation_params || {};
   const r = p.requested ?? { test: p.test_count ?? 10, matching: p.matching_count ?? 2, open: p.open_count ?? 3 };
 
@@ -439,7 +445,7 @@ async function handleResend(chat: number, msgId: number, batchId: string, user: 
       [{ text: '🚀 Создать новый набор', web_app: { url: APP_URL } }],
     ], MAIN_KEYBOARD);
   } catch (err: any) {
-    await send(chat, `❌ Ошибка отправки: ${err.message || err}`, undefined, MAIN_KEYBOARD);
+    await send(chat, `❌ Ошибка отправки: ${escapeHtml(userMessage(err, 'попробуйте ещё раз'))}`, undefined, MAIN_KEYBOARD);
   }
 }
 
@@ -805,7 +811,7 @@ async function onCallback(cb: any) {
         await generate(chat, msgId, st, user, lang);
       } catch (e) {
         console.error('generate failed', e);
-        await send(chat, `❌ Ошибка генерации: ${(e as Error).message || e}`, undefined, MAIN_KEYBOARD);
+        await send(chat, `❌ Ошибка генерации: ${escapeHtml(userMessage(e, 'попробуйте ещё раз'))}`, undefined, MAIN_KEYBOARD);
       } finally {
         st.busyAt = undefined;
         st.step = 'settings';
@@ -823,7 +829,7 @@ async function handle(update: any) {
     console.error('update failed', e);
     const chat = update.message?.chat?.id || update.callback_query?.message?.chat?.id || update.callback_query?.from?.id;
     if (chat) {
-      await send(chat, `⚠️ Произошла ошибка: ${(e as Error).message || e}`);
+      await send(chat, `⚠️ Произошла ошибка: ${escapeHtml(userMessage(e, 'попробуйте ещё раз'))}`);
     }
   }
 }

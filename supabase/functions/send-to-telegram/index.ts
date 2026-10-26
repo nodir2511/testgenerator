@@ -87,6 +87,6 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   } catch (err) {
     console.error('send-to-telegram', err);
-    return json({ error: (err as Error).message || 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Внутренняя ошибка. Попробуйте ещё раз.' }, 500);
   }
 });

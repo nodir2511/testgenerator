@@ -9,6 +9,13 @@ import * as T from './ticketing.ts';
 
 export type Lang = 'ru' | 'tg' | 'both';
 
+// Текст ошибки для пользователя: наши сообщения (на русском) показываем как есть,
+// внутренние ошибки базы и сервисов — общей фразой (подробности только в логах функции)
+export function userMessage(e: unknown, fallback: string): string {
+  const m = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+  return m && /[А-Яа-яЁё]/.test(m) ? m : fallback;
+}
+
 export interface Selection {
   subjectId: string;
   chapterIds: string[];

@@ -140,3 +140,16 @@ export function authErrorText(err: unknown): string {
   if (/[а-яё]/i.test(raw)) return raw;
   return 'Не удалось войти. Попробуйте ещё раз или обратитесь к администратору.';
 }
+
+/** Ошибка смены пароля — по-русски и без технических подробностей */
+export function passwordErrorText(err: unknown): string {
+  const raw = errText(err);
+  const low = raw.toLowerCase();
+  if (low.includes('different from the old')) return 'Новый пароль должен отличаться от прежнего.';
+  if (low.includes('weak') || low.includes('pwned') || low.includes('leaked')) return 'Этот пароль слишком простой или встречался в утечках. Придумайте другой.';
+  if (low.includes('at least') || low.includes('should contain')) return 'Пароль не подходит: сделайте его длиннее и добавьте буквы и цифры.';
+  if (low.includes('reauthenticat') || low.includes('session') || low.includes('jwt')) return 'Сессия устарела. Выйдите, войдите заново и повторите.';
+  if (low.includes('failed to fetch') || low.includes('network') || low.includes('load failed')) return 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.';
+  if (/[а-яё]/i.test(raw)) return raw;
+  return 'Не удалось сменить пароль. Попробуйте ещё раз.';
+}
