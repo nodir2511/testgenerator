@@ -63,3 +63,7 @@ tests/                Тесты (vitest)
 - Сайт: пуш в `main`, Vercel собирает и публикует сам.
 - SQL: `npx supabase db query --linked -f supabase/sql/<файл>.sql`.
 - Функции: `npx supabase functions deploy <имя> --project-ref <ref>` (для `telegram-bot` и `tg-app` добавьте `--no-verify-jwt`). Нужен `npx supabase login` и привязка проекта (`supabase link`).
+  Без CLI (например, через Supabase MCP): деплоится файл-обёртка из одной строки
+  `import 'https://raw.githubusercontent.com/nodir2511/testgenerator/<коммит>/supabase/functions/<имя>/index.ts';` —
+  Supabase сам скачивает при сборке функцию и общие модули `_shared` на этом коммите. Коммит должен быть уже в GitHub;
+  откат — та же обёртка с прошлым коммитом.
