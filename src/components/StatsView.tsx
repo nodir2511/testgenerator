@@ -7,7 +7,7 @@ import { notifyError, notifyInfo } from '../lib/errors';
 import { useGenerationSettings, type GenerationSettings } from '../lib/generationLimits';
 import { type UserRole } from '../types/database';
 
-// Статистика использования (только для администратора): RPC admin_usage_stats (supabase/sql/usage_stats_v3.sql).
+// Статистика использования (только для администратора): RPC admin_usage_stats_v3 (supabase/sql/usage_stats_v3.sql).
 // Поля, которых нет в старой версии функции, необязательны — экран работает и с ней.
 
 interface Totals { batches: number; tickets: number; users: number; telegram?: number }
@@ -255,8 +255,8 @@ export const StatsView: React.FC = () => {
     queryKey: ['admin-usage-stats', days, noAdmins],
     placeholderData: (prev) => prev,
     queryFn: async () => {
-      let res = await supabase.rpc('admin_usage_stats', { p_days: days, p_no_admins: noAdmins });
-      // Старая версия функции в базе — без фильтра «без администраторов»
+      let res = await supabase.rpc('admin_usage_stats_v3', { p_days: days, p_no_admins: noAdmins });
+      // В базе ещё нет v3 — прежняя функция, без новых разделов и фильтра «без администраторов»
       if (res.error?.code === 'PGRST202') res = await supabase.rpc('admin_usage_stats', { p_days: days });
       if (res.error) throw res.error;
       return res.data as Stats;

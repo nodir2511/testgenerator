@@ -1,4 +1,4 @@
--- Статистика для администратора, версия 3: всё из v2 и дополнительно
+-- Статистика для администратора, версия 3 (admin_usage_stats_v3): всё из v2 и дополнительно
 --   prev      — те же итоги за предыдущий период такой же длины (рост/падение),
 --   today     — генерации и люди за сегодня (сутки по Душанбе),
 --   people    — аккаунты: всего, новых, ни разу не генерировали, привязали Telegram, упирались в дневной лимит,
@@ -13,7 +13,7 @@
 -- Применить: supabase db query --linked -f supabase/sql/usage_stats_v3.sql
 
 -- Журнал генераций с учётом фильтра «без администраторов». Не security definer, чтобы планировщик
--- подставлял его прямо в запрос; вызывается только из admin_usage_stats (у пользователей прав нет).
+-- подставлял его прямо в запрос; вызывается только из admin_usage_stats_v3 (у пользователей прав нет).
 create or replace function public.usage_scope(p_no_admins boolean)
 returns setof public.generation_usage
 language sql
@@ -26,9 +26,9 @@ as $$
 $$;
 revoke all on function public.usage_scope(boolean) from public, anon, authenticated;
 
--- Старая версия с одним параметром мешала бы вызову по имени (две подходящие функции)
-drop function if exists public.admin_usage_stats(int);
-create or replace function public.admin_usage_stats(p_days int default 30, p_no_admins boolean default false)
+-- Отдельное имя: прежняя admin_usage_stats(int) остаётся как есть (на ней работает старая версия сайта),
+-- а одноимённая функция с двумя параметрами сделала бы вызов по имени неоднозначным.
+create or replace function public.admin_usage_stats_v3(p_days int default 30, p_no_admins boolean default false)
 returns jsonb
 language plpgsql
 security definer
@@ -223,5 +223,5 @@ begin
   return res;
 end;
 $$;
-revoke all on function public.admin_usage_stats(int, boolean) from public, anon;
-grant execute on function public.admin_usage_stats(int, boolean) to authenticated;
+revoke all on function public.admin_usage_stats_v3(int, boolean) from public, anon;
+grant execute on function public.admin_usage_stats_v3(int, boolean) to authenticated;
