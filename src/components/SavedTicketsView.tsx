@@ -88,7 +88,7 @@ export const SavedTicketsView: React.FC = () => {
 
   // Архив по страницам: только заголовки наборов, без вопросов
   const list = useInfiniteQuery({
-    queryKey: ['saved_ticket_batches', subjectFilter, search, isOwner],
+    queryKey: ['saved_ticket_batches', subjectFilter, search],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       let q = supabase
@@ -98,8 +98,7 @@ export const SavedTicketsView: React.FC = () => {
         .range(pageParam, pageParam + PAGE - 1);
       if (subjectFilter) q = q.eq('subject_id', subjectFilter);
       if (search) q = q.ilike('title', `%${search.replace(/[%_]/g, (c) => `\\${c}`)}%`);
-      // Экзамен-кластер виден только главному админу
-      if (!isOwner) q = q.or('generation_params->>source.is.null,generation_params->>source.neq.cluster');
+      // Экзамен-кластер виден только главному админу — это уже проверяет база (политика «Просмотр партий билетов»)
       const { data, error, count } = await q;
       if (error) throw error;
       const rows = await Promise.all((data || []).map(async (b: any) => ({
