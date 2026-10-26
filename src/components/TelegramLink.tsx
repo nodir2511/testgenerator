@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send, X, Loader2, Copy, Check, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -70,25 +71,35 @@ export const TelegramLink: React.FC = () => {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg transition"
+        className="p-2 text-slate-500 hover:text-indigo-600 rounded-xl transition"
         title="Telegram-бот"
+        aria-label="Telegram-бот"
       >
         <Send className="w-4 h-4" />
       </button>
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setOpen(false)}>
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+      {/* Окно рисуется в body: внутри шапки (backdrop-blur) fixed-слой прижимался бы к шапке и обрезался.
+          На телефоне — шторка снизу, на компьютере — окно по центру */}
+      {open && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 sm:p-4" onClick={() => setOpen(false)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Telegram-бот"
+            className="bg-white rounded-t-3xl sm:rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto p-5 sm:p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:pb-6 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-1 bg-slate-200 rounded-full mx-auto -mt-1 sm:hidden" />
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-slate-900 flex items-center"><Send className="w-4 h-4 mr-2 text-blue-600" />Telegram-бот</h3>
-              <button onClick={() => setOpen(false)} className="text-slate-500 hover:text-slate-700"><X className="w-5 h-5" /></button>
+              <h3 className="font-bold text-lg text-slate-900 flex items-center"><Send className="w-5 h-5 mr-2 text-indigo-600" />Telegram-бот</h3>
+              <button onClick={() => setOpen(false)} className="w-10 h-10 -mr-2 flex items-center justify-center rounded-xl text-slate-500 hover:text-slate-700 hover:bg-slate-100" aria-label="Закрыть"><X className="w-5 h-5" /></button>
             </div>
 
             <p className="text-sm text-slate-600">
               Бот создаёт билеты с теми же настройками, что и сайт, и присылает файл Word прямо в чат.
             </p>
 
-            <div className={`text-xs font-semibold px-3 py-2 rounded-lg ${linked ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+            <div className={`text-sm font-semibold px-3 py-2.5 rounded-xl ${linked ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
               {linked ? '✅ Telegram привязан к вашему аккаунту' : 'Telegram пока не привязан'}
             </div>
 
@@ -104,7 +115,7 @@ export const TelegramLink: React.FC = () => {
                       href={deepLink}
                       target="_blank"
                       rel="noreferrer"
-                      className="w-full px-4 py-2.5 bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-sm font-semibold flex items-center justify-center"
+                      className="w-full min-h-[48px] px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-base font-bold flex items-center justify-center"
                     >
                       <ExternalLink className="w-4 h-4 mr-2" />Открыть бота и активировать
                     </a>
@@ -134,7 +145,7 @@ export const TelegramLink: React.FC = () => {
               <button
                 onClick={getCode}
                 disabled={busy}
-                className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-sm font-semibold flex items-center justify-center"
+                className="w-full min-h-[48px] px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-base font-bold flex items-center justify-center"
               >
                 {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {linked ? 'Привязать другой чат' : 'Получить код привязки'}
@@ -144,10 +155,11 @@ export const TelegramLink: React.FC = () => {
             {error && <p className="text-xs text-red-600">{error}</p>}
 
             {linked && (
-              <button onClick={unlink} className="text-xs text-rose-600 hover:text-rose-800 font-medium">Отвязать Telegram</button>
+              <button onClick={unlink} className="min-h-[40px] text-sm text-rose-600 hover:text-rose-800 font-semibold">Отвязать Telegram</button>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
