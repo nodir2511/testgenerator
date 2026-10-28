@@ -67,3 +67,19 @@ tests/                Тесты (vitest)
   `import 'https://raw.githubusercontent.com/nodir2511/testgenerator/<коммит>/supabase/functions/<имя>/index.ts';` —
   Supabase сам скачивает при сборке функцию и общие модули `_shared` на этом коммите. Коммит должен быть уже в GitHub;
   откат — та же обёртка с прошлым коммитом.
+
+## Резервные копии
+
+Каждую ночь (02:17 по Душанбе) GitHub Actions (`.github/workflows/backup.yml`) выгружает схемы `public` и `auth` базы через `pg_dump`
+и кладёт файл `examiner_<дата>.dump` (или `.dump.gpg`, если задан `BACKUP_PASSPHRASE`) в папку Google Диска. Хранится 30 дней.
+Секреты GitHub: `SUPABASE_DB_URL`, `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN`, `GDRIVE_FOLDER_ID`, `BACKUP_PASSPHRASE`.
+Запустить вручную: вкладка Actions → «Резервная копия базы…» → Run workflow.
+
+Восстановление (в **пустую** тестовую базу, не поверх рабочей):
+
+```
+gpg --batch --passphrase "<фраза>" -o examiner.dump -d examiner_<дата>.dump.gpg   # если файл шифрован
+pg_restore --no-owner --no-privileges -d "<строка подключения новой базы>" examiner.dump
+```
+
+Не входит в копию: файлы картинок вопросов из хранилища `question-images` (в базе лежат только ссылки).
