@@ -1,7 +1,7 @@
 {
   "name": "exam-ticket-generator",
   "private": true,
-  "version": "0.27.0",
+  "version": "0.27.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -23,9 +23,9 @@
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "read-excel-file": "^9.3.14",
     "tailwind-merge": "^3.0.2",
-    "xlsx": "^0.18.5",
-    "zod": "^3.24.2"
+    "write-excel-file": "^4.1.1"
   },
   "devDependencies": {
     "@types/file-saver": "^2.0.7",

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Papa from 'papaparse';
-import * as XLSX from 'xlsx';
+import { readSheet } from 'read-excel-file/browser';
+import writeExcelFile from 'write-excel-file/browser';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { must, notifySuccess } from '../lib/errors';
@@ -325,22 +326,26 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
 
     // 2. ИМПОРТ ИЗ EXCEL
     if (isExcel) {
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        try {
-          const bstr = evt.target?.result;
-          const wb = XLSX.read(bstr, { type: 'binary' });
-          const wsname = wb.SheetNames[0];
-          const ws = wb.Sheets[wsname];
-          const data = XLSX.utils.sheet_to_json(ws);
+      readSheet(file)
+        .then((grid) => {
+          // Первая строка — заголовки; пустые ячейки пропускаем, как раньше
+          const [header = [], ...body] = grid;
+          const data = body
+            .map((cells) => {
+              const row: Record<string, unknown> = {};
+              header.forEach((h, i) => {
+                const v = cells[i];
+                if (h != null && v != null && v !== '') row[String(h).trim()] = v;
+              });
+              return row;
+            })
+            .filter((row) => Object.keys(row).length > 0);
           validateAndProcessRawData(data);
-        } catch (err: any) {
-          setGlobalError('Ошибка чтения Excel: ' + err.message);
-        } finally {
-          setIsProcessing(false);
-        }
-      };
-      reader.readAsBinaryString(file);
+        })
+        .catch((err: any) => {
+          setGlobalError('Ошибка чтения Excel: ' + (err?.message || String(err)));
+        })
+        .finally(() => setIsProcessing(false));
     } else {
       // 3. ИМПОРТ ИЗ CSV
       Papa.parse(file, {
@@ -489,10 +494,12 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
       },
     ];
 
-    const ws = XLSX.utils.json_to_sheet(templateData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Шаблон');
-    XLSX.writeFile(wb, 'shablon_voprosov.xlsx');
+    const columns = Object.keys(templateData[0]);
+    const sheetData = [
+      columns.map((c) => ({ value: c, fontWeight: 'bold' as const })),
+      ...templateData.map((row) => columns.map((c) => ({ value: String((row as Record<string, unknown>)[c] ?? '') }))),
+    ];
+    void writeExcelFile(sheetData as any, { sheet: 'Шаблон', columns: columns.map(() => ({ width: 30 })) } as any).toFile('shablon_voprosov.xlsx');
   };
 
   // Сохранение проверенной партии в базу данных Supabase.

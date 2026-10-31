@@ -23,7 +23,7 @@ export default defineConfig({
           supabase: ['@supabase/supabase-js'],
           query: ['@tanstack/react-query'],
           docx: ['docx'],
-          sheets: ['xlsx', 'papaparse'],
+          sheets: ['read-excel-file/browser', 'write-excel-file/browser', 'papaparse'],
         },
       },
     },

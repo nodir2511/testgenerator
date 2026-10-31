@@ -45,20 +45,24 @@ export const resultText = (r: ReviewRow) =>
 
 /** Excel: лист «Результаты» (места) и лист «Разбор» (вопросы с итогом) */
 export async function exportXlsx(title: string, teamsRows: { name: string; score: number; place: number }[], review: ReviewRow[], file: string) {
-  const XLSX = await import('xlsx');
+  const { default: writeExcelFile } = await import('write-excel-file/browser');
   const { saveAs } = await import('file-saver');
-  const wb = XLSX.utils.book_new();
-  const res = [['Место', 'Команда', 'Очки'], ...teamsRows.map((t) => [t.place, t.name, t.score])];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(res), 'Результаты');
+  const head = (cols: string[]) => cols.map((c) => ({ value: c, fontWeight: 'bold' as const }));
+  const res = [head(['Место', 'Команда', 'Очки']), ...teamsRows.map((t) => [{ value: t.place }, { value: t.name }, { value: t.score }])];
   const rev = [
-    ['Уровень', 'Тема', 'Стоимость', 'Вопрос (рус.)', 'Вопрос (тадж.)', 'Ответ (рус.)', 'Ответ (тадж.)', 'Итог', 'Ответила', 'Ошиблись'],
-    ...review.map((r) => [r.round, r.cat, r.v, r.q, r.qt, r.a, r.at, r.res === 'ok' ? 'Верно' : 'Никто не ответил', r.team, r.wrong.join(', ')]),
+    head(['Уровень', 'Тема', 'Стоимость', 'Вопрос (рус.)', 'Вопрос (тадж.)', 'Ответ (рус.)', 'Ответ (тадж.)', 'Итог', 'Ответила', 'Ошиблись']),
+    ...review.map((r) =>
+      [r.round, r.cat, r.v, r.q, r.qt, r.a, r.at, r.res === 'ok' ? 'Верно' : 'Никто не ответил', r.team, r.wrong.join(', ')].map((value) => ({
+        value: typeof value === 'number' ? value : String(value ?? ''),
+      })),
+    ),
   ];
-  const ws = XLSX.utils.aoa_to_sheet(rev);
-  ws['!cols'] = [{ wch: 10 }, { wch: 22 }, { wch: 10 }, { wch: 60 }, { wch: 60 }, { wch: 40 }, { wch: 40 }, { wch: 18 }, { wch: 18 }, { wch: 24 }];
-  XLSX.utils.book_append_sheet(wb, ws, 'Разбор');
-  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  saveAs(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `${file}.xlsx`);
+  const widths = [10, 22, 10, 60, 60, 40, 40, 18, 18, 24].map((width) => ({ width }));
+  const blob = await writeExcelFile([
+    { data: res, sheet: 'Результаты' },
+    { data: rev, sheet: 'Разбор', columns: widths },
+  ] as any).toBlob();
+  saveAs(blob, `${file}.xlsx`);
   void title;
 }
 
