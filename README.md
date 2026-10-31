@@ -70,7 +70,7 @@ tests/                Тесты (vitest)
 
 ## Резервные копии
 
-Каждую ночь (02:17 по Душанбе) GitHub Actions (`.github/workflows/backup.yml`) выгружает схемы `public` и `auth` базы через `pg_dump`
+Каждую ночь (02:17 по Душанбе; сейчас ночной запуск отключён в workflow до добавления секретов) GitHub Actions (`.github/workflows/backup.yml`) выгружает схемы `public` и `auth` базы через `pg_dump`
 и кладёт файл `examiner_<дата>.dump` (или `.dump.gpg`, если задан `BACKUP_PASSPHRASE`) в папку «Резервные копии экзаменатора» на Google Диске (скрипт создаёт её сам: доступ drive.file видит только созданное им). Хранится 30 дней.
 Секреты GitHub: `SUPABASE_DB_URL`, `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN`, `BACKUP_PASSPHRASE`.
 Запустить вручную: вкладка Actions → «Резервная копия базы…» → Run workflow.
