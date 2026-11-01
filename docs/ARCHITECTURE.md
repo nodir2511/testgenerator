@@ -127,6 +127,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `game_sessions(code, host_id, teams, board, buzz, input)` — живое состояние, Realtime.
 - `game_secrets(code, n, secret, pin, fails)` — ключи команд.
 - `game_bids(code, n, amount, t)`
+- `game_net(code, n, rtt, err, updated_at)` — задержка и погрешность часов телефонов команд; доступ только через RPC
 - `game_packs(id, title, content)` — вопросы с ответами, видит только ведущий.
 - `game_results(host_id, code, round, title, teams, review, finished_at)`
 
@@ -143,7 +144,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | Статистика | `admin_usage_stats_v3(p_days, p_no_admins)` (используется), `admin_usage_stats(p_days)` (старая, запасной вариант), `usage_scope(p_no_admins)` |
 | Что нового | `add_site_release(p_version, p_title, p_items jsonb, p_released_at)` — повторный вызов с той же версией безопасен |
 | Telegram | `create_telegram_link_code()` → код для `/start КОД` |
-| Игра | `game_create`, `game_join`, `game_rejoin`, `game_rename`, `game_remove_team`, `game_team_pins`, `game_is_host`, `game_buzz`, `game_buzz_clear`, `game_buzz_drop`, `game_check`, `game_team_act`, `game_bids_get`, `game_sync_seq`, `game_time`, `game_now_ms`, `game_has_n` |
+| Игра | `game_create`, `game_join`, `game_rejoin`, `game_rename`, `game_remove_team`, `game_team_pins`, `game_is_host`, `game_buzz`, `game_buzz_clear`, `game_buzz_drop`, `game_check`, `game_team_act`, `game_bids_get`, `game_sync_seq`, `game_time`, `game_now_ms`, `game_has_n`, `game_net_report`, `game_net_get` (связь телефонов, видит ведущий). `game_buzz(p_code, p_n, p_secret, p_t, p_seq, p_err)` строит очередь по времени касания по серверным часам |
 
 ### 4.3 Триггеры
 
@@ -209,9 +210,8 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `fix_release_dates_and_missing.sql` | исправление дат и пропущенных релизов |
 | `telegram_bot.sql` | привязка Telegram, сессии бота |
 | `user_prefs.sql` | `user_prefs` |
-| `game.sql`, `game_v2.sql` … `game_v6.sql` | «Своя игра» по версиям |
+| `game.sql`, `game_v2.sql` … `game_v6.sql` | «Своя игра» по версиям; все применены (v6 — 1 ноября 2026) |
 
-**Расхождение с базой:** `game_v6.sql` («Своя игра» 0.10: честный порядок нажатий, таблица `game_net`, RPC `game_net_report`, `game_net_get`) в рабочей базе **не применён**. `src/game/api.ts` и `GamePlay.tsx` вызывают эти RPC, и вызовы падают. Применить: `npx supabase db query --linked -f supabase/sql/game_v6.sql`.
 
 ## 6. Сайт
 
