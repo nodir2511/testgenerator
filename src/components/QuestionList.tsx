@@ -858,7 +858,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 {/* Главное изображение */}
                 {q.image_url && (
                   <div className="pt-1">
-                    <img
+                    <img loading="lazy" decoding="async"
                       src={q.image_url}
                       alt="Изображение вопроса"
                       onClick={() => setPreviewImage(q.image_url || null)}
@@ -908,7 +908,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                             )}
                           </div>
                           {opt.image_url && (
-                            <img
+                            <img loading="lazy" decoding="async"
                               src={opt.image_url}
                               alt=""
                               onClick={() => setPreviewImage(opt.image_url || null)}
@@ -955,7 +955,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                               );
                             })()}
                             {m.image_url && (
-                              <img
+                              <img loading="lazy" decoding="async"
                                 src={m.image_url}
                                 alt=""
                                 onClick={() => setPreviewImage(m.image_url || null)}
@@ -989,7 +989,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                               )}
                             </div>
                             {m.image_url && (
-                              <img
+                              <img loading="lazy" decoding="async"
                                 src={m.image_url}
                                 alt=""
                                 onClick={() => setPreviewImage(m.image_url || null)}
@@ -1084,12 +1084,13 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm transition-all animate-in fade-in duration-150"
           onClick={() => setPreviewImage(null)}
+          role="dialog" aria-modal="true" aria-label="Увеличенное изображение"
         >
           <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => setPreviewImage(null)}
               className="absolute -top-11 right-0 text-white hover:text-slate-300 p-2 rounded-full bg-black/50 hover:bg-black/75 transition"
-              title="Закрыть (Esc)"
+              title="Закрыть (Esc)" aria-label="Закрыть"
             >
               <X className="w-6 h-6" />
             </button>

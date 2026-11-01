@@ -816,7 +816,7 @@ export const TicketGenerator: React.FC = () => {
             </div>
             <button
               onClick={() => setGeneratedBatch(null)}
-              className="w-10 h-10 -mr-2 -mt-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center shrink-0"
+              className="w-10 h-10 -mr-2 -mt-2 rounded-xl text-slate-500 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center shrink-0"
               aria-label="Закрыть результат"
             >
               <X className="w-5 h-5" />

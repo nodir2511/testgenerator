@@ -755,7 +755,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             <div className="flex-1 flex items-center space-x-3">
               {imageUrl ? (
                 <div className="relative group h-20 w-auto min-w-[80px] max-w-[200px] rounded-lg overflow-hidden border border-slate-300 bg-white shrink-0 p-1">
-                  <img src={imageUrl} alt="Вопрос" className="h-full w-full object-contain" />
+                  <img loading="lazy" decoding="async" src={imageUrl} alt="Вопрос" className="h-full w-full object-contain" />
                   <button
                     type="button"
                     onClick={() => setImageUrl(null)}
@@ -836,7 +836,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                           className={`px-2 py-0.5 rounded text-xs font-semibold border flex items-center space-x-1 transition ${
                             opt.is_correct
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                              : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
+                              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
                           }`}
                         >
                           <CheckCircle2 className={`w-3.5 h-3.5 ${opt.is_correct ? 'text-emerald-600' : 'text-slate-500'}`} />
@@ -937,7 +937,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                     {/* Превью картинки варианта */}
                     {opt.image_url && (
                       <div className="flex items-center space-x-2 pt-1">
-                        <img 
+                        <img loading="lazy" decoding="async" 
                           src={opt.image_url} 
                           alt="Превью" 
                           className="h-16 w-auto max-w-[150px] object-contain rounded border bg-white p-1" 
@@ -1088,7 +1088,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
                       {item.image_url && (
                         <div className="flex items-center space-x-1 pt-1">
-                          <img src={item.image_url} alt="" className="h-10 w-auto object-contain rounded border" />
+                          <img loading="lazy" decoding="async" src={item.image_url} alt="" className="h-10 w-auto object-contain rounded border" />
                           <button
                             type="button"
                             onClick={() => {
@@ -1207,7 +1207,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
                     {item.image_url && (
                       <div className="flex items-center space-x-1 pt-1">
-                        <img src={item.image_url} alt="" className="h-10 w-auto object-contain rounded border" />
+                        <img loading="lazy" decoding="async" src={item.image_url} alt="" className="h-10 w-auto object-contain rounded border" />
                         <button
                           type="button"
                           onClick={() => {

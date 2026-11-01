@@ -8,6 +8,7 @@ export const WhatsNewModal: React.FC<{ releases: SiteRelease[]; onClose: () => v
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
     <div
       role="dialog"
+      aria-modal="true"
       aria-label="Что нового"
       className="bg-slate-50 rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col"
       onClick={(e) => e.stopPropagation()}
