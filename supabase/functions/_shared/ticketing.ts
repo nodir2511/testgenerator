@@ -404,18 +404,36 @@ export function chapterTotalsFromCounts(rows: Array<{ chapter_id: string | null;
 export const totalsOf = (t: ChapterTotals | undefined, type: 'test' | 'matching' | 'open') =>
   t ? Object.fromEntries(Object.entries(t).map(([k, v]) => [k, v[type]])) : undefined;
 
-export function buildTickets(pool: any[], s: Settings, rnd: Rnd = Math.random, totals?: ChapterTotals) {
+/** Результат подбора: kinds = [тесты, соответствия, открытые], каждый — матрица [билет][позиция] -> вопрос */
+export interface PickedTickets { kinds: any[][][]; ticketCount: number }
+
+/**
+ * Подбор вопросов без снимков. Пул может быть «лёгким» (только поля для подбора: id, type, topic_id,
+ * chapter_id, num, seq, created_at, linked_ids, chapter/topic.order_index); полные вопросы догружаются
+ * между подбором и snapshotTickets (см. pool.ts).
+ */
+export function pickTickets(pool: any[], s: Settings, rnd: Rnd = Math.random, totals?: ChapterTotals): PickedTickets {
   const T = s.ticketCount;
   const tests = pickParallel(pool.filter((q) => q.type === 'test'), s.testCount, T, rnd, totalsOf(totals, 'test'));
   const matching = pickParallel(pool.filter((q) => q.type === 'matching'), s.matchingCount, T, rnd, totalsOf(totals, 'matching'));
   const open = pickParallel(pool.filter((q) => q.type === 'open'), s.openCount, T, rnd, totalsOf(totals, 'open'));
   separateLinked([tests, matching, open], pool, rnd);
+  return { kinds: [tests, matching, open], ticketCount: T };
+}
+
+/** Билеты со снимками вопросов; в picked должны быть полные вопросы (с вариантами и парами) */
+export function snapshotTickets(picked: PickedTickets, s: Pick<Settings, 'shuffleOptions' | 'shuffleMatching'>, rnd: Rnd = Math.random) {
+  const [tests, matching, open] = picked.kinds;
   const out: Array<{ ticketNumber: number; questions: any[] }> = [];
-  for (let k = 0; k < T; k++) {
+  for (let k = 0; k < picked.ticketCount; k++) {
     const qs = [...tests[k], ...matching[k], ...open[k]];
     out.push({ ticketNumber: k + 1, questions: qs.map((q, i) => ({ order_index: i + 1, question_id: q.id, question_snapshot: toSnapshot(q, s, rnd) })) });
   }
   return out;
+}
+
+export function buildTickets(pool: any[], s: Settings, rnd: Rnd = Math.random, totals?: ChapterTotals) {
+  return snapshotTickets(pickTickets(pool, s, rnd, totals), s, rnd);
 }
 
 export function parseCount(text: string, max: number, min = 0): number | null {

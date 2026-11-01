@@ -20,6 +20,18 @@ export async function withSelectionInfo<T extends { ticket_number: number }>(
   return (await key()).withSelectionInfo(tickets, subjectId, params, load);
 }
 
+/** Описание выбора глав и тем по уже загруженной структуре предмета, без запросов к базе */
+export async function describeSelection(
+  chapters: Array<{ id: string; order_index: number }>,
+  topics: Array<{ id: string; chapter_id: string; order_index: number }>,
+  params: any,
+): Promise<AnswerKeyExport.SelectionInfos> {
+  return (await key()).describeSelection(chapters, topics, params);
+}
+
+/** Заранее подгружает модуль ключей (вместе с JSZip), чтобы он не задерживал показ созданных билетов */
+export const warmKeyModule = (): void => { void key().catch(() => {}); };
+
 /** Загрузчик описания выбора глав и тем с общим кэшем; модуль подгружается при первом вызове */
 export function makeSelectionInfoLoader() {
   let loader: Promise<ReturnType<typeof AnswerKeyExport.makeSelectionInfoLoader>> | undefined;

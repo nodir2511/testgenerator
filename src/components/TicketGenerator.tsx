@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo } from '../lib/errors';
-import { fitSettings, pickParallel, separateLinked, chapterTotalsFromCounts, totalsOf, poolStats as calcPoolStats, toSnapshot, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
+import { fitSettings, pickTickets, snapshotTickets, chapterTotalsFromCounts, poolStats as calcPoolStats, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
+import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Subject, Chapter, Topic, Question } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -19,12 +20,20 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/exportLazy';
-import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo } from '../lib/exportLazy';
+import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo, describeSelection, warmKeyModule } from '../lib/exportLazy';
 import { SendToTelegramButton } from './SendToTelegramButton';
-import { fetchAllPages } from '../lib/fetchAllPages';
 import { useUserLimits } from '../lib/generationLimits';
 import { autoBatchTitle, DEFAULT_BATCH_TITLE } from '../lib/batchTitle';
 import { DownloadButton, useExportLang, type Lang } from './DownloadButton';
+
+type CountRow = { chapter_id: string | null; topic_id: string | null; type: string; cnt: number };
+
+// Счётчики вопросов предмета (по главам, темам и видам) одним запросом к базе
+const fetchQuestionCounts = async (subjectId: string): Promise<CountRow[]> => {
+  const { data, error } = await supabase.rpc('question_counts', { p_subject_id: subjectId });
+  if (error) throw error;
+  return (data || []) as CountRow[];
+};
 
 // Администратору на сайте можно до 50 вариантов; обычным пользователям — те же лимиты, что в Telegram (их же проверяет база)
 const ADMIN_SITE_LIMITS = { ...LIMITS, tickets: 50 };
@@ -187,6 +196,12 @@ export const TicketGenerator: React.FC = () => {
   const [generatedBatch, setGeneratedBatch] = useState<any | null>(() => getStorageJSON('examiner_tg_generated_batch', null));
   const resultRef = React.useRef<HTMLDivElement>(null);
   const [scrollToResult, setScrollToResult] = useState(false);
+
+  // Модуль ключей (с JSZip) подгружается заранее, в простое: иначе показ созданных билетов ждёт его загрузки
+  React.useEffect(() => {
+    const t = setTimeout(warmKeyModule, 1500);
+    return () => clearTimeout(t);
+  }, []);
 
   // Автосохранение настроек в localStorage
   React.useEffect(() => {
@@ -383,11 +398,7 @@ export const TicketGenerator: React.FC = () => {
     queryKey: ['question_counts', subjectId],
     staleTime: 0,
     enabled: Boolean(subjectId),
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc('question_counts', { p_subject_id: subjectId });
-      if (error) throw error;
-      return (data || []) as Array<{ chapter_id: string | null; topic_id: string | null; type: string; cnt: number }>;
-    },
+    queryFn: () => fetchQuestionCounts(subjectId),
   });
   const poolStats = React.useMemo(() => {
     if (!poolCounts) return undefined;
@@ -508,24 +519,12 @@ export const TicketGenerator: React.FC = () => {
       const limitErr = checkSettings({ testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: '' }, limits);
       if (limitErr) throw new Error(limitErr);
 
-      // 1. Загружаем все доступные вопросы пула с деталями для снимков
-      const { data: allQuestionsRaw, error: qErr } = await fetchAllPages<any>(() => {
-        let query = supabase
-          .from('questions')
-          .select(`
-            *,
-            chapter:chapters(name, order_index),
-            topic:topics(name, order_index),
-            options:question_options(*),
-            matching_items:matching_items(*)
-          `)
-          .eq('subject_id', subjectId)
-          .eq('is_deleted', false);
-        if (effTopicIds.length > 0) query = query.in('topic_id', effTopicIds);
-        else if (effChapterIds.length > 0) query = query.in('chapter_id', effChapterIds);
-        return query;
-      });
-      if (qErr || !allQuestionsRaw) throw qErr || new Error('Ошибка загрузки вопросов');
+      // 1. Лёгкий пул (только поля для подбора) и счётчики предмета — одновременно.
+      // Счётчики берутся из кэша страницы, если им меньше минуты. Полные вопросы догружаются ниже, только выбранные.
+      const [allQuestionsRaw, countRows] = await Promise.all([
+        loadLightPool(supabase, { subjectId, chapterIds: effChapterIds, topicIds: effTopicIds }),
+        queryClient.fetchQuery({ queryKey: ['question_counts', subjectId], queryFn: () => fetchQuestionCounts(subjectId), staleTime: 60_000 }),
+      ]);
 
       setGenProgress({ percent: 45, stage: 'Подбор вопросов...' });
 
@@ -543,30 +542,19 @@ export const TicketGenerator: React.FC = () => {
       // без повторов, пока хватает вопросов
       // Охват глав: сколько вопросов главы выбрано от всех её вопросов (неполный выбор уменьшает долю главы)
       const chapterIds = Array.from(new Set(allQuestionsRaw.map(q => q.chapter_id).filter(Boolean)));
-      const { data: countRows, error: totErr } = await supabase.rpc('question_counts', { p_subject_id: subjectId });
-      if (totErr) throw totErr;
-      const totals = chapterTotalsFromCounts(countRows || [], chapterIds);
-      const tests = pickParallel(allQuestionsRaw.filter(q => q.type === 'test'), useTest, ticketCount, Math.random, totalsOf(totals, 'test'));
-      const matchings = pickParallel(allQuestionsRaw.filter(q => q.type === 'matching'), useMatching, ticketCount, Math.random, totalsOf(totals, 'matching'));
-      const opens = pickParallel(allQuestionsRaw.filter(q => q.type === 'open'), useOpen, ticketCount, Math.random, totalsOf(totals, 'open'));
-      separateLinked([tests, matchings, opens], allQuestionsRaw);
-      const ticketsData: Array<{ ticketNumber: number; questions: Question[] }> = [];
-      for (let k = 0; k < ticketCount; k++) {
-        ticketsData.push({ ticketNumber: k + 1, questions: [...tests[k], ...matchings[k], ...opens[k]] });
-      }
+      const totals = chapterTotalsFromCounts(countRows, chapterIds);
+      const picked = pickTickets(allQuestionsRaw, fit.settings, Math.random, totals);
+
+      setGenProgress({ percent: 60, stage: 'Загрузка выбранных вопросов...' });
+      await hydrateTickets(supabase, picked.kinds);
 
       setGenProgress({ percent: 75, stage: 'Сборка вариантов...' });
 
       // 4. Сохранение одной транзакцией: партия, билеты и вопросы билетов (см. supabase/sql/save_ticket_batch.sql).
       // При любой ошибке база откатывает всё — недосозданных наборов не остаётся.
-      const snapOpts = { shuffleOptions, shuffleMatching };
-      const ticketsPayload = ticketsData.map(t => ({
+      const ticketsPayload = snapshotTickets(picked, { shuffleOptions, shuffleMatching }, Math.random).map(t => ({
         ticket_number: t.ticketNumber,
-        questions: t.questions.map((q, idx) => ({
-          question_id: q.id,
-          order_index: idx + 1,
-          question_snapshot: toSnapshot(q, snapOpts),
-        })),
+        questions: t.questions,
       }));
 
       setGenProgress({ percent: 90, stage: 'Сохранение...' });
@@ -609,9 +597,15 @@ export const TicketGenerator: React.FC = () => {
         questions: ticketsPayload[i].questions.map(q => ({ ...q, ticket_id: t.id })),
       }));
 
+      // Главы и темы предмета уже загружены на странице — дополнительных запросов к базе не нужно
+      const structureLoaded = batch.subject_id === subjectId && chapters.length > 0 && chapters[0].subject_id === subjectId
+        && allTopics.length > 0 && chapters.some((c) => c.id === allTopics[0].chapter_id);
       setGeneratedBatch({
         ...batch,
-        tickets: await withSelectionInfo(createdTicketsWithQuestions, batch.subject_id, batch.generation_params),
+        tickets: await withSelectionInfo(
+          createdTicketsWithQuestions, batch.subject_id, batch.generation_params,
+          structureLoaded ? async (_subject, params) => describeSelection(chapters, allTopics, params) : undefined,
+        ),
       });
       setShowVariants(false);
       setScrollToResult(true);

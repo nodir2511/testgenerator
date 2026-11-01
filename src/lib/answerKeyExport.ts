@@ -83,9 +83,18 @@ export function makeSelectionInfoLoader() {
     if (!subjectId) return none;
     const s = await structure(subjectId);
     if (!s) return none;
-    const ch = params?.chapter_ids ?? [], tp = params?.topic_ids ?? [];
-    return { ru: selectionInfo(s.chapters, s.topics, ch, tp, 'ru'), tg: selectionInfo(s.chapters, s.topics, ch, tp, 'tg'), chips: selectionChips(s.chapters, s.topics, ch, tp) };
+    return describeSelection(s.chapters, s.topics, params);
   };
+}
+
+/** Описание выбора глав и тем по уже загруженной структуре предмета (без запросов к базе) */
+export function describeSelection(
+  chapters: Array<{ id: string; order_index: number }>,
+  topics: Array<{ id: string; chapter_id: string; order_index: number }>,
+  params: any,
+): SelectionInfos {
+  const ch = params?.chapter_ids ?? [], tp = params?.topic_ids ?? [];
+  return { ru: selectionInfo(chapters, topics, ch, tp, 'ru'), tg: selectionInfo(chapters, topics, ch, tp, 'tg'), chips: selectionChips(chapters, topics, ch, tp) };
 }
 
 /** Добавляет каждому билету описание выбранных глав и тем (печатается в шапке варианта) */

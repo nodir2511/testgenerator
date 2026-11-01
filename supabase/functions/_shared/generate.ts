@@ -6,6 +6,7 @@ import { buildSingleTicketBlob } from './docxExport.ts';
 import { buildAnswerKeyDocx, keyKindOf, selectionInfo } from './answerKey.ts';
 import { KEY_TEMPLATES } from './keyTemplates.ts';
 import * as T from './ticketing.ts';
+import { hydrateTickets, loadLightPool } from './pool.ts';
 
 export type Lang = 'ru' | 'tg' | 'both';
 
@@ -73,28 +74,11 @@ async function dailyLimitError(sb: any, user: { id: string; role?: string }): Pr
   return (count ?? 0) >= perDay ? `Дневной лимит исчерпан: ${perDay} генераций в сутки. Попробуйте завтра.` : null;
 }
 
+// Лёгкий пул для подбора (без вариантов и пар); полные вопросы догружает hydrateTickets (pool.ts).
+// Без выбранных глав и тем вопросов нет (как раньше: in('chapter_id', [])).
 export async function loadPool(sb: any, sel: Selection) {
-  const PAGE = 1000;
-  const PARALLEL = 4;
-  const page = async (from: number): Promise<any[]> => {
-    let q = sb.from('questions')
-      .select('*, chapter:chapters(name, order_index), topic:topics(name, order_index), options:question_options(*), matching_items:matching_items(*)')
-      .eq('subject_id', sel.subjectId).eq('is_deleted', false).order('id');
-    if (sel.topicIds.length) q = q.in('topic_id', sel.topicIds);
-    else q = q.in('chapter_id', sel.chapterIds);
-    const { data, error } = await q.range(from, from + PAGE - 1);
-    if (error) throw error;
-    return data ?? [];
-  };
-  // Первая страница одна; если она полная, следующие читаем пачками одновременно (порядок строк сохраняется)
-  const all: any[] = await page(0);
-  if (all.length < PAGE) return all;
-  for (let from = PAGE; ; from += PAGE * PARALLEL) {
-    const parts = await Promise.all(Array.from({ length: PARALLEL }, (_, i) => page(from + i * PAGE)));
-    for (const p of parts) all.push(...p);
-    if (parts.some((p) => p.length < PAGE)) break;
-  }
-  return all;
+  if (!sel.topicIds.length && !sel.chapterIds.length) return [];
+  return loadLightPool(sb, sel);
 }
 
 // Какие главы и темы выбраны (для шапки вариантов и ключей); при ошибке — без описания
@@ -113,12 +97,16 @@ async function loadSelectionInfos(sb: any, sel: Selection): Promise<{ ru: string
 }
 
 // Все вопросы глав, в которых что-то выбрано: нужны, чтобы посчитать охват главы
+export async function loadQuestionCounts(sb: any, subjectId: string): Promise<any[]> {
+  const { data, error } = await sb.rpc('question_counts', { p_subject_id: subjectId });
+  if (error) throw error;
+  return data ?? [];
+}
+
 export async function loadChapterTotals(sb: any, subjectId: string, pool: any[]): Promise<T.ChapterTotals> {
   const ids = [...new Set(pool.map((q) => q.chapter_id).filter(Boolean))];
   if (!ids.length) return {};
-  const { data, error } = await sb.rpc('question_counts', { p_subject_id: subjectId });
-  if (error) throw error;
-  return T.chapterTotalsFromCounts(data ?? [], ids);
+  return T.chapterTotalsFromCounts(await loadQuestionCounts(sb, subjectId), ids);
 }
 
 function escapeHtml(s: string): string {
@@ -273,13 +261,17 @@ export async function generateAndSend(opts: {
 
   async function run() {
 
-  const pool = await loadPool(sb, sel);
+  // Лёгкий пул и счётчики предмета читаются одновременно
+  const [pool, counts] = await Promise.all([loadPool(sb, sel), loadQuestionCounts(sb, sel.subjectId)]);
   const fit = T.fitSettings(T.poolStats(pool), s);
   if (fit.error) throw new Error(fit.error);
   if (fit.notes.length && opts.onNotes) await opts.onNotes(fit.notes);
 
-  const totals = await loadChapterTotals(sb, sel.subjectId, pool);
-  const tickets = T.buildTickets(pool, fit.settings, Math.random, totals);
+  const chapterIds = [...new Set(pool.map((q) => q.chapter_id).filter(Boolean))];
+  const totals = T.chapterTotalsFromCounts(counts, chapterIds);
+  const picked = T.pickTickets(pool, fit.settings, Math.random, totals);
+  await hydrateTickets(sb, picked.kinds); // полные вопросы — только выбранные
+  const tickets = T.snapshotTickets(picked, fit.settings, Math.random);
   const title = s.title.trim() || 'Экзаменационные билеты';
 
   // Партия, билеты и вопросы — одной транзакцией (supabase/sql/save_ticket_batch.sql); лимиты проверяет триггер
