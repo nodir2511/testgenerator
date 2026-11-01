@@ -10,6 +10,7 @@ const SavedTicketsView = lazy(() => import('./components/SavedTicketsView').then
 const BulkImport = lazy(() => import('./components/BulkImport').then((m) => ({ default: m.BulkImport })));
 const UserManagementView = lazy(() => import('./components/UserManagementView').then((m) => ({ default: m.UserManagementView })));
 const ClusterExam = lazy(() => import('./components/ClusterExam').then((m) => ({ default: m.ClusterExam })));
+const TrashView = lazy(() => import('./components/TrashView').then((m) => ({ default: m.TrashView })));
 const ReleasesView = lazy(() => import('./components/ReleasesView').then((m) => ({ default: m.ReleasesView })));
 const StatsView = lazy(() => import('./components/StatsView').then((m) => ({ default: m.StatsView })));
 import { AuthModal } from './components/AuthModal';
@@ -30,6 +31,7 @@ import {
   User as UserIcon,
   Menu,
   BarChart3,
+  Trash2,
   Bell,
   Gamepad2,
   X,
@@ -39,12 +41,12 @@ import {
   ChevronRight
 } from 'lucide-react';
 
-type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'cluster' | 'releases';
+type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'trash' | 'cluster' | 'releases';
 
 // Раздел виден в адресе (#archive и т. п.): работает кнопка «Назад» на телефоне, на раздел можно дать ссылку
 const TAB_HASH: Record<TabType, string> = {
   generator: 'generator', saved_tickets: 'archive', questions: 'questions', taxonomy: 'taxonomy',
-  bulk_import: 'import', users: 'users', stats: 'stats', cluster: 'cluster', releases: 'news',
+  bulk_import: 'import', users: 'users', stats: 'stats', trash: 'trash', cluster: 'cluster', releases: 'news',
 };
 const tabFromHash = (hash: string): TabType | null => {
   const key = hash.replace(/^#/, '').split('/')[0];
@@ -59,10 +61,10 @@ export const App: React.FC = () => {
     const fromHash = tabFromHash(window.location.hash);
     if (fromHash) return fromHash;
     const saved = localStorage.getItem('examiner_active_tab');
-    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats', 'cluster', 'releases'];
+    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats', 'trash', 'cluster', 'releases'];
     return (validTabs.includes(saved as TabType)) ? (saved as TabType) : 'generator';
   });
-  const adminOnlyTabs: TabType[] = ['users', 'stats'];
+  const adminOnlyTabs: TabType[] = ['users', 'stats', 'trash'];
   const staffOnlyTabs: TabType[] = ['taxonomy', 'bulk_import'];
   const ownerOnlyTabs: TabType[] = ['cluster'];
   const currentTab: TabType = (!isAdmin && adminOnlyTabs.includes(activeTab)) || (!isStaff && staffOnlyTabs.includes(activeTab)) || (!isOwner && ownerOnlyTabs.includes(activeTab)) ? 'generator' : activeTab;
@@ -174,7 +176,7 @@ export const App: React.FC = () => {
     ...(isAdmin ? [{ id: 'admin', label: 'Администрирование', icon: Users }] : []),
     ...(isOwner ? [{ id: 'game', label: 'Своя игра', icon: Gamepad2 }] : []),
   ];
-  const isAdminSection = currentTab === 'users' || currentTab === 'stats';
+  const isAdminSection = currentTab === 'users' || currentTab === 'stats' || currentTab === 'trash';
 
   const openForm = (q: Question | null) => {
     setEditingQuestion(q);
@@ -455,7 +457,7 @@ export const App: React.FC = () => {
           <>
             {isAdminSection && (
               <div className="flex space-x-1 mb-5 border-b border-slate-200">
-                {([['users', 'Пользователи', Users], ['stats', 'Статистика', BarChart3]] as const).map(([id, label, Icon]) => (
+                {([['users', 'Пользователи', Users], ['stats', 'Статистика', BarChart3], ['trash', 'Корзина', Trash2]] as const).map(([id, label, Icon]) => (
                   <button
                     key={id}
                     onClick={() => goTab(id)}
@@ -483,6 +485,7 @@ export const App: React.FC = () => {
             )}
             {currentTab === 'users' && <UserManagementView />}
             {currentTab === 'stats' && <StatsView />}
+            {currentTab === 'trash' && <TrashView />}
             {currentTab === 'cluster' && isOwner && <ClusterExam />}
             {currentTab === 'releases' && <ReleasesView />}
           </>

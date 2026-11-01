@@ -176,13 +176,24 @@ describe('pickParallel', () => {
 });
 
 describe('fitSettings / checkSettings', () => {
-  const base = { ...DEFAULT_SETTINGS, testCount: 10, matchingCount: 2, openCount: 3 };
+  const base = { ...DEFAULT_SETTINGS, testCount: 10, matchingCount: 2, openCount: 3, ticketCount: 1 };
 
   it('урезает состав билета до того, что есть, и объясняет почему', () => {
     const fit = fitSettings({ total: 12, test: 10, matching: 1, open: 1 }, base);
     expect(fit.error).toBeNull();
     expect(fit.settings).toMatchObject({ testCount: 10, matchingCount: 1, openCount: 1 });
     expect(fit.notes).toHaveLength(2);
+  });
+
+  it('предупреждает о повторах между вариантами, когда вопросов на все варианты не хватает', () => {
+    const s = { ...base, ticketCount: 4, matchingCount: 0, openCount: 0 };
+    const few = fitSettings({ total: 30, test: 30, matching: 0, open: 0 }, s);
+    expect(few.notes).toHaveLength(1);
+    expect(few.notes[0]).toMatch(/повторится/);
+    // хватает ровно на все варианты — предупреждения нет
+    expect(fitSettings({ total: 40, test: 40, matching: 0, open: 0 }, s).notes).toHaveLength(0);
+    // один вариант — повторам неоткуда взяться
+    expect(fitSettings({ total: 5, test: 10, matching: 0, open: 0 }, { ...s, ticketCount: 1 }).notes).toHaveLength(0);
   });
 
   it('ошибка, только если вопросов нет вообще', () => {

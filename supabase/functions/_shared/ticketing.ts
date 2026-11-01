@@ -73,6 +73,15 @@ export function fitSettings(stats: PoolStats, s: Settings): { settings: Settings
   const testCount = fit(s.testCount, stats.test, 'Тестовые вопросы');
   const matchingCount = fit(s.matchingCount, stats.matching, 'Задания на соответствие');
   const openCount = fit(s.openCount, stats.open, 'Открытые вопросы');
+  // Каждому варианту нужны свои вопросы: если на все варианты их не хватает, часть вопросов повторится
+  const repeats = (count: number, have: number, label: string) => {
+    if (s.ticketCount > 1 && count > 0 && count * s.ticketCount > have) {
+      notes.push(`${label}: на ${s.ticketCount} вариантов нужно ${count * s.ticketCount}, а в выбранных темах их ${have} — часть вопросов повторится в разных вариантах (выберите больше тем или уменьшите число вариантов)`);
+    }
+  };
+  repeats(testCount, stats.test, 'Тестовые вопросы');
+  repeats(matchingCount, stats.matching, 'Задания на соответствие');
+  repeats(openCount, stats.open, 'Открытые вопросы');
   const error = testCount + matchingCount + openCount === 0 ? 'В выбранных темах нет вопросов нужных видов' : null;
   return { settings: { ...s, testCount, matchingCount, openCount }, notes, error };
 }
