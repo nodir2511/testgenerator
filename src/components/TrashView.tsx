@@ -48,6 +48,7 @@ export const TrashView: React.FC = () => {
       notifyInfo('Вопрос восстановлен');
       qc.invalidateQueries({ queryKey: ['trash'] });
       qc.invalidateQueries({ queryKey: ['questions'] });
+      qc.invalidateQueries({ queryKey: ['question_counts'] });
     },
   });
 

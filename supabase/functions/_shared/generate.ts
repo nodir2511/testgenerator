@@ -65,8 +65,7 @@ function dayStartIso(): string {
   return new Date(local - (local % 86400000) - shift).toISOString();
 }
 
-async function dailyLimitError(sb: any, user: { id: string; role?: string }): Promise<string | null> {
-  const perDay = (await limitsFor(sb, user)).perDay;
+async function dailyLimitError(sb: any, user: { id: string; role?: string }, perDay: number): Promise<string | null> {
   if (!Number.isFinite(perDay)) return null;
   // Журнал генераций: удалённые наборы тоже считаются
   const { count } = await sb.from('generation_usage').select('*', { count: 'exact', head: true })
@@ -84,8 +83,12 @@ export async function loadPool(sb: any, sel: Selection) {
 // Какие главы и темы выбраны (для шапки вариантов и ключей); при ошибке — без описания
 async function loadSelectionInfos(sb: any, sel: Selection): Promise<{ ru: string | null; tg: string | null }> {
   try {
-    const { data: chs } = await sb.from('chapters').select('id, order_index').eq('subject_id', sel.subjectId).eq('is_deleted', false);
-    const { data: tps } = await sb.from('topics').select('id, chapter_id, order_index').in('chapter_id', (chs ?? []).map((c: any) => c.id)).eq('is_deleted', false);
+    // Главы и их темы — одним запросом
+    const { data, error } = await sb.from('chapters').select('id, order_index, topics(id, chapter_id, order_index, is_deleted)')
+      .eq('subject_id', sel.subjectId).eq('is_deleted', false);
+    if (error) throw error;
+    const chs = (data ?? []).map((c: any) => ({ id: c.id, order_index: c.order_index }));
+    const tps = (data ?? []).flatMap((c: any) => (c.topics ?? []).filter((t: any) => !t.is_deleted));
     return {
       ru: selectionInfo(chs ?? [], tps ?? [], sel.chapterIds, sel.topicIds, 'ru'),
       tg: selectionInfo(chs ?? [], tps ?? [], sel.chapterIds, sel.topicIds, 'tg'),
@@ -140,9 +143,11 @@ export async function deliverBatch(opts: {
 }): Promise<{ missingAnswers: number; keySent: boolean }> {
   const { sb, botToken, chat, title, subjectId, chapterIds, topicIds, tickets, lang } = opts;
   const sel: Selection = { subjectId, chapterIds, topicIds };
-  const { data: subj } = await sb.from('subjects').select('name').eq('id', subjectId).maybeSingle();
+  const [{ data: subj }, infos] = await Promise.all([
+    sb.from('subjects').select('name').eq('id', subjectId).maybeSingle(),
+    loadSelectionInfos(sb, sel),
+  ]);
   const subjectName = subj?.name ?? 'Химия';
-  const infos = await loadSelectionInfos(sb, sel);
   const shaped = tickets.map((t) => ({ ticket_number: t.ticketNumber, selection_info: infos, questions: t.questions.map((q: any) => ({ question_snapshot: q.question_snapshot })) }));
   const bytes = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
   const files: Array<{ name: string; data: Uint8Array }> = [];
@@ -247,7 +252,7 @@ export async function generateAndSend(opts: {
   if (allowed && !allowed.includes(sel.subjectId)) throw new Error('Этот предмет вам не назначен');
   const bad = T.checkSettings(s, limits);
   if (bad) throw new Error(bad);
-  const dayErr = await dailyLimitError(sb, user);
+  const dayErr = await dailyLimitError(sb, user, limits.perDay);
   if (dayErr) throw new Error(dayErr);
 
   // Одна генерация на пользователя одновременно (защита от двойного нажатия)
@@ -293,15 +298,20 @@ export async function generateAndSend(opts: {
   if (sErr || !saved) throw new Error(sErr?.message || 'Не удалось сохранить партию');
   const batch = saved.batch;
 
-  await sb.from('audit_logs').insert({
+  // Запись в журнал не задерживает сборку и отправку файла
+  const audit = sb.from('audit_logs').insert({
     user_id: user.id, action: 'TELEGRAM_EXPORT', entity_type: 'ticket_batches', entity_id: batch.id,
     details: { tickets: s.ticketCount, lang, chat_id: chat, source },
   });
 
-  return deliverBatch({
-    sb, botToken, chat, lang,
-    title, subjectId: sel.subjectId, chapterIds: sel.chapterIds, topicIds: sel.topicIds,
-    tickets: tickets.map((t) => ({ ticketNumber: t.ticketNumber, questions: t.questions })),
-  });
+  const [delivered] = await Promise.all([
+    deliverBatch({
+      sb, botToken, chat, lang,
+      title, subjectId: sel.subjectId, chapterIds: sel.chapterIds, topicIds: sel.topicIds,
+      tickets: tickets.map((t) => ({ ticketNumber: t.ticketNumber, questions: t.questions })),
+    }),
+    audit,
+  ]);
+  return delivered;
   }
 }

@@ -5,6 +5,7 @@ import { AuthProvider } from './hooks/useAuth';
 import App from './App';
 import ErrorToaster from './components/ErrorToaster';
 import { notifyError, notifySuccess } from './lib/errors';
+import { prefetchOnStartup } from './lib/startupPrefetch';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -58,6 +59,7 @@ if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/
     </React.StrictMode>
   );
 } else {
+  prefetchOnStartup(queryClient);
   root.render(
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>

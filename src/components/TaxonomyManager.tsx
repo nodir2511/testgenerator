@@ -130,6 +130,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
     meta: { action: 'Не удалось добавить главу', success: 'Глава добавлена в базу' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chapters', activeSubjectId] });
+      queryClient.invalidateQueries({ queryKey: ['topics_for_generation'] });
       setNewChapterName('');
     },
   });
@@ -145,6 +146,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
     meta: { action: 'Не удалось добавить тему', success: 'Тема добавлена в базу' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['topics', activeChapterId] });
+      queryClient.invalidateQueries({ queryKey: ['topics_for_generation'] });
       setNewTopicName('');
     },
   });
@@ -202,7 +204,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: [variables.table] });
       // Справочники и вопросы, закэшированные в других разделах (генератор, импорт, банк вопросов)
-      for (const key of ['questions', 'pool_stats', 'topics_for_generation', 'chapters', 'topics', 'all_chapters', 'all_topics']) {
+      for (const key of ['questions', 'pool_stats', 'topics_for_generation', 'question_counts', 'chapters', 'topics', 'all_chapters', 'all_topics']) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       // Сохранённые в браузере выбор темы/главы мог указывать на удалённую запись

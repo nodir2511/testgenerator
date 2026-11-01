@@ -733,6 +733,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     meta: { action: 'Не удалось выполнить импорт' },
     onSuccess: (report) => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
+      queryClient.invalidateQueries({ queryKey: ['question_counts'] });
       queryClient.invalidateQueries({ queryKey: ['import_batches'] });
       queryClient.invalidateQueries({ queryKey: ['pool_stats'] });
       queryClient.invalidateQueries({ queryKey: ['all_chapters'] });
@@ -766,6 +767,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     meta: { action: 'Не удалось откатить импорт', success: 'Импорт отменён: вопросы партии удалены из базы' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
+      queryClient.invalidateQueries({ queryKey: ['question_counts'] });
       queryClient.invalidateQueries({ queryKey: ['import_batches'] });
     },
   });

@@ -6,6 +6,7 @@ import { fitSettings, pickTickets, snapshotTickets, chapterTotalsFromCounts, poo
 import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Subject, Chapter, Topic, Question } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
+import { fetchSubjects } from '../lib/startupPrefetch';
 import {
   Sparkles,
   CheckCircle2,
@@ -67,6 +68,24 @@ const formatWait = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padSta
 const fetchChapters = async (subjectId: string) => {
   const { data } = await supabase.from('chapters').select('*').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
   return (data || []) as Chapter[];
+};
+
+// Главы предмета со всеми темами одним запросом (вместо двух последовательных)
+const fetchStructure = async (subjectId: string): Promise<{ chapters: Chapter[]; topics: Topic[] }> => {
+  const { data, error } = await supabase
+    .from('chapters')
+    .select('*, topics(*)')
+    .eq('subject_id', subjectId)
+    .eq('is_deleted', false)
+    .eq('topics.is_deleted', false)
+    .order('order_index')
+    .order('order_index', { referencedTable: 'topics' });
+  if (error) throw error;
+  const rows = (data || []) as Array<Chapter & { topics: Topic[] | null }>;
+  return {
+    chapters: rows.map(({ topics: _t, ...ch }) => ch as Chapter),
+    topics: rows.flatMap((r) => r.topics ?? []),
+  };
 };
 
 // Всё, что нужно для одной генерации; title === null — название подставится само
@@ -279,10 +298,7 @@ export const TicketGenerator: React.FC = () => {
   // 1. Предметы
   const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
-    queryFn: async () => {
-      const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
-      return (data || []) as Subject[];
-    },
+    queryFn: fetchSubjects,
   });
 
   const subjectName = subjects.find((s) => s.id === subjectId)?.name || '';
@@ -313,29 +329,16 @@ export const TicketGenerator: React.FC = () => {
     }
   }, [subjects, subjectId]);
 
-  // 2. Главы
-  const { data: chapters = [] } = useQuery({
-    queryKey: ['chapters', subjectId],
+  // 2–3. Главы и все их темы (для древовидного раскрытия) — одним запросом.
+  // Кэш живёт минуту; правки в «Предметах и темах» сбрасывают его (ключ topics_for_generation).
+  const { data: structure } = useQuery({
+    queryKey: ['topics_for_generation', subjectId],
     enabled: Boolean(subjectId),
-    queryFn: () => fetchChapters(subjectId),
+    staleTime: 60_000,
+    queryFn: () => fetchStructure(subjectId),
   });
-
-  // 3. Все темы предмета (для древовидного раскрытия по главам)
-  const { data: allTopics = [] } = useQuery({
-    queryKey: ['topics_for_generation', subjectId, chapters],
-    staleTime: 0,
-    enabled: Boolean(subjectId && chapters.length > 0),
-    queryFn: async () => {
-      const chIds = chapters.map(c => c.id);
-      const { data } = await supabase
-        .from('topics')
-        .select('*')
-        .in('chapter_id', chIds)
-        .eq('is_deleted', false)
-        .order('order_index');
-      return (data || []) as Topic[];
-    },
-  });
+  const chapters = React.useMemo(() => structure?.chapters ?? [], [structure]);
+  const allTopics = React.useMemo(() => structure?.topics ?? [], [structure]);
 
   // Раскрытые главы (список тем). По умолчанию все свёрнуты: на телефоне так короче
   const [expandedChapterIds, setExpandedChapterIds] = useState<Record<string, boolean>>(() =>
@@ -396,7 +399,7 @@ export const TicketGenerator: React.FC = () => {
   // Счётчики предмета считает база одним запросом; при смене выбора глав и тем запрос не повторяется.
   const { data: poolCounts } = useQuery({
     queryKey: ['question_counts', subjectId],
-    staleTime: 0,
+    staleTime: 30_000, // сбрасывается при правке вопросов
     enabled: Boolean(subjectId),
     queryFn: () => fetchQuestionCounts(subjectId),
   });

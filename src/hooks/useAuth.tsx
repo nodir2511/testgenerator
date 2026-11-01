@@ -51,12 +51,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const refreshProfile = async () => {
-    if (user) {
-      const p = await fetchProfile(user.id);
-      setProfile(p);
+  // Предметы «по предметам» читаются одновременно с профилем (роль заранее не нужна): так нет второго круга запросов
+  const fetchAssigned = async (userId: string): Promise<string[]> => {
+    try {
+      const { data } = await supabase.from('user_subjects').select('subject_id').eq('user_id', userId);
+      return (data || []).map((r: any) => r.subject_id);
+    } catch {
+      return [];
     }
   };
+
+  const loadAccount = async (userId: string) => {
+    const [p, subjects] = await Promise.all([fetchProfile(userId), fetchAssigned(userId)]);
+    setProfile(p);
+    setAssigned(subjects);
+  };
+
+  const refreshProfile = async () => {
+    if (user) await loadAccount(user.id);
+  };
+
+  // Пользователь, чей профиль уже загружен: повторные события (первая сессия, обновление токена) профиль не перечитывают
+  const loadedUserId = React.useRef<string | null>(null);
 
   useEffect(() => {
     // 1. Получаем текущую сессию
@@ -64,10 +80,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id).then((p) => {
-          setProfile(p);
-          setIsLoading(false);
-        });
+        loadedUserId.current = session.user.id;
+        loadAccount(session.user.id).then(() => setIsLoading(false));
       } else {
         setIsLoading(false);
       }
@@ -75,14 +89,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // 2. Подписываемся на изменения авторизации
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      async (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         if (session?.user) {
-          const p = await fetchProfile(session.user.id);
-          setProfile(p);
+          const same = loadedUserId.current === session.user.id;
+          // Первая сессия уже обработана выше; обновление токена не меняет профиль
+          if (event === 'INITIAL_SESSION' || (event === 'TOKEN_REFRESHED' && same)) return;
+          loadedUserId.current = session.user.id;
+          await loadAccount(session.user.id);
         } else {
+          loadedUserId.current = null;
           setProfile(null);
+          setAssigned([]);
         }
         setIsLoading(false);
       }
@@ -92,18 +111,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       subscription.unsubscribe();
     };
   }, []);
-
-  // Предметы, назначенные пользователю с ролью «по предметам»
-  useEffect(() => {
-    const role = profile?.role;
-    if (!user || (role !== 'subject_teacher' && role !== 'subject_admin')) {
-      setAssigned([]);
-      return;
-    }
-    supabase.from('user_subjects').select('subject_id').eq('user_id', user.id).then(({ data }) => {
-      setAssigned((data || []).map((r: any) => r.subject_id));
-    });
-  }, [user?.id, profile?.role]);
 
   const signIn = async (email: string, pass: string) => {
     setIsLoading(true);

@@ -517,6 +517,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     meta: { success: initialData?.id ? 'Изменения вопроса сохранены в базе' : 'Новый вопрос добавлен в базу' },
     onSuccess: (_data, next) => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
+      queryClient.invalidateQueries({ queryKey: ['question_counts'] });
       clearDraft();
       if (next) resetForNext();
       else onSuccess();

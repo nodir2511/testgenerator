@@ -253,6 +253,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
     meta: { action: 'Не удалось удалить вопрос' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
+      queryClient.invalidateQueries({ queryKey: ['question_counts'] });
     },
     onError: (_e, id) => setHiddenIds((prev) => prev.filter((x) => x !== id)),
   });
