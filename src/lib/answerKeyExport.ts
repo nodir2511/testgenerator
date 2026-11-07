@@ -1,6 +1,6 @@
 import { saveAs } from 'file-saver';
 import { supabase } from './supabase';
-import { buildAnswerKeyDocx, keyKindOf, selectionInfo, selectionChips, type KeyTicket, type SelectionChip } from './answerKey';
+import { buildAnswerKeyDocx, keyKindOf, keyTemplateName, selectionInfo, selectionChips, type KeyTicket, type SelectionChip } from './answerKey';
 
 // Скачивание ключей ответов (Word по шаблону предмета) для созданных билетов.
 // Старые сохранённые билеты не хранят верные ответы в снимке — они подгружаются из банка вопросов.
@@ -118,9 +118,10 @@ export async function buildAnswerKeyFile(
   /** Файл шаблона в public/key-templates (без .docx), если нужен не стандартный для предмета */
   templateName?: string,
 ): Promise<KeyFile> {
-  const kind = templateName ?? keyKindOf(subjectName);
-  if (!kind) throw new Error('Для этого предмета нет шаблона ключей');
-  const res = await fetch(`/key-templates/${kind}.docx`);
+  const kind = keyKindOf(subjectName);
+  const file = templateName ?? (kind && keyTemplateName(kind, tickets));
+  if (!file) throw new Error('Для этого предмета нет шаблона ключей');
+  const res = await fetch(`/key-templates/${file}.docx`);
   if (!res.ok) throw new Error('Не удалось загрузить шаблон ключей');
   const template = await res.arrayBuffer();
   const sorted = [...tickets].sort((a, b) => a.ticket_number - b.ticket_number);

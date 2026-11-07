@@ -23,6 +23,16 @@ export interface KeyTicket {
   questions: Array<{ question_snapshot: any }>;
 }
 
+/**
+ * Файл шаблона под состав билетов. У таджикского их два: taj — пять соответствий без открытых (20/5/0),
+ * taj-cluster — четыре соответствия и два открытых (20/4/2). С шаблоном без клеток для открытых вопросов
+ * ключ ушёл бы в универсальную таблицу.
+ */
+export function keyTemplateName(kind: KeyKind, tickets: KeyTicket[]): string {
+  const hasOpen = tickets.some((t) => t.questions.some((q) => q.question_snapshot?.type === 'open'));
+  return kind === 'taj' && hasOpen ? 'taj-cluster' : kind;
+}
+
 export interface KeyStats {
   /** Вопросы, для которых в базе нет верного ответа (в ключе эти клетки красные, с «?») */
   missing: number;
@@ -43,7 +53,8 @@ const cellText = (cell: string) =>
 // Пишет text в первый абзац пустой клетки, оформляя как отметка абзаца в шаблоне
 function putText(cell: string, text: string): string {
   const pPr = cell.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] ?? '';
-  const rPr = pPr.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)?.[0] ?? '';
+  // Жирность не берём: в шаблонах она размечена у части клеток, а ответы должны выглядеть одинаково
+  const rPr = (pPr.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)?.[0] ?? '').replace(/<w:b(?:Cs)?\/>/g, '');
   const run = `<w:r>${rPr}<w:t xml:space="preserve">${esc(text)}</w:t></w:r>`;
   const end = cell.indexOf('</w:p>');
   if (end < 0) return cell;

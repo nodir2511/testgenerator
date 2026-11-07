@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import JSZip from 'jszip';
-import { buildAnswerKeyDocx, keyKindOf } from '../src/lib/answerKey';
+import { buildAnswerKeyDocx, keyKindOf, keyTemplateName } from '../src/lib/answerKey';
 
 // Ключ по шаблону химии: вопросы без верного ответа должны попасть в stats.missing
 // и быть видны в файле (красная заливка клетки), а вопросы с ответом — нет.
@@ -78,5 +78,56 @@ describe('ключи ответов: состав не по шаблону', () 
   it('стандартный состав остаётся в шаблоне', async () => {
     const { stats } = await buildAnswerKeyDocx(template, [{ ticket_number: 1, questions: [test('a', 1)] }]);
     expect(stats.universal).toBeUndefined();
+  });
+});
+
+describe('ключи таджикского языка: шаблон под состав', () => {
+  const matching = (id: string) => ({ question_snapshot: { id, type: 'matching', matching_items: [
+    ...[1, 2, 3, 4].map((i) => ({ id: `${id}l${i}`, side: 'left', order_index: i, correct_match_id: `${id}r${i}` })),
+    ...[1, 2, 3, 4, 5].map((i) => ({ id: `${id}r${i}`, side: 'right', order_index: i })),
+  ] } });
+  const open = (id: string) => ({ question_snapshot: { id, type: 'open', correct_numeric_answer: 124 } });
+  const ticket = (t: number, m: number, o: number) => ({ ticket_number: 1, questions: [
+    ...Array.from({ length: t }, (_, i) => test(`t${i}`, 1)),
+    ...Array.from({ length: m }, (_, i) => matching(`m${i}`)),
+    ...Array.from({ length: o }, (_, i) => open(`o${i}`)),
+  ] });
+  const build = (tk: ReturnType<typeof ticket>) =>
+    buildAnswerKeyDocx(fs.readFileSync(`templates/key/${keyTemplateName('taj', [tk])}.docx`), [tk]);
+
+  it('20/4/2 собирается по шаблону, а не универсальной таблицей', async () => {
+    const tk = ticket(20, 4, 2);
+    expect(keyTemplateName('taj', [tk])).toBe('taj-cluster');
+    const { stats } = await build(tk);
+    expect(stats.universal).toBeUndefined();
+    expect(stats.overflow).toBe(0);
+  });
+
+  it('все ответы написаны обычным шрифтом, жирные только номера', async () => {
+    const xml = await (await JSZip.loadAsync((await build(ticket(20, 4, 2))).bytes)).file('word/document.xml')!.async('string');
+    const tbl = xml.slice(xml.indexOf('<w:tbl>'), xml.indexOf('</w:tbl>'));
+    // Ответы в таблице вставляет putText: у них, в отличие от номеров шаблона, есть xml:space
+    const runs = tbl.match(/<w:r>(?:(?!<\/w:r>)[\s\S])*?<w:t xml:space="preserve">[^<]*<\/w:t><\/w:r>/g) || [];
+    expect(runs.length).toBe(20 + 4 * 4 + 2 * 3); // 20 букв, 4 соответствия по 4 цифры, 2 ответа по 3 цифры
+    expect(runs.filter((r) => r.includes('<w:b/>'))).toHaveLength(0);
+  });
+
+  it('20/5/0 по-прежнему идёт в шаблон с пятью соответствиями', async () => {
+    const tk = ticket(20, 5, 0);
+    expect(keyTemplateName('taj', [tk])).toBe('taj');
+    expect((await build(tk)).stats.universal).toBeUndefined();
+  });
+
+  it('остальные предметы не затронуты', () => {
+    expect(keyTemplateName('bio', [ticket(20, 4, 2)])).toBe('bio');
+  });
+
+  it('шаблоны есть и на сайте, и в функциях бота', async () => {
+    const { KEY_TEMPLATES } = await import('../supabase/functions/_shared/keyTemplates');
+    for (const name of ['taj', 'taj-cluster']) {
+      const file = fs.readFileSync(`templates/key/${name}.docx`);
+      expect(KEY_TEMPLATES[name]).toBe(file.toString('base64'));
+      expect(fs.readFileSync(`public/key-templates/${name}.docx`).equals(file)).toBe(true);
+    }
   });
 });
