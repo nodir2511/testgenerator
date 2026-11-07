@@ -5,6 +5,7 @@ import { assertRowsChanged } from '../lib/errors';
 import { Profile, UserRole, AuditLog, ROLE_LABELS } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { Users, ShieldCheck, UserCheck, Activity, Loader2, UserPlus, Pencil, Trash2, BookMarked } from 'lucide-react';
+import { CustomSelect } from './CustomSelect';
 
 const SUBJECT_ROLES: UserRole[] = ['subject_teacher', 'subject_admin'];
 const isSubjectRole = (r: UserRole) => SUBJECT_ROLES.includes(r);
@@ -326,16 +327,16 @@ export const UserManagementView: React.FC = () => {
               onChange={(e) => setNewFullName(e.target.value)}
               className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
             />
-            <select
+            <CustomSelect
               value={newRole}
-              onChange={(e) => setNewRole(e.target.value as UserRole)}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+              onChange={(val) => setNewRole(val as UserRole)}
+              className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
             >
               <option value="user">{ROLE_LABELS.user}</option>
               {isOwner && <option value="admin">{ROLE_LABELS.admin}</option>}
               {isOwner && <option value="subject_teacher">{ROLE_LABELS.subject_teacher}</option>}
               {isOwner && <option value="subject_admin">{ROLE_LABELS.subject_admin}</option>}
-            </select>
+            </CustomSelect>
           </div>
           {isSubjectRole(newRole) && (
             <div className="space-y-1.5">
@@ -455,15 +456,15 @@ export const UserManagementView: React.FC = () => {
               </div>
               {rolesEditId === p.id && (
                 <div className="px-4 pb-4 space-y-3">
-                  <select
+                  <CustomSelect
                     value={rolesEditRole}
-                    onChange={(e) => setRolesEditRole(e.target.value as UserRole)}
-                    className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                    onChange={(val) => setRolesEditRole(val as UserRole)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
                   >
                     {(Object.keys(ROLE_LABELS) as UserRole[]).map((role) => (
                       <option key={role} value={role}>{ROLE_LABELS[role]}</option>
                     ))}
-                  </select>
+                  </CustomSelect>
                   {isSubjectRole(rolesEditRole) && (
                     <div className="space-y-1.5">
                       <div className="text-xs font-semibold text-slate-600">Доступные предметы</div>

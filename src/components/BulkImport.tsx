@@ -11,6 +11,7 @@ import { parseDocxFile } from '../lib/docxImport';
 import { pairBilingual } from '../lib/docxPair';
 import { uploadQuestionImage } from '../lib/imageCompression';
 import { FormattedText } from './FormulaEditor';
+import { CustomSelect } from './CustomSelect';
 import { 
   Upload, 
   FileSpreadsheet, 
@@ -861,44 +862,44 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1">Предмет</label>
-                <select
+                <CustomSelect
                   value={defaultSubjectId}
-                  onChange={(e) => {
-                    setDefaultSubjectId(e.target.value);
+                  onChange={(val) => {
+                    setDefaultSubjectId(val);
                     setDefaultChapterId('');
                     setDefaultTopicId('');
                   }}
                   className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                </CustomSelect>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1">Глава</label>
-                <select
+                <CustomSelect
                   value={defaultChapterId}
-                  onChange={(e) => {
-                    setDefaultChapterId(e.target.value);
+                  onChange={(val) => {
+                    setDefaultChapterId(val);
                     setDefaultTopicId('');
                   }}
                   className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">-- Выберите главу --</option>
                   {availableChapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                </CustomSelect>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1">Тема</label>
-                <select
+                <CustomSelect
                   value={defaultTopicId}
-                  onChange={(e) => setDefaultTopicId(e.target.value)}
+                  onChange={(val) => setDefaultTopicId(val)}
                   className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">-- Выберите тему --</option>
                   {availableTopics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
+                </CustomSelect>
               </div>
             </div>
           </div>
@@ -925,17 +926,17 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 </button>
               </div>
               {!pairMode && (
-                <label className="flex items-center gap-2 text-slate-600">
+                <div className="flex items-center gap-2 text-slate-600">
                   <span className="font-semibold">Язык файла:</span>
-                  <select
+                  <CustomSelect
                     value={fileLang}
-                    onChange={(e) => setFileLang(e.target.value as ImportLang)}
+                    onChange={(val) => setFileLang(val as ImportLang)}
                     className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="ru">Русский</option>
                     <option value="tg">Таджикский</option>
-                  </select>
-                </label>
+                  </CustomSelect>
+                </div>
               )}
             </div>
 
@@ -1131,9 +1132,9 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
             {sectionNames.length > 1 && (
               <div className="flex items-center gap-2 text-xs">
                 <label className="font-semibold text-slate-600 shrink-0">Раздел документа:</label>
-                <select
+                <CustomSelect
                   value={sectionFilter}
-                  onChange={(e) => setSectionFilter(e.target.value)}
+                  onChange={(val) => setSectionFilter(val)}
                   className="flex-1 min-w-0 text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Все разделы ({parsedRows.length} вопр.)</option>
@@ -1142,7 +1143,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                       {name} ({parsedRows.filter(r => r.section === name).length})
                     </option>
                   ))}
-                </select>
+                </CustomSelect>
               </div>
             )}
 

@@ -13,6 +13,7 @@ import {
 } from '../../supabase/functions/_shared/ticketing';
 import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Layers, Loader2, Download, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { CustomSelect } from './CustomSelect';
 
 // Экзамен-кластер: книжка сразу из 4 предметов по образцу (только главный админ).
 // Параметры экзамена (код кластера, название, дата) вносятся заранее и запоминаются в браузере.
@@ -455,15 +456,15 @@ export const ClusterExam: React.FC = () => {
                   <input type="checkbox" checked={on} onChange={(e) => setEnabled(i, e.target.checked)} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
                   <span>{i + 1}. {slot.name}</span>
                 </label>
-                <select
+                <CustomSelect
                   disabled={!on}
                   className={`${input} ${on && !state.subjectIds[i] ? 'border-amber-400 bg-amber-50/40 focus:ring-amber-500' : ''}`}
                   value={state.subjectIds[i]}
-                  onChange={(e) => setSubject(i, e.target.value)}
+                  onChange={(val) => setSubject(i, val)}
                 >
                   <option value="">— выберите предмет —</option>
                   {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                </CustomSelect>
                 {on && !state.subjectIds[i] && (
                   <p className="text-xs text-amber-700 font-medium">Предмет не выбран. Выберите предмет из списка или снимите галочку.</p>
                 )}

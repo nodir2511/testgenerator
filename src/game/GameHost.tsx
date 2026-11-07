@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { AuthModal } from '../components/AuthModal';
 import { FormattedText } from '../components/FormulaEditor';
+import { CustomSelect } from '../components/CustomSelect';
 import { GameRound, INTRO_SLIDES, RULES, SPECIAL } from './content';
 import { buildReview, exportXlsx, resultText, standingsRows, type ReviewRow } from './review';
 import {
@@ -766,14 +767,23 @@ const TieBreak: React.FC<{ teams: GameTeam[]; only: number[]; onAsk: (only: numb
     <div className="tiebreak">
       <p className="lab"><Bi ru={<>Дополнительный вопрос для: <b>{only.map((n) => teamName(teams, n)).join(', ')}</b></>} tj={<>Саволи иловагӣ барои: <b>{only.map((n) => teamName(teams, n)).join(', ')}</b></>} /></p>
       <div className="tb-row">
-        <select value={subject} onChange={(e) => setSubject(e.target.value)}>
+        <CustomSelect
+          value={subject}
+          onChange={(val) => setSubject(val)}
+          className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+        >
           <option value="">— предмет —</option>
           {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <select value={chapter} onChange={(e) => setChapter(e.target.value)} disabled={!chapters.length}>
+        </CustomSelect>
+        <CustomSelect
+          value={chapter}
+          onChange={(val) => setChapter(val)}
+          disabled={!chapters.length}
+          className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+        >
           <option value="">все разделы</option>
           {chapters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
+        </CustomSelect>
         <button className="btn" onClick={load} disabled={!subject || loading}>{loading ? '…' : 'Взять вопрос'}</button>
       </div>
       {err && <p className="gate-err">{err}</p>}

@@ -23,6 +23,7 @@ import {
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/exportLazy';
 import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo, describeSelection, warmKeyModule } from '../lib/exportLazy';
 import { SendToTelegramButton } from './SendToTelegramButton';
+import { CustomSelect } from './CustomSelect';
 import { useUserLimits } from '../lib/generationLimits';
 import { autoBatchTitle, DEFAULT_BATCH_TITLE } from '../lib/batchTitle';
 import { DownloadButton, useExportLang, type Lang } from './DownloadButton';
@@ -994,13 +995,13 @@ export const TicketGenerator: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <select
+              <CustomSelect
                 value={subjectId}
-                onChange={(e) => applyPresetForSubject(e.target.value)}
+                onChange={(val) => applyPresetForSubject(val)}
                 className="w-full min-h-[44px] text-base px-3 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-900"
               >
                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              </CustomSelect>
             )}
           </section>
 
