@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import { saveClusterBatch, loadUsedQuestionIds } from '../lib/clusterStore';
 import { saveAs } from 'file-saver';
@@ -9,8 +9,9 @@ import { describeError, notifyError, notifyInfo } from '../lib/errors';
 import { keyKindOf } from '../lib/answerKey';
 import { CLUSTER_SLOTS, buildClusterZip, type ClusterSettings, type ClusterVariant } from '../lib/clusterExport';
 import {
-  fitSettings, pickParallel, separateLinked, chapterTotals, totalsOf, poolStats as calcPoolStats, toSnapshot, preferUnused,
+  fitSettings, pickParallel, separateLinked, chapterTotalsFromCounts, totalsOf, poolStats as calcPoolStats, toSnapshot, preferUnused,
 } from '../../supabase/functions/_shared/ticketing';
+import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Layers, Loader2, Download, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
 
 // Экзамен-кластер: книжка сразу из 4 предметов по образцу (только главный админ).
@@ -71,45 +72,39 @@ function load(): Saved {
 
 const PREFS_KEY = 'cluster_v1';
 
-const LIGHT_COLUMNS = 'id, type, chapter_id, topic_id, num, seq, created_at, linked_ids';
+// Счётчики вопросов предмета (по главам и видам) одним запросом — для охвата глав, как в генераторе билетов
+type CountRow = { chapter_id: string | null; type: string; cnt: number };
+const fetchQuestionCounts = async (subjectId: string): Promise<CountRow[]> => {
+  const { data, error } = await supabase.rpc('question_counts', { p_subject_id: subjectId });
+  if (error) throw error;
+  return (data || []) as CountRow[];
+};
 
-// Все вопросы предмета без вариантов ответа (быстро), страницы по 1000 — параллельно
-async function loadLightQuestions(subjectId: string): Promise<any[]> {
-  const page = (from: number) =>
-    supabase.from('questions').select(LIGHT_COLUMNS, { count: 'exact' }).eq('subject_id', subjectId).eq('is_deleted', false).order('id').range(from, from + 999);
-  const first = await page(0);
-  if (first.error) throw first.error;
-  const total = first.count ?? first.data?.length ?? 0;
-  const rest = [] as ReturnType<typeof page>[];
-  for (let from = 1000; from < total; from += 1000) rest.push(page(from));
-  const pages = await Promise.all(rest);
-  const out: any[] = [...(first.data || [])];
-  for (const r of pages) {
-    if (r.error) throw r.error;
-    out.push(...(r.data || []));
-  }
-  return out;
+// Лёгкий пул (только поля для подбора) по выбранным темам и главам без тем; ничего не выбрано — весь предмет.
+// Фильтр работает в базе, а не в браузере
+async function loadSlotPool(subjectId: string, topicIds: string[], chapterIds: string[]): Promise<any[]> {
+  if (!topicIds.length && !chapterIds.length) return loadLightPool(supabase, { subjectId, topicIds: [], chapterIds: [] });
+  const parts = await Promise.all([
+    topicIds.length ? loadLightPool(supabase, { subjectId, topicIds, chapterIds: [] }) : Promise.resolve([]),
+    chapterIds.length ? loadLightPool(supabase, { subjectId, topicIds: [], chapterIds }) : Promise.resolve([]),
+  ]);
+  const seen = new Set<string>();
+  return parts.flat().filter((q) => (seen.has(q.id) ? false : (seen.add(q.id), true)));
 }
 
-async function pickForSlot(subjectId: string, topicIds: string[], chapterIds: string[], want: Counts, V: number, used: Set<string>) {
-  const [rows, chaptersRes] = await Promise.all([
-    loadLightQuestions(subjectId),
-    supabase.from('chapters').select('id, name, order_index').eq('subject_id', subjectId).eq('is_deleted', false),
-  ]);
-  if (chaptersRes.error) throw chaptersRes.error;
-  const chapters = new Map<string, any>((chaptersRes.data || []).map((c: any) => [c.id, c]));
-  const topicsRes = chapters.size
-    ? await supabase.from('topics').select('id, name, order_index').in('chapter_id', [...chapters.keys()]).eq('is_deleted', false)
-    : { data: [] as any[], error: null };
-  if (topicsRes.error) throw topicsRes.error;
-  const topics = new Map<string, any>((topicsRes.data || []).map((t: any) => [t.id, t]));
+const slotPoolKey = (subjectId: string, topicIds: string[], chapterIds: string[]) =>
+  ['cluster_pool', subjectId, [...topicIds].sort().join(','), [...chapterIds].sort().join(',')];
 
-  // Выбор тем: если ничего не выбрано — весь предмет
-  const tSet = new Set(topicIds), cSet = new Set(chapterIds);
-  const selected = tSet.size === 0 && cSet.size === 0
-    ? rows
-    : rows.filter((q) => (q.topic_id && tSet.has(q.topic_id)) || cSet.has(q.chapter_id));
-  selected.forEach((q) => { q.chapter = chapters.get(q.chapter_id); q.topic = q.topic_id ? topics.get(q.topic_id) : undefined; });
+async function pickForSlot(
+  qc: QueryClient, subjectId: string, topicIds: string[], chapterIds: string[], want: Counts, V: number, usedP: Promise<Set<string>>,
+) {
+  // Пул и счётчики берутся из кэша страницы, если их уже загрузила предзагрузка (не старше минуты)
+  const [cached, countRows, used] = await Promise.all([
+    qc.fetchQuery({ queryKey: slotPoolKey(subjectId, topicIds, chapterIds), queryFn: () => loadSlotPool(subjectId, topicIds, chapterIds), staleTime: 60_000 }),
+    qc.fetchQuery({ queryKey: ['question_counts', subjectId], queryFn: () => fetchQuestionCounts(subjectId), staleTime: 60_000 }),
+    usedP,
+  ]);
+  const selected = cached.map((q) => ({ ...q })); // кэш не меняем
 
   const fit = fitSettings(calcPoolStats(selected), {
     testCount: want.test, matchingCount: want.matching, openCount: want.open,
@@ -118,8 +113,7 @@ async function pickForSlot(subjectId: string, topicIds: string[], chapterIds: st
   if (fit.error) throw new Error(fit.error);
 
   // Охват глав — по всем вопросам выбранных глав (как в генераторе билетов)
-  const chosenChapters = new Set(selected.map((q) => q.chapter_id));
-  const totals = chapterTotals(rows.filter((q) => chosenChapters.has(q.chapter_id)));
+  const totals = chapterTotalsFromCounts(countRows, [...new Set(selected.map((q) => q.chapter_id).filter(Boolean))]);
   // Вопросы из прошлых экзаменов — только если новых не хватает; сколько таких повторов вошло, считаем отдельно
   let repeats = 0;
   const pick = (type: 'test' | 'matching' | 'open', n: number) => {
@@ -131,22 +125,14 @@ async function pickForSlot(subjectId: string, topicIds: string[], chapterIds: st
   const opens = pick('open', fit.settings.openCount);
   separateLinked([tests, matchings, opens], selected);
 
-  // Полные данные (варианты ответов, пары соответствия) — только для выбранных вопросов
   const ids = new Set<string>();
   for (let k = 0; k < V; k++) [...tests[k], ...matchings[k], ...opens[k]].forEach((q) => ids.add(q.id));
   ids.forEach((id) => { if (used.has(id)) repeats++; });
-  const idList = [...ids];
-  const batches: string[][] = [];
-  for (let i = 0; i < idList.length; i += 80) batches.push(idList.slice(i, i + 80));
-  const full = new Map<string, any>();
-  const results = await Promise.all(batches.map((b) =>
-    supabase.from('questions').select('*, options:question_options(*), matching_items:matching_items(*)').in('id', b)));
-  for (const r of results) {
-    if (r.error) throw r.error;
-    (r.data || []).forEach((q: any) => full.set(q.id, q));
-  }
+
+  // Полные данные (варианты ответов, пары, названия глав и тем) — только для выбранных вопросов
+  await hydrateTickets(supabase, [tests, matchings, opens]);
   const perVariant = Array.from({ length: V }, (_, k) =>
-    [...tests[k], ...matchings[k], ...opens[k]].map((q) => toSnapshot({ ...full.get(q.id), chapter: q.chapter, topic: q.topic }, { shuffleOptions: true, shuffleMatching: true })));
+    [...tests[k], ...matchings[k], ...opens[k]].map((q) => toSnapshot(q, { shuffleOptions: true, shuffleMatching: true })));
   return { perVariant, notes: fit.notes, repeats, picked: ids.size };
 }
 
@@ -288,6 +274,21 @@ export const ClusterExam: React.FC = () => {
     });
   }, [subjects]);
 
+  // Предзагрузка: пока настраиваются параметры, вопросы и счётчики включённых предметов уже качаются
+  // (как только выбор не меняется полсекунды). При создании экзамена они берутся из кэша
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      CLUSTER_SLOTS.forEach((_, i) => {
+        const id = state.subjectIds[i];
+        if (!id || state.enabled?.[i] === false) return;
+        const t = state.topicIds?.[i] ?? [], c = state.chapterIds?.[i] ?? [];
+        queryClient.prefetchQuery({ queryKey: slotPoolKey(id, t, c), queryFn: () => loadSlotPool(id, t, c), staleTime: 60_000 }).catch(() => {});
+        queryClient.prefetchQuery({ queryKey: ['question_counts', id], queryFn: () => fetchQuestionCounts(id), staleTime: 60_000 }).catch(() => {});
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [state.subjectIds, state.enabled, state.topicIds, state.chapterIds, queryClient]);
+
   const setSetting = (k: keyof ClusterSettings, v: string) => setState((st) => ({ ...st, settings: { ...st.settings, [k]: v } }));
   const setCount = (i: number, k: keyof Counts, v: number) =>
     setState((st) => ({ ...st, counts: st.counts.map((c, j) => (j === i ? { ...c, [k]: Math.max(0, Math.min(100, v || 0)) } : c)) }));
@@ -329,18 +330,17 @@ export const ClusterExam: React.FC = () => {
 
       // Предметы подбираются параллельно: сначала лёгкий список вопросов, полные данные — только для выбранных
       setProgress('Подбор вопросов…');
-      let used = new Set<string>();
-      if (state.avoidRepeats !== false) {
-        try {
-          used = await loadUsedQuestionIds();
-        } catch (e) {
+      // Прошлые экзамены читаются одновременно с вопросами предметов, а не перед ними
+      const usedP: Promise<Set<string>> = state.avoidRepeats === false
+        ? Promise.resolve(new Set<string>())
+        : loadUsedQuestionIds().catch((e) => {
           notifyError(e, 'Не удалось проверить прошлые экзамены — повторы вопросов не исключены');
-        }
-      }
+          return new Set<string>();
+        });
       const perSlot = await Promise.all(CLUSTER_SLOTS.map(async (slot, s) => {
         if (!enabled[s]) return null;
         try {
-          const r = await pickForSlot(subjectIds[s], state.topicIds?.[s] ?? [], state.chapterIds?.[s] ?? [], counts[s], V, used);
+          const r = await pickForSlot(queryClient, subjectIds[s], state.topicIds?.[s] ?? [], state.chapterIds?.[s] ?? [], counts[s], V, usedP);
           r.notes.forEach((n) => notes.push(`${slot.name} — ${n}`));
           if (r.repeats > 0) repeatNotes.push(`${slot.name}: ${r.repeats} из ${r.picked}`);
           return r.perVariant;
