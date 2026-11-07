@@ -10,3 +10,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// Идентификатор сборки (подставляется в vite.config.ts); у dev-сервера — 'dev'
+declare const __BUILD_ID__: string;
