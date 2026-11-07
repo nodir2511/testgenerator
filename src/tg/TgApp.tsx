@@ -411,9 +411,11 @@ export default function TgApp() {
   const backRef = useRef(back);
   backRef.current = back;
 
+  // Скрипт Telegram подгружается динамически: при монтировании WebApp ещё нет,
+  // поэтому обработчики вешаем, когда приложение готово (ready)
   useEffect(() => {
     const app = wa();
-    if (!app) return;
+    if (!app || !ready) return;
     const onMain = () => nextRef.current();
     const onBack = () => backRef.current();
     app.MainButton.onClick(onMain);
@@ -422,7 +424,7 @@ export default function TgApp() {
       app.MainButton.offClick(onMain);
       app.BackButton.offClick(onBack);
     };
-  }, []);
+  }, [ready]);
 
   useEffect(() => {
     const app = wa();
