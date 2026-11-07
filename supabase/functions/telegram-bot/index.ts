@@ -13,6 +13,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
 import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser as linkedUserOf, userMessage } from '../_shared/generate.ts';
+import { LAW_RE } from '../_shared/answerKey.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -319,8 +320,16 @@ async function screenQuick(chat: number, user: any, msgId?: number) {
     }]);
   }
 
+  const law = userSubs.find((s: any) => LAW_RE.test((s.name || '').toLowerCase()));
+  if (law) {
+    kb.push([{
+      text: `⚖️ Право (20+5+0 = 25 в.) · ${T.shortName(law.name, 20)}`,
+      callback_data: `Q:PRE:law:${law.id}`,
+    }]);
+  }
+
   userSubs.forEach((s: any, idx: number) => {
-    if (s.id !== physChem?.id && s.id !== bioState?.id && kb.length < 5) {
+    if (s.id !== physChem?.id && s.id !== bioState?.id && s.id !== law?.id && kb.length < 6) {
       kb.push([{
         text: `📚 ${T.shortName(s.name, 35)}`,
         callback_data: `S:${idx}`,
@@ -338,10 +347,19 @@ async function screenQuick(chat: number, user: any, msgId?: number) {
   return show(chat, msgId, text, kb, MAIN_KEYBOARD);
 }
 
-async function screenQuickVariants(chat: number, msgId: number, type: 'phys' | 'bio', subjectId: string, user: any) {
+// Стандартные составы для экспресс-генерации
+type QuickType = 'phys' | 'bio' | 'law';
+const QUICK: Record<QuickType, { test: number; matching: number; open: number; title: string; fallback: string }> = {
+  phys: { test: 18, matching: 2, open: 7, title: '🧪 Физика / Химия (18 тестов, 2 соотв., 7 откр.)', fallback: 'Химия' },
+  bio: { test: 20, matching: 4, open: 2, title: '🧬 Биология / Гос (20 тестов, 4 соотв., 2 откр.)', fallback: 'Биология' },
+  law: { test: 20, matching: 5, open: 0, title: '⚖️ Право (20 тестов, 5 соотв., без открытых)', fallback: 'Право' },
+};
+const quickType = (v: string): QuickType => (v === 'bio' || v === 'law' ? v : 'phys');
+
+async function screenQuickVariants(chat: number, msgId: number, type: QuickType, subjectId: string, user: any) {
   const limits = await limitsFor(sb, user);
   const options = (limits.tickets <= 4 ? [1, 2, 4] : [1, 2, 4, 10, 20]).filter((n) => n <= limits.tickets);
-  const title = type === 'phys' ? '🧪 Физика / Химия (18 тестов, 2 соотв., 7 откр.)' : '🧬 Биология / Гос (20 тестов, 4 соотв., 2 откр.)';
+  const title = QUICK[type].title;
 
   const kb = [
     options.map((n) => ({
@@ -355,7 +373,7 @@ async function screenQuickVariants(chat: number, msgId: number, type: 'phys' | '
   return show(chat, msgId, text, kb);
 }
 
-async function handleQuickRun(chat: number, msgId: number, type: 'phys' | 'bio', subjectId: string, count: number, user: any) {
+async function handleQuickRun(chat: number, msgId: number, type: QuickType, subjectId: string, count: number, user: any) {
   // Номер предмета приходит из кнопки — проверяем, что предмет доступен пользователю
   const allowed = await allowedSubjectIds(sb, user);
   if (allowed && !allowed.includes(subjectId)) return show(chat, msgId, 'Этот предмет вам не назначен.');
@@ -363,11 +381,9 @@ async function handleQuickRun(chat: number, msgId: number, type: 'phys' | 'bio',
   if (!chs.length) return show(chat, msgId, 'У выбранного предмета нет доступных глав.');
 
   const { data: subj } = await sb.from('subjects').select('name').eq('id', subjectId).maybeSingle();
-  const subjName = subj?.name || (type === 'phys' ? 'Химия' : 'Биология');
+  const subjName = subj?.name || QUICK[type].fallback;
 
-  const testCount = type === 'phys' ? 18 : 20;
-  const matchingCount = type === 'phys' ? 2 : 4;
-  const openCount = type === 'phys' ? 7 : 2;
+  const { test: testCount, matching: matchingCount, open: openCount } = QUICK[type];
   const title = `Экзамен — ${subjName}`;
 
   const st: State = {
@@ -455,7 +471,7 @@ async function screenHelp(chat: number) {
     `Бот помогает преподавателям за секунды создавать билеты по стандартам вуза с правильными ключами ответов.\n\n` +
     `<b>Основные функции:</b>\n` +
     `1. <b>🚀 Конструктор билетов</b> — полноценное визуальное приложение с фильтрами тем и индикатором запаса вопросов (рекомендуется).\n` +
-    `2. <b>⚡ Быстрый билет</b> — экспресс-составление вариантов по стандартам (Физ/Хим 18+2+7, Био/Гос 20+4+2) в 2 клика.\n` +
+    `2. <b>⚡ Быстрый билет</b> — экспресс-составление вариантов по стандартам (Физ/Хим 18+2+7, Био/Гос 20+4+2, Право 20+5+0) в 2 клика.\n` +
     `3. <b>📂 Мои билеты</b> — доступ к ранее созданным наборам с возможностью повторно скачать файл.\n\n` +
     `<b>Команды:</b>\n` +
     `• /app — открыть конструктор билетов\n` +
@@ -697,7 +713,7 @@ async function onCallback(cb: any) {
   // Быстрый выбор вариантов для стандартов
   if (data.startsWith('Q:PRE:')) {
     const parts = data.split(':');
-    const type = parts[2] as 'phys' | 'bio';
+    const type = quickType(parts[2]);
     const subjectId = parts[3];
     return screenQuickVariants(chat, msgId, type, subjectId, user);
   }
@@ -705,7 +721,7 @@ async function onCallback(cb: any) {
   // Быстрый запуск генерации стандарта
   if (data.startsWith('Q:RUN:')) {
     const parts = data.split(':');
-    const type = parts[2] as 'phys' | 'bio';
+    const type = quickType(parts[2]);
     const subjectId = parts[3];
     const count = parseInt(parts[4]) || 2;
     return handleQuickRun(chat, msgId, type, subjectId, count, user);

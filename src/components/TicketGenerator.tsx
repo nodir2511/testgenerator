@@ -45,6 +45,7 @@ type ScopeMode = 'all' | 'pick';
 const STANDARDS = [
   { match: ['хим', 'физ'], test: 18, matching: 2, open: 7 },
   { match: ['био', 'тадж', 'тоҷик', 'гос'], test: 20, matching: 4, open: 2 },
+  { match: ['право', 'ҳуқуқ'], test: 20, matching: 5, open: 0 },
 ];
 const standardFor = (name?: string) => {
   const n = (name || '').toLowerCase();

@@ -273,6 +273,9 @@ describe('ключи ответов', () => {
     expect(keyKindOf('Химия')).toBe('chem');
     expect(keyKindOf('Физика / Физика')).toBe('phys');
     expect(keyKindOf('История')).toBeNull();
+    expect(keyKindOf('Право')).toBe('law');
+    expect(keyKindOf('Ҳуқуқ')).toBe('law');
+    expect(keyKindOf('Правописание')).toBeNull();
   });
 
   it('описание выбора: главы полностью и темы неполных глав', () => {

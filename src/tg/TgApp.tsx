@@ -613,6 +613,17 @@ export default function TgApp() {
                 <span className="tg-preset-title">🧬 Био / Гос</span>
                 <span className="tg-preset-sub">20 + 4 + 2 (26 в.)</span>
               </button>
+              <button
+                type="button"
+                className={`tg-preset-btn ${nums.test === '20' && nums.matching === '5' && nums.open === '0' ? 'on' : ''}`}
+                onClick={() => {
+                  wa()?.HapticFeedback?.impactOccurred('medium');
+                  setNums((cur) => ({ ...cur, test: '20', matching: '5', open: '0' }));
+                }}
+              >
+                <span className="tg-preset-title">⚖️ Право</span>
+                <span className="tg-preset-sub">20 + 5 + 0 (25 в.)</span>
+              </button>
             </div>
           </div>
 

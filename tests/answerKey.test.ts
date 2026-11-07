@@ -39,7 +39,7 @@ describe('ключи ответов: пропуски', () => {
 describe('hasKeyTemplate (ленивый фасад)', () => {
   it('совпадает с keyKindOf', async () => {
     const { hasKeyTemplate } = await import('../src/lib/exportLazy');
-    for (const n of ['Химия', 'химия', 'Физика', 'Биология', 'Таджикский язык', 'Забони тоҷикӣ', 'Тоҷикӣ', 'Математика', 'История', 'English', '', 'ХИМИЯ 11']) {
+    for (const n of ['Химия', 'химия', 'Физика', 'Биология', 'Таджикский язык', 'Забони тоҷикӣ', 'Тоҷикӣ', 'Математика', 'История', 'English', '', 'ХИМИЯ 11', 'Право', 'Основы права', 'Ҳуқуқ', 'Правописание']) {
       expect(hasKeyTemplate(n)).toBe(keyKindOf(n) !== null);
     }
   });
@@ -118,13 +118,21 @@ describe('ключи таджикского языка: шаблон под со
     expect((await build(tk)).stats.universal).toBeUndefined();
   });
 
+  it('право 20/5/0: свой шаблон, все ответы на месте', async () => {
+    const tk = ticket(20, 5, 0);
+    expect(keyTemplateName('law', [tk])).toBe('law');
+    const { stats } = await buildAnswerKeyDocx(fs.readFileSync('templates/key/law.docx'), [tk]);
+    expect(stats.universal).toBeUndefined();
+    expect(stats.overflow).toBe(0);
+  });
+
   it('остальные предметы не затронуты', () => {
     expect(keyTemplateName('bio', [ticket(20, 4, 2)])).toBe('bio');
   });
 
   it('шаблоны есть и на сайте, и в функциях бота', async () => {
     const { KEY_TEMPLATES } = await import('../supabase/functions/_shared/keyTemplates');
-    for (const name of ['taj', 'taj-cluster']) {
+    for (const name of ['taj', 'taj-cluster', 'law']) {
       const file = fs.readFileSync(`templates/key/${name}.docx`);
       expect(KEY_TEMPLATES[name]).toBe(file.toString('base64'));
       expect(fs.readFileSync(`public/key-templates/${name}.docx`).equals(file)).toBe(true);

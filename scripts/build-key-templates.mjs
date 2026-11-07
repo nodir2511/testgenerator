@@ -2,7 +2,7 @@
 // Запуск: node scripts/build-key-templates.mjs
 import fs from 'fs';
 
-const kinds = ['chem', 'phys', 'bio', 'taj', 'taj-cluster'];
+const kinds = ['chem', 'phys', 'bio', 'taj', 'taj-cluster', 'law'];
 fs.mkdirSync('public/key-templates', { recursive: true });
 let out = '// АВТОГЕНЕРАЦИЯ: scripts/build-key-templates.mjs. Шаблоны лежат в templates/key/*.docx.\nexport const KEY_TEMPLATES: Record<string, string> = {\n';
 for (const k of kinds) {

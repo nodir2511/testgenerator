@@ -42,4 +42,7 @@ export function makeSelectionInfoLoader() {
 }
 
 /** Есть ли у предмета шаблон ключей (то же правило, что keyKindOf; сверяется тестом) */
-export const hasKeyTemplate = (subjectName: string): boolean => /хим|физ|биол|тоҷик|таджик|забони/.test((subjectName || '').toLowerCase());
+export const hasKeyTemplate = (subjectName: string): boolean => {
+  const n = (subjectName || '').toLowerCase();
+  return /хим|физ|биол|тоҷик|таджик|забони/.test(n) || /(^|[^а-яё])право([^а-яё]|$)|ҳуқуқ/.test(n);
+};
