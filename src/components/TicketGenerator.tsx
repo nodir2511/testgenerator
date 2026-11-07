@@ -791,7 +791,7 @@ export const TicketGenerator: React.FC = () => {
       <div className="px-1">
         <h2 className="text-xl font-bold text-slate-900 leading-tight">Генератор билетов</h2>
         <p className="text-sm text-slate-600 mt-1">
-          Выберите предмет и нажмите «Сгенерировать» — получите Word с билетами и ключами.
+          Выберите предмет и нажмите «Генерировать» — получите Word с билетами и ключами.
         </p>
       </div>
 
@@ -924,7 +924,7 @@ export const TicketGenerator: React.FC = () => {
             {[
               ['Выберите предмет', 'состав билета подставится сам'],
               ['Оставьте «Весь предмет»', 'или отметьте нужные главы'],
-              ['Нажмите «Сгенерировать» внизу', 'и скачайте Word с билетами и ключами'],
+              ['Нажмите «Генерировать» внизу', 'и скачайте Word с билетами и ключами'],
             ].map(([a, b], i) => (
               <li key={a} className="flex items-start gap-3">
                 <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
@@ -1323,7 +1323,7 @@ export const TicketGenerator: React.FC = () => {
                   ) : (
                     <>
                       <Sparkles className="w-5 h-5 shrink-0" />
-                      <span className="truncate">{generatedBatch ? 'Ещё набор' : 'Сгенерировать'}</span>
+                      <span className="truncate">Генерировать</span>
                     </>
                   )}
                 </span>

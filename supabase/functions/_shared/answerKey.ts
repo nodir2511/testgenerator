@@ -370,7 +370,7 @@ export async function buildUniversalKeyDocx(
 export async function buildAnswerKeyDocx(
   templateBytes: Uint8Array | ArrayBuffer,
   tickets: KeyTicket[],
-  /** Что вошло в билеты (selectionInfo); если задано, заменяет заголовок в шапке шаблона */
+  /** Название экзамена (набора); если задано, встаёт в шапку под «ҶАВОБИ ДУРУСТИ» вместо строки шаблона */
   info?: string | null,
 ): Promise<{ bytes: Uint8Array; stats: KeyStats }> {
   const zip = await JSZip.loadAsync(templateBytes);
@@ -378,7 +378,6 @@ export async function buildAnswerKeyDocx(
     for (const name of Object.keys(zip.files).filter((n) => /^word\/header\d*\.xml$/.test(n))) {
       let h = await zip.file(name)!.async('string');
       if (!h.includes('ДУРУСТИ')) continue;
-      h = setParagraphText(h, 'ДУРУСТИ', 'ВКЛЮЧЕНО В БИЛЕТЫ');
       h = setParagraphText(h, 'саволу', info, 24);
       zip.file(name, h);
     }

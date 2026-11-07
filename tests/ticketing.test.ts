@@ -320,16 +320,16 @@ describe('ключи ответов', () => {
     expect(tj!.fileName).toBe('Экзамен_TJ.zip');
   });
 
-  it('шапка ключей: «ҶАВОБИ ДУРУСТИ …» заменяется на то, что вошло в билеты', async () => {
-    for (const kind of ['bio', 'chem', 'phys', 'taj']) {
+  it('шапка ключей: под «ҶАВОБИ ДУРУСТИ» — название экзамена', async () => {
+    for (const kind of ['bio', 'chem', 'phys', 'taj', 'law']) {
       const tpl = fs.readFileSync(`templates/key/${kind}.docx`);
-      const { bytes } = await buildAnswerKeyDocx(tpl, [{ ticket_number: 1, questions: [] }], 'Главы 1, 2, 3 — полностью; глава 4 — темы 1–4');
+      const { bytes } = await buildAnswerKeyDocx(tpl, [{ ticket_number: 1, questions: [] }], 'Пробный экзамен — 11 класс');
       const zip = await JSZip.loadAsync(bytes);
       const h = await zip.file('word/header1.xml')!.async('string');
       const text = (h.match(/<w:t[^>]*>[^<]*<\/w:t>/g) || []).map((x) => x.replace(/<[^>]+>/g, '')).join('|');
-      expect(text).toContain('ВКЛЮЧЕНО В БИЛЕТЫ');
-      expect(text).toContain('Главы 1, 2, 3 — полностью; глава 4 — темы 1–4');
-      expect(text).not.toContain('ДУРУСТИ');
+      expect(text).toContain('ҶАВОБИ ДУРУСТИ');
+      expect(text).toContain('Пробный экзамен — 11 класс');
+      expect(text).not.toContain('саволу');
       expect(text).not.toContain('А.5');
       expect(text).toContain('Repetitor');
     }

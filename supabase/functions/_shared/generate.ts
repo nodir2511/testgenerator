@@ -164,7 +164,7 @@ export async function deliverBatch(opts: {
   if (kind) {
     try {
       const tpl = Uint8Array.from(atob(KEY_TEMPLATES[keyTemplateName(kind, shaped)]), (c) => c.charCodeAt(0));
-      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped, infos.ru);
+      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped, title.trim() || null);
       missingAnswers = stats.missing;
       key = {
         data: kbytes,
