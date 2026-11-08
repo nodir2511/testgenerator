@@ -10,16 +10,6 @@ interface TopicRow { id: string; name: string; counts: Counts }
 interface ChapterRow { id: string; name: string; counts: Counts; topics: TopicRow[] }
 interface Subject { id: string; name: string }
 interface Limits { perType: number; tickets: number; total?: number; perDay: number | null }
-interface HistoryBatch {
-  id: string; title: string; created_at: string; subject_id: string;
-  generation_params: {
-    chapter_ids?: string[]; topic_ids?: string[]; ticket_count?: number;
-    test_count?: number; matching_count?: number; open_count?: number;
-    requested?: { test: number; matching: number; open: number };
-    shuffle_options?: boolean; shuffle_matching?: boolean; lang?: Lang;
-  };
-  subject?: { name: string } | null;
-}
 interface Result { missingAnswers: number; keySent: boolean }
 type Step = 'subject' | 'chapters' | 'topics' | 'counts' | 'final' | 'done';
 type Lang = 'ru' | 'tg' | 'both';
@@ -160,7 +150,6 @@ export default function TgApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [limits, setLimits] = useState<Limits>({ ...TG_LIMITS });
-  const [history, setHistory] = useState<HistoryBatch[]>([]);
   const [result, setResult] = useState<Result | null>(null);
 
   // ---- загрузка ----
@@ -185,11 +174,6 @@ export default function TgApp() {
         if (prefs.title) setTitle(prefs.title);
         if (typeof prefs.shuffleOptions === 'boolean') setShuffleOptions(prefs.shuffleOptions);
         if (typeof prefs.shuffleMatching === 'boolean') setShuffleMatching(prefs.shuffleMatching);
-        api<{ batches: HistoryBatch[] }>('history').then((h) => {
-          setHistory(h.batches);
-          const last = h.batches.find((b) => me.subjects.some((s) => s.id === b.subject_id));
-          if (last && me.subjects.length > 1) void loadTree(last.subject_id).catch(() => {});
-        }).catch(() => {});
         // Остальные предметы грузятся в фоне, пока пользователь выбирает
         if (me.subjects.length > 1) me.subjects.forEach((s) => void loadTree(s.id).catch(() => {}));
         if (me.subjects.length === 1) await pickSubject(me.subjects[0], true);
@@ -202,32 +186,16 @@ export default function TgApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function pickSubject(s: Subject, auto = false, preset?: HistoryBatch) {
+  async function pickSubject(s: Subject, auto = false) {
     setBusy(true);
     setError('');
     try {
       const ch = await loadTree(s.id);
       setSubject(s);
       setChapters(ch);
-      if (preset) {
-        // «Повторить»: те же главы, темы и настройки
-        const p = preset.generation_params;
-        const known = new Set(ch.flatMap((c) => c.topics.map((t) => t.id)));
-        const chIds = (p.chapter_ids ?? []).filter((id) => ch.some((c) => c.id === id));
-        const r = p.requested ?? { test: p.test_count ?? 0, matching: p.matching_count ?? 0, open: p.open_count ?? 0 };
-        setChapterIds(chIds);
-        setTopicSel((p.topic_ids ?? []).filter((id) => known.has(id)));
-        setNums({ test: String(r.test), matching: String(r.matching), open: String(r.open), tickets: String(p.ticket_count ?? 2) });
-        setTitle(preset.title || DEFAULT_SETTINGS.title);
-        if (p.lang) setLang(p.lang);
-        if (typeof p.shuffle_options === 'boolean') setShuffleOptions(p.shuffle_options);
-        if (typeof p.shuffle_matching === 'boolean') setShuffleMatching(p.shuffle_matching);
-        setStep(chIds.length ? 'counts' : 'chapters');
-      } else {
-        setChapterIds([]);
-        setTopicSel([]);
-        setStep('chapters');
-      }
+      setChapterIds([]);
+      setTopicSel([]);
+      setStep('chapters');
     } catch (e) {
       if (auto) throw e;
       setError((e as Error).message);
@@ -370,23 +338,6 @@ export default function TgApp() {
     }
   }, [subject, chapterIds, topicIds, lang, settings, nums, title, shuffleOptions, shuffleMatching]);
 
-  // Прислать файл набора из истории ещё раз (в лимит генераций не засчитывается)
-  const resend = useCallback(async (b: HistoryBatch) => {
-    setBusy(true);
-    setError('');
-    try {
-      const r = await api<Result>('resend', { batchId: b.id, lang: b.generation_params.lang ?? 'ru' });
-      wa()?.HapticFeedback?.notificationOccurred('success');
-      setResult(r);
-      setStep('done');
-    } catch (e) {
-      wa()?.HapticFeedback?.notificationOccurred('error');
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
   const next = useCallback(() => {
     setError('');
     if (step === 'chapters') {
@@ -501,7 +452,6 @@ export default function TgApp() {
         <>
           <h1>Предмет</h1>
           <p className="tg-hint">{name ? `Вы вошли как ${name}.` : ''} Выберите предмет.</p>
-          <Recent history={history} subjects={subjects} busy={busy} onRepeat={(b) => pickSubject(subjects.find((s) => s.id === b.subject_id)!, false, b)} onResend={resend} />
           {subjects.map((s) => (
             <button
               key={s.id}
@@ -524,7 +474,6 @@ export default function TgApp() {
         <>
           <h1>Главы</h1>
           <p className="tg-hint">{shortName(subject?.name ?? '', 60)} · цифры: тесты / соответствия / открытые</p>
-          <Recent history={history} subjects={subjects} busy={busy} onRepeat={(b) => pickSubject(subjects.find((s) => s.id === b.subject_id)!, false, b)} onResend={resend} />
           <div className="tg-actions">
             <button className="tg-link" onClick={() => setChapterIds(chapters.map((c) => c.id))}>Все</button>
             <button className="tg-link" onClick={() => setChapterIds([])}>Сбросить</button>
@@ -787,52 +736,6 @@ export default function TgApp() {
         </div>
       )}
     </Shell>
-  );
-}
-
-function Recent(p: { history: HistoryBatch[]; subjects: Subject[]; busy: boolean; onRepeat: (b: HistoryBatch) => void; onResend: (b: HistoryBatch) => void }) {
-  const items = p.history.filter((b) => p.subjects.some((s) => s.id === b.subject_id)).slice(0, 4);
-  if (!items.length) return null;
-  return (
-    <section>
-      <h2>Повторить прошлый набор</h2>
-      {items.map((b) => {
-        const subjName = b.subject?.name ?? '';
-        return (
-          <React.Fragment key={b.id}>
-            <button
-              type="button"
-              className="tg-row"
-              disabled={p.busy}
-              onClick={() => {
-                wa()?.HapticFeedback?.impactOccurred('light');
-                p.onRepeat(b);
-              }}
-            >
-              <span className="tg-subject-icon">{subjectIcon(subjName)}</span>
-              <span className="tg-grow">
-                {shortName(b.title, 50)}
-                <span className="tg-sub">
-                  {new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} · {b.generation_params.ticket_count ?? '?'} шт. · {shortName(subjName, 30)}
-                </span>
-              </span>
-              <span className="tg-chev">↻</span>
-            </button>
-            <button
-              type="button"
-              className="tg-link"
-              disabled={p.busy}
-              onClick={() => {
-                wa()?.HapticFeedback?.impactOccurred('light');
-                p.onResend(b);
-              }}
-            >
-              Прислать файл ещё раз
-            </button>
-          </React.Fragment>
-        );
-      })}
-    </section>
   );
 }
 

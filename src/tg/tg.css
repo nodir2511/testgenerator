@@ -111,10 +111,10 @@ body.tg-body {
   text-align: left;
   background: var(--bg);
   color: var(--fg);
-  border: 1.5px solid transparent;
-  border-radius: 14px;
+  border: 1px solid rgba(128, 128, 128, 0.14);
+  border-radius: 16px;
   padding: 12px 14px;
-  margin-bottom: 7px;
+  margin-bottom: 8px;
   font: inherit;
   font-size: 14px;
   cursor: pointer;
@@ -136,10 +136,21 @@ body.tg-body {
 }
 
 .tg-subject-row {
-  padding: 14px;
+  padding: 12px 14px;
+}
+
+.tg-subject-row:active {
+  border-color: var(--btn);
 }
 
 .tg-subject-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--bg2);
   font-size: 22px;
   line-height: 1;
   flex-shrink: 0;
@@ -161,7 +172,8 @@ body.tg-body {
 
 .tg-chev {
   color: var(--hint);
-  font-size: 20px;
+  opacity: 0.6;
+  font-size: 22px;
   font-weight: 300;
   flex-shrink: 0;
 }
