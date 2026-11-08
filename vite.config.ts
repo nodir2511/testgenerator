@@ -5,11 +5,23 @@ import { readFileSync } from 'fs';
 
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, './package.json'), 'utf-8'));
 
-export default defineConfig({
-  plugins: [react()],
+// Идентификатор сборки: сайт сверяет его с /version.json и предлагает обновиться, когда вышла новая версия
+const BUILD_ID = String(Date.now());
+
+export default defineConfig(({ command }) => ({
   define: {
+    __BUILD_ID__: JSON.stringify(command === 'build' ? BUILD_ID : 'dev'),
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
+  plugins: [
+    react(),
+    {
+      name: 'emit-version',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ id: BUILD_ID }) });
+      },
+    },
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -34,4 +46,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

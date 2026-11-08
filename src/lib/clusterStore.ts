@@ -75,19 +75,18 @@ export function clusterVariantsFromBatch(tickets: any[]): ClusterVariant[] {
 /** Идентификаторы вопросов, уже вошедших в сохранённые экзамены-кластеры (видит только главный админ) */
 export async function loadUsedQuestionIds(): Promise<Set<string>> {
   const used = new Set<string>();
-  const { data: batches, error } = await supabase.from('ticket_batches').select('id, generation_params');
+  // Только партии-кластеры (фильтр в базе), без параметров остальных наборов
+  const { data: batches, error } = await supabase.from('ticket_batches').select('id').eq('generation_params->>source', 'cluster');
   if (error) throw error;
-  const batchIds = (batches || []).filter((b: any) => isClusterBatch(b)).map((b: any) => b.id as string);
-  for (let i = 0; i < batchIds.length; i += 40) {
-    const { data: tickets, error: tErr } = await supabase.from('tickets').select('id').in('batch_id', batchIds.slice(i, i + 40));
-    if (tErr) throw tErr;
-    const ticketIds = (tickets || []).map((t: any) => t.id as string);
-    for (let j = 0; j < ticketIds.length; j += 40) {
-      const { data, error: qErr } = await fetchAllPages<any>(() =>
-        supabase.from('ticket_questions').select('id, question_id').in('ticket_id', ticketIds.slice(j, j + 40)));
-      if (qErr) throw qErr;
-      (data || []).forEach((r: any) => { if (r.question_id) used.add(r.question_id); });
-    }
+  const batchIds = (batches || []).map((b: any) => b.id as string);
+  // Вопросы билетов этих партий — одним запросом через связь с билетами (по 40 партий, пачки параллельно)
+  const chunks: string[][] = [];
+  for (let i = 0; i < batchIds.length; i += 40) chunks.push(batchIds.slice(i, i + 40));
+  const results = await Promise.all(chunks.map((ids) => fetchAllPages<any>(() =>
+    supabase.from('ticket_questions').select('id, question_id, ticket:tickets!inner(batch_id)').in('ticket.batch_id', ids))));
+  for (const r of results) {
+    if (r.error) throw r.error;
+    (r.data || []).forEach((row: any) => { if (row.question_id) used.add(row.question_id); });
   }
   return used;
 }

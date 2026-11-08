@@ -411,9 +411,11 @@ export default function TgApp() {
   const backRef = useRef(back);
   backRef.current = back;
 
+  // Скрипт Telegram подгружается динамически: при монтировании WebApp ещё нет,
+  // поэтому обработчики вешаем, когда приложение готово (ready)
   useEffect(() => {
     const app = wa();
-    if (!app) return;
+    if (!app || !ready) return;
     const onMain = () => nextRef.current();
     const onBack = () => backRef.current();
     app.MainButton.onClick(onMain);
@@ -422,7 +424,7 @@ export default function TgApp() {
       app.MainButton.offClick(onMain);
       app.BackButton.offClick(onBack);
     };
-  }, []);
+  }, [ready]);
 
   useEffect(() => {
     const app = wa();
@@ -610,6 +612,17 @@ export default function TgApp() {
               >
                 <span className="tg-preset-title">🧬 Био / Гос</span>
                 <span className="tg-preset-sub">20 + 4 + 2 (26 в.)</span>
+              </button>
+              <button
+                type="button"
+                className={`tg-preset-btn ${nums.test === '20' && nums.matching === '5' && nums.open === '0' ? 'on' : ''}`}
+                onClick={() => {
+                  wa()?.HapticFeedback?.impactOccurred('medium');
+                  setNums((cur) => ({ ...cur, test: '20', matching: '5', open: '0' }));
+                }}
+              >
+                <span className="tg-preset-title">⚖️ Право</span>
+                <span className="tg-preset-sub">20 + 5 + 0 (25 в.)</span>
               </button>
             </div>
           </div>

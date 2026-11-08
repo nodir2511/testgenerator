@@ -23,6 +23,7 @@ import {
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/exportLazy';
 import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo, describeSelection, warmKeyModule } from '../lib/exportLazy';
 import { SendToTelegramButton } from './SendToTelegramButton';
+import { CustomSelect } from './CustomSelect';
 import { useUserLimits } from '../lib/generationLimits';
 import { autoBatchTitle, DEFAULT_BATCH_TITLE } from '../lib/batchTitle';
 import { DownloadButton, useExportLang, type Lang } from './DownloadButton';
@@ -45,6 +46,7 @@ type ScopeMode = 'all' | 'pick';
 const STANDARDS = [
   { match: ['хим', 'физ'], test: 18, matching: 2, open: 7 },
   { match: ['био', 'тадж', 'тоҷик', 'гос'], test: 20, matching: 4, open: 2 },
+  { match: ['право', 'ҳуқуқ'], test: 20, matching: 5, open: 0 },
 ];
 const standardFor = (name?: string) => {
   const n = (name || '').toLowerCase();
@@ -790,7 +792,7 @@ export const TicketGenerator: React.FC = () => {
       <div className="px-1">
         <h2 className="text-xl font-bold text-slate-900 leading-tight">Генератор билетов</h2>
         <p className="text-sm text-slate-600 mt-1">
-          Выберите предмет и нажмите «Сгенерировать» — получите Word с билетами и ключами.
+          Выберите предмет и нажмите «Генерировать» — получите Word с билетами и ключами.
         </p>
       </div>
 
@@ -923,7 +925,7 @@ export const TicketGenerator: React.FC = () => {
             {[
               ['Выберите предмет', 'состав билета подставится сам'],
               ['Оставьте «Весь предмет»', 'или отметьте нужные главы'],
-              ['Нажмите «Сгенерировать» внизу', 'и скачайте Word с билетами и ключами'],
+              ['Нажмите «Генерировать» внизу', 'и скачайте Word с билетами и ключами'],
             ].map(([a, b], i) => (
               <li key={a} className="flex items-start gap-3">
                 <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center shrink-0">{i + 1}</span>
@@ -993,13 +995,13 @@ export const TicketGenerator: React.FC = () => {
                 ))}
               </div>
             ) : (
-              <select
+              <CustomSelect
                 value={subjectId}
-                onChange={(e) => applyPresetForSubject(e.target.value)}
+                onChange={(val) => applyPresetForSubject(val)}
                 className="w-full min-h-[44px] text-base px-3 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold text-slate-900"
               >
                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+              </CustomSelect>
             )}
           </section>
 
@@ -1322,7 +1324,7 @@ export const TicketGenerator: React.FC = () => {
                   ) : (
                     <>
                       <Sparkles className="w-5 h-5 shrink-0" />
-                      <span className="truncate">{generatedBatch ? 'Ещё набор' : 'Сгенерировать'}</span>
+                      <span className="truncate">Генерировать</span>
                     </>
                   )}
                 </span>

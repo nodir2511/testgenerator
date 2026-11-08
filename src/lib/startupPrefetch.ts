@@ -12,6 +12,7 @@ const TAB_MODULES: Record<string, () => Promise<unknown>> = {
   generator: () => import('../components/TicketGenerator'),
   questions: () => import('../components/QuestionList'),
   saved_tickets: () => import('../components/SavedTicketsView'),
+  cluster: () => import('../components/ClusterExam'),
 };
 
 /**

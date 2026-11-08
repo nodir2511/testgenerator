@@ -6,6 +6,7 @@ import { Question, QuestionType, Subject, Chapter, Topic } from '../types/databa
 import { useAuth } from '../hooks/useAuth';
 import { FormattedText } from './FormulaEditor';
 import { questionIssues, ISSUE_LABELS, ISSUE_FILTER_LABELS, matchesIssueFilter, IssueFilter } from '../lib/questionIssues';
+import { CustomSelect } from './CustomSelect';
 import { 
   Search, 
   Filter, 
@@ -435,10 +436,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Предмет</label>
-                <select
+                <CustomSelect
                   value={filterSubjectId}
-                  onChange={(e) => {
-                    setFilterSubjectId(e.target.value);
+                  onChange={(val) => {
+                    setFilterSubjectId(val);
                     setFilterChapterId('');
                     setFilterTopicId('');
                     setPage(0); setExtra(0);
@@ -447,16 +448,16 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 >
                   <option value="">Все предметы</option>
                   {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                </CustomSelect>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Глава</label>
-                <select
+                <CustomSelect
                   disabled={!filterSubjectId}
                   value={filterChapterId}
-                  onChange={(e) => {
-                    setFilterChapterId(e.target.value);
+                  onChange={(val) => {
+                    setFilterChapterId(val);
                     setFilterTopicId('');
                     setPage(0); setExtra(0);
                   }}
@@ -464,31 +465,31 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 >
                   <option value="">Все главы</option>
                   {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                </CustomSelect>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Тема</label>
-                <select
+                <CustomSelect
                   disabled={!filterChapterId}
                   value={filterTopicId}
-                  onChange={(e) => {
-                    setFilterTopicId(e.target.value);
+                  onChange={(val) => {
+                    setFilterTopicId(val);
                     setPage(0); setExtra(0);
                   }}
                   className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                 >
                   <option value="">Все темы</option>
                   {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
+                </CustomSelect>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Проблемные вопросы</label>
-                <select
+                <CustomSelect
                   value={filterIssue}
-                  onChange={(e) => {
-                    setFilterIssue(e.target.value as IssueFilter);
+                  onChange={(val) => {
+                    setFilterIssue(val as IssueFilter);
                     setPage(0); setExtra(0);
                   }}
                   className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500"
@@ -496,7 +497,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   {(Object.keys(ISSUE_FILTER_LABELS) as IssueFilter[]).map((k) => (
                     <option key={k} value={k}>{ISSUE_FILTER_LABELS[k]}</option>
                   ))}
-                </select>
+                </CustomSelect>
               </div>
 
               <div>
@@ -579,10 +580,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           </div>
 
           {/* Предмет */}
-          <select
+          <CustomSelect
             value={filterSubjectId}
-            onChange={(e) => {
-              setFilterSubjectId(e.target.value);
+            onChange={(val) => {
+              setFilterSubjectId(val);
               setFilterChapterId('');
               setFilterTopicId('');
               setPage(0); setExtra(0);
@@ -591,14 +592,14 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           >
             <option value="">Все предметы</option>
             {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          </CustomSelect>
 
           {/* Глава */}
-          <select
+          <CustomSelect
             disabled={!filterSubjectId}
             value={filterChapterId}
-            onChange={(e) => {
-              setFilterChapterId(e.target.value);
+            onChange={(val) => {
+              setFilterChapterId(val);
               setFilterTopicId('');
               setPage(0); setExtra(0);
             }}
@@ -606,27 +607,27 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           >
             <option value="">Все главы</option>
             {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          </CustomSelect>
 
           {/* Тема */}
-          <select
+          <CustomSelect
             disabled={!filterChapterId}
             value={filterTopicId}
-            onChange={(e) => {
-              setFilterTopicId(e.target.value);
+            onChange={(val) => {
+              setFilterTopicId(val);
               setPage(0); setExtra(0);
             }}
             className="text-xs px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
           >
             <option value="">Все темы</option>
             {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
+          </CustomSelect>
 
           {/* Тип */}
-          <select
+          <CustomSelect
             value={filterType}
-            onChange={(e) => {
-              setFilterType(e.target.value);
+            onChange={(val) => {
+              setFilterType(val);
               setPage(0); setExtra(0);
             }}
             className="text-xs px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -635,13 +636,13 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             <option value="test">Тестовые</option>
             <option value="matching">На соответствие</option>
             <option value="open">Открытые</option>
-          </select>
+          </CustomSelect>
 
           {/* Проблемные вопросы */}
-          <select
+          <CustomSelect
             value={filterIssue}
-            onChange={(e) => {
-              setFilterIssue(e.target.value as IssueFilter);
+            onChange={(val) => {
+              setFilterIssue(val as IssueFilter);
               setPage(0); setExtra(0);
             }}
             className={`text-xs px-2.5 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 ${filterIssue !== 'all' ? 'border-amber-400 bg-amber-50' : 'bg-slate-50/70 border-slate-200'}`}
@@ -649,7 +650,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             {(Object.keys(ISSUE_FILTER_LABELS) as IssueFilter[]).map((k) => (
               <option key={k} value={k}>{ISSUE_FILTER_LABELS[k]}</option>
             ))}
-          </select>
+          </CustomSelect>
         </div>
 
         {/* Выбор языка отображения */}

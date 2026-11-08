@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@ta
 import { AuthProvider } from './hooks/useAuth';
 import App from './App';
 import ErrorToaster from './components/ErrorToaster';
+import UpdateBanner from './components/UpdateBanner';
 import { notifyError, notifySuccess } from './lib/errors';
 import { prefetchOnStartup } from './lib/startupPrefetch';
 import { installGlobalErrorReporting } from './lib/errorReporter';
@@ -72,6 +73,7 @@ if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/
             <App />
           </AppErrorBoundary>
           <ErrorToaster />
+          <UpdateBanner />
         </AuthProvider>
       </QueryClientProvider>
     </React.StrictMode>

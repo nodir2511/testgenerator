@@ -5,6 +5,7 @@ import { notifyError, describeError, must } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { FormulaEditor } from './FormulaEditor';
+import { CustomSelect } from './CustomSelect';
 import { uploadQuestionImage } from '../lib/imageCompression';
 import { 
   CheckCircle2, 
@@ -579,10 +580,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
               Предмет *
             </label>
-            <select
+            <CustomSelect
               value={subjectId}
-              onChange={(e) => {
-                setSubjectId(e.target.value);
+              onChange={(val) => {
+                setSubjectId(val);
                 setChapterId('');
                 setTopicId('');
               }}
@@ -590,54 +591,54 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             >
               <option value="">-- Выберите предмет --</option>
               {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            </CustomSelect>
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
               Глава *
             </label>
-            <select
+            <CustomSelect
               disabled={!subjectId}
               value={chapterId}
-              onChange={(e) => {
-                setChapterId(e.target.value);
+              onChange={(val) => {
+                setChapterId(val);
                 setTopicId('');
               }}
               className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium disabled:bg-slate-100"
             >
               <option value="">-- Выберите главу --</option>
               {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            </CustomSelect>
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
               Тема *
             </label>
-            <select
+            <CustomSelect
               disabled={!chapterId}
               value={topicId}
-              onChange={(e) => setTopicId(e.target.value)}
+              onChange={(val) => setTopicId(val)}
               className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium disabled:bg-slate-100"
             >
               <option value="">-- Выберите тему --</option>
               {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
+            </CustomSelect>
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
               Источник / Сборник
             </label>
-            <select
+            <CustomSelect
               value={sourceId}
-              onChange={(e) => setSourceId(e.target.value)}
+              onChange={(val) => setSourceId(val)}
               className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
             >
               <option value="">-- Без источника --</option>
               {sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            </CustomSelect>
           </div>
         </div>
 
@@ -996,20 +997,20 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                           </span>
                           <label className="flex items-center gap-1 text-xs text-slate-500">
                             <span>ответ →</span>
-                            <select
+                            <CustomSelect
                               value={item.match ?? ''}
-                              onChange={(e) => {
+                              onChange={(val) => {
                                 const updated = [...leftItems];
-                                updated[idx] = { ...updated[idx], match: e.target.value === '' ? null : Number(e.target.value) };
+                                updated[idx] = { ...updated[idx], match: val === '' ? null : Number(val) };
                                 setLeftItems(updated);
                               }}
-                              className={`text-xs font-bold px-1.5 py-0.5 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 ${item.match == null ? 'border-red-300 bg-red-50 text-red-600' : 'border-emerald-300 bg-emerald-50 text-emerald-700'}`}
+                              className={`text-xs font-bold px-2 py-0.5 border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 min-w-[54px] ${item.match == null ? 'border-red-300 bg-red-50 text-red-600' : 'border-emerald-300 bg-emerald-50 text-emerald-700'}`}
                             >
                               <option value="">—</option>
                               {rightItems.map((_, k) => (
                                 <option key={k} value={k}>{k + 1}</option>
                               ))}
-                            </select>
+                            </CustomSelect>
                           </label>
                         </div>
                         <div className="flex items-center space-x-1">

@@ -7,7 +7,10 @@ import JSZip from 'npm:jszip@3';
 // открытые (число по одной цифре в клетку).
 // Модуль общий для сайта и Edge Functions: scripts/sync-docx-shared.mjs копирует его в supabase/functions/_shared.
 
-export type KeyKind = 'chem' | 'phys' | 'bio' | 'taj';
+export type KeyKind = 'chem' | 'phys' | 'bio' | 'taj' | 'law';
+
+/** «Право» отдельным словом (не «правописание»), по-таджикски — «ҳуқуқ» */
+export const LAW_RE = /(^|[^а-яё])право([^а-яё]|$)|ҳуқуқ/;
 
 export function keyKindOf(subjectName: string): KeyKind | null {
   const n = (subjectName || '').toLowerCase();
@@ -15,12 +18,24 @@ export function keyKindOf(subjectName: string): KeyKind | null {
   if (/физ/.test(n)) return 'phys';
   if (/биол/.test(n)) return 'bio';
   if (/тоҷик|таджик|забони/.test(n)) return 'taj';
+  // Право: 20 тестов и 5 соответствий, без открытых
+  if (LAW_RE.test(n)) return 'law';
   return null;
 }
 
 export interface KeyTicket {
   ticket_number: number;
   questions: Array<{ question_snapshot: any }>;
+}
+
+/**
+ * Файл шаблона под состав билетов. У таджикского их два: taj — пять соответствий без открытых (20/5/0),
+ * taj-cluster — четыре соответствия и два открытых (20/4/2). С шаблоном без клеток для открытых вопросов
+ * ключ ушёл бы в универсальную таблицу.
+ */
+export function keyTemplateName(kind: KeyKind, tickets: KeyTicket[]): string {
+  const hasOpen = tickets.some((t) => t.questions.some((q) => q.question_snapshot?.type === 'open'));
+  return kind === 'taj' && hasOpen ? 'taj-cluster' : kind;
 }
 
 export interface KeyStats {
@@ -43,7 +58,8 @@ const cellText = (cell: string) =>
 // Пишет text в первый абзац пустой клетки, оформляя как отметка абзаца в шаблоне
 function putText(cell: string, text: string): string {
   const pPr = cell.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] ?? '';
-  const rPr = pPr.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)?.[0] ?? '';
+  // Жирность не берём: в шаблонах она размечена у части клеток, а ответы должны выглядеть одинаково
+  const rPr = (pPr.match(/<w:rPr>[\s\S]*?<\/w:rPr>/)?.[0] ?? '').replace(/<w:b(?:Cs)?\/>/g, '');
   const run = `<w:r>${rPr}<w:t xml:space="preserve">${esc(text)}</w:t></w:r>`;
   const end = cell.indexOf('</w:p>');
   if (end < 0) return cell;
@@ -354,7 +370,7 @@ export async function buildUniversalKeyDocx(
 export async function buildAnswerKeyDocx(
   templateBytes: Uint8Array | ArrayBuffer,
   tickets: KeyTicket[],
-  /** Что вошло в билеты (selectionInfo); если задано, заменяет заголовок в шапке шаблона */
+  /** Название экзамена (набора); если задано, встаёт в шапку под «ҶАВОБИ ДУРУСТИ» вместо строки шаблона */
   info?: string | null,
 ): Promise<{ bytes: Uint8Array; stats: KeyStats }> {
   const zip = await JSZip.loadAsync(templateBytes);
@@ -362,7 +378,6 @@ export async function buildAnswerKeyDocx(
     for (const name of Object.keys(zip.files).filter((n) => /^word\/header\d*\.xml$/.test(n))) {
       let h = await zip.file(name)!.async('string');
       if (!h.includes('ДУРУСТИ')) continue;
-      h = setParagraphText(h, 'ДУРУСТИ', 'ВКЛЮЧЕНО В БИЛЕТЫ');
       h = setParagraphText(h, 'саволу', info, 24);
       zip.file(name, h);
     }

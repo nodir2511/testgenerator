@@ -1,6 +1,6 @@
 import { saveAs } from 'file-saver';
 import { supabase } from './supabase';
-import { buildAnswerKeyDocx, keyKindOf, selectionInfo, selectionChips, type KeyTicket, type SelectionChip } from './answerKey';
+import { buildAnswerKeyDocx, keyKindOf, keyTemplateName, selectionInfo, selectionChips, type KeyTicket, type SelectionChip } from './answerKey';
 
 // Скачивание ключей ответов (Word по шаблону предмета) для созданных билетов.
 // Старые сохранённые билеты не хранят верные ответы в снимке — они подгружаются из банка вопросов.
@@ -60,7 +60,7 @@ export function hasKeyTemplate(subjectName: string): boolean {
   return keyKindOf(subjectName) !== null;
 }
 
-// Какие главы и темы вошли в билеты — для шапки ключей; при ошибке шапка остаётся как в шаблоне
+// Какие главы и темы вошли в билеты — для шапки вариантов
 export interface SelectionInfos { ru: string | null; tg: string | null; chips?: SelectionChip[] }
 
 // Загрузчик с кэшем структуры предмета (главы и темы), чтобы не повторять запросы для партий одного предмета
@@ -106,10 +106,6 @@ export async function withSelectionInfo<T extends { ticket_number: number }>(
   return tickets.map((t) => ({ ...t, selection_info: info }));
 }
 
-async function loadSelectionInfo(subjectId: string, params: any): Promise<string | null> {
-  return (await makeSelectionInfoLoader()(subjectId, params)).ru;
-}
-
 export interface KeyFile { blob: Blob; fileName: string; stats: { missing: number; overflow: number; universal?: boolean } }
 type KeySelection = { subjectId?: string | null; params?: any };
 
@@ -118,14 +114,15 @@ export async function buildAnswerKeyFile(
   /** Файл шаблона в public/key-templates (без .docx), если нужен не стандартный для предмета */
   templateName?: string,
 ): Promise<KeyFile> {
-  const kind = templateName ?? keyKindOf(subjectName);
-  if (!kind) throw new Error('Для этого предмета нет шаблона ключей');
-  const res = await fetch(`/key-templates/${kind}.docx`);
+  const kind = keyKindOf(subjectName);
+  const file = templateName ?? (kind && keyTemplateName(kind, tickets));
+  if (!file) throw new Error('Для этого предмета нет шаблона ключей');
+  const res = await fetch(`/key-templates/${file}.docx`);
   if (!res.ok) throw new Error('Не удалось загрузить шаблон ключей');
   const template = await res.arrayBuffer();
   const sorted = [...tickets].sort((a, b) => a.ticket_number - b.ticket_number);
-  const info = selection?.subjectId ? await loadSelectionInfo(selection.subjectId, selection.params) : null;
-  const { bytes, stats } = await buildAnswerKeyDocx(template, await enrich(sorted), info);
+  // В шапке ключей — название экзамена, которое пользователь дал набору
+  const { bytes, stats } = await buildAnswerKeyDocx(template, await enrich(sorted), title.trim() || null);
   const safe = title.replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 80) || 'Билеты';
   return {
     blob: new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
@@ -136,7 +133,7 @@ export async function buildAnswerKeyFile(
 
 export async function exportAnswerKey(
   title: string, tickets: KeyTicket[], subjectName: string,
-  /** Предмет и выбор глав/тем партии (subject_id + generation_params) — для шапки ключей */
+  /** Предмет и выбор глав/тем партии (subject_id + generation_params) (сейчас ключам не нужен: в их шапке — название набора) */
   selection?: KeySelection,
 ): Promise<{ missing: number; overflow: number; universal?: boolean }> {
   const file = await buildAnswerKeyFile(title, tickets, subjectName, selection);

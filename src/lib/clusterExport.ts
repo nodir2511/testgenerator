@@ -438,24 +438,34 @@ export interface ClusterFile { blob: Blob; fileName: string; missingAnswers: num
 /** ZIP: Русский/Вариант N.docx, Тоҷикӣ/Варианти N.docx и Ключи/Ключи – <предмет>.docx (все варианты) */
 export async function buildClusterZip(settings: ClusterSettings, variants: ClusterVariant[]): Promise<ClusterFile> {
   const zip = new JSZip();
-  for (const v of variants) {
-    zip.file(`Русский/Вариант ${v.number}.docx`, await buildClusterVariantBlob(settings, v, 'ru'));
-    zip.file(`Тоҷикӣ/Варианти ${v.number}.docx`, await buildClusterVariantBlob(settings, v, 'tj'));
-  }
+  // Варианты (RU и TJ) и ключи собираются одновременно: пока один файл ждёт картинки и шаблоны, идёт другой.
+  // В архив кладутся в прежнем порядке
+  const docs = Promise.all(variants.map((v) => Promise.all([
+    buildClusterVariantBlob(settings, v, 'ru'),
+    buildClusterVariantBlob(settings, v, 'tj'),
+  ])));
 
   // Ключи по каждому предмету: все варианты на отдельных страницах (шаблоны ключей)
-  let missingAnswers = 0;
-  let overflow = 0;
-  let universal = 0;
-  for (let s = 0; s < CLUSTER_SLOTS.length; s++) {
-    if (variants.some((v) => v.subjects[s] == null)) continue;
+  const keys = Promise.all(CLUSTER_SLOTS.map((slot, s) => {
+    if (variants.some((v) => v.subjects[s] == null)) return null;
     const tickets = variants.map((v) => ({
       ticket_number: v.number,
       questions: (v.subjects[s] || []).map((q) => ({ question_snapshot: q })),
     }));
-    const slot = CLUSTER_SLOTS[s];
     // У таджикского в кластере 20 + 4 + 2: обычный шаблон ключей рассчитан на 5 соответствий, поэтому свой
-    const key = await buildAnswerKeyFile(`${settings.code}-${settings.exam} – ${slot.name}`, tickets, slot.name, undefined, slot.kind === 'taj' ? 'taj-cluster' : undefined);
+    return buildAnswerKeyFile(`${settings.code}-${settings.exam} – ${slot.name}`, tickets, slot.name, undefined, slot.kind === 'taj' ? 'taj-cluster' : undefined);
+  }));
+
+  const [docBlobs, keyFiles] = await Promise.all([docs, keys]);
+  variants.forEach((v, i) => {
+    zip.file(`Русский/Вариант ${v.number}.docx`, docBlobs[i][0]);
+    zip.file(`Тоҷикӣ/Варианти ${v.number}.docx`, docBlobs[i][1]);
+  });
+  let missingAnswers = 0;
+  let overflow = 0;
+  let universal = 0;
+  for (const key of keyFiles) {
+    if (!key) continue;
     missingAnswers += key.stats.missing;
     overflow += key.stats.overflow;
     if (key.stats.universal) universal++;

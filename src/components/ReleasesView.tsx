@@ -7,6 +7,7 @@ import { useReleases } from '../hooks/useReleases';
 import { KIND_LABELS, RANK_LABELS } from '../lib/releases';
 import { ReleaseItemKind, ReleaseRank, SiteRelease } from '../types/database';
 import { ReleaseCard } from './ReleaseCard';
+import { CustomSelect } from './CustomSelect';
 
 interface DraftItem { kind: ReleaseItemKind; text: string; min_rank: ReleaseRank; subject_id: string }
 type SubjectOpt = { id: string; name: string };
@@ -66,17 +67,17 @@ const ReleaseEditor: React.FC<{ initial: Draft; subjects: SubjectOpt[]; onClose:
       <div className="space-y-2">
         {draft.items.map((it, n) => (
           <div key={n} className="grid grid-cols-1 sm:grid-cols-[8rem_1fr_14rem_10rem_auto] gap-2 items-start">
-            <select className={field} value={it.kind} onChange={(e) => setItem(n, { kind: e.target.value as ReleaseItemKind })}>
+            <CustomSelect className={field} value={it.kind} onChange={(val) => setItem(n, { kind: val as ReleaseItemKind })}>
               {(Object.keys(KIND_LABELS) as ReleaseItemKind[]).map((k) => <option key={k} value={k}>{KIND_LABELS[k]}</option>)}
-            </select>
+            </CustomSelect>
             <textarea className={field} rows={2} placeholder="Что изменилось" value={it.text} onChange={(e) => setItem(n, { text: e.target.value })} />
-            <select className={field} value={it.min_rank} onChange={(e) => setItem(n, { min_rank: Number(e.target.value) as ReleaseRank })}>
+            <CustomSelect className={field} value={it.min_rank} onChange={(val) => setItem(n, { min_rank: Number(val) as ReleaseRank })}>
               {([1, 2, 3, 4] as ReleaseRank[]).map((r) => <option key={r} value={r}>{RANK_LABELS[r]}</option>)}
-            </select>
-            <select className={field} value={it.subject_id} onChange={(e) => setItem(n, { subject_id: e.target.value })}>
+            </CustomSelect>
+            <CustomSelect className={field} value={it.subject_id} onChange={(val) => setItem(n, { subject_id: val })}>
               <option value="">Любой предмет</option>
               {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            </CustomSelect>
             <button
               onClick={() => setDraft((d) => ({ ...d, items: d.items.filter((_, k) => k !== n) }))}
               className="p-2 text-slate-500 hover:text-red-600" aria-label="Удалить пункт"

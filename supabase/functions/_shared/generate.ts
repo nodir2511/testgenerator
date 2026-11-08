@@ -3,7 +3,7 @@
 
 import JSZip from 'npm:jszip@3';
 import { buildSingleTicketBlob } from './docxExport.ts';
-import { buildAnswerKeyDocx, keyKindOf, selectionInfo } from './answerKey.ts';
+import { buildAnswerKeyDocx, keyKindOf, keyTemplateName, selectionInfo } from './answerKey.ts';
 import { KEY_TEMPLATES } from './keyTemplates.ts';
 import * as T from './ticketing.ts';
 import { hydrateTickets, loadLightPool } from './pool.ts';
@@ -163,8 +163,8 @@ export async function deliverBatch(opts: {
   const kind = keyKindOf(subjectName);
   if (kind) {
     try {
-      const tpl = Uint8Array.from(atob(KEY_TEMPLATES[kind]), (c) => c.charCodeAt(0));
-      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped, infos.ru);
+      const tpl = Uint8Array.from(atob(KEY_TEMPLATES[keyTemplateName(kind, shaped)]), (c) => c.charCodeAt(0));
+      const { bytes: kbytes, stats } = await buildAnswerKeyDocx(tpl, shaped, title.trim() || null);
       missingAnswers = stats.missing;
       key = {
         data: kbytes,
