@@ -42,6 +42,7 @@ import {
   MoreHorizontal,
   ChevronRight
 } from 'lucide-react';
+import { IconButton } from './components/ui';
 
 type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'trash' | 'cluster' | 'releases';
 
@@ -312,24 +313,23 @@ export const App: React.FC = () => {
               <TelegramLink />
               <button 
                 onClick={openReleases} 
-                className="relative p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition" 
+                className="relative p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition min-h-[40px]" 
                 title="Что нового" 
                 aria-label="Что нового"
               >
                 <Bell className="w-4 h-4" />
                 {unread.length > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center animate-pulse">
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-red-600 text-white text-[11px] leading-none font-bold flex items-center justify-center animate-pulse motion-reduce:animate-none">
                     {unread.length}
                   </span>
                 )}
               </button>
-              <button
+              <IconButton
+                icon={LogOut}
+                label="Выйти"
                 onClick={() => signOut()}
-                className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition"
-                title="Выйти"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
+                className="w-10 h-10 text-slate-500 hover:text-red-600 hover:bg-red-50"
+              />
             </div>
           </div>
 
@@ -338,20 +338,20 @@ export const App: React.FC = () => {
             <TelegramLink />
             <button 
               onClick={openReleases} 
-              className="relative p-2 text-slate-500 hover:text-indigo-600 active:scale-90 rounded-xl transition hover:bg-slate-100" 
+              className="relative p-2 text-slate-500 hover:text-indigo-600 active:scale-90 rounded-xl transition hover:bg-slate-100 min-h-[40px]" 
               title="Что нового" 
               aria-label="Что нового"
             >
               <Bell className="w-4 h-4" />
               {unread.length > 0 && (
-                <span className="absolute 1 top-1 right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center">
+                <span className="absolute top-1 right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-red-600 text-white text-[11px] leading-none font-bold flex items-center justify-center">
                   {unread.length}
                 </span>
               )}
             </button>
             <button
               onClick={openSheet}
-              className="flex items-center space-x-1.5 p-1.5 pl-2.5 bg-slate-100/90 active:scale-95 border border-slate-200/80 rounded-2xl text-slate-700"
+              className="flex items-center space-x-1.5 p-1.5 pl-2.5 bg-slate-100/90 active:scale-95 border border-slate-200/80 rounded-2xl text-slate-700 min-h-[40px]"
               aria-label="Открыть меню профиля"
             >
               <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">
@@ -375,11 +375,11 @@ export const App: React.FC = () => {
                     if (item.id === 'game') { window.open('/game', '_blank'); return; }
                     goTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
                   }}
-                  className={`py-2 px-3.5 rounded-xl text-xs font-semibold flex items-center space-x-2 whitespace-nowrap transition-all duration-150 active:scale-98 ${
+                  className={`py-2 px-3.5 rounded-xl text-sm font-semibold flex items-center space-x-2 whitespace-nowrap transition-all duration-150 active:scale-98 ${
                     isActive
                       ? 'bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-xs font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 border border-transparent'
-                  }`}
+                  } min-h-[40px]`}
                 >
                   <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-indigo-600' : 'text-slate-500'}`} />
                   <span>{item.label}</span>
@@ -443,11 +443,11 @@ export const App: React.FC = () => {
                       if (item.id === 'game') { window.open('/game', '_blank'); closeSheet(); return; }
                       goTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
                     }}
-                    className={`w-full text-left py-3 px-3.5 rounded-2xl text-xs font-semibold flex items-center justify-between transition active:scale-98 ${
+                    className={`w-full text-left py-3 px-3.5 rounded-2xl text-sm font-semibold flex items-center justify-between transition active:scale-98 ${
                       isActive 
                         ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/25' 
                         : 'text-slate-700 hover:bg-slate-100 active:bg-slate-100'
-                    }`}
+                    } min-h-[40px]`}
                   >
                     <div className="flex items-center space-x-3">
                       <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-500'}`} />
@@ -463,7 +463,7 @@ export const App: React.FC = () => {
             <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
               <button
                 onClick={openReleases}
-                className="w-full py-2.5 px-3.5 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100/70 flex items-center justify-between"
+                className="w-full py-2.5 px-3.5 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100/70 flex items-center justify-between min-h-[40px]"
               >
                 <div className="flex items-center space-x-2">
                   <Bell className="w-4 h-4 text-indigo-600" />
@@ -481,7 +481,7 @@ export const App: React.FC = () => {
                   closeSheet();
                   signOut();
                 }}
-                className="w-full py-2.5 px-3.5 rounded-xl text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100/80 flex items-center justify-center space-x-2 transition active:scale-98"
+                className="w-full py-2.5 px-3.5 rounded-xl text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100/80 flex items-center justify-center space-x-2 transition active:scale-98 min-h-[40px]"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Выйти из аккаунта</span>
@@ -521,11 +521,11 @@ export const App: React.FC = () => {
                   <button
                     key={id}
                     onClick={() => goTab(id)}
-                    className={`flex-1 sm:flex-none justify-center min-h-[44px] px-4 text-sm font-semibold border-b-2 -mb-px flex items-center space-x-2 transition-all ${
+                    className={`flex-1 sm:flex-none justify-center min-h-[44px] px-3 sm:px-4 text-sm font-semibold border-b-2 -mb-px flex items-center space-x-2 whitespace-nowrap transition-all ${
                       currentTab === id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'
                     }`}
                   >
-                    <Icon className="w-4 h-4" />
+                    <Icon className="w-4 h-4 hidden sm:block" />
                     <span>{label}</span>
                   </button>
                 ))}
@@ -571,7 +571,7 @@ export const App: React.FC = () => {
               currentTab === 'generator' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
                 : 'text-slate-500 hover:text-slate-900'
-            }`}
+            } min-h-[40px]`}
           >
             <div className={`p-1.5 rounded-xl transition-colors ${
               currentTab === 'generator' && !isQuestionFormOpen ? 'bg-indigo-50 text-indigo-600 shadow-xs' : ''
@@ -588,7 +588,7 @@ export const App: React.FC = () => {
               currentTab === 'questions' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
                 : 'text-slate-500 hover:text-slate-900'
-            }`}
+            } min-h-[40px]`}
           >
             <div className={`p-1.5 rounded-xl transition-colors ${
               currentTab === 'questions' && !isQuestionFormOpen ? 'bg-indigo-50 text-indigo-600 shadow-xs' : ''
@@ -605,7 +605,7 @@ export const App: React.FC = () => {
               currentTab === 'saved_tickets' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
                 : 'text-slate-500 hover:text-slate-900'
-            }`}
+            } min-h-[40px]`}
           >
             <div className={`p-1.5 rounded-xl transition-colors ${
               currentTab === 'saved_tickets' && !isQuestionFormOpen ? 'bg-indigo-50 text-indigo-600 shadow-xs' : ''
@@ -622,7 +622,7 @@ export const App: React.FC = () => {
               mobileMenuOpen || (!['generator', 'questions', 'saved_tickets'].includes(currentTab) && !isQuestionFormOpen)
                 ? 'text-indigo-600 font-bold'
                 : 'text-slate-500 hover:text-slate-900'
-            }`}
+            } min-h-[40px]`}
           >
             <div className={`p-1.5 rounded-xl transition-colors ${
               !['generator', 'questions', 'saved_tickets'].includes(currentTab) && !isQuestionFormOpen ? 'bg-indigo-50 text-indigo-600 shadow-xs' : ''

@@ -5,6 +5,7 @@ import { Send, X, Loader2, Copy, Check, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { confirmAction } from '../lib/confirm';
+import { Button, IconButton } from './ui';
 
 const BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string | undefined;
 
@@ -82,7 +83,7 @@ export const TelegramLink: React.FC = () => {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="p-2 text-slate-500 hover:text-indigo-600 rounded-xl transition"
+        className="p-2 text-slate-500 hover:text-indigo-600 rounded-xl transition min-h-[40px]"
         title="Telegram-бот"
         aria-label="Telegram-бот"
       >
@@ -143,24 +144,20 @@ export const TelegramLink: React.FC = () => {
                 )}
                 <div className="flex items-center gap-2">
                   <code className="flex-1 bg-slate-100 rounded-lg px-3 py-2 text-sm font-mono">{command}</code>
-                  <button
+                  <IconButton
+                    icon={copied ? Check : Copy}
+                    label={copied ? 'Скопировано' : 'Скопировать команду'}
+                    variant="secondary"
                     onClick={() => { navigator.clipboard?.writeText(command); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-                    className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50"
-                    title="Копировать"
-                  >
-                    {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
-                  </button>
+                    className={copied ? 'text-emerald-600' : undefined}
+                  />
                 </div>
               </div>
             ) : (
-              <button
-                onClick={getCode}
-                disabled={busy}
-                className="w-full min-h-[48px] px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-base font-bold flex items-center justify-center"
-              >
+              <Button variant="primary" size="lg" className="w-full" onClick={getCode} disabled={busy}>
                 {busy && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {linked ? 'Привязать другой чат' : 'Получить код привязки'}
-              </button>
+              </Button>
             )}
 
             {error && <p className="text-xs text-red-600">{error}</p>}

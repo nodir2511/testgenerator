@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { authErrorText } from '../lib/errors';
 import { LogIn, ShieldAlert, Lock, Mail, Eye, EyeOff, Loader2, Sparkles } from 'lucide-react';
+import { Button } from './ui';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -114,14 +115,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               </span>
             </label>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full min-h-[52px] px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-70 text-white font-bold rounded-xl text-base shadow-sm transition flex items-center justify-center gap-2"
-            >
+            <Button variant="primary" size="lg" className="w-full" type="submit" disabled={loading}>
               {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
               <span>{loading ? 'Входим…' : 'Войти'}</span>
-            </button>
+            </Button>
 
             <div className="text-center">
               <button type="button" onClick={() => setShowForgot((v) => !v)} className="min-h-[40px] text-sm font-semibold text-indigo-700">

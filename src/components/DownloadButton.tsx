@@ -38,7 +38,7 @@ export const DownloadButton: React.FC<{
         <button
           onClick={() => pick(lang)}
           disabled={busy}
-          className={`flex-1 ${h} px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-l-xl font-bold flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-70`}
+          className={`flex-1 ${h} px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-l-xl font-bold flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-70 min-h-[40px]`}
         >
           {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
           <span>{busy ? 'Готовим файл…' : `Скачать · ${LANG_LABEL[lang]}`}</span>
@@ -46,7 +46,7 @@ export const DownloadButton: React.FC<{
         <button
           onClick={() => setOpen((v) => !v)}
           disabled={busy}
-          className={`w-12 ${h} bg-indigo-600 hover:bg-indigo-700 text-white rounded-r-xl border-l border-indigo-400/60 flex items-center justify-center transition disabled:opacity-70`}
+          className={`w-12 ${h} bg-indigo-600 hover:bg-indigo-700 text-white rounded-r-xl border-l border-indigo-400/60 flex items-center justify-center transition disabled:opacity-70 min-h-[40px]`}
           aria-label="Выбрать язык"
           aria-expanded={open}
         >

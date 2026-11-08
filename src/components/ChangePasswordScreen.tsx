@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { passwordErrorText } from '../lib/errors';
 import { passwordChecks, passwordOk } from '../lib/passwordRules';
 import { CheckCircle2, Circle, Eye, EyeOff, KeyRound, Loader2, LogOut } from 'lucide-react';
+import { Button } from './ui';
 
 // Обязательная смена пароля: пароль задал администратор, значит его знает не только владелец аккаунта.
 // Пока пароль не сменён, остальная часть сайта недоступна. Флаг в профиле база снимает сама,
@@ -104,14 +105,10 @@ export const ChangePasswordScreen: React.FC = () => {
 
             {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</div>}
 
-            <button
-              type="submit"
-              disabled={!canSave}
-              className="w-full min-h-[52px] bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-base flex items-center justify-center gap-2 transition disabled:opacity-50"
-            >
+            <Button variant="primary" size="lg" className="w-full" type="submit" disabled={!canSave}>
               {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
               {saving ? 'Сохраняем…' : 'Сохранить пароль'}
-            </button>
+            </Button>
 
             <button
               type="button"

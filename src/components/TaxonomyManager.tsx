@@ -16,7 +16,7 @@ import {
   Library
 } from 'lucide-react';
 import { confirmAction } from '../lib/confirm';
-import { PageHeader } from './ui';
+import { Button, Card, IconButton, PageHeader } from './ui';
 
 interface TaxonomyManagerProps {
   onSelectSubject?: (subjectId: string) => void;
@@ -219,7 +219,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
   return (
     <div className="space-y-6">
       {/* Селектор предметов */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+      <Card padding="none" className="p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div>
             <PageHeader
@@ -235,23 +235,19 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
               e.preventDefault();
               if (newSubjectName.trim()) addSubjectMutation.mutate(newSubjectName.trim());
             }}
-            className="flex items-center gap-2"
+            className="flex items-center gap-2 w-full sm:w-auto"
           >
             <input
               type="text"
               value={newSubjectName}
               onChange={(e) => setNewSubjectName(e.target.value)}
               placeholder="Новый предмет (напр. Химия)"
-              className="text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="min-w-0 flex-1 text-sm px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            <button
-              type="submit"
-              disabled={addSubjectMutation.isPending || !newSubjectName.trim()}
-              className="text-xs px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-1 font-medium disabled:opacity-50"
-            >
+            <Button variant="primary" type="submit" disabled={addSubjectMutation.isPending || !newSubjectName.trim()}>
               <Plus className="w-3.5 h-3.5" />
               Добавить
-            </button>
+            </Button>
           </form>}
         </div>
 
@@ -278,20 +274,20 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                   activeSubjectId === sub.id
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                }`}
+                } min-h-[40px]`}
               >
                 {sub.name}
               </button>
             ))
           )}
         </div>
-      </div>
+      </Card>
 
       {/* Колонки: Главы, Темы и Источники */}
       {activeSubjectId && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* 1. Главы */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
+          <Card padding="none" className="p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Layers className="w-4 h-4 mr-2 text-indigo-600" />
@@ -314,15 +310,17 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 value={newChapterName}
                 onChange={(e) => setNewChapterName(e.target.value)}
                 placeholder="Название главы"
-                className="text-xs flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="text-sm flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
-              <button
+              <IconButton
                 type="submit"
-                disabled={addChapterMutation.isPending || !newChapterName.trim()}
-                className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
+                icon={Plus}
+                label="Добавить главу"
+                variant="primary"
+                loading={addChapterMutation.isPending}
+                disabled={!newChapterName.trim()}
+                className="w-10 h-10 rounded-lg"
+              />
             </form>
 
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
@@ -374,10 +372,10 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 ))
               )}
             </div>
-          </div>
+          </Card>
 
           {/* 2. Темы выбранной главы */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
+          <Card padding="none" className="p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Bookmark className="w-4 h-4 mr-2 text-emerald-600" />
@@ -406,15 +404,17 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                     value={newTopicName}
                     onChange={(e) => setNewTopicName(e.target.value)}
                     placeholder="Название темы"
-                    className="text-xs flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="text-sm flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
-                  <button
+                  <IconButton
                     type="submit"
-                    disabled={addTopicMutation.isPending || !newTopicName.trim()}
-                    className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
+                    icon={Plus}
+                    label="Добавить тему"
+                    variant="primary"
+                    loading={addTopicMutation.isPending}
+                    disabled={!newTopicName.trim()}
+                    className="w-10 h-10 rounded-lg"
+                  />
                 </form>
 
                 <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
@@ -459,10 +459,10 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 </div>
               </>
             )}
-          </div>
+          </Card>
 
           {/* 3. Источники / Сборники */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
+          <Card padding="none" className="p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Library className="w-4 h-4 mr-2 text-amber-600" />
@@ -483,15 +483,17 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 value={newSourceName}
                 onChange={(e) => setNewSourceName(e.target.value)}
                 placeholder="Сборник / Автор (напр. ЕГЭ 2025)"
-                className="text-xs flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="text-sm flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
-              <button
+              <IconButton
                 type="submit"
-                disabled={addSourceMutation.isPending || !newSourceName.trim()}
-                className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
+                icon={Plus}
+                label="Добавить источник"
+                variant="primary"
+                loading={addSourceMutation.isPending}
+                disabled={!newSourceName.trim()}
+                className="w-10 h-10 rounded-lg"
+              />
             </form>
 
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
@@ -526,7 +528,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 ))
               )}
             </div>
-          </div>
+          </Card>
         </div>
       )}
     </div>

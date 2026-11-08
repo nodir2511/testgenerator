@@ -238,10 +238,10 @@ export const SavedTicketsView: React.FC = () => {
       </div>
 
       {list.isLoading ? (
-        <div className="bento-card p-12 rounded-2xl text-center">
+        <Card padding="none" className="p-12 text-center">
           <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto mb-2" />
           <p className="text-sm font-semibold text-slate-600">Загружаем архив…</p>
-        </div>
+        </Card>
       ) : batches.length === 0 ? (
         <Card>
           {filtered ? (
@@ -279,14 +279,10 @@ export const SavedTicketsView: React.FC = () => {
             />
           ))}
           {list.hasNextPage && (
-            <button
-              onClick={() => list.fetchNextPage()}
-              disabled={list.isFetchingNextPage}
-              className="w-full min-h-[48px] rounded-xl border border-slate-300 bg-white text-base font-semibold text-slate-800 flex items-center justify-center gap-2 disabled:opacity-60"
-            >
+            <Button variant="secondary" size="lg" className="w-full bg-white" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
               {list.isFetchingNextPage && <Loader2 className="w-5 h-5 animate-spin" />}
               Показать ещё
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -333,7 +329,7 @@ const BatchCard: React.FC<{
   };
 
   return (
-    <div className="bento-card rounded-2xl">
+    <Card padding="none">
       <div className={`h-1 rounded-t-2xl ${accent.bar}`} />
       <div className="p-4 sm:p-5 space-y-3">
         <div className="flex items-start justify-between gap-2">
@@ -384,23 +380,19 @@ const BatchCard: React.FC<{
               </span>
             ))}
             {!showAllChips && batch.chips.length > 3 && (
-              <button onClick={() => setShowAllChips(true)} className="rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold text-slate-700 bg-white">
+              <Button variant="secondary" className="bg-white" onClick={() => setShowAllChips(true)}>
                 ещё {batch.chips.length - 3}
-              </button>
+              </Button>
             )}
           </div>
         )}
 
         {/* Главное действие — одна кнопка; остальное — второстепенные кнопки с рамкой */}
         {cluster ? (
-          <button
-            onClick={() => onDownload(exportLang)}
-            disabled={busyId === `${batch.id}-dl`}
-            className="w-full sm:w-auto min-h-[44px] px-5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-60"
-          >
+          <Button variant="primary" className="w-full sm:w-auto" onClick={() => onDownload(exportLang)} disabled={busyId === `${batch.id}-dl`}>
             {busyId === `${batch.id}-dl` ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
             Скачать кластер (ZIP)
-          </button>
+          </Button>
         ) : (
           <div className="sm:max-w-sm">
             <DownloadButton size="md" lang={exportLang} busy={busyId === `${batch.id}-dl`} onDownload={onDownload} />
@@ -420,14 +412,10 @@ const BatchCard: React.FC<{
             />
           )}
           {!cluster && hasKeyTemplate(subjName) && (
-            <button
-              onClick={onKey}
-              disabled={busyId === `${batch.id}-key`}
-              className="min-h-[40px] px-3.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-800 rounded-xl text-sm font-semibold flex items-center gap-1.5 disabled:opacity-60"
-            >
+            <Button variant="secondary" className="bg-white" onClick={onKey} disabled={busyId === `${batch.id}-key`}>
               {busyId === `${batch.id}-key` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
               Только ключи
-            </button>
+            </Button>
           )}
         </div>
 
@@ -480,6 +468,6 @@ const BatchCard: React.FC<{
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 };

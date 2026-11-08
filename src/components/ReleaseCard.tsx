@@ -1,6 +1,7 @@
 import React from 'react';
 import { KIND_LABELS, RANK_LABELS } from '../lib/releases';
 import { SiteRelease } from '../types/database';
+import { Card } from './ui';
 
 const KIND_STYLES = {
   new: 'bg-emerald-100 text-emerald-700',
@@ -13,7 +14,7 @@ export const formatReleaseDate = (iso: string) =>
 
 /** Версия со списком пунктов; showAudience — подпись уровня для главного админа */
 export const ReleaseCard: React.FC<{ release: SiteRelease; showAudience?: boolean; unread?: boolean; subjectNames?: Record<string, string> }> = ({ release, showAudience, unread, subjectNames }) => (
-  <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5">
+  <Card padding="none" className="p-4 sm:p-5">
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
       <span className="text-sm font-bold text-slate-900">v{release.version}</span>
       {unread && <span className="text-xs font-bold uppercase bg-indigo-600 text-white px-1.5 py-0.5 rounded">Новое</span>}
@@ -35,5 +36,5 @@ export const ReleaseCard: React.FC<{ release: SiteRelease; showAudience?: boolea
         </li>
       ))}
     </ul>
-  </div>
+  </Card>
 );

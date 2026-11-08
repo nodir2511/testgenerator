@@ -6,7 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { notifyError, notifyInfo } from '../lib/errors';
 import { useGenerationSettings, type GenerationSettings } from '../lib/generationLimits';
 import { type UserRole } from '../types/database';
-import { Hint, PageHeader } from './ui';
+import { Button, Card as UiCard, Hint, PageHeader } from './ui';
 
 // Статистика использования (только для администратора): RPC admin_usage_stats_v3 (supabase/sql/usage_stats_v3.sql).
 // Поля, которых нет в старой версии функции, необязательны — экран работает и с ней.
@@ -86,7 +86,7 @@ const Empty = () => <p className="text-sm text-slate-600">За этот пери
 const Kpi: React.FC<{ label: string; value: number; prev?: number; prevLabel: string; note?: string }> = ({ label, value, prev, prevLabel, note }) => {
   const pct = prev !== undefined && prev > 0 ? Math.round(((value - prev) / prev) * 100) : null;
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-3.5">
+    <UiCard padding="none" className="p-3.5">
       <div className="text-sm font-semibold text-slate-600 leading-tight">{label}</div>
       <div className="text-3xl font-bold text-slate-900 mt-1 tabular-nums">{value}</div>
       {note ? (
@@ -99,7 +99,7 @@ const Kpi: React.FC<{ label: string; value: number; prev?: number; prevLabel: st
       ) : (
         <div className="text-xs text-slate-500 mt-1">Раньше данных нет</div>
       )}
-    </div>
+    </UiCard>
   );
 };
 
@@ -150,7 +150,7 @@ function TimeBars({ buckets, unit }: { buckets: Array<{ label: string; batches: 
             role="listitem"
             onClick={() => setSel(i)}
             onMouseEnter={() => setSel(i)}
-            className="flex-1 h-full flex items-end justify-center px-px"
+            className="flex-1 h-full flex items-end justify-center px-px min-h-[40px]"
             aria-label={`${b.label}: ${b.batches}`}
           >
             <span
@@ -217,7 +217,7 @@ const GenerationLimitsCard: React.FC<{ hint?: string }> = ({ hint }) => {
   };
 
   return (
-    <section className="bg-white border border-slate-200 rounded-2xl p-4">
+    <UiCard as="section" padding="none" className="p-4">
       <h3 className="font-bold text-slate-900 text-base flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-indigo-600" /> Лимиты генерации <Hint label="Что такое лимиты">Ограничения для преподавателей: сколько раз в сутки и как часто можно создавать билеты. Администраторов они не касаются.</Hint></h3>
       <p className="text-sm text-slate-600 mt-0.5 mb-3">
         Для всех, кроме администраторов: сайт, Telegram-бот и Mini App.{isOwner ? '' : ' Менять может только главный админ.'}
@@ -237,12 +237,11 @@ const GenerationLimitsCard: React.FC<{ hint?: string }> = ({ hint }) => {
         ))}
       </div>
       {isOwner && (
-        <button onClick={save} disabled={!dirty || !valid || saving}
-          className="mt-3 w-full sm:w-auto min-h-[44px] px-5 rounded-xl bg-indigo-600 text-white text-sm font-bold disabled:opacity-40">
+        <Button variant="primary" className="mt-3 w-full sm:w-auto" onClick={save} disabled={!dirty || !valid || saving}>
           {saving ? 'Сохранение…' : 'Сохранить лимиты'}
-        </button>
+        </Button>
       )}
-    </section>
+    </UiCard>
   );
 };
 

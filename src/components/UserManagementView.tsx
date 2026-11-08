@@ -7,7 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Users, ShieldCheck, UserCheck, Activity, Loader2, UserPlus, Pencil, Trash2, BookMarked } from 'lucide-react';
 import { CustomSelect } from './CustomSelect';
 import { confirmAction } from '../lib/confirm';
-import { Button, PageHeader } from './ui';
+import { Badge, Button, Card, Field, IconButton, Input, PageHeader } from './ui';
 
 const SUBJECT_ROLES: UserRole[] = ['subject_teacher', 'subject_admin'];
 const isSubjectRole = (r: UserRole) => SUBJECT_ROLES.includes(r);
@@ -26,9 +26,9 @@ const SubjectPicker: React.FC<{
           key={sub.id}
           type="button"
           onClick={() => onChange(on ? value.filter((x) => x !== sub.id) : [...value, sub.id])}
-          className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${
+          className={`px-3 py-1.5 rounded-full border text-sm font-semibold transition ${
             on ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
-          }`}
+          } min-h-[40px]`}
         >
           {on ? '✓ ' : ''}
           {sub.name}
@@ -277,16 +277,16 @@ export const UserManagementView: React.FC = () => {
 
   if (!isAdmin) {
     return (
-      <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-sm text-slate-500">
+      <Card padding="none" className="p-8 text-center text-sm text-slate-500">
         У вас нет прав администратора для просмотра этого раздела.
-      </div>
+      </Card>
     );
   }
 
   return (
     <div className="space-y-6 max-w-5xl xl:max-w-none mx-auto">
       {/* Пользователи */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+      <Card padding="none" className="p-6">
         <div>
           <PageHeader icon={Users} title="Пользователи и роли" className="px-0" />
           <p className="text-sm text-slate-600 mt-2">
@@ -295,51 +295,38 @@ export const UserManagementView: React.FC = () => {
             Пароль, заданный здесь, временный: при входе человек заменит его на свой.
           </p>
         </div>
-      </div>
+      </Card>
 
       {/* Широкий экран: слева список людей, справа форма нового аккаунта и журнал. Уже — всё подряд */}
       <div className="space-y-6 xl:space-y-0 xl:grid xl:grid-cols-[minmax(0,1fr)_420px] xl:gap-6 xl:items-start xl:content-start">
-      <div className="xl:col-start-2 xl:row-start-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+      <Card padding="none" className="xl:col-start-2 xl:row-start-1 p-6">
         <form onSubmit={handleCreateUser} className="space-y-3">
           <div className="text-sm font-semibold text-slate-800 flex items-center">
             <UserPlus className="w-4 h-4 mr-2 text-primary" />
             Создать новый аккаунт
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <input
-              type="email"
-              required
-              placeholder="Email"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-            />
-            <input
-              type="password"
-              required
-              minLength={6}
-              placeholder="Временный пароль (мин. 6 символов)"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-            />
-            <input
-              type="text"
-              placeholder="Имя (необязательно)"
-              value={newFullName}
-              onChange={(e) => setNewFullName(e.target.value)}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-            />
-            <CustomSelect
-              value={newRole}
-              onChange={(val) => setNewRole(val as UserRole)}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
-            >
-              <option value="user">{ROLE_LABELS.user}</option>
-              {isOwner && <option value="admin">{ROLE_LABELS.admin}</option>}
-              {isOwner && <option value="subject_teacher">{ROLE_LABELS.subject_teacher}</option>}
-              {isOwner && <option value="subject_admin">{ROLE_LABELS.subject_admin}</option>}
-            </CustomSelect>
+            <Field label="Email" required>
+              <Input type="email" required placeholder="teacher@school.tj" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+            </Field>
+            <Field label="Временный пароль" hint="Не короче 6 символов" required>
+              <Input type="password" required minLength={6} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+            </Field>
+            <Field label="Имя" hint="Необязательно">
+              <Input type="text" value={newFullName} onChange={(e) => setNewFullName(e.target.value)} />
+            </Field>
+            <Field label="Роль">
+              <CustomSelect
+                value={newRole}
+                onChange={(val) => setNewRole(val as UserRole)}
+                className="w-full min-h-[44px] px-3 border border-input rounded-xl text-sm bg-white"
+              >
+                <option value="user">{ROLE_LABELS.user}</option>
+                {isOwner && <option value="admin">{ROLE_LABELS.admin}</option>}
+                {isOwner && <option value="subject_teacher">{ROLE_LABELS.subject_teacher}</option>}
+                {isOwner && <option value="subject_admin">{ROLE_LABELS.subject_admin}</option>}
+              </CustomSelect>
+            </Field>
           </div>
           {isSubjectRole(newRole) && (
             <div className="space-y-1.5">
@@ -355,26 +342,24 @@ export const UserManagementView: React.FC = () => {
             Создать аккаунт
           </Button>
         </form>
-      </div>
+      </Card>
 
-      <div className="xl:col-start-1 xl:row-start-1 xl:row-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+      <Card padding="none" className="xl:col-start-1 xl:row-start-1 xl:row-span-2 p-6 space-y-4">
         {loadingProfiles ? (
           <div className="text-center py-6 text-slate-500 flex items-center justify-center">
             <Loader2 className="w-5 h-5 animate-spin mr-2" /> Загрузка пользователей...
           </div>
         ) : (
-          <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 text-xs">
+          <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 text-sm">
             {profiles.map((p) => (
               <div key={p.id} className="bg-white">
               <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 xl:flex-col xl:items-start 2xl:flex-row 2xl:items-center">
                 <div>
                   <div className="font-semibold text-slate-900 text-sm flex items-center space-x-2">
                     <span>{p.full_name || p.email}</span>
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase whitespace-nowrap ${
-                      p.role === 'admin' || p.role === 'subject_admin' ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-slate-100 text-slate-700'
-                    }`}>
+                    <Badge tone={p.role === 'admin' || p.role === 'subject_admin' ? 'warning' : 'neutral'} className="uppercase whitespace-nowrap font-bold">
                       {p.is_owner ? 'Главный админ' : ROLE_LABELS[p.role]}
-                    </span>
+                    </Badge>
                   </div>
                   {isSubjectRole(p.role) && (
                     <div className="flex flex-wrap items-center gap-1 mt-1">
@@ -395,11 +380,11 @@ export const UserManagementView: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                <div className="flex items-center flex-wrap gap-2">
                   {canEdit(p) && (
                   <button
                     onClick={() => (editingId === p.id ? setEditingId(null) : startEdit(p))}
-                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg font-semibold flex items-center space-x-1"
+                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg font-semibold flex items-center space-x-1 min-h-[40px]"
                   >
                     <Pencil className="w-3.5 h-3.5" />
                     <span>Изменить</span>
@@ -409,7 +394,7 @@ export const UserManagementView: React.FC = () => {
                     <button
                       onClick={() => changeRoleMutation.mutate({ userId: p.id, newRole: 'admin' })}
                       disabled={changeRoleMutation.isPending}
-                      className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg font-semibold flex items-center space-x-1"
+                      className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg font-semibold flex items-center space-x-1 min-h-[40px]"
                     >
                       <ShieldCheck className="w-3.5 h-3.5" />
                       <span>Сделать админом</span>
@@ -419,7 +404,7 @@ export const UserManagementView: React.FC = () => {
                     <button
                       onClick={() => changeRoleMutation.mutate({ userId: p.id, newRole: 'user' })}
                       disabled={p.id === currentUser?.id || changeRoleMutation.isPending}
-                      className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg font-semibold flex items-center space-x-1 disabled:opacity-40"
+                      className="px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg font-semibold flex items-center space-x-1 disabled:opacity-40 min-h-[40px]"
                     >
                       <UserCheck className="w-3.5 h-3.5" />
                       <span>Сделать преподавателем</span>
@@ -428,14 +413,18 @@ export const UserManagementView: React.FC = () => {
                   {isOwner && !p.is_owner && (
                     <button
                       onClick={() => (rolesEditId === p.id ? setRolesEditId(null) : startRolesEdit(p))}
-                      className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-semibold flex items-center space-x-1"
+                      className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-semibold flex items-center space-x-1 min-h-[40px]"
                     >
                       <BookMarked className="w-3.5 h-3.5" />
                       <span>Роль и предметы</span>
                     </button>
                   )}
                   {isOwner && !p.is_owner && p.id !== currentUser?.id && (
-                    <button
+                    <IconButton
+                      icon={Trash2}
+                      label="Удалить пользователя"
+                      disabled={deleteUserMutation.isPending}
+                      className="w-10 h-10 text-slate-500 hover:text-red-600 hover:bg-red-50"
                       onClick={async () => {
                         if (await confirmAction({
                           title: `Удалить пользователя ${p.full_name || p.email}?`,
@@ -446,12 +435,7 @@ export const UserManagementView: React.FC = () => {
                           deleteUserMutation.mutate(p.id);
                         }
                       }}
-                      disabled={deleteUserMutation.isPending}
-                      className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-40"
-                      title="Удалить пользователя"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    />
                   )}
                 </div>
               </div>
@@ -473,18 +457,13 @@ export const UserManagementView: React.FC = () => {
                     </div>
                   )}
                   <div className="flex space-x-2">
-                    <button
-                      type="button"
-                      onClick={() => saveRolesMutation.mutate(p.id)}
-                      disabled={saveRolesMutation.isPending}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-sm disabled:opacity-50"
-                    >
+                    <Button variant="primary" type="button" onClick={() => saveRolesMutation.mutate(p.id)} disabled={saveRolesMutation.isPending}>
                       Сохранить
-                    </button>
+                    </Button>
                     <button
                       type="button"
                       onClick={() => setRolesEditId(null)}
-                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-sm"
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-sm min-h-[40px]"
                     >
                       Отмена
                     </button>
@@ -527,17 +506,13 @@ export const UserManagementView: React.FC = () => {
                   </div>
                   {editError && <div className="text-xs text-red-600">{editError}</div>}
                   <div className="flex space-x-2">
-                    <button
-                      type="submit"
-                      disabled={updateUserMutation.isPending}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-sm disabled:opacity-50"
-                    >
+                    <Button variant="primary" type="submit" disabled={updateUserMutation.isPending}>
                       Сохранить
-                    </button>
+                    </Button>
                     <button
                       type="button"
                       onClick={() => setEditingId(null)}
-                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-sm"
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold text-sm min-h-[40px]"
                     >
                       Отмена
                     </button>
@@ -548,9 +523,9 @@ export const UserManagementView: React.FC = () => {
             ))}
           </div>
         )}
-      </div>
+      </Card>
 
-      <div className="xl:col-start-2 xl:row-start-2 xl:max-h-[70vh] xl:overflow-y-auto bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+      <Card padding="none" className="xl:col-start-2 xl:row-start-2 xl:max-h-[70vh] xl:overflow-y-auto p-6 space-y-4">
         <div>
           <h3 className="font-bold text-slate-900 text-base flex items-center">
             <Activity className="w-4 h-4 mr-2 text-indigo-600" />
@@ -566,7 +541,7 @@ export const UserManagementView: React.FC = () => {
         ) : logs.length === 0 ? (
           <div className="text-center py-6 text-xs text-slate-500">Событий пока не зафиксировано.</div>
         ) : (
-          <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden text-xs">
+          <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden text-sm">
             {logs.map((log) => (
               <div key={log.id} className="p-3 flex items-center justify-between bg-white hover:bg-slate-50">
                 <div>
@@ -585,7 +560,7 @@ export const UserManagementView: React.FC = () => {
             ))}
           </div>
         )}
-      </div>
+      </Card>
       </div>
     </div>
   );
