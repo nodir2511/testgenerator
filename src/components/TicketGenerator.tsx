@@ -17,8 +17,6 @@ import {
   Share2,
   SlidersHorizontal,
   X,
-  History,
-  RotateCcw,
 } from 'lucide-react';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/exportLazy';
 import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, withSelectionInfo, describeSelection, warmKeyModule } from '../lib/exportLazy';
@@ -643,39 +641,6 @@ export const TicketGenerator: React.FC = () => {
   };
   const showIntro = !introDismissed && recentFetched && recentBatches.length === 0 && !generatedBatch;
 
-  // Повторить прошлый набор одним нажатием: те же настройки — и сразу генерация
-  const repeatBatch = (b: any) => {
-    const p = b.generation_params || {};
-    const r = p.requested ?? { test: p.test_count ?? 0, matching: p.matching_count ?? 0, open: p.open_count ?? 0 };
-    const keepTitle = !p.auto_title && b.title && b.title !== DEFAULT_BATCH_TITLE;
-    const cfg: GenCfg = {
-      subjectId: b.subject_id,
-      chapterIds: p.chapter_ids ?? [],
-      topicIds: p.topic_ids ?? [],
-      test: Math.min(limits.perType, r.test ?? 0),
-      matching: Math.min(limits.perType, r.matching ?? 0),
-      open: Math.min(limits.perType, r.open ?? 0),
-      tickets: Math.min(limits.tickets, Math.max(1, p.ticket_count ?? 1)),
-      shuffleOptions: typeof p.shuffle_options === 'boolean' ? p.shuffle_options : shuffleOptions,
-      shuffleMatching: typeof p.shuffle_matching === 'boolean' ? p.shuffle_matching : shuffleMatching,
-      title: keepTitle ? b.title : null,
-    };
-    // Форма показывает те же настройки, что ушли в генерацию
-    setSubjectId(cfg.subjectId);
-    setSelectedChapterIds(cfg.chapterIds);
-    setSelectedTopicIds(cfg.topicIds);
-    setScopeMode(cfg.chapterIds.length || cfg.topicIds.length ? 'pick' : 'all');
-    setTestCount(cfg.test);
-    setMatchingCount(cfg.matching);
-    setOpenCount(cfg.open);
-    setTicketCount(cfg.tickets);
-    setShuffleOptions(cfg.shuffleOptions);
-    setShuffleMatching(cfg.shuffleMatching);
-    setCustomTitle(keepTitle ? b.title : '');
-    if (dayExhausted) return notifyInfo('Настройки подставлены, но лимит генераций на сегодня исчерпан. Попробуйте завтра.');
-    if (cooldownLeft > 0) return notifyInfo(`Настройки подставлены. Сгенерировать можно через ${formatWait(cooldownLeft)}.`);
-    handleGenerate(cfg);
-  };
 
   const generatedSubjectName = subjects.find(s => s.id === (generatedBatch?.subject_id || subjectId))?.name || '';
   const generatedHasKey = hasKeyTemplate(generatedSubjectName);
@@ -921,40 +886,6 @@ export const TicketGenerator: React.FC = () => {
         </div>
       )}
 
-      {/* Повторить прошлый набор: одно нажатие — тот же набор заново. На телефоне — лента, листается пальцем */}
-      {recentBatches.length > 0 && (
-        <div>
-          <div className="flex items-center gap-1.5 px-1 mb-2 text-sm font-semibold text-slate-700">
-            <History className="w-4 h-4" />
-            <span>Собрать заново в одно нажатие</span>
-          </div>
-          <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap">
-            {recentBatches.map((b) => {
-              const p = b.generation_params || {};
-              const scope = p.chapter_ids?.length ? `${p.chapter_ids.length} гл.` : 'весь предмет';
-              return (
-                <button
-                  key={b.id}
-                  onClick={() => repeatBatch(b)}
-                  disabled={isGenerating}
-                  className="shrink-0 text-left pl-3 pr-3.5 py-2 bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 rounded-2xl transition active:scale-95 disabled:opacity-50 flex items-center gap-2.5 min-h-[40px]"
-                  title={`${b.title} — сгенерировать заново с теми же настройками`}
-                >
-                  <RotateCcw className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span>
-                    <span className="block text-sm font-semibold text-slate-800 whitespace-nowrap">
-                      {b.subject?.name || b.title} · {scope}
-                    </span>
-                    <span className="block text-xs text-slate-600 whitespace-nowrap">
-                      {p.ticket_count ?? '?'} вар. · {new Date(b.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 md:grid-cols-5 xl:grid-cols-12 gap-4 sm:gap-5 items-start">
         <div className="md:col-span-3 xl:col-span-7 space-y-4 sm:space-y-5">
