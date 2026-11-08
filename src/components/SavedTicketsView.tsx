@@ -429,13 +429,13 @@ const BatchCard: React.FC<{
           {tickets.isLoading ? (
             <div className="py-6 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3">
               {(tickets.data || []).map((t: any) => (
                 <div key={t.id} className="p-3 bg-white rounded-xl border border-slate-200 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-sm text-slate-900">Вариант {t.ticket_number} <span className="font-normal text-slate-600">· {t.questions?.length} вопр.</span></span>
+                  <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+                    <span className="font-bold text-sm text-slate-900 min-w-0">Вариант {t.ticket_number} <span className="font-normal text-slate-600">· {t.questions?.length} вопр.</span></span>
                     {!cluster && (
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 shrink-0">
                         {(exportLang === 'both' ? (['ru', 'tg'] as const) : [exportLang]).map((l) => (
                           <button
                             key={l}
