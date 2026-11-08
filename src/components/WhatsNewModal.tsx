@@ -4,7 +4,13 @@ import { SiteRelease } from '../types/database';
 import { ReleaseCard } from './ReleaseCard';
 
 /** Окно «Что нового» с непрочитанными версиями (только пункты уровня пользователя) */
-export const WhatsNewModal: React.FC<{ releases: SiteRelease[]; onClose: () => void; onOpenHistory: () => void }> = ({ releases, onClose, onOpenHistory }) => (
+export const WhatsNewModal: React.FC<{ releases: SiteRelease[]; onClose: () => void; onOpenHistory: () => void }> = ({ releases, onClose, onOpenHistory }) => {
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
     <div
       role="dialog"
@@ -30,4 +36,5 @@ export const WhatsNewModal: React.FC<{ releases: SiteRelease[]; onClose: () => v
       </div>
     </div>
   </div>
-);
+  );
+};

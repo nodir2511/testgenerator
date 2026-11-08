@@ -6,6 +6,8 @@ import App from './App';
 import ErrorToaster from './components/ErrorToaster';
 import { notifyError, notifySuccess } from './lib/errors';
 import { prefetchOnStartup } from './lib/startupPrefetch';
+import { installGlobalErrorReporting } from './lib/errorReporter';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -27,6 +29,8 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+installGlobalErrorReporting();
 
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 
@@ -64,7 +68,9 @@ if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <App />
+          <AppErrorBoundary>
+            <App />
+          </AppErrorBoundary>
           <ErrorToaster />
         </AuthProvider>
       </QueryClientProvider>
