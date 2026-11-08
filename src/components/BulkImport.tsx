@@ -28,6 +28,7 @@ import {
   Layers
 } from 'lucide-react';
 import { confirmAction } from '../lib/confirm';
+import { PageHeader } from './ui';
 
 type ImportLang = 'ru' | 'tg';
 
@@ -785,13 +786,12 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
       {/* Header */}
       <div className="p-6 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center">
-            <Upload className="w-5 h-5 mr-2 text-blue-600" />
-            Импорт вопросов (Word .docx, Excel, CSV)
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Прямой импорт документов Word с автоматическим извлечением картинок и формул
-          </p>
+          <PageHeader
+            icon={Upload}
+            title="Импорт вопросов"
+            description="Загрузите Word (.docx), Excel или CSV — картинки и формулы подтянутся сами"
+            className="px-0"
+          />
         </div>
 
         <button
@@ -808,7 +808,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         <button
           onClick={() => setActiveTab('file')}
           className={`py-3 px-4 border-b-2 transition flex items-center space-x-1.5 ${
-            activeTab === 'file' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+            activeTab === 'file' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
           <FileText className="w-4 h-4" />
@@ -817,7 +817,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         <button
           onClick={() => setActiveTab('text')}
           className={`py-3 px-4 border-b-2 transition flex items-center space-x-1.5 ${
-            activeTab === 'text' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+            activeTab === 'text' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
           <span>Вставка текста</span>
@@ -826,7 +826,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
           <button
             onClick={() => setActiveTab('history')}
             className={`py-3 px-4 border-b-2 transition flex items-center space-x-1.5 ${
-              activeTab === 'history' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+              activeTab === 'history' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <span>История партий и откат</span>
@@ -846,14 +846,14 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center">
-                <Layers className="w-3.5 h-3.5 mr-1.5 text-blue-600" />
+                <Layers className="w-3.5 h-3.5 mr-1.5 text-indigo-600" />
                 Раздел для вопросов (по умолчанию):
               </span>
               {parsedRows.length > 0 && (
                 <button
                   type="button"
                   onClick={handleApplyTaxonomyToAll}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline"
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold underline"
                 >
                   Применить ко всем ({parsedRows.length})
                 </button>
@@ -870,7 +870,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                     setDefaultChapterId('');
                     setDefaultTopicId('');
                   }}
-                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </CustomSelect>
@@ -884,7 +884,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                     setDefaultChapterId(val);
                     setDefaultTopicId('');
                   }}
-                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="">-- Выберите главу --</option>
                   {availableChapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -896,7 +896,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 <CustomSelect
                   value={defaultTopicId}
                   onChange={(val) => setDefaultTopicId(val)}
-                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="">-- Выберите тему --</option>
                   {availableTopics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -932,7 +932,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                   <CustomSelect
                     value={fileLang}
                     onChange={(val) => setFileLang(val as ImportLang)}
-                    className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
                     <option value="ru">Русский</option>
                     <option value="tg">Таджикский</option>
@@ -957,7 +957,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                         accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         onChange={(e) => setFile(e.target.files?.[0] || null)}
                         disabled={isProcessing}
-                        className="block w-full text-xs file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:font-semibold"
+                        className="block w-full text-xs file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-indigo-600 file:text-white file:font-semibold"
                       />
                       {file && <span className="block text-xs text-slate-500 truncate">{file.name}</span>}
                     </label>
@@ -971,7 +971,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                   {isProcessing && <Loader2 className="w-4 h-4 animate-spin" />}
                   <span>Распознать пару и сопоставить</span>
                 </button>
-                {isProcessing && statusMessage && <p className="text-xs text-blue-600 font-medium">{statusMessage}</p>}
+                {isProcessing && statusMessage && <p className="text-xs text-indigo-600 font-medium">{statusMessage}</p>}
               </div>
             ) : (
           <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center bg-slate-50 hover:bg-slate-100/60 transition cursor-pointer relative">
@@ -984,14 +984,14 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
             />
             {isProcessing ? (
               <div className="space-y-2 py-4">
-                <Loader2 className="w-10 h-10 text-blue-600 mx-auto animate-spin" />
+                <Loader2 className="w-10 h-10 text-indigo-600 mx-auto animate-spin" />
                 <p className="font-bold text-slate-800 text-sm">Обработка документа...</p>
-                {statusMessage && <p className="text-xs text-blue-600 font-medium">{statusMessage}</p>}
+                {statusMessage && <p className="text-xs text-indigo-600 font-medium">{statusMessage}</p>}
               </div>
             ) : (
               <>
                 <div className="flex items-center justify-center space-x-3 mb-3">
-                  <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 shadow-sm">
+                  <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
                     <FileText className="w-6 h-6" />
                   </div>
                   <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
@@ -1019,7 +1019,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               value={pastedText}
               onChange={(e) => setPastedText(e.target.value)}
               placeholder="Вставьте таблицу с заголовками (например, скопированную из Excel или CSV)..."
-              className="w-full p-3 font-mono text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-3 font-mono text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <button
               onClick={handleParseText}
@@ -1141,7 +1141,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 <CustomSelect
                   value={sectionFilter}
                   onChange={(val) => setSectionFilter(val)}
-                  className="flex-1 min-w-0 text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 min-w-0 text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="">Все разделы ({parsedRows.length} вопр.)</option>
                   {sectionNames.map(name => (
@@ -1161,7 +1161,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                       <div className="flex items-center space-x-2">
                         <span className="font-mono text-slate-500 font-semibold">#{r.rowNum}</span>
                         <span className={`px-1.5 py-0.5 rounded text-xs font-bold uppercase ${
-                          r.type === 'test' ? 'bg-blue-100 text-blue-800' : r.type === 'matching' ? 'bg-purple-100 text-purple-800' : 'bg-emerald-100 text-emerald-800'
+                          r.type === 'test' ? 'bg-indigo-100 text-indigo-800' : r.type === 'matching' ? 'bg-purple-100 text-purple-800' : 'bg-emerald-100 text-emerald-800'
                         }`}>
                           {r.type === 'test' ? 'Тест' : r.type === 'matching' ? 'Соответствие' : 'Открытый'}
                         </span>
@@ -1195,7 +1195,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                                   {opt.textTg && opt.textTg !== opt.text && (
                                     <span className="ml-1 text-slate-500">/ <FormattedText text={opt.textTg} /></span>
                                   )}
-                                  {opt.imageUrl && <ImageIcon className="w-3 h-3 text-blue-500 ml-1 inline" />}
+                                  {opt.imageUrl && <ImageIcon className="w-3 h-3 text-indigo-500 ml-1 inline" />}
                                 </span>
                               ))}
                             </div>

@@ -215,7 +215,7 @@ export const App: React.FC = () => {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+        <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
       </div>
     );
   }
@@ -458,7 +458,7 @@ export const App: React.FC = () => {
 
       {/* Основной контент */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-8">
-        <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-blue-600 animate-spin" /></div>}>
+        <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-indigo-600 animate-spin" /></div>}>
         {/* Экран формы создания / редактирования вопроса */}
         {isQuestionFormOpen && isStaff ? (
           <QuestionForm

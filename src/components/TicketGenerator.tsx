@@ -27,6 +27,7 @@ import { CustomSelect } from './CustomSelect';
 import { useUserLimits } from '../lib/generationLimits';
 import { autoBatchTitle, DEFAULT_BATCH_TITLE } from '../lib/batchTitle';
 import { DownloadButton, useExportLang, type Lang } from './DownloadButton';
+import { PageHeader } from './ui';
 
 type CountRow = { chapter_id: string | null; topic_id: string | null; type: string; cnt: number };
 
@@ -789,12 +790,10 @@ export const TicketGenerator: React.FC = () => {
   return (
     <div className="space-y-4 sm:space-y-5 max-w-5xl mx-auto">
       {/* Заголовок */}
-      <div className="px-1">
-        <h2 className="text-xl font-bold text-slate-900 leading-tight">Генератор билетов</h2>
-        <p className="text-sm text-slate-600 mt-1">
-          Выберите предмет и нажмите «Генерировать» — получите Word с билетами и ключами.
-        </p>
-      </div>
+      <PageHeader
+        title="Генератор билетов"
+        description="Выберите предмет и нажмите «Генерировать» — получите Word с билетами и ключами."
+      />
 
       {/* Результат генерации — первым, чтобы сразу было видно, что всё готово */}
       {generatedBatch && (

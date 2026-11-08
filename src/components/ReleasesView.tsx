@@ -9,6 +9,7 @@ import { ReleaseItemKind, ReleaseRank, SiteRelease } from '../types/database';
 import { ReleaseCard } from './ReleaseCard';
 import { CustomSelect } from './CustomSelect';
 import { confirmAction } from '../lib/confirm';
+import { Button, PageHeader } from './ui';
 
 interface DraftItem { kind: ReleaseItemKind; text: string; min_rank: ReleaseRank; subject_id: string }
 type SubjectOpt = { id: string; name: string };
@@ -55,7 +56,7 @@ const ReleaseEditor: React.FC<{ initial: Draft; subjects: SubjectOpt[]; onClose:
   const field = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white';
 
   return (
-    <div className="bg-white border border-blue-200 rounded-2xl p-4 sm:p-5 space-y-3">
+    <div className="bg-white border border-indigo-200 rounded-2xl p-4 sm:p-5 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-sm text-slate-900">{draft.id ? 'Правка обновления' : 'Новое обновление'}</h3>
         <button onClick={onClose} className="p-1 text-slate-500 hover:text-slate-700" aria-label="Закрыть"><X className="w-4 h-4" /></button>
@@ -85,7 +86,7 @@ const ReleaseEditor: React.FC<{ initial: Draft; subjects: SubjectOpt[]; onClose:
             ><Trash2 className="w-4 h-4" /></button>
           </div>
         ))}
-        <button onClick={() => setDraft((d) => ({ ...d, items: [...d.items, { kind: 'new', text: '', min_rank: 1, subject_id: '' }] }))} className="text-xs font-semibold text-blue-600 hover:underline">
+        <button onClick={() => setDraft((d) => ({ ...d, items: [...d.items, { kind: 'new', text: '', min_rank: 1, subject_id: '' }] }))} className="text-xs font-semibold text-indigo-600 hover:underline">
           + Добавить пункт
         </button>
       </div>
@@ -142,22 +143,16 @@ export const ReleasesView: React.FC = () => {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">История обновлений</h2>
-          <p className="text-xs text-slate-500">Показаны изменения, относящиеся к вашей роли</p>
-        </div>
-        {isOwner && !draft && (
-          <button onClick={() => setDraft(emptyDraft())} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700">
-            <Plus className="w-4 h-4" /> Добавить
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="История обновлений"
+        description="Показаны изменения, относящиеся к вашей роли"
+        actions={isOwner && !draft && <Button variant="primary" icon={Plus} onClick={() => setDraft(emptyDraft())}>Добавить</Button>}
+      />
 
       {draft && <ReleaseEditor key={draft.id ?? 'new'} initial={draft} subjects={subjects} onClose={() => setDraft(null)} />}
 
       {isLoading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 text-blue-600 animate-spin" /></div>
+        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 text-indigo-600 animate-spin" /></div>
       ) : releases.length === 0 ? (
         <div className="text-sm text-slate-500 py-8 text-center">Пока нет записей об обновлениях</div>
       ) : (
@@ -166,7 +161,7 @@ export const ReleasesView: React.FC = () => {
             <ReleaseCard release={r} showAudience={isOwner} subjectNames={subjectNames} unread={unreadIds.has(r.id)} />
             {isOwner && (
               <div className="absolute top-3 right-3 flex gap-1">
-                <button onClick={() => edit(r)} className="p-1.5 text-slate-500 hover:text-blue-600" aria-label="Править"><Pencil className="w-4 h-4" /></button>
+                <button onClick={() => edit(r)} className="p-1.5 text-slate-500 hover:text-indigo-600" aria-label="Править"><Pencil className="w-4 h-4" /></button>
                 <button
                   onClick={async () => {
                     if (await confirmAction({ title: `Удалить версию ${r.version}?`, message: 'Запись пропадёт из истории обновлений у всех пользователей.', confirmLabel: 'Удалить версию', cancelLabel: 'Оставить', tone: 'danger' })) remove.mutate(r.id);

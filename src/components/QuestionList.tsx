@@ -317,10 +317,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             <FileText className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 leading-tight tracking-tight">
               Банк вопросов
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm text-slate-600 mt-0.5">
               Всего в базе: <strong className="text-slate-700 font-semibold">{totalCount}</strong> вопросов • Стр. {page + 1} из {Math.max(1, totalPages)}
             </p>
           </div>

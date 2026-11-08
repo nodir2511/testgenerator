@@ -70,7 +70,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('<sub>', '</sub>')}
           title="Нижний индекс (H₂O)"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center font-mono font-bold"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center font-mono font-bold"
         >
           <Subscript className="w-3.5 h-3.5 mr-1" /> X₂
         </button>
@@ -78,7 +78,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('<sup>', '</sup>')}
           title="Верхний индекс (Ca²⁺)"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center font-mono font-bold"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center font-mono font-bold"
         >
           <Superscript className="w-3.5 h-3.5 mr-1" /> X²
         </button>
@@ -86,7 +86,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('(', ')/( )')}
           title="Дробь (числитель)/(знаменатель)"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center font-mono font-bold"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center font-mono font-bold"
         >
           a/b
         </button>
@@ -94,7 +94,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('<b>', '</b>')}
           title="Полужирный"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center"
         >
           <Bold className="w-3.5 h-3.5" />
         </button>
@@ -102,7 +102,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('<i>', '</i>')}
           title="Курсив"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center"
         >
           <Italic className="w-3.5 h-3.5" />
         </button>
@@ -110,7 +110,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('<u>', '</u>')}
           title="Подчёркнутый"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center"
         >
           <Underline className="w-3.5 h-3.5" />
         </button>
@@ -122,7 +122,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol(' → ')}
           title="Стрелка реакции"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono"
         >
           →
         </button>
@@ -130,7 +130,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol(' ⇄ ')}
           title="Равновесие"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono"
         >
           ⇄
         </button>
@@ -138,7 +138,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol('↑')}
           title="Выделение газа"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono"
         >
           ↑
         </button>
@@ -146,7 +146,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol('↓')}
           title="Осадок"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono"
         >
           ↓
         </button>
@@ -154,7 +154,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol('°C')}
           title="Градусы Цельсия"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono"
         >
           °C
         </button>
@@ -162,7 +162,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol('Δ')}
           title="Дельта (нагревание)"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono"
         >
           Δ
         </button>
@@ -174,7 +174,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full p-3 text-sm font-sans border border-t-0 border-slate-300 rounded-b-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium text-slate-800"
+        className="w-full p-3 text-sm font-sans border border-t-0 border-slate-300 rounded-b-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-medium text-slate-800"
       />
     </div>
   );

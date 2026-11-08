@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { Loader2, SlidersHorizontal, TrendingUp, TrendingDown } from 'lucide-react';
+import { BarChart3, Loader2, SlidersHorizontal, TrendingUp, TrendingDown } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { notifyError, notifyInfo } from '../lib/errors';
 import { useGenerationSettings, type GenerationSettings } from '../lib/generationLimits';
 import { type UserRole } from '../types/database';
+import { Hint, PageHeader } from './ui';
 
 // Статистика использования (только для администратора): RPC admin_usage_stats_v3 (supabase/sql/usage_stats_v3.sql).
 // Поля, которых нет в старой версии функции, необязательны — экран работает и с ней.
@@ -217,7 +218,7 @@ const GenerationLimitsCard: React.FC<{ hint?: string }> = ({ hint }) => {
 
   return (
     <section className="bg-white border border-slate-200 rounded-2xl p-4">
-      <h3 className="font-bold text-slate-900 text-base flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-indigo-600" /> Лимиты генерации</h3>
+      <h3 className="font-bold text-slate-900 text-base flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-indigo-600" /> Лимиты генерации <Hint label="Что такое лимиты">Ограничения для преподавателей: сколько раз в сутки и как часто можно создавать билеты. Администраторов они не касаются.</Hint></h3>
       <p className="text-sm text-slate-600 mt-0.5 mb-3">
         Для всех, кроме администраторов: сайт, Telegram-бот и Mini App.{isOwner ? '' : ' Менять может только главный админ.'}
         {hint ? ` ${hint}` : ''}
@@ -304,6 +305,7 @@ export const StatsView: React.FC = () => {
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto">
+      <PageHeader icon={BarChart3} title="Статистика" description="Как пользуются сайтом: генерации, люди, предметы и банк вопросов" />
       {header}
 
       {/* Главные цифры */}

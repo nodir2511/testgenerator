@@ -5,7 +5,7 @@ import { SiteRelease } from '../types/database';
 const KIND_STYLES = {
   new: 'bg-emerald-100 text-emerald-700',
   fixed: 'bg-amber-100 text-amber-700',
-  improved: 'bg-blue-100 text-blue-700',
+  improved: 'bg-indigo-100 text-indigo-700',
 } as const;
 
 export const formatReleaseDate = (iso: string) =>
@@ -16,7 +16,7 @@ export const ReleaseCard: React.FC<{ release: SiteRelease; showAudience?: boolea
   <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5">
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
       <span className="text-sm font-bold text-slate-900">v{release.version}</span>
-      {unread && <span className="text-xs font-bold uppercase bg-blue-600 text-white px-1.5 py-0.5 rounded">Новое</span>}
+      {unread && <span className="text-xs font-bold uppercase bg-indigo-600 text-white px-1.5 py-0.5 rounded">Новое</span>}
       <span className="text-xs text-slate-500">{formatReleaseDate(release.released_at)}</span>
     </div>
     {release.title && <div className="mt-1 text-sm font-semibold text-slate-700">{release.title}</div>}

@@ -20,6 +20,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
+import { Button, Card, EmptyState, PageHeader } from './ui';
 
 const PAGE = 15;
 
@@ -33,7 +34,7 @@ const plural = (n: number, one: string, few: string, many: string) => {
 // Цветовой акцент карточки по предмету
 const subjectAccent = (name?: string) => {
   const n = (name || '').toLowerCase();
-  if (n.includes('хим')) return { bar: 'bg-gradient-to-r from-sky-400 to-blue-600', pill: 'bg-blue-50 text-blue-800 border-blue-200' };
+  if (n.includes('хим')) return { bar: 'bg-gradient-to-r from-sky-400 to-blue-600', pill: 'bg-indigo-50 text-indigo-800 border-indigo-200' };
   if (n.includes('физ')) return { bar: 'bg-gradient-to-r from-violet-400 to-purple-600', pill: 'bg-violet-50 text-violet-800 border-violet-200' };
   if (n.includes('био')) return { bar: 'bg-gradient-to-r from-emerald-400 to-green-600', pill: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
   return { bar: 'bg-gradient-to-r from-slate-300 to-slate-500', pill: 'bg-slate-50 text-slate-800 border-slate-200' };
@@ -185,10 +186,10 @@ export const SavedTicketsView: React.FC = () => {
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto">
-      <div className="px-1">
-        <h2 className="text-xl font-bold text-slate-900 leading-tight">Архив билетов</h2>
-        <p className="text-sm text-slate-600 mt-1">Все созданные наборы: скачать снова, отправить в Telegram или посмотреть варианты.</p>
-      </div>
+      <PageHeader
+        title="Архив билетов"
+        description="Все созданные наборы: скачать снова, отправить в Telegram или посмотреть варианты."
+      />
 
       {/* Поиск и фильтр по предмету */}
       <div className="space-y-2">
@@ -242,32 +243,23 @@ export const SavedTicketsView: React.FC = () => {
           <p className="text-sm font-semibold text-slate-600">Загружаем архив…</p>
         </div>
       ) : batches.length === 0 ? (
-        <div className="bento-card p-8 sm:p-12 rounded-2xl text-center space-y-3">
-          <FileCheck2 className="w-10 h-10 text-slate-300 mx-auto" />
+        <Card>
           {filtered ? (
-            <>
-              <h3 className="font-bold text-slate-900 text-base">Ничего не нашлось</h3>
-              <p className="text-sm text-slate-600">Попробуйте другое название или другой предмет.</p>
-              <button
-                onClick={() => { setSearchInput(''); setSubjectFilter(''); }}
-                className="min-h-[44px] px-4 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-800"
-              >
-                Сбросить фильтры
-              </button>
-            </>
+            <EmptyState
+              icon={FileCheck2}
+              title="Ничего не нашлось"
+              description="Попробуйте другое название или другой предмет."
+              action={<Button onClick={() => { setSearchInput(''); setSubjectFilter(''); }}>Сбросить фильтры</Button>}
+            />
           ) : (
-            <>
-              <h3 className="font-bold text-slate-900 text-base">Здесь появятся ваши билеты</h3>
-              <p className="text-sm text-slate-600 max-w-sm mx-auto">Каждый созданный набор сохраняется в архиве — его можно скачать снова в любой момент.</p>
-              <a
-                href="#generator"
-                className="inline-flex items-center gap-2 min-h-[48px] px-5 rounded-xl bg-indigo-600 text-white text-base font-bold"
-              >
-                <Sparkles className="w-5 h-5" /> Создать билеты
-              </a>
-            </>
+            <EmptyState
+              icon={FileCheck2}
+              title="Здесь появятся ваши билеты"
+              description="Каждый созданный набор сохраняется в архиве — его можно скачать снова в любой момент."
+              action={<a href="#generator" className="inline-flex items-center justify-center gap-2 min-h-[52px] px-5 rounded-xl bg-primary hover:bg-primary-hover text-primary-foreground text-base font-semibold shadow-sm"><Sparkles className="w-5 h-5" /> Создать билеты</a>}
+            />
           )}
-        </div>
+        </Card>
       ) : (
         <div className="space-y-3">
           {batches.map((batch: any) => (

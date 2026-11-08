@@ -587,7 +587,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 setChapterId('');
                 setTopicId('');
               }}
-              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
             >
               <option value="">-- Выберите предмет --</option>
               {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -605,7 +605,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 setChapterId(val);
                 setTopicId('');
               }}
-              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium disabled:bg-slate-100"
+              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium disabled:bg-slate-100"
             >
               <option value="">-- Выберите главу --</option>
               {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -620,7 +620,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               disabled={!chapterId}
               value={topicId}
               onChange={(val) => setTopicId(val)}
-              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium disabled:bg-slate-100"
+              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium disabled:bg-slate-100"
             >
               <option value="">-- Выберите тему --</option>
               {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -634,7 +634,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             <CustomSelect
               value={sourceId}
               onChange={(val) => setSourceId(val)}
-              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+              className="w-full text-xs p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
             >
               <option value="">-- Без источника --</option>
               {sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -659,7 +659,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 onClick={() => setType(t.id as QuestionType)}
                 className={`p-3 text-left rounded-xl border transition ${
                   type === t.id
-                    ? 'border-blue-600 bg-blue-50/60 ring-2 ring-blue-500'
+                    ? 'border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-500'
                     : 'border-slate-200 hover:border-slate-300'
                 }`}
               >
@@ -810,7 +810,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               <button
                 type="button"
                 onClick={() => setOptions([...options, { text: '', text_ru: '', text_tg: '', is_correct: false }])}
-                className="text-xs text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg font-semibold flex items-center space-x-1 transition"
+                className="text-xs text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded-lg font-semibold flex items-center space-x-1 transition"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Добавить вариант</span>
@@ -825,7 +825,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                   <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
-                        <span className="w-6 h-6 rounded-lg bg-blue-100 text-blue-800 text-xs font-bold flex items-center justify-center shrink-0">
+                        <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-800 text-xs font-bold flex items-center justify-center shrink-0">
                           {optLetter}
                         </span>
                         <button
@@ -887,7 +887,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                               setOptions(updated);
                             }}
                             placeholder={`Вариант ${optLetter} (RU)`}
-                            className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                            className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                           />
                         </div>
                         <div>
@@ -917,7 +917,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             setOptions(updated);
                           }}
                           placeholder={`Вариант ${optLetter} (RU)`}
-                          className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                          className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                         />
                       </div>
                     ) : (
@@ -979,7 +979,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                   <button
                     type="button"
                     onClick={() => setLeftItems([...leftItems, { side: 'left', text: '', text_ru: '', text_tg: '' }])}
-                    className="text-xs text-blue-600 hover:text-blue-700 font-semibold flex items-center space-x-1"
+                    className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold flex items-center space-x-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Добавить</span>
@@ -992,7 +992,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                     <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1.5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-xs text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                          <span className="font-bold text-xs text-indigo-800 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
                             {letter}
                           </span>
                           <label className="flex items-center gap-1 text-xs text-slate-500">
@@ -1004,7 +1004,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                                 updated[idx] = { ...updated[idx], match: val === '' ? null : Number(val) };
                                 setLeftItems(updated);
                               }}
-                              className={`text-xs font-bold px-2 py-0.5 border rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 min-w-[54px] ${item.match == null ? 'border-red-300 bg-red-50 text-red-600' : 'border-emerald-300 bg-emerald-50 text-emerald-700'}`}
+                              className={`text-xs font-bold px-2 py-0.5 border rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 min-w-[54px] ${item.match == null ? 'border-red-300 bg-red-50 text-red-600' : 'border-emerald-300 bg-emerald-50 text-emerald-700'}`}
                             >
                               <option value="">—</option>
                               {rightItems.map((_, k) => (
@@ -1047,7 +1047,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                               setLeftItems(updated);
                             }}
                             placeholder={`Элемент ${letter} (RU)`}
-                            className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                           />
                           <input
                             type="text"
@@ -1072,7 +1072,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             setLeftItems(updated);
                           }}
                           placeholder={`Элемент ${letter} (RU)`}
-                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                       ) : (
                         <input
@@ -1116,7 +1116,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                   <button
                     type="button"
                     onClick={() => setRightItems([...rightItems, { side: 'right', text: '', text_ru: '', text_tg: '' }])}
-                    className="text-xs text-blue-600 hover:text-blue-700 font-semibold flex items-center space-x-1"
+                    className="text-xs text-indigo-600 hover:text-indigo-700 font-semibold flex items-center space-x-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Добавить</span>
@@ -1166,7 +1166,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             setRightItems(updated);
                           }}
                           placeholder={`Элемент ${idx + 1} (RU)`}
-                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                         />
                         <input
                           type="text"
@@ -1191,7 +1191,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                           setRightItems(updated);
                         }}
                         placeholder={`Элемент ${idx + 1} (RU)`}
-                        className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        className="w-full text-xs p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                     ) : (
                       <input
@@ -1242,7 +1242,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               value={correctNumeric}
               onChange={(e) => setCorrectNumeric(e.target.value)}
               placeholder="Например: 42 или -5"
-              className="w-full sm:w-64 text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+              className="w-full sm:w-64 text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
             />
           </div>
         )}

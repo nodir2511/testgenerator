@@ -14,6 +14,7 @@ import {
 import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Layers, Loader2, Download, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { CustomSelect } from './CustomSelect';
+import { Hint, PageHeader } from './ui';
 
 // Экзамен-кластер: книжка сразу из 4 предметов по образцу (только главный админ).
 // Параметры экзамена (код кластера, название, дата) вносятся заранее и запоминаются в браузере.
@@ -171,14 +172,14 @@ const TopicPicker: React.FC<{
   return (
     <div className="md:col-span-2">
       <button type="button" disabled={disabled || !subjectId} onClick={() => setOpen((o) => !o)}
-        className="flex items-center space-x-1 text-xs font-semibold text-blue-700 disabled:text-slate-400">
+        className="flex items-center space-x-1 text-xs font-semibold text-indigo-700 disabled:text-slate-400">
         {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
         <span>Темы: {picked === 0 ? 'весь предмет' : `выбрано ${picked}`}</span>
       </button>
       {open && (
         <div className="mt-2 space-y-2">
           <div className="flex items-center gap-2 text-xs">
-            <button type="button" className="px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-medium"
+            <button type="button" className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-medium"
               onClick={() => onChange(chapters.filter((c: any) => !topics.some((t: any) => t.chapter_id === c.id)).map((c: any) => c.id), topics.map((t: any) => t.id))}>Выбрать все</button>
             <button type="button" className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium" onClick={() => onChange([], [])}>Снять всё (= весь предмет)</button>
           </div>
@@ -189,12 +190,12 @@ const TopicPicker: React.FC<{
               return (
                 <div key={ch.id} className="bg-white border border-slate-200 rounded-lg p-2">
                   <label className="flex items-start space-x-2 text-xs font-bold text-slate-800 cursor-pointer">
-                    <input type="checkbox" className="mt-0.5 w-4 h-4 rounded text-blue-600" checked={checked} onChange={(e) => toggleChapter(ch, e.target.checked)} />
+                    <input type="checkbox" className="mt-0.5 w-4 h-4 rounded text-indigo-600" checked={checked} onChange={(e) => toggleChapter(ch, e.target.checked)} />
                     <span className="break-words">{ch.name}</span>
                   </label>
                   {own.map((t: any, i: number) => (
                     <label key={t.id} className="flex items-start space-x-2 text-xs text-slate-700 cursor-pointer pl-6 pt-1">
-                      <input type="checkbox" className="mt-0.5 w-3.5 h-3.5 rounded text-blue-600" checked={topicIds.includes(t.id)} onChange={(e) => toggleTopic(t.id, e.target.checked)} />
+                      <input type="checkbox" className="mt-0.5 w-3.5 h-3.5 rounded text-indigo-600" checked={topicIds.includes(t.id)} onChange={(e) => toggleTopic(t.id, e.target.checked)} />
                       <span className="leading-snug">{i + 1}. {t.name}</span>
                     </label>
                   ))}
@@ -384,17 +385,14 @@ export const ClusterExam: React.FC = () => {
     }
   };
 
-  const input = 'w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500';
-  const num = 'w-16 text-sm px-2 py-1.5 border border-slate-300 rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-blue-500';
+  const input = 'w-full text-sm px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500';
+  const num = 'w-16 text-sm px-2 py-1.5 border border-slate-300 rounded-lg text-center focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
   return (
     <div className="space-y-6">
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-        <h2 className="text-xl font-bold text-slate-900 flex items-center">
-          <Layers className="w-5 h-5 mr-2 text-blue-600" />
-          Экзамен-кластер
-        </h2>
-        <p className="text-xs text-slate-500 mt-0.5">
+        <PageHeader icon={Layers} title="Экзамен-кластер" className="px-0" />
+        <p className="text-sm text-slate-600 mt-2">
           Тестовая книжка из 4 предметов по образцу: обложка, инструкция, субтесты, справочные материалы. Русский и таджикский языки и ключи ответов — одним архивом.
         </p>
       </div>
@@ -403,7 +401,7 @@ export const ClusterExam: React.FC = () => {
         <h3 className="font-bold text-slate-900 text-sm">1. Параметры экзамена</h3>
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <label className="text-xs font-semibold text-slate-600 space-y-1">
-            <span>Код кластера</span>
+            <span className="flex items-center gap-1">Код кластера <Hint label="Что такое код кластера">Короткий шифр экзаменационной книжки, например «А.5». Он печатается на обложке («Компонент А.5-Авг») и в колонтитулах вариантов.</Hint></span>
             <input className={input} value={state.settings.code} onChange={(e) => setSetting('code', e.target.value)} placeholder="А.5" />
           </label>
           <label className="text-xs font-semibold text-slate-600 space-y-1">
@@ -432,7 +430,7 @@ export const ClusterExam: React.FC = () => {
         </div>
         <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer select-none">
           <input
-            type="checkbox" className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+            type="checkbox" className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
             checked={state.avoidRepeats !== false}
             onChange={(e) => setState((st) => ({ ...st, avoidRepeats: e.target.checked }))}
           />
@@ -453,7 +451,7 @@ export const ClusterExam: React.FC = () => {
             <div key={slot.kind} className={`grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end p-3 rounded-xl bg-slate-50 border border-slate-200 ${on ? '' : 'opacity-60'}`}>
               <div className="space-y-1">
                 <label className="flex items-center space-x-2 text-xs font-semibold text-slate-700 cursor-pointer">
-                  <input type="checkbox" checked={on} onChange={(e) => setEnabled(i, e.target.checked)} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
+                  <input type="checkbox" checked={on} onChange={(e) => setEnabled(i, e.target.checked)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500" />
                   <span>{i + 1}. {slot.name}</span>
                 </label>
                 <CustomSelect

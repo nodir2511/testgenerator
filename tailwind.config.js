@@ -15,7 +15,27 @@ export default {
         foreground: "hsl(var(--foreground))",
         primary: {
           DEFAULT: "hsl(var(--primary))",
+          hover: "hsl(var(--primary-hover))",
+          soft: "hsl(var(--primary-soft))",
+          ink: "hsl(var(--primary-ink))",
           foreground: "hsl(var(--primary-foreground))",
+        },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          solid: "hsl(var(--success-solid))",
+          soft: "hsl(var(--success-soft))",
+          line: "hsl(var(--success-line))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          solid: "hsl(var(--warning-solid))",
+          soft: "hsl(var(--warning-soft))",
+          line: "hsl(var(--warning-line))",
+        },
+        info: {
+          DEFAULT: "hsl(var(--info))",
+          soft: "hsl(var(--info-soft))",
+          line: "hsl(var(--info-line))",
         },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
@@ -23,6 +43,9 @@ export default {
         },
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
+          hover: "hsl(var(--destructive-hover))",
+          soft: "hsl(var(--destructive-soft))",
+          line: "hsl(var(--destructive-line))",
           foreground: "hsl(var(--destructive-foreground))",
         },
         muted: {
@@ -39,6 +62,7 @@ export default {
         },
       },
       borderRadius: {
+        card: "var(--radius-card)",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",

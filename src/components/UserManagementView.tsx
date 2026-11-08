@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Users, ShieldCheck, UserCheck, Activity, Loader2, UserPlus, Pencil, Trash2, BookMarked } from 'lucide-react';
 import { CustomSelect } from './CustomSelect';
 import { confirmAction } from '../lib/confirm';
+import { Button, PageHeader } from './ui';
 
 const SUBJECT_ROLES: UserRole[] = ['subject_teacher', 'subject_admin'];
 const isSubjectRole = (r: UserRole) => SUBJECT_ROLES.includes(r);
@@ -287,11 +288,8 @@ export const UserManagementView: React.FC = () => {
       {/* Пользователи */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center">
-            <Users className="w-5 h-5 mr-2 text-blue-600" />
-            Управление пользователями и ролями
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <PageHeader icon={Users} title="Пользователи и роли" className="px-0" />
+          <p className="text-sm text-slate-600 mt-2">
             Роли: преподаватель, администратор и роли по предметам (доступ только к назначенным предметам).
             Роли, данные администраторов и удаление пользователей — только у главного админа.
             Пароль, заданный здесь, временный: при входе человек заменит его на свой.
@@ -300,7 +298,7 @@ export const UserManagementView: React.FC = () => {
 
         <form onSubmit={handleCreateUser} className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
           <div className="text-sm font-semibold text-slate-800 flex items-center">
-            <UserPlus className="w-4 h-4 mr-2 text-blue-600" />
+            <UserPlus className="w-4 h-4 mr-2 text-primary" />
             Создать новый аккаунт
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -346,21 +344,12 @@ export const UserManagementView: React.FC = () => {
             </div>
           )}
 
-          {createError && <div className="text-xs text-red-600">{createError}</div>}
-          {createSuccess && <div className="text-xs text-emerald-600">{createSuccess}</div>}
+          {createError && <div role="alert" className="text-sm font-semibold text-destructive-hover">{createError}</div>}
+          {createSuccess && <div role="status" className="text-sm font-semibold text-success">{createSuccess}</div>}
 
-          <button
-            type="submit"
-            disabled={createUserMutation.isPending}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-sm flex items-center space-x-2 disabled:opacity-50"
-          >
-            {createUserMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <UserPlus className="w-4 h-4" />
-            )}
-            <span>Создать аккаунт</span>
-          </button>
+          <Button type="submit" variant="primary" icon={UserPlus} loading={createUserMutation.isPending}>
+            Создать аккаунт
+          </Button>
         </form>
 
         {loadingProfiles ? (
@@ -404,7 +393,7 @@ export const UserManagementView: React.FC = () => {
                   {canEdit(p) && (
                   <button
                     onClick={() => (editingId === p.id ? setEditingId(null) : startEdit(p))}
-                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-lg font-semibold flex items-center space-x-1"
+                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg font-semibold flex items-center space-x-1"
                   >
                     <Pencil className="w-3.5 h-3.5" />
                     <span>Изменить</span>

@@ -16,6 +16,7 @@ import {
   Library
 } from 'lucide-react';
 import { confirmAction } from '../lib/confirm';
+import { PageHeader } from './ui';
 
 interface TaxonomyManagerProps {
   onSelectSubject?: (subjectId: string) => void;
@@ -221,13 +222,12 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div>
-            <h2 className="text-lg font-bold text-slate-900 flex items-center">
-              <Book className="w-5 h-5 mr-2 text-blue-600" />
-              Предметная структура
-            </h2>
-            <p className="text-xs text-slate-500">
-              Выберите предмет для управления его главами и темами
-            </p>
+            <PageHeader
+              icon={Book}
+              title="Предметы и темы"
+              description="Выберите предмет, чтобы управлять его главами, темами и источниками"
+              className="px-0"
+            />
           </div>
 
           {isAdmin && <form
@@ -242,7 +242,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
               value={newSubjectName}
               onChange={(e) => setNewSubjectName(e.target.value)}
               placeholder="Новый предмет (напр. Химия)"
-              className="text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <button
               type="submit"
@@ -363,9 +363,9 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                               softDeleteMutation.mutate({ table: 'chapters', id: ch.id });
                             }
                           }}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-600 rounded"
+                          className="w-9 h-9 -my-1 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить главу" title="Удалить главу"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       )}
                       <ChevronRight className={`w-3.5 h-3.5 ${activeChapterId === ch.id ? 'text-indigo-600' : 'text-slate-500'}`} />
@@ -448,9 +448,9 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                                 softDeleteMutation.mutate({ table: 'topics', id: tp.id });
                               }
                             }}
-                            className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-600 rounded"
+                            className="w-9 h-9 -my-1 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить тему" title="Удалить тему"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         )}
                       </div>
@@ -517,9 +517,9 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                             softDeleteMutation.mutate({ table: 'sources', id: src.id });
                           }
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-600 rounded"
+                        className="w-9 h-9 -my-1 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить источник" title="Удалить источник"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     )}
                   </div>
