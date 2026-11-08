@@ -324,9 +324,10 @@ const BatchCard: React.FC<{
   const wholeSubject = !(p.chapter_ids?.length || p.topic_ids?.length);
   const [showAllChips, setShowAllChips] = useState(false);
 
+  // Грузим напрямую: через loadTickets (fetchQuery с тем же ключом) запрос ждал бы сам себя и крутился бесконечно
   const tickets = useQuery({
     queryKey: ticketsQueryKey(batch.id),
-    queryFn: loadTickets,
+    queryFn: () => fetchBatchTickets(batch),
     enabled: expanded,
     staleTime: Infinity,
     meta: { action: 'Не удалось загрузить варианты' },
