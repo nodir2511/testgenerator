@@ -269,7 +269,7 @@ export const SavedTicketsView: React.FC = () => {
               busyId={busyId}
               exportLang={exportLang}
               showCreator={isOwner}
-              canDelete={isAdmin}
+              canDelete={isOwner}
               onDownload={(lang) => (isClusterBatch(batch) ? handleClusterExport(batch) : handleExport(batch, lang))}
               onKey={() => handleKey(batch)}
               onDelete={() => removeBatch(batch)}
