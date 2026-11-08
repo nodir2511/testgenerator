@@ -859,12 +859,12 @@ export const TicketGenerator: React.FC = () => {
               <ChevronDown className={`w-5 h-5 text-slate-500 transition-transform ${showVariants ? 'rotate-180' : ''}`} />
             </button>
             {showVariants && (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mt-2">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3 mt-2">
                 {generatedBatch.tickets.map((t: any) => (
                   <div key={t.id} className="p-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-bold text-sm text-slate-900">Вариант {t.ticket_number}</span>
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+                      <span className="font-bold text-sm text-slate-900 min-w-0">Вариант {t.ticket_number}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
                         {(exportLang === 'both' ? (['ru', 'tg'] as const) : [exportLang]).map((l) => (
                           <button
                             key={l}
