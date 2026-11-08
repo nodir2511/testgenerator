@@ -11,6 +11,7 @@ import { prefetchOnStartup } from './lib/startupPrefetch';
 import { installGlobalErrorReporting } from './lib/errorReporter';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './index.css';
+import './dark.css';
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({

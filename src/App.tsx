@@ -19,6 +19,7 @@ import { TelegramLink } from './components/TelegramLink';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { confirmAction } from './lib/confirm';
 import { SideNav, type SideNavGroup } from './components/SideNav';
+import { ThemeButton, ThemeSegmented } from './components/ThemeToggle';
 import { useReleases } from './hooks/useReleases';
 import { Question, ROLE_LABELS } from './types/database';
 import { 
@@ -311,6 +312,7 @@ export const App: React.FC = () => {
                 </div>
               </div>
               <TelegramLink />
+              <ThemeButton />
               <button 
                 onClick={openReleases} 
                 className="relative p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition min-h-[40px]" 
@@ -461,6 +463,8 @@ export const App: React.FC = () => {
 
             {/* Быстрые действия */}
             <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
+              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pb-0.5">Тема оформления</div>
+              <ThemeSegmented />
               <button
                 onClick={openReleases}
                 className="w-full py-2.5 px-3.5 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100/70 flex items-center justify-between min-h-[40px]"
