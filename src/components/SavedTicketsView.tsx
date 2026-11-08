@@ -185,7 +185,7 @@ export const SavedTicketsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-5xl xl:max-w-none mx-auto">
       <PageHeader
         title="Архив билетов"
         description="Все созданные наборы: скачать снова, отправить в Telegram или посмотреть варианты."
@@ -261,7 +261,7 @@ export const SavedTicketsView: React.FC = () => {
           )}
         </Card>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 xl:space-y-0 xl:grid xl:grid-cols-2 2xl:grid-cols-3 xl:gap-4 xl:items-start">
           {batches.map((batch: any) => (
             <BatchCard
               key={batch.id}

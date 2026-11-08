@@ -291,7 +291,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
       {activeSubjectId && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* 1. Главы */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px]">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Layers className="w-4 h-4 mr-2 text-indigo-600" />
@@ -377,7 +377,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
           </div>
 
           {/* 2. Темы выбранной главы */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px]">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Bookmark className="w-4 h-4 mr-2 text-emerald-600" />
@@ -462,7 +462,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
           </div>
 
           {/* 3. Источники / Сборники */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px]">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Library className="w-4 h-4 mr-2 text-amber-600" />

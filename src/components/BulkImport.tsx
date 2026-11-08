@@ -782,7 +782,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const warningRowsCount = visibleRows.filter(r => r.errors.length === 0 && (r.warnings?.length || 0) > 0).length;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-w-5xl mx-auto my-6">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-w-5xl xl:max-w-7xl mx-auto my-6">
       {/* Header */}
       <div className="p-6 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -834,7 +834,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         )}
       </div>
 
-      <div className="p-6 space-y-6">
+      <div className={`p-6 space-y-6 ${parsedRows.length > 0 && activeTab !== 'history' ? 'xl:space-y-0 xl:grid xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)] xl:gap-8 xl:items-start' : ''}`}>
+      <div className="space-y-6 min-w-0">
         {globalError && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">
             {globalError}
@@ -1098,9 +1099,11 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
           </div>
         )}
 
-        {/* Предпросмотр распознанных строк */}
+        </div>
+
+        {/* Предпросмотр распознанных строк: на широком экране — справа от настроек */}
         {parsedRows.length > 0 && activeTab !== 'history' && (
-          <div className="space-y-4 pt-4 border-t border-slate-200">
+          <div className="space-y-4 pt-4 border-t border-slate-200 xl:border-t-0 xl:pt-0 min-w-0">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="font-bold text-slate-900 text-sm">Предварительный просмотр перед сохранением</h3>
@@ -1153,7 +1156,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               </div>
             )}
 
-            <div className="max-h-96 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-xs">
+            <div className="max-h-96 xl:max-h-[calc(100vh-18rem)] overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-xs">
               {visibleRows.map((r, i) => (
                 <div key={i} className={`p-3 ${r.errors.length > 0 ? 'bg-red-50/50' : 'bg-white'}`}>
                   <div className="flex items-start justify-between gap-3">

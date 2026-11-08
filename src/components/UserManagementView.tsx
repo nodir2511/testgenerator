@@ -284,9 +284,9 @@ export const UserManagementView: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
+    <div className="space-y-6 max-w-5xl xl:max-w-none mx-auto">
       {/* Пользователи */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div>
           <PageHeader icon={Users} title="Пользователи и роли" className="px-0" />
           <p className="text-sm text-slate-600 mt-2">
@@ -295,8 +295,12 @@ export const UserManagementView: React.FC = () => {
             Пароль, заданный здесь, временный: при входе человек заменит его на свой.
           </p>
         </div>
+      </div>
 
-        <form onSubmit={handleCreateUser} className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
+      {/* Широкий экран: слева список людей, справа форма нового аккаунта и журнал. Уже — всё подряд */}
+      <div className="space-y-6 xl:space-y-0 xl:grid xl:grid-cols-[minmax(0,1fr)_420px] xl:gap-6 xl:items-start xl:content-start">
+      <div className="xl:col-start-2 xl:row-start-1 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <form onSubmit={handleCreateUser} className="space-y-3">
           <div className="text-sm font-semibold text-slate-800 flex items-center">
             <UserPlus className="w-4 h-4 mr-2 text-primary" />
             Создать новый аккаунт
@@ -351,7 +355,9 @@ export const UserManagementView: React.FC = () => {
             Создать аккаунт
           </Button>
         </form>
+      </div>
 
+      <div className="xl:col-start-1 xl:row-start-1 xl:row-span-2 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         {loadingProfiles ? (
           <div className="text-center py-6 text-slate-500 flex items-center justify-center">
             <Loader2 className="w-5 h-5 animate-spin mr-2" /> Загрузка пользователей...
@@ -360,11 +366,11 @@ export const UserManagementView: React.FC = () => {
           <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 text-xs">
             {profiles.map((p) => (
               <div key={p.id} className="bg-white">
-              <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 xl:flex-col xl:items-start 2xl:flex-row 2xl:items-center">
                 <div>
                   <div className="font-semibold text-slate-900 text-sm flex items-center space-x-2">
                     <span>{p.full_name || p.email}</span>
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase whitespace-nowrap ${
                       p.role === 'admin' || p.role === 'subject_admin' ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-slate-100 text-slate-700'
                     }`}>
                       {p.is_owner ? 'Главный админ' : ROLE_LABELS[p.role]}
@@ -544,8 +550,7 @@ export const UserManagementView: React.FC = () => {
         )}
       </div>
 
-      {/* Журнал аудита действий */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+      <div className="xl:col-start-2 xl:row-start-2 xl:max-h-[70vh] xl:overflow-y-auto bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <div>
           <h3 className="font-bold text-slate-900 text-base flex items-center">
             <Activity className="w-4 h-4 mr-2 text-indigo-600" />
@@ -580,6 +585,7 @@ export const UserManagementView: React.FC = () => {
             ))}
           </div>
         )}
+      </div>
       </div>
     </div>
   );
