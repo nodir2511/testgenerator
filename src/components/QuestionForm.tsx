@@ -6,6 +6,7 @@ import { Question, QuestionType, Subject, Chapter, Topic, Source } from '../type
 import { useAuth } from '../hooks/useAuth';
 import { FormulaEditor } from './FormulaEditor';
 import { QuestionPreview } from './QuestionPreview';
+import { QuestionProgress, type ProgressStep } from './QuestionProgress';
 import { CustomSelect } from './CustomSelect';
 import { uploadQuestionImage } from '../lib/imageCompression';
 import { 
@@ -530,6 +531,29 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     },
   });
 
+  // Готовность вопроса — те же правила, что при сохранении, плюс рекомендации
+  const isFilled = (o: { text?: string; text_ru?: string; text_tg?: string; image_url?: string | null }) =>
+    !!(o.text_ru?.trim() || o.text_tg?.trim() || o.text?.trim() || o.image_url);
+  const progressSteps: ProgressStep[] = (() => {
+    const steps: ProgressStep[] = [
+      { id: 'binding', label: 'Предмет, глава и тема', status: subjectId && chapterId && topicId ? 'done' : 'todo', target: 'qf-taxonomy', required: true },
+      { id: 'text', label: 'Текст вопроса', status: contentRu.trim() || contentTg.trim() ? 'done' : 'todo', target: 'qf-text', required: true },
+    ];
+    if (type === 'test') {
+      const filled = options.filter(isFilled);
+      steps.push({ id: 'options', label: 'Минимум 2 варианта ответа', status: filled.length >= 2 ? 'done' : 'todo', target: 'qf-answers', required: true });
+      steps.push({ id: 'correct', label: 'Отмечен верный ответ', status: filled.some((o) => o.is_correct) ? 'done' : 'warn', target: 'qf-answers' });
+    } else if (type === 'matching') {
+      const left = leftItems.filter(isFilled);
+      const rightOk = (k: number | null | undefined) => k != null && !!rightItems[k] && isFilled(rightItems[k]);
+      const matches = left.map((l) => l.match);
+      const ok = left.length > 0 && rightItems.some(isFilled) && left.every((l) => rightOk(l.match)) && new Set(matches).size === matches.length;
+      steps.push({ id: 'pairs', label: 'Пары для соответствия', status: ok ? 'done' : 'todo', target: 'qf-answers', required: true });
+    }
+    if (formMode === 'both') steps.push({ id: 'tg', label: 'Перевод на таджикский', status: contentTg.trim() ? 'done' : 'optional', target: 'qf-text' });
+    return steps;
+  })();
+
   return (
     <div 
       ref={topRef}
@@ -576,11 +600,13 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           </div>
         )}
 
+        <div className="xl:hidden"><QuestionProgress steps={progressSteps} variant="compact" /></div>
+
         {/* Широкий экран: слева сам вопрос, справа закреплённая колонка — привязка к теме и предпросмотр */}
         <div className="space-y-6 xl:space-y-0 xl:grid xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-8 xl:items-start">
         <aside className="xl:order-2 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto space-y-4">
         {/* 1. Таксономия */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-1 gap-4">
+        <div id="qf-taxonomy" className="scroll-mt-24 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-1 gap-4">
           <Field label="Предмет" required>
 <CustomSelect
               value={subjectId}
@@ -634,6 +660,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             </CustomSelect>
 </Field>
         </div>
+
+        <div className="hidden xl:block"><QuestionProgress steps={progressSteps} /></div>
 
         <div className="hidden xl:block">
           <QuestionPreview
@@ -725,7 +753,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         </div>
 
         {/* 3. Текст вопроса */}
-        <div className="space-y-4">
+        <div id="qf-text" className="scroll-mt-24 space-y-4">
           {formMode === 'both' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormulaEditor
@@ -812,7 +840,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
         {/* 4. ТИП: ТЕСТОВЫЙ С ВАРИАНТАМИ */}
         {type === 'test' && (
-          <div className="space-y-3 pt-3 border-t border-slate-200">
+          <div id="qf-answers" className="scroll-mt-24 space-y-3 pt-3 border-t border-slate-200">
             <div className="flex items-center justify-between">
               <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
                 Варианты ответа (A, B, C, D...)
@@ -972,7 +1000,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
         {/* 5. ТИП: СООТВЕТСТВИЕ С ДВОЙНЫМ РЕДАКТОРОМ */}
         {type === 'matching' && (
-          <div className="space-y-4 pt-3 border-t border-slate-200">
+          <div id="qf-answers" className="scroll-mt-24 space-y-4 pt-3 border-t border-slate-200">
             <p className="text-xs text-slate-500">
               Левая колонка маркируется буквами (A, B, C, D), правая колонка — цифрами (1, 2, 3, 4, 5). В двойном режиме можно заполнять русский и таджикский варианты параллельно.
             </p>
