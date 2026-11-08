@@ -339,6 +339,9 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         )}
       </div>
 
+      {/* Широкий экран: слева панель фильтров (закреплена), справа список. Уже — всё по порядку друг под другом */}
+      <div className="flex flex-col gap-4 sm:gap-6 xl:grid xl:grid-cols-[300px_minmax(0,1fr)] xl:items-start xl:gap-x-6 xl:gap-y-4">
+      <div className="space-y-4 sm:space-y-6 min-w-0 xl:col-start-2 xl:row-start-1">
       {/* Быстрые фильтры: Горизонтальные свайп-чипсы типов вопросов */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5 px-0.5">
         {[
@@ -556,14 +559,16 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         </div>
       )}
 
+      </div>
+
       {/* Десктопная панель фильтров (в стиле Bento) */}
-      <div className="hidden md:block bento-card p-4 rounded-2xl space-y-3">
+      <div className="hidden md:block bento-card p-4 rounded-2xl space-y-3 xl:col-start-1 xl:row-start-1 xl:row-span-2 xl:self-start xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto">
         <div className="flex items-center text-xs font-bold text-slate-700 uppercase tracking-wider">
           <Filter className="w-3.5 h-3.5 mr-1.5 text-indigo-500" />
           Фильтры и поиск
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 xl:grid-cols-1 gap-2.5">
           {/* Поиск */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -654,10 +659,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         </div>
 
         {/* Выбор языка отображения */}
-        <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-100 gap-2">
-          <div className="flex items-center space-x-2">
-            <span className="text-xs font-semibold text-slate-500">Язык вопросов:</span>
-            <div className="inline-flex rounded-xl border border-slate-200/90 p-0.5 bg-slate-100/70 text-xs">
+        <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-100 gap-2 xl:flex-col xl:items-stretch">
+          <div className="flex items-center space-x-2 xl:flex-col xl:items-stretch xl:space-x-0 xl:gap-1.5">
+            <span className="text-xs font-semibold text-slate-600">Язык вопросов:</span>
+            <div className="inline-flex xl:flex rounded-xl border border-slate-200/90 p-0.5 bg-slate-100/70 text-xs [&>button]:whitespace-nowrap xl:[&>button]:flex-1">
               <button
                 type="button"
                 onClick={() => setDisplayLang('ru')}
@@ -689,7 +694,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                RU + TJ (Параллельно)
+                RU + TJ
               </button>
             </div>
           </div>
@@ -714,6 +719,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         </div>
       </div>
 
+      <div className="space-y-4 sm:space-y-6 min-w-0 xl:col-start-2 xl:row-start-2">
       {/* Список карточек вопросов */}
       {isLoading ? (
         <div className="bento-card p-12 rounded-2xl text-center text-slate-500 flex flex-col items-center justify-center">
@@ -1080,6 +1086,9 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           </div>
         </div>
       )}
+
+      </div>
+      </div>
 
       {/* Модальное окно увеличения изображения (Lightbox) */}
       {previewImage && (

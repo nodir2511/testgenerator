@@ -788,7 +788,7 @@ export const TicketGenerator: React.FC = () => {
   }).length;
 
   return (
-    <div className="space-y-4 sm:space-y-5 max-w-5xl mx-auto">
+    <div className="space-y-4 sm:space-y-5 max-w-5xl xl:max-w-none mx-auto">
       {/* Заголовок */}
       <PageHeader
         title="Генератор билетов"
@@ -873,7 +873,7 @@ export const TicketGenerator: React.FC = () => {
               <ChevronDown className={`w-5 h-5 text-slate-500 transition-transform ${showVariants ? 'rotate-180' : ''}`} />
             </button>
             {showVariants && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mt-2">
                 {generatedBatch.tickets.map((t: any) => (
                   <div key={t.id} className="p-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -970,8 +970,8 @@ export const TicketGenerator: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 sm:gap-5 items-start">
-        <div className="md:col-span-3 space-y-4 sm:space-y-5">
+      <div className="grid grid-cols-1 md:grid-cols-5 xl:grid-cols-12 gap-4 sm:gap-5 items-start">
+        <div className="md:col-span-3 xl:col-span-7 space-y-4 sm:space-y-5">
           {/* 1. Предмет */}
           <section className="bento-card p-4 sm:p-5 rounded-2xl space-y-3">
             <h3 className="font-bold text-slate-900 text-base">1. Предмет</h3>
@@ -1111,7 +1111,7 @@ export const TicketGenerator: React.FC = () => {
           </section>
         </div>
 
-        <div className="md:col-span-2 space-y-4 sm:space-y-5">
+        <div className="md:col-span-2 xl:col-span-5 space-y-4 sm:space-y-5 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto xl:pb-1">
           {/* 3. Состав билета: по умолчанию — стандарт предмета одной строкой */}
           <section className="bento-card p-4 sm:p-5 rounded-2xl space-y-4">
             <div className="flex items-start justify-between gap-2">

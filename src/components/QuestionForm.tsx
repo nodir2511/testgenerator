@@ -5,6 +5,7 @@ import { notifyError, describeError, must } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { FormulaEditor } from './FormulaEditor';
+import { QuestionPreview } from './QuestionPreview';
 import { CustomSelect } from './CustomSelect';
 import { uploadQuestionImage } from '../lib/imageCompression';
 import { 
@@ -532,7 +533,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     <div 
       ref={topRef}
       onPaste={handlePaste}
-      className="scroll-mt-24 bg-white rounded-2xl border border-slate-200 shadow-xl max-w-4xl mx-auto my-2 sm:my-6"
+      className="scroll-mt-24 bg-white rounded-2xl border border-slate-200 shadow-xl max-w-4xl xl:max-w-7xl mx-auto my-2 sm:my-6"
     >
       {/* Header */}
       <div className="p-4 sm:p-6 bg-slate-50 border-b border-slate-200 rounded-t-2xl flex items-center justify-between gap-3">
@@ -574,8 +575,11 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           </div>
         )}
 
+        {/* Широкий экран: слева сам вопрос, справа закреплённая колонка — привязка к теме и предпросмотр */}
+        <div className="space-y-6 xl:space-y-0 xl:grid xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-8 xl:items-start">
+        <aside className="xl:order-2 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto space-y-4">
         {/* 1. Таксономия */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-1 gap-4">
           <div>
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
               Предмет *
@@ -642,6 +646,16 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           </div>
         </div>
 
+        <div className="hidden xl:block">
+          <QuestionPreview
+            type={type} contentRu={contentRu} contentTg={contentTg} imageUrl={imageUrl}
+            options={options} leftItems={leftItems} rightItems={rightItems}
+            correctNumeric={correctNumeric} mode={formMode}
+          />
+        </div>
+        </aside>
+
+        <div className="space-y-6 min-w-0 xl:order-1">
         {/* 2. Переключатель типа вопроса */}
         <div>
           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
@@ -1246,6 +1260,9 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             />
           </div>
         )}
+
+        </div>
+        </div>
 
         {/* Действия: на телефоне закреплены над нижним меню */}
         <div className="sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-0 z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-white/95 backdrop-blur border-t border-slate-200 rounded-b-2xl grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
