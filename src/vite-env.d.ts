@@ -11,5 +11,8 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
+/** Версия сайта из package.json (подставляет vite.config.ts) */
+declare const __APP_VERSION__: string;
+
 // Идентификатор сборки (подставляется в vite.config.ts); у dev-сервера — 'dev'
 declare const __BUILD_ID__: string;

@@ -70,15 +70,17 @@ tests/                Тесты (vitest)
 
 ## Резервные копии
 
-Каждую ночь (02:17 по Душанбе; сейчас ночной запуск отключён в workflow до добавления секретов) GitHub Actions (`.github/workflows/backup.yml`) выгружает схемы `public` и `auth` базы через `pg_dump`
-и кладёт файл `examiner_<дата>.dump` (или `.dump.gpg`, если задан `BACKUP_PASSPHRASE`) в папку «Резервные копии экзаменатора» на Google Диске (скрипт создаёт её сам: доступ drive.file видит только созданное им). Хранится 30 дней.
-Секреты GitHub: `SUPABASE_DB_URL`, `GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN`, `BACKUP_PASSPHRASE`.
+Каждую ночь (02:17 по Душанбе; сейчас ночной запуск отключён в workflow до добавления секретов) GitHub Actions (`.github/workflows/backup.yml`) выгружает схемы `public` и `auth` базы через `pg_dump`,
+шифрует файл паролем (`gpg`, AES-256) и присылает его документом в личный чат с ботом: `examiner_<дата>.dump.gpg`.
+Бот отправляет файлы до 50 МБ, поэтому большой дамп режется на части `.part00`, `.part01` … (по 45 МБ). Старые копии остаются в истории чата.
+Секреты GitHub: `SUPABASE_DB_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BACKUP_CHAT_ID` (числовой id вашего чата), `BACKUP_PASSPHRASE` (запишите отдельно: без неё копию не открыть).
 Запустить вручную: вкладка Actions → «Резервная копия базы…» → Run workflow.
 
 Восстановление (в **пустую** тестовую базу, не поверх рабочей):
 
 ```
-gpg --batch --passphrase "<фраза>" -o examiner.dump -d examiner_<дата>.dump.gpg   # если файл шифрован
+cat examiner_<дата>.dump.gpg.part* > examiner_<дата>.dump.gpg                        # только если файл пришёл частями
+gpg --batch --passphrase "<фраза>" -o examiner.dump -d examiner_<дата>.dump.gpg
 pg_restore --no-owner --no-privileges -d "<строка подключения новой базы>" examiner.dump
 ```
 
