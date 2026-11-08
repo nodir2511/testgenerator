@@ -274,6 +274,8 @@ describe('ключи ответов', () => {
     expect(keyKindOf('Физика / Физика')).toBe('phys');
     expect(keyKindOf('История')).toBe('hist');
     expect(keyKindOf('Таърих')).toBe('hist');
+    expect(keyKindOf('Математика')).toBe('math');
+    expect(keyKindOf('Математика')).toBe('math');
     expect(keyKindOf('Право')).toBe('law');
     expect(keyKindOf('Ҳуқуқ')).toBe('law');
     expect(keyKindOf('Правописание')).toBeNull();
