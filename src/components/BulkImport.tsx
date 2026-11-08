@@ -27,6 +27,7 @@ import {
   Sparkles,
   Layers
 } from 'lucide-react';
+import { confirmAction } from '../lib/confirm';
 
 type ImportLang = 'ru' | 'tg';
 
@@ -1048,8 +1049,13 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                       <span className="text-xs text-slate-500 font-medium">Откачено</span>
                     ) : (
                       <button
-                        onClick={() => {
-                          if (confirm(`Откатить эту партию (${b.items_count} вопр.)? Все они будут скрыты.`)) {
+                        onClick={async () => {
+                          if (await confirmAction({
+                            title: 'Откатить эту партию импорта?',
+                            message: 'Все вопросы партии будут скрыты из банка.',
+                            details: [`Вопросов: ${b.items_count}`],
+                            confirmLabel: 'Откатить партию', cancelLabel: 'Оставить', tone: 'danger',
+                          })) {
                             revertBatchMutation.mutate(b.id);
                           }
                         }}

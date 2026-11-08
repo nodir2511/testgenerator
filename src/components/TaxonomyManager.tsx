@@ -15,6 +15,7 @@ import {
   Loader2,
   Library
 } from 'lucide-react';
+import { confirmAction } from '../lib/confirm';
 
 interface TaxonomyManagerProps {
   onSelectSubject?: (subjectId: string) => void;
@@ -353,7 +354,12 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                           onClick={async (e) => {
                             e.stopPropagation();
                             const n = await countActiveQuestions('chapter_id', ch.id);
-                            if (confirm(`Удалить главу "${ch.name}"${n ? ` вместе с её темами и вопросами (${n})` : ''}?`)) {
+                            if (await confirmAction({
+                              title: `Удалить главу «${ch.name}»?`,
+                              message: n ? 'Вместе с главой уйдут её темы и вопросы.' : undefined,
+                              details: n ? [`Вопросов в главе: ${n}`] : undefined,
+                              confirmLabel: 'Удалить главу', cancelLabel: 'Оставить', tone: 'danger',
+                            })) {
                               softDeleteMutation.mutate({ table: 'chapters', id: ch.id });
                             }
                           }}
@@ -433,7 +439,12 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                             type="button"
                             onClick={async () => {
                               const n = await countActiveQuestions('topic_id', tp.id);
-                              if (confirm(`Удалить тему "${tp.name}"${n ? ` вместе с её вопросами (${n})` : ''}?`)) {
+                              if (await confirmAction({
+                                title: `Удалить тему «${tp.name}»?`,
+                                message: n ? 'Вместе с темой уйдут её вопросы.' : undefined,
+                                details: n ? [`Вопросов в теме: ${n}`] : undefined,
+                                confirmLabel: 'Удалить тему', cancelLabel: 'Оставить', tone: 'danger',
+                              })) {
                                 softDeleteMutation.mutate({ table: 'topics', id: tp.id });
                               }
                             }}
@@ -498,8 +509,11 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                     {isAdmin && (
                       <button
                         type="button"
-                        onClick={() => {
-                          if (confirm(`Удалить источник "${src.name}"?`)) {
+                        onClick={async () => {
+                          if (await confirmAction({
+                            title: `Удалить источник «${src.name}»?`,
+                            confirmLabel: 'Удалить источник', cancelLabel: 'Оставить', tone: 'danger',
+                          })) {
                             softDeleteMutation.mutate({ table: 'sources', id: src.id });
                           }
                         }}

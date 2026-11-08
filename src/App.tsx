@@ -17,6 +17,7 @@ import { AuthModal } from './components/AuthModal';
 import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { TelegramLink } from './components/TelegramLink';
 import { WhatsNewModal } from './components/WhatsNewModal';
+import { confirmAction } from './lib/confirm';
 import { useReleases } from './hooks/useReleases';
 import { Question, ROLE_LABELS } from './types/database';
 import { 
@@ -53,7 +54,14 @@ const tabFromHash = (hash: string): TabType | null => {
   return (Object.keys(TAB_HASH) as TabType[]).find((t) => TAB_HASH[t] === key) ?? null;
 };
 const isFormHash = (hash: string) => hash.startsWith('#questions/');
-const LEAVE_FORM_TEXT = 'Есть несохранённые изменения в вопросе. Закрыть без сохранения?';
+// Несохранённые изменения в форме вопроса: true — можно уходить
+const confirmLeaveForm = () => confirmAction({
+  title: 'Закрыть вопрос без сохранения?',
+  message: 'Внесённые изменения пропадут.',
+  confirmLabel: 'Закрыть без сохранения',
+  cancelLabel: 'Продолжить редактирование',
+  tone: 'danger',
+});
 
 export const App: React.FC = () => {
   const { user, profile, isAdmin, isOwner, isStaff, signOut, isLoading } = useAuth();
@@ -96,8 +104,14 @@ export const App: React.FC = () => {
       }
       const hash = window.location.hash;
       if (formOpenRef.current && !isFormHash(hash)) {
-        if (formDirtyRef.current && !window.confirm(LEAVE_FORM_TEXT)) {
+        if (formDirtyRef.current) {
+          // Шаг формы сразу возвращаем в историю, пока человек отвечает; «Закрыть» — снова шаг назад
           window.history.pushState(null, '', '#questions/edit');
+          confirmLeaveForm().then((ok) => {
+            if (!ok) return;
+            formDirtyRef.current = false;
+            window.history.back();
+          });
           return;
         }
         formOpenRef.current = false;
@@ -131,8 +145,8 @@ export const App: React.FC = () => {
   };
 
   // Переход в раздел. Из формы или меню «Ещё» — заменяем их шаг истории, чтобы «Назад» не открывал их снова
-  const goTab = (tab: TabType) => {
-    if (formOpenRef.current && formDirtyRef.current && !window.confirm(LEAVE_FORM_TEXT)) return false;
+  const goTab = async (tab: TabType) => {
+    if (formOpenRef.current && formDirtyRef.current && !(await confirmLeaveForm())) return false;
     const replace = formOpenRef.current || sheetOpenRef.current;
     sheetOpenRef.current = false;
     setMobileMenuOpen(false);
@@ -190,8 +204,8 @@ export const App: React.FC = () => {
   const handleEditQuestion = (q: Question) => openForm(q);
 
   // Закрыть форму: шаг формы в истории убираем «Назад»-ом (popstate закроет форму)
-  const closeForm = (force = false) => {
-    if (!force && formDirtyRef.current && !window.confirm(LEAVE_FORM_TEXT)) return;
+  const closeForm = async (force = false) => {
+    if (!force && formDirtyRef.current && !(await confirmLeaveForm())) return;
     formDirtyRef.current = false;
     if (isFormHash(window.location.hash)) window.history.back();
     else closeFormState();

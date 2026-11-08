@@ -6,6 +6,7 @@ import { Profile, UserRole, AuditLog, ROLE_LABELS } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { Users, ShieldCheck, UserCheck, Activity, Loader2, UserPlus, Pencil, Trash2, BookMarked } from 'lucide-react';
 import { CustomSelect } from './CustomSelect';
+import { confirmAction } from '../lib/confirm';
 
 const SUBJECT_ROLES: UserRole[] = ['subject_teacher', 'subject_admin'];
 const isSubjectRole = (r: UserRole) => SUBJECT_ROLES.includes(r);
@@ -440,8 +441,13 @@ export const UserManagementView: React.FC = () => {
                   )}
                   {isOwner && !p.is_owner && p.id !== currentUser?.id && (
                     <button
-                      onClick={() => {
-                        if (confirm(`Удалить пользователя ${p.full_name || p.email}? Его вопросы и билеты останутся, войти он больше не сможет.`)) {
+                      onClick={async () => {
+                        if (await confirmAction({
+                          title: `Удалить пользователя ${p.full_name || p.email}?`,
+                          message: 'Войти на сайт он больше не сможет.',
+                          details: ['Его вопросы и билеты останутся'],
+                          confirmLabel: 'Удалить пользователя', cancelLabel: 'Оставить', tone: 'danger',
+                        })) {
                           deleteUserMutation.mutate(p.id);
                         }
                       }}

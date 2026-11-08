@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send, X, Loader2, Copy, Check, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { confirmAction } from '../lib/confirm';
 
 const BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string | undefined;
 
@@ -59,7 +60,11 @@ export const TelegramLink: React.FC = () => {
   useEffect(() => { if (linked && code) setCode(null); }, [linked, code]);
 
   const unlink = async () => {
-    if (!confirm('Отвязать Telegram от этого аккаунта?')) return;
+    if (!(await confirmAction({
+      title: 'Отвязать Telegram?',
+      message: 'Бот перестанет присылать файлы в ваш Telegram. Привязать снова можно в любой момент.',
+      confirmLabel: 'Отвязать', cancelLabel: 'Оставить', tone: 'danger',
+    }))) return;
     await supabase.from('telegram_links').delete().eq('user_id', user!.id);
     queryClient.invalidateQueries({ queryKey: ['telegram_link'] });
   };

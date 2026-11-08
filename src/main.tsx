@@ -5,6 +5,7 @@ import { AuthProvider } from './hooks/useAuth';
 import App from './App';
 import ErrorToaster from './components/ErrorToaster';
 import UpdateBanner from './components/UpdateBanner';
+import ConfirmDialog from './components/ConfirmDialog';
 import { notifyError, notifySuccess } from './lib/errors';
 import { prefetchOnStartup } from './lib/startupPrefetch';
 import './index.css';
@@ -46,6 +47,7 @@ if (screenMatch || playMatch || path === '/play' || path === '/play/' || path ==
         <React.Suspense fallback={null}>
           {screenMatch ? <GameScreenPage code={code} /> : path.startsWith('/play') ? <GamePlayPage code={code} /> : <GameHostPage />}
         </React.Suspense>
+        <ConfirmDialog />
       </AuthProvider>
     </React.StrictMode>
   );
@@ -67,6 +69,7 @@ if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/
         <AuthProvider>
           <App />
           <ErrorToaster />
+          <ConfirmDialog />
           <UpdateBanner />
         </AuthProvider>
       </QueryClientProvider>

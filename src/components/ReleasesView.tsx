@@ -8,6 +8,7 @@ import { KIND_LABELS, RANK_LABELS } from '../lib/releases';
 import { ReleaseItemKind, ReleaseRank, SiteRelease } from '../types/database';
 import { ReleaseCard } from './ReleaseCard';
 import { CustomSelect } from './CustomSelect';
+import { confirmAction } from '../lib/confirm';
 
 interface DraftItem { kind: ReleaseItemKind; text: string; min_rank: ReleaseRank; subject_id: string }
 type SubjectOpt = { id: string; name: string };
@@ -167,7 +168,9 @@ export const ReleasesView: React.FC = () => {
               <div className="absolute top-3 right-3 flex gap-1">
                 <button onClick={() => edit(r)} className="p-1.5 text-slate-500 hover:text-blue-600" aria-label="Править"><Pencil className="w-4 h-4" /></button>
                 <button
-                  onClick={() => { if (window.confirm(`Удалить версию ${r.version}?`)) remove.mutate(r.id); }}
+                  onClick={async () => {
+                    if (await confirmAction({ title: `Удалить версию ${r.version}?`, message: 'Запись пропадёт из истории обновлений у всех пользователей.', confirmLabel: 'Удалить версию', cancelLabel: 'Оставить', tone: 'danger' })) remove.mutate(r.id);
+                  }}
                   className="p-1.5 text-slate-500 hover:text-red-600" aria-label="Удалить"
                 ><Trash2 className="w-4 h-4" /></button>
               </div>
