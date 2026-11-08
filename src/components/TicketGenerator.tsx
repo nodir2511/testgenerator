@@ -27,7 +27,7 @@ import { CustomSelect } from './CustomSelect';
 import { useUserLimits } from '../lib/generationLimits';
 import { autoBatchTitle, DEFAULT_BATCH_TITLE } from '../lib/batchTitle';
 import { DownloadButton, useExportLang, type Lang } from './DownloadButton';
-import { Badge, Button, Card, PageHeader } from './ui';
+import { Badge, Button, Card, Field, PageHeader } from './ui';
 
 type CountRow = { chapter_id: string | null; topic_id: string | null; type: string; cnt: number };
 
@@ -1232,8 +1232,14 @@ export const TicketGenerator: React.FC = () => {
               </button>
               {showExtra && (
                 <div className="space-y-3 pb-1">
-                  <label className="block">
-                    <span className="block text-sm font-semibold text-slate-700 mb-1">Название набора</span>
+                  <Field
+                    label="Название набора"
+                    hint={customTitle.trim() ? (
+                      <button type="button" onClick={() => setCustomTitle('')} className="font-semibold text-indigo-700 min-h-[32px]">
+                        Вернуть автоматическое название
+                      </button>
+                    ) : 'Можно не заполнять — название подставится само'}
+                  >
                     <input
                       type="text"
                       value={customTitle}
@@ -1242,14 +1248,7 @@ export const TicketGenerator: React.FC = () => {
                       maxLength={100}
                       className="w-full min-h-[44px] text-base px-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
-                    <span className="block text-xs text-slate-600 mt-1">
-                      {customTitle.trim() ? (
-                        <button type="button" onClick={() => setCustomTitle('')} className="font-semibold text-indigo-700 min-h-[32px]">
-                          Вернуть автоматическое название
-                        </button>
-                      ) : 'Можно не заполнять — название подставится само'}
-                    </span>
-                  </label>
+                  </Field>
                   <label className="flex items-center gap-3 min-h-[40px] text-sm text-slate-700 cursor-pointer select-none">
                     <input
                       type="checkbox"

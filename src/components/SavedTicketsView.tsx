@@ -120,7 +120,7 @@ export const SavedTicketsView: React.FC = () => {
     mutationFn: async (batchId: string) => {
       const { data, error } = await supabase.from('ticket_batches').delete().eq('id', batchId).select('id');
       if (error) throw error;
-      assertRowsChanged(data, 'партия билетов');
+      assertRowsChanged(data, 'набор билетов');
     },
     meta: { action: 'Не удалось удалить набор билетов' },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recent_batches'] }),
@@ -197,6 +197,7 @@ export const SavedTicketsView: React.FC = () => {
           <Search className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="search"
+            aria-label="Поиск по названию"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Поиск по названию"

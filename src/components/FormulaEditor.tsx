@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useId, useRef } from 'react';
 import { Bold, Italic, Underline, Subscript, Superscript } from 'lucide-react';
 import { splitFractions, hasFraction, newFmtState, tokenizeFormatted, type MathNode, type FmtState, type FmtToken } from '../lib/fractions';
 
@@ -18,6 +18,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
   label,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fieldId = useId();
 
   // Обертывание выделенного фрагмента тегами форматирования
   const wrapSelection = (prefix: string, suffix: string) => {
@@ -59,7 +60,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
   return (
     <div className="space-y-1">
       {label && (
-        <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
+        <label htmlFor={fieldId} className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
           {label}
         </label>
       )}
@@ -181,6 +182,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
       </div>
 
       <textarea
+        id={fieldId}
         ref={textareaRef}
         rows={rows}
         value={value}

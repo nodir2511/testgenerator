@@ -28,7 +28,7 @@ import {
   Layers
 } from 'lucide-react';
 import { confirmAction } from '../lib/confirm';
-import { Badge, Button, Field, IconButton, PageHeader } from './ui';
+import { Badge, Button, Field, Hint, IconButton, PageHeader } from './ui';
 
 type ImportLang = 'ru' | 'tg';
 
@@ -1019,7 +1019,10 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         {/* Вкладка 3: История партий (для админа) */}
         {activeTab === 'history' && (
           <div className="space-y-3">
-            <h3 className="font-semibold text-slate-900 text-sm">Ранее загруженные партии вопросов</h3>
+            <h3 className="font-semibold text-slate-900 text-sm flex items-center gap-1">
+              Ранее загруженные партии вопросов
+              <Hint label="Что такое партия">Партия — один загруженный файл или вставленный текст. «Откатить партию» скроет из банка все вопросы из неё, остальные вопросы не затрагиваются.</Hint>
+            </h3>
             <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
               {batches.map((b: any) => (
                 <div key={b.id} className="p-4 flex items-center justify-between bg-white hover:bg-slate-50">

@@ -681,10 +681,12 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               Языковой режим редактора:
             </span>
           </div>
-          <div className="inline-flex rounded-xl border border-slate-200 p-0.5 bg-slate-100 text-xs font-semibold">
+          <div role="radiogroup" aria-label="Языковой режим редактора" className="inline-flex rounded-xl border border-slate-200 p-0.5 bg-slate-100 text-xs font-semibold">
             <button
               type="button"
               onClick={() => setFormMode('both')}
+              role="radio"
+              aria-checked={formMode === 'both'}
               className={`px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 ${
                 formMode === 'both'
                   ? 'bg-purple-600 text-white shadow-sm'
@@ -696,6 +698,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             <button
               type="button"
               onClick={() => setFormMode('ru')}
+              role="radio"
+              aria-checked={formMode === 'ru'}
               className={`px-3 py-1.5 rounded-lg transition ${
                 formMode === 'ru'
                   ? 'bg-indigo-600 text-white shadow-sm'
@@ -707,6 +711,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             <button
               type="button"
               onClick={() => setFormMode('tg')}
+              role="radio"
+              aria-checked={formMode === 'tg'}
               className={`px-3 py-1.5 rounded-lg transition ${
                 formMode === 'tg'
                   ? 'bg-emerald-600 text-white shadow-sm'
@@ -877,9 +883,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                     {/* Поля ввода варианта в зависимости от выбранного режима */}
                     {formMode === 'both' ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-500 uppercase mb-0.5">Русский (RU)</label>
-                          <input
+                        <Field label="Русский (RU)">
+<input
                             type="text"
                             value={opt.text_ru ?? opt.text ?? ''}
                             onChange={(e) => {
@@ -891,10 +896,9 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             placeholder={`Вариант ${optLetter} (RU)`}
                             className="w-full text-sm p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                           />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-emerald-600 uppercase mb-0.5">Тоҷикӣ (TJ)</label>
-                          <input
+</Field>
+                        <Field label="Тоҷикӣ (TJ)">
+<input
                             type="text"
                             value={opt.text_tg ?? ''}
                             onChange={(e) => {
@@ -905,7 +909,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                             placeholder={`Варианти ${optLetter} (TJ)`}
                             className="w-full text-sm p-2 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
                           />
-                        </div>
+</Field>
                       </div>
                     ) : formMode === 'ru' ? (
                       <div>

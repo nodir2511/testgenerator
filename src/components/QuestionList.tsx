@@ -499,10 +499,12 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Язык отображения</label>
-                <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
+                <div role="radiogroup" aria-label="Язык вопросов" className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
                   <button
                     type="button"
                     onClick={() => setDisplayLang('ru')}
+                    role="radio"
+                    aria-checked={displayLang === 'ru'}
                     className={`py-2 rounded-lg transition ${displayLang === 'ru' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'} min-h-[40px]`}
                   >
                     Русский
@@ -510,6 +512,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   <button
                     type="button"
                     onClick={() => setDisplayLang('tg')}
+                    role="radio"
+                    aria-checked={displayLang === 'tg'}
                     className={`py-2 rounded-lg transition ${displayLang === 'tg' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'} min-h-[40px]`}
                   >
                     Тоҷикӣ
@@ -517,6 +521,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   <button
                     type="button"
                     onClick={() => setDisplayLang('both')}
+                    role="radio"
+                    aria-checked={displayLang === 'both'}
                     className={`py-2 rounded-lg transition ${displayLang === 'both' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'} min-h-[40px]`}
                   >
                     RU + TJ
@@ -652,10 +658,12 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-100 gap-2 xl:flex-col xl:items-stretch">
           <div className="flex items-center space-x-2 xl:flex-col xl:items-stretch xl:space-x-0 xl:gap-1.5">
             <span className="text-xs font-semibold text-slate-600">Язык вопросов:</span>
-            <div className="inline-flex xl:flex rounded-xl border border-slate-200/90 p-0.5 bg-slate-100/70 text-xs [&>button]:whitespace-nowrap xl:[&>button]:flex-1">
+            <div role="radiogroup" aria-label="Язык вопросов" className="inline-flex xl:flex rounded-xl border border-slate-200/90 p-0.5 bg-slate-100/70 text-xs [&>button]:whitespace-nowrap xl:[&>button]:flex-1">
               <button
                 type="button"
                 onClick={() => setDisplayLang('ru')}
+                role="radio"
+                aria-checked={displayLang === 'ru'}
                 className={`px-3 py-1 rounded-lg font-medium transition ${
                   displayLang === 'ru'
                     ? 'bg-indigo-600 text-white shadow-xs font-bold'
@@ -667,6 +675,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               <button
                 type="button"
                 onClick={() => setDisplayLang('tg')}
+                role="radio"
+                aria-checked={displayLang === 'tg'}
                 className={`px-3 py-1 rounded-lg font-medium transition ${
                   displayLang === 'tg'
                     ? 'bg-emerald-600 text-white shadow-xs font-bold'
@@ -678,6 +688,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               <button
                 type="button"
                 onClick={() => setDisplayLang('both')}
+                role="radio"
+                aria-checked={displayLang === 'both'}
                 className={`px-3 py-1 rounded-lg font-medium transition ${
                   displayLang === 'both'
                     ? 'bg-purple-600 text-white shadow-xs font-bold'

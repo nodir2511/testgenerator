@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { passwordErrorText } from '../lib/errors';
 import { passwordChecks, passwordOk } from '../lib/passwordRules';
 import { CheckCircle2, Circle, Eye, EyeOff, KeyRound, Loader2, LogOut } from 'lucide-react';
-import { Button } from './ui';
+import { Button, Field } from './ui';
 
 // Обязательная смена пароля: пароль задал администратор, значит его знает не только владелец аккаунта.
 // Пока пароль не сменён, остальная часть сайта недоступна. Флаг в профиле база снимает сама,
@@ -60,8 +60,7 @@ export const ChangePasswordScreen: React.FC = () => {
               Аккаунт: <span className="font-semibold text-slate-900">{profile?.email || user?.email}</span>
             </div>
 
-            <label className="block">
-              <span className="block text-sm font-semibold text-slate-700 mb-1.5">Новый пароль</span>
+            <Field label="Новый пароль">
               <div className="relative">
                 <input
                   type={show ? 'text' : 'password'}
@@ -80,7 +79,7 @@ export const ChangePasswordScreen: React.FC = () => {
                   {show ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
-            </label>
+            </Field>
 
             <ul className="space-y-1.5">
               {checks.map((c) => (
@@ -91,8 +90,7 @@ export const ChangePasswordScreen: React.FC = () => {
               ))}
             </ul>
 
-            <label className="block">
-              <span className="block text-sm font-semibold text-slate-700 mb-1.5">Повторите пароль</span>
+            <Field label="Повторите пароль">
               <input
                 type={show ? 'text' : 'password'}
                 autoComplete="new-password"
@@ -101,7 +99,7 @@ export const ChangePasswordScreen: React.FC = () => {
                 className={inputCls}
               />
               {repeat.length > 0 && !same && <span className="block text-sm text-red-600 mt-1.5">Пароли не совпадают</span>}
-            </label>
+            </Field>
 
             {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{error}</div>}
 

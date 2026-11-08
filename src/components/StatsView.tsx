@@ -220,7 +220,7 @@ const GenerationLimitsCard: React.FC<{ hint?: string }> = ({ hint }) => {
     <UiCard as="section" padding="none" className="p-4">
       <h3 className="font-bold text-slate-900 text-base flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-indigo-600" /> Лимиты генерации <Hint label="Что такое лимиты">Ограничения для преподавателей: сколько раз в сутки и как часто можно создавать билеты. Администраторов они не касаются.</Hint></h3>
       <p className="text-sm text-slate-600 mt-0.5 mb-3">
-        Для всех, кроме администраторов: сайт, Telegram-бот и Mini App.{isOwner ? '' : ' Менять может только главный админ.'}
+        Для всех, кроме администраторов: сайт, Telegram-бот и мини-приложение внутри Telegram.{isOwner ? '' : ' Менять может только главный админ.'}
         {hint ? ` ${hint}` : ''}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -322,7 +322,7 @@ export const StatsView: React.FC = () => {
         <Kpi label="Пользовались" value={data.totals.users} prev={data.prev?.users} prevLabel={period.prevLabel} note={people ? `из ${people.total} аккаунтов` : undefined} />
         {data.today
           ? <Kpi label="Сегодня" value={data.today.batches} prevLabel="" note={`${data.today.users} ${plural(data.today.users, 'человек', 'человека', 'человек')}`} />
-          : <Kpi label="Через Telegram" value={data.totals.telegram ?? 0} prevLabel="" note="бот и Mini App" />}
+          : <Kpi label="Через Telegram" value={data.totals.telegram ?? 0} prevLabel="" note="бот и мини-приложение" />}
       </div>
 
       <Card title="Активность" hint={days <= 31 ? 'Генерации по дням — коснитесь столбика' : days <= 120 ? 'Генерации по неделям' : 'Генерации по месяцам'}>
