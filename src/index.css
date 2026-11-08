@@ -54,6 +54,21 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Предотвращение принудительного масштабирования (iOS Safari auto-zoom) при фокусе на полях ввода */
+@media (max-width: 640px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="search"],
+  input[type="tel"],
+  input[type="url"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
 body {
   font-family: "Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color: hsl(var(--foreground));

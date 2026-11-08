@@ -345,7 +345,7 @@ export const App: React.FC = () => {
             <TelegramLink />
             <button 
               onClick={openReleases} 
-              className="relative p-2 text-slate-500 hover:text-indigo-600 active:scale-90 rounded-xl transition hover:bg-slate-100 min-h-[40px]" 
+              className="relative p-2 text-slate-500 hover:text-indigo-600 active:scale-90 rounded-xl transition hover:bg-slate-100 min-h-[44px] min-w-[44px] flex items-center justify-center" 
               title="Что нового" 
               aria-label="Что нового"
             >
@@ -358,7 +358,7 @@ export const App: React.FC = () => {
             </button>
             <button
               onClick={openSheet}
-              className="flex items-center space-x-1.5 p-1.5 pl-2.5 bg-slate-100/90 active:scale-95 border border-slate-200/80 rounded-2xl text-slate-700 min-h-[40px]"
+              className="flex items-center space-x-1.5 p-1.5 pl-2.5 bg-slate-100/90 active:scale-95 border border-slate-200/80 rounded-2xl text-slate-700 min-h-[44px]"
               aria-label="Открыть меню профиля"
             >
               <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">
@@ -571,6 +571,7 @@ export const App: React.FC = () => {
       </footer>
 
       {/* Мобильная нижняя навигация (Floating Bottom Bar под большой палец) */}
+      {!isQuestionFormOpen && (
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-slate-200/80 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(15,23,42,0.06)]">
         <div className="grid grid-cols-4 h-16 items-center px-2">
           {/* Генератор */}
@@ -642,6 +643,7 @@ export const App: React.FC = () => {
           </button>
         </div>
       </nav>
+      )}
     </div>
   );
 };

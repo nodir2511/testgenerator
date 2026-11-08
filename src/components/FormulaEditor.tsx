@@ -66,7 +66,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
       )}
 
       {/* Панель быстрого форматирования */}
-      <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 border border-slate-300 rounded-t-lg text-slate-700 text-xs">
+      <div className="flex items-center gap-1 p-1.5 bg-slate-100 border border-slate-300 rounded-t-lg text-slate-700 text-xs overflow-x-auto no-scrollbar sm:flex-wrap">
         <button
           type="button"
           onClick={() => wrapSelection('<sub>', '</sub>')}

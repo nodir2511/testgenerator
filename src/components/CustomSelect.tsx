@@ -348,7 +348,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                       }}
                       onMouseEnter={() => setHighlightedIndex(idx)}
                       className={cn(
-                        "w-full px-2.5 py-1.5 text-xs rounded-xl flex items-center justify-between text-left transition-all duration-150 cursor-pointer",
+                        "w-full px-3 py-2.5 sm:py-1.5 text-sm sm:text-xs min-h-[40px] sm:min-h-0 rounded-xl flex items-center justify-between text-left transition-all duration-150 cursor-pointer",
                         isSelected
                           ? "bg-indigo-50/90 text-indigo-700 font-semibold"
                           : isHighlighted

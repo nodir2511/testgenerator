@@ -10,31 +10,33 @@ export const WhatsNewModal: React.FC<{ releases: SiteRelease[]; onClose: () => v
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
   return (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Что нового"
-      className="bg-slate-50 rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
-        <div className="flex items-center gap-2 font-bold text-slate-900">
-          <Megaphone className="w-5 h-5 text-indigo-600" /> Что нового
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 sm:p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Что нового"
+        className="bg-slate-50 rounded-t-3xl sm:rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sm:hidden w-12 h-1 bg-slate-300 rounded-full mx-auto mt-3 mb-1 shrink-0" />
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+          <div className="flex items-center gap-2 font-bold text-slate-900">
+            <Megaphone className="w-5 h-5 text-indigo-600" /> Что нового
+          </div>
+          <button onClick={onClose} className="p-1.5 text-slate-500 hover:text-slate-700 rounded-lg min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="Закрыть">
+            <X className="w-5 h-5" />
+          </button>
         </div>
-        <button onClick={onClose} className="p-1.5 text-slate-500 hover:text-slate-700 rounded-lg min-h-[40px]" aria-label="Закрыть">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-      <div className="overflow-y-auto p-4 space-y-3">
-        {releases.map((r) => <ReleaseCard key={r.id} release={r} />)}
-      </div>
-      <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200">
-        <button onClick={onOpenHistory} className="text-sm font-semibold text-indigo-600 hover:underline min-h-[40px]">Вся история обновлений</button>
-        <button onClick={onClose} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 min-h-[40px]">Понятно</button>
+        <div className="overflow-y-auto p-4 space-y-3">
+          {releases.map((r) => <ReleaseCard key={r.id} release={r} />)}
+        </div>
+        <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-200">
+          <button onClick={onOpenHistory} className="text-sm font-semibold text-indigo-600 hover:underline min-h-[44px]">Вся история обновлений</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 min-h-[44px]">Понятно</button>
+        </div>
       </div>
     </div>
-  </div>
   );
 };

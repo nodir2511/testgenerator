@@ -32,6 +32,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
 
   const [activeSubjectId, setActiveSubjectId] = useState<string>(selectedSubjectId || '');
   const [activeChapterId, setActiveChapterId] = useState<string>('');
+  const [mobileTab, setMobileTab] = useState<'chapters' | 'topics' | 'sources'>('chapters');
 
   // Формы добавления
   const [newSubjectName, setNewSubjectName] = useState('');
@@ -281,9 +282,50 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
 
       {/* Колонки: Главы, Темы и Источники */}
       {activeSubjectId && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* 1. Главы */}
-          <Card padding="none" className="p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
+        <>
+          {/* Переключатель вкладок на мобильных устройствах */}
+          <div className="md:hidden flex p-1 bg-slate-100 rounded-xl mb-3" role="tablist" aria-label="Разделы структуры">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === 'chapters'}
+              onClick={() => setMobileTab('chapters')}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition min-h-[40px] flex items-center justify-center gap-1.5 ${
+                mobileTab === 'chapters' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Главы ({chapters.length})</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === 'topics'}
+              onClick={() => setMobileTab('topics')}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition min-h-[40px] flex items-center justify-center gap-1.5 ${
+                mobileTab === 'topics' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600'
+              }`}
+            >
+              <Bookmark className="w-3.5 h-3.5" />
+              <span>Темы ({topics.length})</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === 'sources'}
+              onClick={() => setMobileTab('sources')}
+              className={`flex-1 py-2 text-xs font-bold rounded-lg transition min-h-[40px] flex items-center justify-center gap-1.5 ${
+                mobileTab === 'sources' ? 'bg-white text-amber-700 shadow-xs' : 'text-slate-600'
+              }`}
+            >
+              <Library className="w-3.5 h-3.5" />
+              <span>Источники ({sources.length})</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* 1. Главы */}
+            <Card padding="none" className={`p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px] ${mobileTab !== 'chapters' ? 'hidden md:flex' : ''}`}>
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Layers className="w-4 h-4 mr-2 text-indigo-600" />
@@ -328,7 +370,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 chapters.map((ch, idx) => (
                   <div
                     key={ch.id}
-                    onClick={() => setActiveChapterId(ch.id)}
+                    onClick={() => { setActiveChapterId(ch.id); setMobileTab('topics'); }}
                     className={`group flex items-center justify-between p-2.5 rounded-xl cursor-pointer text-xs font-medium transition ${
                       activeChapterId === ch.id
                         ? 'bg-indigo-50 border border-indigo-200 text-indigo-900'
@@ -369,7 +411,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
           </Card>
 
           {/* 2. Темы выбранной главы */}
-          <Card padding="none" className="p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
+          <Card padding="none" className={`p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px] ${mobileTab !== 'topics' ? 'hidden md:flex' : ''}`}>
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Bookmark className="w-4 h-4 mr-2 text-emerald-600" />
@@ -452,7 +494,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
           </Card>
 
           {/* 3. Источники / Сборники */}
-          <Card padding="none" className="p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
+          <Card padding="none" className={`p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px] ${mobileTab !== 'sources' ? 'hidden md:flex' : ''}`}>
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Library className="w-4 h-4 mr-2 text-amber-600" />
@@ -518,6 +560,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
             </div>
           </Card>
         </div>
+        </>
       )}
     </div>
   );
