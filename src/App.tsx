@@ -18,6 +18,7 @@ import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { TelegramLink } from './components/TelegramLink';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { confirmAction } from './lib/confirm';
+import { SideNav, type SideNavGroup } from './components/SideNav';
 import { useReleases } from './hooks/useReleases';
 import { Question, ROLE_LABELS } from './types/database';
 import { 
@@ -190,6 +191,33 @@ export const App: React.FC = () => {
     ...(isAdmin ? [{ id: 'admin', label: 'Администрирование', icon: Users }] : []),
     ...(isOwner ? [{ id: 'game', label: 'Своя игра', icon: Gamepad2 }] : []),
   ];
+  // Боковое меню (широкие экраны): те же разделы, но по группам, а «Администрирование» раскрыто в три пункта
+  const sideGroups: SideNavGroup[] = [
+    { title: 'Билеты', items: [
+      { id: 'generator', label: 'Генератор билетов', icon: Sparkles },
+      { id: 'saved_tickets', label: 'Архив билетов', icon: FileCheck2 },
+    ] },
+    { title: 'Вопросы', items: [
+      { id: 'questions', label: 'Банк вопросов', icon: FileQuestion },
+      ...(isStaff ? [{ id: 'taxonomy', label: 'Предметы и темы', icon: Layers }, { id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
+    ] },
+    ...(isAdmin ? [{ title: 'Администрирование', items: [
+      { id: 'users', label: 'Пользователи', icon: Users },
+      { id: 'stats', label: 'Статистика', icon: BarChart3 },
+      { id: 'trash', label: 'Корзина', icon: Trash2 },
+    ] }] : []),
+    ...(isOwner ? [{ title: 'Дополнительно', items: [
+      { id: 'cluster', label: 'Экзамен-кластер', icon: BookOpen },
+      { id: 'game', label: 'Своя игра', icon: Gamepad2, external: true },
+    ] }] : []),
+  ];
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try { return localStorage.getItem('examiner_sidenav_collapsed') === 'true'; } catch { return false; }
+  });
+  const toggleNav = () => setNavCollapsed((v) => {
+    try { localStorage.setItem('examiner_sidenav_collapsed', String(!v)); } catch { /* память браузера недоступна — не страшно */ }
+    return !v;
+  });
   const isAdminSection = currentTab === 'users' || currentTab === 'stats' || currentTab === 'trash';
 
   const openForm = (q: Question | null) => {
@@ -238,7 +266,7 @@ export const App: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900 antialiased selection:bg-indigo-500/20 selection:text-indigo-900">
       {/* Главный заголовок */}
       <header className="bg-white/85 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 shadow-xs pt-[env(safe-area-inset-top)]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Логотип */}
           <div className="flex items-center space-x-3 cursor-pointer group" onClick={() => goTab('generator')}>
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-indigo-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-transform">
@@ -328,8 +356,8 @@ export const App: React.FC = () => {
         </div>
 
         {/* Навигационная панель табов (десктоп) в Bento-стиле */}
-        <div className="hidden md:block bg-white/70 border-t border-slate-200/60 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto flex space-x-1 py-1.5 overflow-x-auto no-scrollbar">
+        <div className="hidden md:block xl:hidden bg-white/70 border-t border-slate-200/60 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-[1680px] mx-auto flex space-x-1 py-1.5 overflow-x-auto no-scrollbar">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = item.id === 'admin' ? isAdminSection : currentTab === item.id;
@@ -457,7 +485,18 @@ export const App: React.FC = () => {
       )}
 
       {/* Основной контент */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-8">
+      <div className="flex-1 w-full max-w-[1680px] mx-auto flex">
+      <SideNav
+        groups={sideGroups}
+        activeId={currentTab}
+        collapsed={navCollapsed}
+        onToggle={toggleNav}
+        onSelect={(item) => {
+          if (item.id === 'game') { window.open('/game', '_blank'); return; }
+          goTab(item.id as TabType);
+        }}
+      />
+      <main className="flex-1 min-w-0 px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-8">
         <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-indigo-600 animate-spin" /></div>}>
         {/* Экран формы создания / редактирования вопроса */}
         {isQuestionFormOpen && isStaff ? (
@@ -470,7 +509,7 @@ export const App: React.FC = () => {
         ) : (
           <>
             {isAdminSection && (
-              <div className="flex space-x-1 mb-5 border-b border-slate-200">
+              <div className="flex space-x-1 mb-5 border-b border-slate-200 xl:hidden">
                 {([['users', 'Пользователи', Users], ['stats', 'Статистика', BarChart3], ['trash', 'Корзина', Trash2]] as const).map(([id, label, Icon]) => (
                   <button
                     key={id}
@@ -506,6 +545,7 @@ export const App: React.FC = () => {
         )}
         </Suspense>
       </main>
+      </div>
 
       {showNews && <WhatsNewModal releases={unread} onClose={closeNews} onOpenHistory={() => { closeNews(); openReleases(); }} />}
 

@@ -304,7 +304,7 @@ export const StatsView: React.FC = () => {
     : undefined;
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-7xl mx-auto">
       <PageHeader icon={BarChart3} title="Статистика" description="Как пользуются сайтом: генерации, люди, предметы и банк вопросов" />
       {header}
 
