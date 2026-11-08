@@ -268,7 +268,14 @@ export const App: React.FC = () => {
       <header className="bg-white/85 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 shadow-xs pt-[env(safe-area-inset-top)]">
         <div className="max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Логотип */}
-          <div className="flex items-center space-x-3 cursor-pointer group" onClick={() => goTab('generator')}>
+          <div
+            role="link"
+            tabIndex={0}
+            aria-label="Экзаменатор — на главную"
+            className="flex items-center space-x-3 cursor-pointer group rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+            onClick={() => goTab('generator')}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goTab('generator'); } }}
+          >
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-indigo-500 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-transform">
               <Sparkles className="w-5 h-5" />
             </div>

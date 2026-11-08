@@ -1,10 +1,9 @@
-name: Резервная копия базы на Google Диск
+name: Резервная копия базы в Telegram
 
 on:
-  # Ночной запуск отключён, пока не добавлены секреты (без них запуск падает и шлёт письма).
-  # Чтобы включить: раскомментировать две строки ниже (02:17 по Душанбе)
-  # schedule:
-  #   - cron: '17 21 * * *'
+  # Каждую ночь в 02:17 по Душанбе (21:17 UTC)
+  schedule:
+    - cron: '17 21 * * *'
   workflow_dispatch: {}
 
 permissions:
@@ -29,11 +28,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-17
 
-      - name: Выгрузка и загрузка на Диск
+      - name: Выгрузка и отправка в Telegram
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
-          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
-          GDRIVE_REFRESH_TOKEN: ${{ secrets.GDRIVE_REFRESH_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BACKUP_CHAT_ID: ${{ secrets.TELEGRAM_BACKUP_CHAT_ID }}
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
-        run: ./scripts/backup-to-drive.sh
+        run: ./scripts/backup-to-telegram.sh
