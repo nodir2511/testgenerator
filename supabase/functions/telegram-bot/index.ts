@@ -191,7 +191,7 @@ async function screenStart(chat: number, user: any) {
 
   const rem = Number.isFinite(limits.perDay) ? Math.max(0, limits.perDay - (usageCount ?? 0)) : '∞';
   const perDayStr = Number.isFinite(limits.perDay) ? `${limits.perDay} в сутки` : 'без ограничений';
-  const roleName = user.role === 'admin' ? '👑 Администратор' : '🎓 Преподаватель';
+  const roleName = user.role === 'admin' ? '👑 Администратор' : user.role === 'subject_admin' ? '🛡 Администратор предметов' : '🎓 Преподаватель';
 
   const text = (
     `👋 <b>Здравствуйте, ${escapeHtml(user.full_name || user.email)}!</b>\n\n` +
@@ -312,7 +312,7 @@ async function screenQuick(chat: number, user: any, msgId?: number) {
     }]);
   }
 
-  const bioState = userSubs.find((s: any) => /биол|тоҷик|таджик/i.test(s.name));
+  const bioState = userSubs.find((s: any) => /биол|тоҷик|таджик|истор|таърих/i.test(s.name));
   if (bioState) {
     kb.push([{
       text: `🧬 Био / Гос (20+4+2 = 26 в.) · ${T.shortName(bioState.name, 20)}`,
@@ -351,7 +351,7 @@ async function screenQuick(chat: number, user: any, msgId?: number) {
 type QuickType = 'phys' | 'bio' | 'law';
 const QUICK: Record<QuickType, { test: number; matching: number; open: number; title: string; fallback: string }> = {
   phys: { test: 18, matching: 2, open: 7, title: '🧪 Физика / Химия (18 тестов, 2 соотв., 7 откр.)', fallback: 'Химия' },
-  bio: { test: 20, matching: 4, open: 2, title: '🧬 Биология / Гос (20 тестов, 4 соотв., 2 откр.)', fallback: 'Биология' },
+  bio: { test: 20, matching: 4, open: 2, title: '🧬 Био / Гос / История (20 тестов, 4 соотв., 2 откр.)', fallback: 'Биология' },
   law: { test: 20, matching: 5, open: 0, title: '⚖️ Право (20 тестов, 5 соотв., без открытых)', fallback: 'Право' },
 };
 const quickType = (v: string): QuickType => (v === 'bio' || v === 'law' ? v : 'phys');

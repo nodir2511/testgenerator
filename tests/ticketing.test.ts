@@ -272,7 +272,8 @@ describe('ключи ответов', () => {
   it('предмет определяется по названию', () => {
     expect(keyKindOf('Химия')).toBe('chem');
     expect(keyKindOf('Физика / Физика')).toBe('phys');
-    expect(keyKindOf('История')).toBeNull();
+    expect(keyKindOf('История')).toBe('hist');
+    expect(keyKindOf('Таърих')).toBe('hist');
     expect(keyKindOf('Право')).toBe('law');
     expect(keyKindOf('Ҳуқуқ')).toBe('law');
     expect(keyKindOf('Правописание')).toBeNull();

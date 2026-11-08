@@ -126,13 +126,21 @@ describe('ключи таджикского языка: шаблон под со
     expect(stats.overflow).toBe(0);
   });
 
+  it('история 20/4/2: свой шаблон, все ответы на месте', async () => {
+    const tk = ticket(20, 4, 2);
+    expect(keyTemplateName('hist', [tk])).toBe('hist');
+    const { stats } = await buildAnswerKeyDocx(fs.readFileSync('templates/key/hist.docx'), [tk]);
+    expect(stats.universal).toBeUndefined();
+    expect(stats.overflow).toBe(0);
+  });
+
   it('остальные предметы не затронуты', () => {
     expect(keyTemplateName('bio', [ticket(20, 4, 2)])).toBe('bio');
   });
 
   it('шаблоны есть и на сайте, и в функциях бота', async () => {
     const { KEY_TEMPLATES } = await import('../supabase/functions/_shared/keyTemplates');
-    for (const name of ['taj', 'taj-cluster', 'law']) {
+    for (const name of ['taj', 'taj-cluster', 'law', 'hist']) {
       const file = fs.readFileSync(`templates/key/${name}.docx`);
       expect(KEY_TEMPLATES[name]).toBe(file.toString('base64'));
       expect(fs.readFileSync(`public/key-templates/${name}.docx`).equals(file)).toBe(true);

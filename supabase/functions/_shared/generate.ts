@@ -48,7 +48,7 @@ export async function allowedSubjectIds(sb: any, user: { id: string; role?: stri
 // generation_settings (правится на вкладке «Статистика»); если таблицы нет — значения по умолчанию.
 export type Limits = { perType: number; tickets: number; total?: number; perDay: number };
 export async function limitsFor(sb: any, user: { role?: string }): Promise<Limits> {
-  if (user.role === 'admin') return { ...T.LIMITS, perDay: Infinity };
+  if (user.role === 'admin' || user.role === 'subject_admin') return { ...T.LIMITS, perDay: Infinity };
   try {
     const { data } = await sb.from('generation_settings').select('per_day, max_tickets, max_per_ticket').eq('id', true).maybeSingle();
     if (data) return { perType: T.TG_LIMITS.perType, tickets: data.max_tickets, total: data.max_per_ticket, perDay: data.per_day };

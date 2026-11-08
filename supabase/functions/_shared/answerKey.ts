@@ -7,10 +7,13 @@ import JSZip from 'npm:jszip@3';
 // открытые (число по одной цифре в клетку).
 // Модуль общий для сайта и Edge Functions: scripts/sync-docx-shared.mjs копирует его в supabase/functions/_shared.
 
-export type KeyKind = 'chem' | 'phys' | 'bio' | 'taj' | 'law';
+export type KeyKind = 'chem' | 'phys' | 'bio' | 'taj' | 'law' | 'hist';
 
 /** «Право» отдельным словом (не «правописание»), по-таджикски — «ҳуқуқ» */
 export const LAW_RE = /(^|[^а-яё])право([^а-яё]|$)|ҳуқуқ/;
+
+/** «История» или по-таджикски «таърих» */
+export const HIST_RE = /истор|таърих/;
 
 export function keyKindOf(subjectName: string): KeyKind | null {
   const n = (subjectName || '').toLowerCase();
@@ -20,6 +23,8 @@ export function keyKindOf(subjectName: string): KeyKind | null {
   if (/тоҷик|таджик|забони/.test(n)) return 'taj';
   // Право: 20 тестов и 5 соответствий, без открытых
   if (LAW_RE.test(n)) return 'law';
+  // История: 20 тестов и 5 соответствий, без открытых
+  if (HIST_RE.test(n)) return 'hist';
   return null;
 }
 

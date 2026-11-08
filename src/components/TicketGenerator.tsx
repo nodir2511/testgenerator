@@ -47,7 +47,7 @@ type ScopeMode = 'all' | 'pick';
 const STANDARDS = [
   { match: ['хим', 'физ'], test: 18, matching: 2, open: 7 },
   { match: ['био', 'тадж', 'тоҷик', 'гос'], test: 20, matching: 4, open: 2 },
-  { match: ['право', 'ҳуқуқ'], test: 20, matching: 5, open: 0 },
+  { match: ['право', 'ҳуқуқ', 'истор', 'таърих'], test: 20, matching: 5, open: 0 },
 ];
 const standardFor = (name?: string) => {
   const n = (name || '').toLowerCase();
@@ -167,9 +167,9 @@ const Stepper: React.FC<{ label: string; hint?: string; value: number; min: numb
 
 export const TicketGenerator: React.FC = () => {
   const queryClient = useQueryClient();
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, isStaff } = useAuth();
   const userLimits = useUserLimits();
-  const limits = isAdmin ? ADMIN_SITE_LIMITS : userLimits;
+  const limits = isStaff ? ADMIN_SITE_LIMITS : userLimits;
   const generatingRef = React.useRef(false);
 
   // Параметры конфигурации билета (сохраняются при перезагрузке)
@@ -450,7 +450,7 @@ export const TicketGenerator: React.FC = () => {
   // 5. Лимиты обычного пользователя: сколько генераций осталось сегодня и когда можно следующую
   const { data: usage } = useQuery({
     queryKey: ['generation_usage_today', user?.id, userLimits.cooldownSeconds],
-    enabled: Boolean(user?.id) && !isAdmin,
+    enabled: Boolean(user?.id) && !isStaff,
     staleTime: 0,
     queryFn: async () => {
       const dayStart = dushanbeDayStart();
@@ -469,7 +469,7 @@ export const TicketGenerator: React.FC = () => {
       };
     },
   });
-  const cooldownUntil = !isAdmin && usage?.last ? usage.last + userLimits.cooldownSeconds * 1000 : 0;
+  const cooldownUntil = !isStaff && usage?.last ? usage.last + userLimits.cooldownSeconds * 1000 : 0;
   const [nowTick, setNowTick] = useState(() => Date.now());
   React.useEffect(() => {
     if (cooldownUntil <= Date.now()) return;
@@ -482,7 +482,7 @@ export const TicketGenerator: React.FC = () => {
     return () => clearInterval(timer);
   }, [cooldownUntil]);
   const cooldownLeft = cooldownUntil > nowTick ? Math.ceil((cooldownUntil - nowTick) / 1000) : 0;
-  const leftToday = !isAdmin && usage ? Math.max(0, userLimits.perDay - usage.today) : null;
+  const leftToday = !isStaff && usage ? Math.max(0, userLimits.perDay - usage.today) : null;
   const dayExhausted = leftToday === 0;
 
   // Номера выбранных глав (по порядку в предмете) — для названия набора
@@ -768,7 +768,7 @@ export const TicketGenerator: React.FC = () => {
     : null;
   const healthDot = !health ? 'bg-slate-300' : health.status === 'green' ? 'bg-emerald-500' : health.status === 'amber' ? 'bg-amber-500' : 'bg-rose-500';
 
-  const variantChoices = isAdmin
+  const variantChoices = isStaff
     ? [1, 2, 4, 10, 20, 50].filter((n) => n <= limits.tickets)
     : Array.from({ length: Math.min(limits.tickets, 6) }, (_, i) => i + 1);
 
@@ -1146,7 +1146,7 @@ export const TicketGenerator: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-semibold text-slate-800">Вариантов</span>
-                {isAdmin && <span className="text-xs text-slate-500">до {limits.tickets}</span>}
+                {isStaff && <span className="text-xs text-slate-500">до {limits.tickets}</span>}
               </div>
               <div className="flex flex-wrap gap-2">
                 {variantChoices.map((n) => (
@@ -1163,7 +1163,7 @@ export const TicketGenerator: React.FC = () => {
                   </button>
                 ))}
               </div>
-              {isAdmin && (
+              {isStaff && (
                 <Stepper label="Другое число" value={ticketCount} min={1} max={limits.tickets} onChange={setTicketCount} />
               )}
             </div>

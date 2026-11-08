@@ -83,7 +83,7 @@ begin
   -- Генерации одного пользователя проверяются по очереди (до конца транзакции)
   perform pg_advisory_xact_lock(hashtextextended('generation:' || new.created_by::text, 0));
 
-  if not exists (select 1 from public.profiles where id = new.created_by and role = 'admin') then
+  if not exists (select 1 from public.profiles where id = new.created_by and role in ('admin', 'subject_admin')) then
     select * into cfg from public.generation_settings where id;
     if not found then
       cfg.per_day := 5; cfg.cooldown_seconds := 60; cfg.max_tickets := 4; cfg.max_per_ticket := 50;
