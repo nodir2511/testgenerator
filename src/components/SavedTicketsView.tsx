@@ -20,7 +20,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { Button, Card, EmptyState, PageHeader, Skeleton } from './ui';
+import { Badge, Button, Card, EmptyState, PageHeader, Skeleton } from './ui';
 
 const PAGE = 15;
 
@@ -357,24 +357,20 @@ const BatchCard: React.FC<{
         {cluster && clusterSubjects.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {clusterSubjects.map((s) => (
-              <span key={s.name} className="text-sm px-2 py-0.5 rounded-full border bg-slate-50 text-slate-800 border-slate-200">{s.name} · {s.count}</span>
+              <Badge tone="neutral" className="text-sm rounded-full font-normal text-slate-800" key={s.name}>{s.name} · {s.count}</Badge>
             ))}
           </div>
         )}
 
         {!cluster && wholeSubject && (
-          <span className="inline-block rounded-lg border px-2 py-1 text-sm bg-emerald-50 border-emerald-200 text-emerald-900">Весь предмет</span>
+          <Badge tone="success" className="text-sm py-1 font-normal">Весь предмет</Badge>
         )}
         {!cluster && !wholeSubject && batch.chips.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {(showAllChips ? batch.chips : batch.chips.slice(0, 3)).map((c: any) => (
-              <span
-                key={c.chapter}
-                className={`rounded-lg border px-2 py-1 text-sm ${c.full ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}
-                title={c.full ? 'Глава взята полностью' : `Выбрано тем: ${c.picked} из ${c.total}`}
-              >
+              <Badge tone={c.full ? 'success' : 'warning'} className="text-sm py-1 font-normal" key={c.chapter} title={c.full ? 'Глава взята полностью' : `Выбрано тем: ${c.picked} из ${c.total}`}>
                 <b>Гл. {c.chapter}</b> · {c.full ? 'полностью' : `${plural(c.picked, 'тема', 'темы', 'тем')} ${c.topics}`}
-              </span>
+              </Badge>
             ))}
             {!showAllChips && batch.chips.length > 3 && (
               <Button variant="secondary" className="bg-white" onClick={() => setShowAllChips(true)}>

@@ -27,7 +27,7 @@ import { CustomSelect } from './CustomSelect';
 import { useUserLimits } from '../lib/generationLimits';
 import { autoBatchTitle, DEFAULT_BATCH_TITLE } from '../lib/batchTitle';
 import { DownloadButton, useExportLang, type Lang } from './DownloadButton';
-import { Button, Card, PageHeader } from './ui';
+import { Badge, Button, Card, PageHeader } from './ui';
 
 type CountRow = { chapter_id: string | null; topic_id: string | null; type: string; cnt: number };
 
@@ -1109,9 +1109,9 @@ export const TicketGenerator: React.FC = () => {
                   </p>
                 )}
                 {!editComposition && isStandard && (
-                  <span className="inline-block mt-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <Badge tone="success" className="mt-1.5 rounded-full">
                     Стандарт для предмета «{subjectName}»
-                  </span>
+                  </Badge>
                 )}
               </div>
               <button

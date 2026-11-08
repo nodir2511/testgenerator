@@ -19,7 +19,7 @@ import {
   X,
   Languages
 } from 'lucide-react';
-import { IconButton } from './ui';
+import { Badge, Field, IconButton } from './ui';
 
 interface QuestionFormProps {
   initialData?: Question | null;
@@ -581,11 +581,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         <aside className="xl:order-2 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto space-y-4">
         {/* 1. Таксономия */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-1 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Предмет *
-            </label>
-            <CustomSelect
+          <Field label="Предмет" required>
+<CustomSelect
               value={subjectId}
               onChange={(val) => {
                 setSubjectId(val);
@@ -597,13 +594,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               <option value="">-- Выберите предмет --</option>
               {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </CustomSelect>
-          </div>
+</Field>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Глава *
-            </label>
-            <CustomSelect
+          <Field label="Глава" required>
+<CustomSelect
               disabled={!subjectId}
               value={chapterId}
               onChange={(val) => {
@@ -615,13 +609,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               <option value="">-- Выберите главу --</option>
               {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </CustomSelect>
-          </div>
+</Field>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Тема *
-            </label>
-            <CustomSelect
+          <Field label="Тема" required>
+<CustomSelect
               disabled={!chapterId}
               value={topicId}
               onChange={(val) => setTopicId(val)}
@@ -630,13 +621,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               <option value="">-- Выберите тему --</option>
               {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </CustomSelect>
-          </div>
+</Field>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-              Источник / Сборник
-            </label>
-            <CustomSelect
+          <Field label="Источник / Сборник">
+<CustomSelect
               value={sourceId}
               onChange={(val) => setSourceId(val)}
               className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
@@ -644,7 +632,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               <option value="">-- Без источника --</option>
               {sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </CustomSelect>
-          </div>
+</Field>
         </div>
 
         <div className="hidden xl:block">
@@ -1006,9 +994,9 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                     <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1.5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-xs text-indigo-800 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
+                          <Badge tone="primary" className="px-1.5 font-bold">
                             {letter}
-                          </span>
+                          </Badge>
                           <label className="flex items-center gap-1 text-xs text-slate-500">
                             <span>ответ →</span>
                             <CustomSelect
@@ -1139,9 +1127,9 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 {rightItems.map((item, idx) => (
                   <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                      <Badge tone="neutral" className="px-1.5 font-bold">
                         {idx + 1}
-                      </span>
+                      </Badge>
                       <div className="flex items-center space-x-1">
                         <label className="cursor-pointer min-w-[40px] min-h-[40px] inline-flex items-center justify-center text-slate-500 hover:text-slate-600 rounded-lg border border-slate-200" title="Прикрепить картинку" aria-label="Прикрепить картинку">
                           <ImageIcon className="w-3 h-3" />
@@ -1244,11 +1232,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
         {/* 6. ТИП: ОТКРЫТЫЙ */}
         {type === 'open' && (
-          <div className="pt-3 border-t border-slate-200 space-y-2">
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
-              Правильный числовой ответ (необязательно)
-            </label>
-            <input
+          <Field label="Правильный числовой ответ (необязательно)" className="pt-3 border-t border-slate-200 space-y-2">
+<input
               type="number"
               step="any"
               value={correctNumeric}
@@ -1256,7 +1241,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               placeholder="Например: 42 или -5"
               className="w-full sm:w-64 text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
             />
-          </div>
+</Field>
         )}
 
         </div>

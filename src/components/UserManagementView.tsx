@@ -366,9 +366,9 @@ export const UserManagementView: React.FC = () => {
                         <span className="text-xs text-red-500">предметы не назначены</span>
                       ) : (
                         subjectsOf(p.id).map((sid) => (
-                          <span key={sid} className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+                          <Badge tone="success" className="rounded-full" key={sid}>
                             {allSubjects.find((x) => x.id === sid)?.name ?? '—'}
-                          </span>
+                          </Badge>
                         ))
                       )}
                     </div>

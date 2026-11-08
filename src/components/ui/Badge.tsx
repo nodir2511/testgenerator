@@ -1,7 +1,7 @@
 import type { HTMLAttributes } from 'react';
 import { cn } from '../../lib/cn';
 
-export type BadgeTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
+export type BadgeTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info' | 'purple';
 const TONE: Record<BadgeTone, string> = {
   neutral: 'bg-slate-100 text-slate-700 border-slate-200',
   primary: 'bg-primary-soft text-primary-ink border-indigo-200',
@@ -9,6 +9,7 @@ const TONE: Record<BadgeTone, string> = {
   warning: 'bg-warning-soft text-warning border-warning-line',
   danger: 'bg-destructive-soft text-destructive-hover border-destructive-line',
   info: 'bg-info-soft text-info border-info-line',
+  purple: 'bg-purple-50 text-purple-700 border-purple-200',
 };
 
 /** Метка-статус: тип вопроса, роль, «Откачено»… Текст не мельче 12 px */

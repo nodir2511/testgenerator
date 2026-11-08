@@ -28,7 +28,7 @@ import {
   Layers
 } from 'lucide-react';
 import { confirmAction } from '../lib/confirm';
-import { Button, IconButton, PageHeader } from './ui';
+import { Badge, Button, Field, IconButton, PageHeader } from './ui';
 
 type ImportLang = 'ru' | 'tg';
 
@@ -859,9 +859,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Предмет</label>
-                <CustomSelect
+              <Field label="Предмет">
+<CustomSelect
                   value={defaultSubjectId}
                   onChange={(val) => {
                     setDefaultSubjectId(val);
@@ -872,11 +871,10 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 >
                   {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Глава</label>
-                <CustomSelect
+              <Field label="Глава">
+<CustomSelect
                   value={defaultChapterId}
                   onChange={(val) => {
                     setDefaultChapterId(val);
@@ -887,11 +885,10 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                   <option value="">-- Выберите главу --</option>
                   {availableChapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Тема</label>
-                <CustomSelect
+              <Field label="Тема">
+<CustomSelect
                   value={defaultTopicId}
                   onChange={(val) => setDefaultTopicId(val)}
                   className="w-full text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -899,7 +896,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                   <option value="">-- Выберите тему --</option>
                   {availableTopics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
             </div>
           </div>
         )}
@@ -948,8 +945,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {([['Русский файл (.docx)', pairRu, setPairRu], ['Таджикский файл (.docx)', pairTg, setPairTg]] as const).map(([label, file, setFile]) => (
-                    <label key={label} className="block text-xs font-semibold text-slate-600 space-y-1">
-                      <span>{label}</span>
+                    <Field key={label} label={label} hint={file ? <span className="block truncate">{file.name}</span> : undefined}>
                       <input
                         type="file"
                         accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -957,8 +953,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                         disabled={isProcessing}
                         className="block w-full text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-indigo-600 file:text-white file:font-semibold"
                       />
-                      {file && <span className="block text-xs text-slate-500 truncate">{file.name}</span>}
-                    </label>
+                    </Field>
                   ))}
                 </div>
                 <Button variant="primary" onClick={handleParsePair} disabled={!pairRu || !pairTg || isProcessing}>
@@ -1143,21 +1138,19 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                     <div className="flex-1 space-y-1">
                       <div className="flex items-center space-x-2">
                         <span className="font-mono text-slate-500 font-semibold">#{r.rowNum}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-xs font-bold uppercase ${
-                          r.type === 'test' ? 'bg-indigo-100 text-indigo-800' : r.type === 'matching' ? 'bg-purple-100 text-purple-800' : 'bg-emerald-100 text-emerald-800'
-                        }`}>
+                        <Badge tone={r.type === 'test' ? 'primary' : r.type === 'matching' ? 'purple' : 'success'} className="px-1.5 font-bold uppercase">
                           {r.type === 'test' ? 'Тест' : r.type === 'matching' ? 'Соответствие' : 'Открытый'}
-                        </span>
+                        </Badge>
                         <div className="font-semibold text-slate-800 leading-snug">
                           <FormattedText text={r.content} />
                           {r.lang === 'tg' && r.contentTg === undefined && (
-                            <span className="ml-2 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">ТЖ</span>
+                            <Badge tone="warning" className="ml-2 px-1 font-bold">ТЖ</Badge>
                           )}
                         </div>
                       </div>
                       {r.contentTg && (
                         <div className="pl-8 text-slate-600 leading-snug">
-                          <span className="mr-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">ТЖ</span>
+                          <Badge tone="warning" className="mr-1.5 px-1 font-bold">ТЖ</Badge>
                           <FormattedText text={r.contentTg} />
                         </div>
                       )}
@@ -1172,14 +1165,14 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                           {r.type === 'test' && r.rawOptions && (
                             <div className="flex flex-wrap gap-2 pt-0.5">
                               {r.rawOptions.map((opt, oIdx) => (
-                                <span key={oIdx} className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                <Badge tone="neutral" className="font-normal" key={oIdx}>
                                   <strong className="mr-1">{['A', 'B', 'C', 'D', 'E'][oIdx] || String(oIdx + 1)})</strong>
                                   <FormattedText text={opt.text} />
                                   {opt.textTg && opt.textTg !== opt.text && (
                                     <span className="ml-1 text-slate-500">/ <FormattedText text={opt.textTg} /></span>
                                   )}
                                   {opt.imageUrl && <ImageIcon className="w-3 h-3 text-indigo-500 ml-1 inline" />}
-                                </span>
+                                </Badge>
                               ))}
                             </div>
                           )}

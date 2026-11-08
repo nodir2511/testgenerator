@@ -14,7 +14,7 @@ import {
 import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Layers, Loader2, Download, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { CustomSelect } from './CustomSelect';
-import { Button, Card, Hint, PageHeader } from './ui';
+import { Button, Card, Field, Hint, PageHeader } from './ui';
 
 // Экзамен-кластер: книжка сразу из 4 предметов по образцу (только главный админ).
 // Параметры экзамена (код кластера, название, дата) вносятся заранее и запоминаются в браузере.
@@ -400,16 +400,13 @@ export const ClusterExam: React.FC = () => {
       <Card padding="none" className="p-5 space-y-4">
         <h3 className="font-bold text-slate-900 text-sm">1. Параметры экзамена</h3>
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-          <label className="text-xs font-semibold text-slate-600 space-y-1">
-            <span className="flex items-center gap-1">Код кластера <Hint label="Что такое код кластера">Короткий шифр экзаменационной книжки, например «А.5». Он печатается на обложке («Компонент А.5-Авг») и в колонтитулах вариантов.</Hint></span>
+          <Field label={<span className="inline-flex items-center gap-1">Код кластера <Hint label="Что такое код кластера">Короткий шифр экзаменационной книжки, например «А.5». Он печатается на обложке («Компонент А.5-Авг») и в колонтитулах вариантов.</Hint></span>}>
             <input className={input} value={state.settings.code} onChange={(e) => setSetting('code', e.target.value)} placeholder="А.5" />
-          </label>
-          <label className="text-xs font-semibold text-slate-600 space-y-1">
-            <span>Название экзамена</span>
+          </Field>
+          <Field label="Название экзамена">
             <input className={input} value={state.settings.exam} onChange={(e) => setSetting('exam', e.target.value)} placeholder="Авг" />
-          </label>
-          <label className="text-xs font-semibold text-slate-600 space-y-1">
-            <span>Дата экзамена</span>
+          </Field>
+          <Field label="Дата экзамена" hint={<>На обложке: <strong className="text-slate-700">{state.settings.date || '—'}</strong></>}>
             <input
               type="date" className={input} value={state.dateIso ?? ''}
               onChange={(e) => {
@@ -418,15 +415,13 @@ export const ClusterExam: React.FC = () => {
                 setState((st) => ({ ...st, dateIso: iso, settings: { ...st.settings, date: formatted || st.settings.date } }));
               }}
             />
-            <span className="block text-xs font-normal text-slate-500">На обложке: <strong className="text-slate-700">{state.settings.date || '—'}</strong></span>
-          </label>
-          <label className="text-xs font-semibold text-slate-600 space-y-1">
-            <span>Вариантов (1–{MAX_VARIANTS})</span>
+          </Field>
+          <Field label={`Вариантов (1–${MAX_VARIANTS})`}>
             <input
               type="number" min={1} max={MAX_VARIANTS} className={input} value={state.variants}
               onChange={(e) => setState((st) => ({ ...st, variants: Math.max(1, Math.min(MAX_VARIANTS, Number(e.target.value) || 1)) }))}
             />
-          </label>
+          </Field>
         </div>
         <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer select-none">
           <input
@@ -469,10 +464,9 @@ export const ClusterExam: React.FC = () => {
               </div>
               <div className="flex items-end gap-2 flex-wrap">
                 {([['test', 'Тестов'], ['matching', 'Соответствий'], ['open', 'Открытых']] as const).map(([k, label]) => (
-                  <label key={k} className="text-xs font-semibold text-slate-500 space-y-1 block">
-                    <span>{label}</span>
+                  <Field key={k} label={label}>
                     <input type="number" min={0} disabled={!on} className={num} value={state.counts[i][k]} onChange={(e) => setCount(i, k, Number(e.target.value))} />
-                  </label>
+                  </Field>
                 ))}
                 <span className="text-xs text-slate-500 pb-2">= {total(state.counts[i])}</span>
               </div>

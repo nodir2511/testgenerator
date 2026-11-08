@@ -25,7 +25,7 @@ import {
   SlidersHorizontal,
   Check
 } from 'lucide-react';
-import { Button, Card, EmptyState, IconButton, Skeleton } from './ui';
+import { Badge, Button, Card, EmptyState, Field, IconButton, Skeleton } from './ui';
 
 interface QuestionListProps {
   onAddQuestion: () => void;
@@ -435,9 +435,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             </div>
 
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Предмет</label>
-                <CustomSelect
+              <Field label="Предмет">
+<CustomSelect
                   value={filterSubjectId}
                   onChange={(val) => {
                     setFilterSubjectId(val);
@@ -450,11 +449,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   <option value="">Все предметы</option>
                   {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Глава</label>
-                <CustomSelect
+              <Field label="Глава">
+<CustomSelect
                   disabled={!filterSubjectId}
                   value={filterChapterId}
                   onChange={(val) => {
@@ -467,11 +465,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   <option value="">Все главы</option>
                   {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Тема</label>
-                <CustomSelect
+              <Field label="Тема">
+<CustomSelect
                   disabled={!filterChapterId}
                   value={filterTopicId}
                   onChange={(val) => {
@@ -483,11 +480,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   <option value="">Все темы</option>
                   {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Проблемные вопросы</label>
-                <CustomSelect
+              <Field label="Проблемные вопросы">
+<CustomSelect
                   value={filterIssue}
                   onChange={(val) => {
                     setFilterIssue(val as IssueFilter);
@@ -499,7 +495,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     <option key={k} value={k}>{ISSUE_FILTER_LABELS[k]}</option>
                   ))}
                 </CustomSelect>
-              </div>
+</Field>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Язык отображения</label>
@@ -739,46 +735,40 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               {/* Верхняя строка карточки: метки и действия */}
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                  <span className={`text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg ${
-                    q.type === 'test'
-                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
-                      : q.type === 'matching'
-                      ? 'bg-purple-50 text-purple-700 border border-purple-100'
-                      : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                  }`}>
+                  <Badge tone={q.type === 'test' ? 'primary' : q.type === 'matching' ? 'purple' : 'success'} className="font-bold uppercase tracking-wider px-2.5 py-1">
                     {q.type === 'test' ? 'Тест' : q.type === 'matching' ? 'Соответствие' : 'Открытый'}
-                  </span>
+                  </Badge>
 
                   {q.num != null && (
-                    <span className="text-xs font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200/60" title="Номер вопроса в теме">
+                    <Badge tone="neutral" className="font-bold text-slate-800" title="Номер вопроса в теме">
                       № {q.num}
-                    </span>
+                    </Badge>
                   )}
 
                   {q.chapter && (
-                    <span className="text-xs text-slate-600 bg-slate-100/90 px-2 py-0.5 rounded-lg">
+                    <Badge tone="neutral" className="font-normal">
                       Гл: {(q.chapter as any).name}
-                    </span>
+                    </Badge>
                   )}
                   {q.topic && (
-                    <span className="text-xs text-slate-600 bg-slate-100/90 px-2 py-0.5 rounded-lg">
+                    <Badge tone="neutral" className="font-normal">
                       Тема: {(q.topic as any).name}
-                    </span>
+                    </Badge>
                   )}
                   {q.source && (
-                    <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+                    <Badge tone="warning" className="font-normal">
                       {(q.source as any).name}
-                    </span>
+                    </Badge>
                   )}
                   {questionIssues(q).map((code) => (
-                    <span key={code} className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-lg">
+                    <Badge tone="danger" key={code}>
                       ⚠ {ISSUE_LABELS[code]}
-                    </span>
+                    </Badge>
                   ))}
                   {(links?.get(q.id) || []).length > 0 && (
-                    <span className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg" title="Эти вопросы не попадут в один билет">
+                    <Badge tone="primary" className="font-normal" title="Эти вопросы не попадут в один билет">
                       🔗 Связан: {(links?.get(q.id) || []).join(', ')}
-                    </span>
+                    </Badge>
                   )}
                   <span className="text-xs text-slate-500 font-mono">
                     v{q.version}
@@ -932,7 +922,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                               return k >= 0 ? (
                                 <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold text-xs shadow-sm" title="Правильный ответ">→ {k + 1}</span>
                               ) : (
-                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-600 font-semibold text-xs" title="Ответ не задан">нет ответа</span>
+                                <Badge tone="danger" className="shrink-0 px-1.5" title="Ответ не задан">нет ответа</Badge>
                               );
                             })()}
                             {m.image_url && (
