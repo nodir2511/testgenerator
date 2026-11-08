@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, RotateCcw, Trash2 } from 'lucide-react';
-import { Button, Card, EmptyState, PageHeader } from './ui';
+import { RotateCcw, Trash2 } from 'lucide-react';
+import { Button, Card, EmptyState, PageHeader, SkeletonList } from './ui';
 import { supabase } from '../lib/supabase';
 import { assertRowsChanged, notifyInfo } from '../lib/errors';
 
@@ -53,7 +53,12 @@ export const TrashView: React.FC = () => {
     },
   });
 
-  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>;
+  if (isLoading) return (
+    <div className="space-y-3 max-w-5xl mx-auto">
+      <PageHeader icon={Trash2} title="Корзина" description="Удалённые вопросы. Восстановленный вопрос вернётся в банк на прежнее место." />
+      <SkeletonList rows={3} />
+    </div>
+  );
   const list = data?.list ?? [];
 
   return (

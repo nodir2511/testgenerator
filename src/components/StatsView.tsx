@@ -6,7 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { notifyError, notifyInfo } from '../lib/errors';
 import { useGenerationSettings, type GenerationSettings } from '../lib/generationLimits';
 import { type UserRole } from '../types/database';
-import { Button, Card as UiCard, Hint, PageHeader } from './ui';
+import { Button, Card as UiCard, Hint, PageHeader, Skeleton } from './ui';
 
 // Статистика использования (только для администратора): RPC admin_usage_stats_v3 (supabase/sql/usage_stats_v3.sql).
 // Поля, которых нет в старой версии функции, необязательны — экран работает и с ней.
@@ -288,7 +288,15 @@ export const StatsView: React.FC = () => {
     </div>
   );
 
-  if (isLoading) return <div className="space-y-4">{header}<div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-indigo-600 animate-spin" /></div></div>;
+  if (isLoading) return (
+    <div className="space-y-4">
+      {header}
+      <div role="status" aria-label="Загрузка статистики" className="space-y-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24 rounded-card" />)}</div>
+        <Skeleton className="h-64 rounded-card" />
+      </div>
+    </div>
+  );
   if (error || !data) return <div className="space-y-4">{header}<div className="p-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-2xl">Не удалось загрузить статистику. Убедитесь, что вы администратор.</div></div>;
 
   const people = data.people;

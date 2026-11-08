@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Loader2, Pencil, Plus, Trash2, X, Megaphone } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useReleases } from '../hooks/useReleases';
@@ -9,7 +9,7 @@ import { ReleaseItemKind, ReleaseRank, SiteRelease } from '../types/database';
 import { ReleaseCard } from './ReleaseCard';
 import { CustomSelect } from './CustomSelect';
 import { confirmAction } from '../lib/confirm';
-import { Button, PageHeader } from './ui';
+import { Button, Card, EmptyState, PageHeader, SkeletonList } from './ui';
 
 interface DraftItem { kind: ReleaseItemKind; text: string; min_rank: ReleaseRank; subject_id: string }
 type SubjectOpt = { id: string; name: string };
@@ -152,9 +152,9 @@ export const ReleasesView: React.FC = () => {
       {draft && <ReleaseEditor key={draft.id ?? 'new'} initial={draft} subjects={subjects} onClose={() => setDraft(null)} />}
 
       {isLoading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 text-indigo-600 animate-spin" /></div>
+        <SkeletonList rows={2} />
       ) : releases.length === 0 ? (
-        <div className="text-sm text-slate-500 py-8 text-center">Пока нет записей об обновлениях</div>
+        <Card><EmptyState icon={Megaphone} title="Пока нет записей об обновлениях" description="Когда на сайте что-то изменится, это появится здесь." /></Card>
       ) : (
         releases.map((r) => (
           <div key={r.id} className="relative">

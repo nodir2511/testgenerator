@@ -20,7 +20,7 @@ import {
   Sparkles,
   X,
 } from 'lucide-react';
-import { Button, Card, EmptyState, PageHeader } from './ui';
+import { Button, Card, EmptyState, PageHeader, Skeleton } from './ui';
 
 const PAGE = 15;
 
@@ -238,10 +238,7 @@ export const SavedTicketsView: React.FC = () => {
       </div>
 
       {list.isLoading ? (
-        <Card padding="none" className="p-12 text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto mb-2" />
-          <p className="text-sm font-semibold text-slate-600">Загружаем архив…</p>
-        </Card>
+        <div role="status" aria-label="Загружаем архив" className="space-y-3 xl:space-y-0 xl:grid xl:grid-cols-2 2xl:grid-cols-3 xl:gap-4">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-72 rounded-card" />)}</div>
       ) : batches.length === 0 ? (
         <Card>
           {filtered ? (

@@ -7,7 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Users, ShieldCheck, UserCheck, Activity, Loader2, UserPlus, Pencil, Trash2, BookMarked } from 'lucide-react';
 import { CustomSelect } from './CustomSelect';
 import { confirmAction } from '../lib/confirm';
-import { Badge, Button, Card, Field, IconButton, Input, PageHeader } from './ui';
+import { Badge, Button, Card, EmptyState, Field, IconButton, Input, PageHeader, Skeleton } from './ui';
 
 const SUBJECT_ROLES: UserRole[] = ['subject_teacher', 'subject_admin'];
 const isSubjectRole = (r: UserRole) => SUBJECT_ROLES.includes(r);
@@ -346,9 +346,7 @@ export const UserManagementView: React.FC = () => {
 
       <Card padding="none" className="xl:col-start-1 xl:row-start-1 xl:row-span-2 p-6 space-y-4">
         {loadingProfiles ? (
-          <div className="text-center py-6 text-slate-500 flex items-center justify-center">
-            <Loader2 className="w-5 h-5 animate-spin mr-2" /> Загрузка пользователей...
-          </div>
+        <div role="status" aria-label="Загрузка пользователей" className="space-y-2">{[0, 1, 2, 3, 4, 5].slice(0, 4).map((i) => <Skeleton key={i} className="h-20" />)}</div>
         ) : (
           <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 text-sm">
             {profiles.map((p) => (
@@ -537,9 +535,9 @@ export const UserManagementView: React.FC = () => {
         </div>
 
         {loadingLogs ? (
-          <div className="text-center py-4 text-slate-500">Загрузка журнала...</div>
+          <div role="status" aria-label="Загрузка журнала" className="space-y-2">{[0, 1, 2, 3, 4, 5].slice(0, 3).map((i) => <Skeleton key={i} className="h-10" />)}</div>
         ) : logs.length === 0 ? (
-          <div className="text-center py-6 text-xs text-slate-500">Событий пока не зафиксировано.</div>
+          <EmptyState icon={Activity} title="Событий пока нет" description="Здесь появятся последние изменения и события в системе." className="py-6" />
         ) : (
           <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden text-sm">
             {logs.map((log) => (

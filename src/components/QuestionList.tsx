@@ -25,7 +25,7 @@ import {
   SlidersHorizontal,
   Check
 } from 'lucide-react';
-import { Button, Card, IconButton } from './ui';
+import { Button, Card, EmptyState, IconButton, Skeleton } from './ui';
 
 interface QuestionListProps {
   onAddQuestion: () => void;
@@ -711,31 +711,17 @@ export const QuestionList: React.FC<QuestionListProps> = ({
       <div className="space-y-4 sm:space-y-6 min-w-0 xl:col-start-2 xl:row-start-2">
       {/* Список карточек вопросов */}
       {isLoading ? (
-        <Card padding="none" className="p-12 text-center text-slate-500 flex flex-col items-center justify-center">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-2" />
-          <p className="text-xs font-semibold text-slate-600">Загрузка вопросов...</p>
-        </Card>
+        <div role="status" aria-label="Загрузка вопросов" className="space-y-3.5">{[0, 1, 2, 3, 4, 5].slice(0, 3).map((i) => <Skeleton key={i} className="h-44 rounded-card" />)}</div>
       ) : questions.length === 0 ? (
-        <Card padding="none" className="p-12 text-center space-y-3">
-          <HelpCircle className="w-10 h-10 text-slate-300 mx-auto" />
-          <h3 className="font-bold text-slate-800 text-base">Вопросы не найдены</h3>
-          {searchQuery || filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || filterIssue !== 'all' ? (
-            <>
-              <p className="text-sm text-slate-600 max-w-sm mx-auto">По заданным фильтрам ничего не найдено.</p>
-              <Button variant="secondary" className="bg-white" onClick={resetFilters}>
-                Сбросить фильтры
-              </Button>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-slate-600 max-w-sm mx-auto">В банке ещё нет вопросов.</p>
-              {isStaff && (
-                <Button variant="primary" onClick={onAddQuestion}>
-                  <Plus className="w-4 h-4" /> Добавить первый вопрос
-                </Button>
-              )}
-            </>
-          )}
+        <Card>
+          <EmptyState
+            icon={HelpCircle}
+            title="Вопросы не найдены"
+            description={(searchQuery || filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || filterIssue !== 'all') ? 'По заданным фильтрам ничего не найдено.' : 'В банке ещё нет вопросов.'}
+            action={(searchQuery || filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || filterIssue !== 'all')
+              ? <Button variant="secondary" onClick={resetFilters}>Сбросить фильтры</Button>
+              : isStaff ? <Button variant="primary" icon={Plus} onClick={onAddQuestion}>Добавить первый вопрос</Button> : undefined}
+          />
         </Card>
       ) : (
         <div className="space-y-3.5">

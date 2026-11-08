@@ -16,7 +16,7 @@ import {
   Library
 } from 'lucide-react';
 import { confirmAction } from '../lib/confirm';
-import { Button, Card, IconButton, PageHeader } from './ui';
+import { Button, Card, EmptyState, IconButton, PageHeader, Skeleton } from './ui';
 
 interface TaxonomyManagerProps {
   onSelectSubject?: (subjectId: string) => void;
@@ -254,13 +254,9 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
         {/* Список вкладок предметов */}
         <div className="flex flex-wrap gap-2 pt-4">
           {loadingSubjects ? (
-            <div className="text-xs text-slate-500 flex items-center">
-              <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> Загрузка предметов...
-            </div>
+            <div role="status" aria-label="Загрузка предметов" className="flex gap-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-10 w-24" />)}</div>
           ) : subjects.length === 0 ? (
-            <div className="text-xs text-slate-500 italic">
-              Нет добавленных предметов. Создайте первый предмет выше (например, «Химия»).
-            </div>
+            <EmptyState icon={Book} title="Предметов пока нет" description="Создайте первый предмет в поле выше, например «Химия»." className="w-full py-6" />
           ) : (
             subjects.map((sub) => (
               <button
@@ -325,11 +321,9 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
 
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
               {loadingChapters ? (
-                <div className="text-xs text-slate-500 text-center py-4">Загрузка глав...</div>
+                <div role="status" aria-label="Загрузка глав" className="space-y-1.5">{[0, 1, 2, 3, 4, 5].slice(0, 4).map((i) => <Skeleton key={i} className="h-10" />)}</div>
               ) : chapters.length === 0 ? (
-                <div className="text-xs text-slate-500 text-center py-8">
-                  В этом предмете пока нет глав. Добавьте первую.
-                </div>
+                <EmptyState icon={Layers} title="Глав пока нет" description="Добавьте первую главу в поле выше." className="py-8" />
               ) : (
                 chapters.map((ch, idx) => (
                   <div
@@ -385,9 +379,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
             </div>
 
             {!activeChapterId ? (
-              <div className="flex-1 flex items-center justify-center text-xs text-slate-500 text-center p-4">
-                Выберите главу слева, чтобы просмотреть и добавить её темы
-              </div>
+              <EmptyState icon={Bookmark} title="Выберите главу" description="Темы выбранной главы появятся здесь, и их можно будет добавлять." className="flex-1 justify-center" />
             ) : (
               <>
                 <form
@@ -419,11 +411,9 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
 
                 <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
                   {loadingTopics ? (
-                    <div className="text-xs text-slate-500 text-center py-4">Загрузка тем...</div>
+                    <div role="status" aria-label="Загрузка тем" className="space-y-1.5">{[0, 1, 2, 3, 4, 5].slice(0, 4).map((i) => <Skeleton key={i} className="h-10" />)}</div>
                   ) : topics.length === 0 ? (
-                    <div className="text-xs text-slate-500 text-center py-8">
-                      В этой главе пока нет тем. Добавьте первую тему.
-                    </div>
+                    <EmptyState icon={Bookmark} title="Тем пока нет" description="Добавьте первую тему в поле выше." className="py-8" />
                   ) : (
                     topics.map((tp, idx) => (
                       <div
@@ -498,9 +488,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
 
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
               {sources.length === 0 ? (
-                <div className="text-xs text-slate-500 text-center py-8">
-                  Источники не добавлены. Источник позволяет отслеживать, из какого сборника взят вопрос.
-                </div>
+                <EmptyState icon={Library} title="Источников нет" description="Источник позволяет отслеживать, из какого сборника взят вопрос." className="py-8" />
               ) : (
                 sources.map((src) => (
                   <div
