@@ -5,11 +5,13 @@ import { AuthProvider } from './hooks/useAuth';
 import App from './App';
 import ErrorToaster from './components/ErrorToaster';
 import UpdateBanner from './components/UpdateBanner';
+import ConfirmDialog from './components/ConfirmDialog';
 import { notifyError, notifySuccess } from './lib/errors';
 import { prefetchOnStartup } from './lib/startupPrefetch';
 import { installGlobalErrorReporting } from './lib/errorReporter';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './index.css';
+import './dark.css';
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -50,6 +52,7 @@ if (screenMatch || playMatch || path === '/play' || path === '/play/' || path ==
         <React.Suspense fallback={null}>
           {screenMatch ? <GameScreenPage code={code} /> : path.startsWith('/play') ? <GamePlayPage code={code} /> : <GameHostPage />}
         </React.Suspense>
+        <ConfirmDialog />
       </AuthProvider>
     </React.StrictMode>
   );
@@ -73,6 +76,7 @@ if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/
             <App />
           </AppErrorBoundary>
           <ErrorToaster />
+          <ConfirmDialog />
           <UpdateBanner />
         </AuthProvider>
       </QueryClientProvider>

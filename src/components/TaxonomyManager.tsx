@@ -15,6 +15,8 @@ import {
   Loader2,
   Library
 } from 'lucide-react';
+import { confirmAction } from '../lib/confirm';
+import { Button, Card, EmptyState, IconButton, PageHeader, Skeleton } from './ui';
 
 interface TaxonomyManagerProps {
   onSelectSubject?: (subjectId: string) => void;
@@ -217,16 +219,15 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
   return (
     <div className="space-y-6">
       {/* Селектор предметов */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+      <Card padding="none" className="p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div>
-            <h2 className="text-lg font-bold text-slate-900 flex items-center">
-              <Book className="w-5 h-5 mr-2 text-blue-600" />
-              Предметная структура
-            </h2>
-            <p className="text-xs text-slate-500">
-              Выберите предмет для управления его главами и темами
-            </p>
+            <PageHeader
+              icon={Book}
+              title="Предметы и темы"
+              description="Выберите предмет, чтобы управлять его главами, темами и источниками"
+              className="px-0"
+            />
           </div>
 
           {isAdmin && <form
@@ -234,36 +235,28 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
               e.preventDefault();
               if (newSubjectName.trim()) addSubjectMutation.mutate(newSubjectName.trim());
             }}
-            className="flex items-center gap-2"
+            className="flex items-center gap-2 w-full sm:w-auto"
           >
             <input
               type="text"
               value={newSubjectName}
               onChange={(e) => setNewSubjectName(e.target.value)}
               placeholder="Новый предмет (напр. Химия)"
-              className="text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="min-w-0 flex-1 text-sm px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            <button
-              type="submit"
-              disabled={addSubjectMutation.isPending || !newSubjectName.trim()}
-              className="text-xs px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-1 font-medium disabled:opacity-50"
-            >
+            <Button variant="primary" type="submit" disabled={addSubjectMutation.isPending || !newSubjectName.trim()}>
               <Plus className="w-3.5 h-3.5" />
               Добавить
-            </button>
+            </Button>
           </form>}
         </div>
 
         {/* Список вкладок предметов */}
         <div className="flex flex-wrap gap-2 pt-4">
           {loadingSubjects ? (
-            <div className="text-xs text-slate-500 flex items-center">
-              <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> Загрузка предметов...
-            </div>
+            <div role="status" aria-label="Загрузка предметов" className="flex gap-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-10 w-24" />)}</div>
           ) : subjects.length === 0 ? (
-            <div className="text-xs text-slate-500 italic">
-              Нет добавленных предметов. Создайте первый предмет выше (например, «Химия»).
-            </div>
+            <EmptyState icon={Book} title="Предметов пока нет" description="Создайте первый предмет в поле выше, например «Химия»." className="w-full py-6" />
           ) : (
             subjects.map((sub) => (
               <button
@@ -277,20 +270,20 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                   activeSubjectId === sub.id
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                }`}
+                } min-h-[40px]`}
               >
                 {sub.name}
               </button>
             ))
           )}
         </div>
-      </div>
+      </Card>
 
       {/* Колонки: Главы, Темы и Источники */}
       {activeSubjectId && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* 1. Главы */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px]">
+          <Card padding="none" className="p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Layers className="w-4 h-4 mr-2 text-indigo-600" />
@@ -313,24 +306,24 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 value={newChapterName}
                 onChange={(e) => setNewChapterName(e.target.value)}
                 placeholder="Название главы"
-                className="text-xs flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="text-sm flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
-              <button
+              <IconButton
                 type="submit"
-                disabled={addChapterMutation.isPending || !newChapterName.trim()}
-                className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
+                icon={Plus}
+                label="Добавить главу"
+                variant="primary"
+                loading={addChapterMutation.isPending}
+                disabled={!newChapterName.trim()}
+                className="w-10 h-10 rounded-lg"
+              />
             </form>
 
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
               {loadingChapters ? (
-                <div className="text-xs text-slate-500 text-center py-4">Загрузка глав...</div>
+                <div role="status" aria-label="Загрузка глав" className="space-y-1.5">{[0, 1, 2, 3, 4, 5].slice(0, 4).map((i) => <Skeleton key={i} className="h-10" />)}</div>
               ) : chapters.length === 0 ? (
-                <div className="text-xs text-slate-500 text-center py-8">
-                  В этом предмете пока нет глав. Добавьте первую.
-                </div>
+                <EmptyState icon={Layers} title="Глав пока нет" description="Добавьте первую главу в поле выше." className="py-8" />
               ) : (
                 chapters.map((ch, idx) => (
                   <div
@@ -353,13 +346,18 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                           onClick={async (e) => {
                             e.stopPropagation();
                             const n = await countActiveQuestions('chapter_id', ch.id);
-                            if (confirm(`Удалить главу "${ch.name}"${n ? ` вместе с её темами и вопросами (${n})` : ''}?`)) {
+                            if (await confirmAction({
+                              title: `Удалить главу «${ch.name}»?`,
+                              message: n ? 'Вместе с главой уйдут её темы и вопросы.' : undefined,
+                              details: n ? [`Вопросов в главе: ${n}`] : undefined,
+                              confirmLabel: 'Удалить главу', cancelLabel: 'Оставить', tone: 'danger',
+                            })) {
                               softDeleteMutation.mutate({ table: 'chapters', id: ch.id });
                             }
                           }}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-600 rounded"
+                          className="w-9 h-9 -my-1 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить главу" title="Удалить главу"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       )}
                       <ChevronRight className={`w-3.5 h-3.5 ${activeChapterId === ch.id ? 'text-indigo-600' : 'text-slate-500'}`} />
@@ -368,10 +366,10 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 ))
               )}
             </div>
-          </div>
+          </Card>
 
           {/* 2. Темы выбранной главы */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px]">
+          <Card padding="none" className="p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Bookmark className="w-4 h-4 mr-2 text-emerald-600" />
@@ -381,9 +379,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
             </div>
 
             {!activeChapterId ? (
-              <div className="flex-1 flex items-center justify-center text-xs text-slate-500 text-center p-4">
-                Выберите главу слева, чтобы просмотреть и добавить её темы
-              </div>
+              <EmptyState icon={Bookmark} title="Выберите главу" description="Темы выбранной главы появятся здесь, и их можно будет добавлять." className="flex-1 justify-center" />
             ) : (
               <>
                 <form
@@ -400,24 +396,24 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                     value={newTopicName}
                     onChange={(e) => setNewTopicName(e.target.value)}
                     placeholder="Название темы"
-                    className="text-xs flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="text-sm flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
-                  <button
+                  <IconButton
                     type="submit"
-                    disabled={addTopicMutation.isPending || !newTopicName.trim()}
-                    className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
+                    icon={Plus}
+                    label="Добавить тему"
+                    variant="primary"
+                    loading={addTopicMutation.isPending}
+                    disabled={!newTopicName.trim()}
+                    className="w-10 h-10 rounded-lg"
+                  />
                 </form>
 
                 <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
                   {loadingTopics ? (
-                    <div className="text-xs text-slate-500 text-center py-4">Загрузка тем...</div>
+                    <div role="status" aria-label="Загрузка тем" className="space-y-1.5">{[0, 1, 2, 3, 4, 5].slice(0, 4).map((i) => <Skeleton key={i} className="h-10" />)}</div>
                   ) : topics.length === 0 ? (
-                    <div className="text-xs text-slate-500 text-center py-8">
-                      В этой главе пока нет тем. Добавьте первую тему.
-                    </div>
+                    <EmptyState icon={Bookmark} title="Тем пока нет" description="Добавьте первую тему в поле выше." className="py-8" />
                   ) : (
                     topics.map((tp, idx) => (
                       <div
@@ -433,13 +429,18 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                             type="button"
                             onClick={async () => {
                               const n = await countActiveQuestions('topic_id', tp.id);
-                              if (confirm(`Удалить тему "${tp.name}"${n ? ` вместе с её вопросами (${n})` : ''}?`)) {
+                              if (await confirmAction({
+                                title: `Удалить тему «${tp.name}»?`,
+                                message: n ? 'Вместе с темой уйдут её вопросы.' : undefined,
+                                details: n ? [`Вопросов в теме: ${n}`] : undefined,
+                                confirmLabel: 'Удалить тему', cancelLabel: 'Оставить', tone: 'danger',
+                              })) {
                                 softDeleteMutation.mutate({ table: 'topics', id: tp.id });
                               }
                             }}
-                            className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-600 rounded"
+                            className="w-9 h-9 -my-1 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить тему" title="Удалить тему"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         )}
                       </div>
@@ -448,10 +449,10 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 </div>
               </>
             )}
-          </div>
+          </Card>
 
           {/* 3. Источники / Сборники */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[520px]">
+          <Card padding="none" className="p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px]">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <h3 className="font-semibold text-slate-900 text-sm flex items-center">
                 <Library className="w-4 h-4 mr-2 text-amber-600" />
@@ -472,22 +473,22 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 value={newSourceName}
                 onChange={(e) => setNewSourceName(e.target.value)}
                 placeholder="Сборник / Автор (напр. ЕГЭ 2025)"
-                className="text-xs flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="text-sm flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
-              <button
+              <IconButton
                 type="submit"
-                disabled={addSourceMutation.isPending || !newSourceName.trim()}
-                className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
+                icon={Plus}
+                label="Добавить источник"
+                variant="primary"
+                loading={addSourceMutation.isPending}
+                disabled={!newSourceName.trim()}
+                className="w-10 h-10 rounded-lg"
+              />
             </form>
 
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
               {sources.length === 0 ? (
-                <div className="text-xs text-slate-500 text-center py-8">
-                  Источники не добавлены. Источник позволяет отслеживать, из какого сборника взят вопрос.
-                </div>
+                <EmptyState icon={Library} title="Источников нет" description="Источник позволяет отслеживать, из какого сборника взят вопрос." className="py-8" />
               ) : (
                 sources.map((src) => (
                   <div
@@ -498,21 +499,24 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                     {isAdmin && (
                       <button
                         type="button"
-                        onClick={() => {
-                          if (confirm(`Удалить источник "${src.name}"?`)) {
+                        onClick={async () => {
+                          if (await confirmAction({
+                            title: `Удалить источник «${src.name}»?`,
+                            confirmLabel: 'Удалить источник', cancelLabel: 'Оставить', tone: 'danger',
+                          })) {
                             softDeleteMutation.mutate({ table: 'sources', id: src.id });
                           }
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-600 rounded"
+                        className="w-9 h-9 -my-1 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить источник" title="Удалить источник"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     )}
                   </div>
                 ))
               )}
             </div>
-          </div>
+          </Card>
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useId, useRef } from 'react';
 import { Bold, Italic, Underline, Subscript, Superscript } from 'lucide-react';
 import { splitFractions, hasFraction, newFmtState, tokenizeFormatted, type MathNode, type FmtState, type FmtToken } from '../lib/fractions';
 
@@ -18,6 +18,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
   label,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fieldId = useId();
 
   // Обертывание выделенного фрагмента тегами форматирования
   const wrapSelection = (prefix: string, suffix: string) => {
@@ -59,7 +60,7 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
   return (
     <div className="space-y-1">
       {label && (
-        <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
+        <label htmlFor={fieldId} className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
           {label}
         </label>
       )}
@@ -70,7 +71,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('<sub>', '</sub>')}
           title="Нижний индекс (H₂O)"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center font-mono font-bold"
+          aria-label="Нижний индекс (H₂O)"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center font-mono font-bold min-h-[40px]"
         >
           <Subscript className="w-3.5 h-3.5 mr-1" /> X₂
         </button>
@@ -78,7 +80,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('<sup>', '</sup>')}
           title="Верхний индекс (Ca²⁺)"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center font-mono font-bold"
+          aria-label="Верхний индекс (Ca²⁺)"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center font-mono font-bold min-h-[40px]"
         >
           <Superscript className="w-3.5 h-3.5 mr-1" /> X²
         </button>
@@ -86,7 +89,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('(', ')/( )')}
           title="Дробь (числитель)/(знаменатель)"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center font-mono font-bold"
+          aria-label="Дробь (числитель)/(знаменатель)"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center font-mono font-bold min-h-[40px]"
         >
           a/b
         </button>
@@ -94,7 +98,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('<b>', '</b>')}
           title="Полужирный"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center"
+          aria-label="Полужирный"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center min-h-[40px]"
         >
           <Bold className="w-3.5 h-3.5" />
         </button>
@@ -102,7 +107,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('<i>', '</i>')}
           title="Курсив"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center"
+          aria-label="Курсив"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center min-h-[40px]"
         >
           <Italic className="w-3.5 h-3.5" />
         </button>
@@ -110,7 +116,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => wrapSelection('<u>', '</u>')}
           title="Подчёркнутый"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 flex items-center"
+          aria-label="Подчёркнутый"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center min-h-[40px]"
         >
           <Underline className="w-3.5 h-3.5" />
         </button>
@@ -122,7 +129,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol(' → ')}
           title="Стрелка реакции"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          aria-label="Стрелка реакции"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono min-h-[40px]"
         >
           →
         </button>
@@ -130,7 +138,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol(' ⇄ ')}
           title="Равновесие"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          aria-label="Равновесие"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono min-h-[40px]"
         >
           ⇄
         </button>
@@ -138,7 +147,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol('↑')}
           title="Выделение газа"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          aria-label="Выделение газа"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono min-h-[40px]"
         >
           ↑
         </button>
@@ -146,7 +156,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol('↓')}
           title="Осадок"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          aria-label="Осадок"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono min-h-[40px]"
         >
           ↓
         </button>
@@ -154,7 +165,8 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol('°C')}
           title="Градусы Цельсия"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          aria-label="Градусы Цельсия"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono min-h-[40px]"
         >
           °C
         </button>
@@ -162,19 +174,21 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
           type="button"
           onClick={() => insertSymbol('Δ')}
           title="Дельта (нагревание)"
-          className="px-2 py-1 bg-white hover:bg-blue-50 hover:text-blue-600 rounded border border-slate-200 font-mono"
+          aria-label="Дельта (нагревание)"
+          className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 font-mono min-h-[40px]"
         >
           Δ
         </button>
       </div>
 
       <textarea
+        id={fieldId}
         ref={textareaRef}
         rows={rows}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full p-3 text-sm font-sans border border-t-0 border-slate-300 rounded-b-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium text-slate-800"
+        className="w-full p-3 text-sm font-sans border border-t-0 border-slate-300 rounded-b-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-medium text-slate-800"
       />
     </div>
   );

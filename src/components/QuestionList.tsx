@@ -25,6 +25,7 @@ import {
   SlidersHorizontal,
   Check
 } from 'lucide-react';
+import { Badge, Button, Card, EmptyState, Field, IconButton, Skeleton } from './ui';
 
 interface QuestionListProps {
   onAddQuestion: () => void;
@@ -311,16 +312,16 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Верхняя панель в стиле Bento: Заголовок и кнопка добавления */}
-      <div className="bento-card p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+      <Card padding="none" className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-indigo-600 to-blue-600 text-white flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
             <FileText className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg sm:text-xl font-bold text-slate-900 leading-tight">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 leading-tight tracking-tight">
               Банк вопросов
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-sm text-slate-600 mt-0.5">
               Всего в базе: <strong className="text-slate-700 font-semibold">{totalCount}</strong> вопросов • Стр. {page + 1} из {Math.max(1, totalPages)}
             </p>
           </div>
@@ -330,15 +331,18 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={onAddQuestion}
-              className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-500/20 flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
+              className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white rounded-xl text-sm font-bold shadow-md shadow-indigo-500/20 flex items-center justify-center space-x-1.5 active:scale-95 transition-all min-h-[40px]"
             >
               <Plus className="w-4 h-4" />
               <span>Добавить вопрос</span>
             </button>
           </div>
         )}
-      </div>
+      </Card>
 
+      {/* Широкий экран: слева панель фильтров (закреплена), справа список. Уже — всё по порядку друг под другом */}
+      <div className="flex flex-col gap-4 sm:gap-6 xl:grid xl:grid-cols-[300px_minmax(0,1fr)] xl:items-start xl:gap-x-6 xl:gap-y-4">
+      <div className="space-y-4 sm:space-y-6 min-w-0 xl:col-start-2 xl:row-start-1">
       {/* Быстрые фильтры: Горизонтальные свайп-чипсы типов вопросов */}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5 px-0.5">
         {[
@@ -350,11 +354,11 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           <button
             key={t.id}
             onClick={() => { setFilterType(t.id); setPage(0); setExtra(0); }}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-150 active:scale-95 ${
+            className={`px-3.5 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all duration-150 active:scale-95 ${
               filterType === t.id
                 ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 font-bold'
                 : 'bg-white border border-slate-200/90 text-slate-600 hover:bg-slate-50'
-            }`}
+            } min-h-[40px]`}
           >
             {t.label}
           </button>
@@ -363,7 +367,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         {filterIssue !== 'all' && (
           <span className="px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold whitespace-nowrap flex items-center space-x-1">
             <span>⚠ {ISSUE_FILTER_LABELS[filterIssue]}</span>
-            <button onClick={() => { setFilterIssue('all'); setPage(0); setExtra(0); }} className="hover:text-amber-950">
+            <button onClick={() => { setFilterIssue('all'); setPage(0); setExtra(0); }} className="p-1.5 -m-1.5 hover:text-amber-950" aria-label="Убрать фильтр по проблемным вопросам" title="Убрать фильтр">
               <X className="w-3.5 h-3.5" />
             </button>
           </span>
@@ -382,24 +386,26 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setPage(0); setExtra(0);
             }}
             placeholder="Поиск вопросов по тексту..."
-            className="w-full text-xs pl-9 pr-8 py-2.5 bg-white border border-slate-200/90 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+            className="w-full text-sm pl-9 pr-8 py-2.5 bg-white border border-slate-200/90 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
           />
           {searchQuery && (
             <button 
               onClick={() => { setSearchQuery(''); setPage(0); setExtra(0); }} 
-              className="absolute right-2.5 top-2.5 p-1 text-slate-500 hover:text-slate-600"
+              className="absolute right-0.5 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center text-slate-500 hover:text-slate-700"
+              aria-label="Очистить поиск"
+              title="Очистить поиск"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
         <button
           onClick={() => setIsFilterSheetOpen(true)}
-          className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition active:scale-95 shadow-xs border ${
+          className={`px-3.5 py-2.5 rounded-xl text-sm font-bold flex items-center space-x-1.5 transition active:scale-95 shadow-xs border ${
             activeFiltersCount > 0
               ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
               : 'bg-white text-slate-700 border-slate-200/90'
-          }`}
+          } min-h-[40px]`}
         >
           <SlidersHorizontal className="w-4 h-4" />
           <span>Фильтры</span>
@@ -425,18 +431,12 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 <SlidersHorizontal className="w-4 h-4 text-indigo-600" />
                 <h3 className="font-bold text-base text-slate-900">Фильтры банка</h3>
               </div>
-              <button 
-                onClick={() => setIsFilterSheetOpen(false)} 
-                className="w-8 h-8 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <IconButton icon={X} label="Закрыть фильтры" onClick={() => setIsFilterSheetOpen(false)} className="w-10 h-10 bg-slate-100 text-slate-500" />
             </div>
 
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Предмет</label>
-                <CustomSelect
+              <Field label="Предмет">
+<CustomSelect
                   value={filterSubjectId}
                   onChange={(val) => {
                     setFilterSubjectId(val);
@@ -444,16 +444,15 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     setFilterTopicId('');
                     setPage(0); setExtra(0);
                   }}
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500"
+                  className="w-full text-sm p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="">Все предметы</option>
                   {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Глава</label>
-                <CustomSelect
+              <Field label="Глава">
+<CustomSelect
                   disabled={!filterSubjectId}
                   value={filterChapterId}
                   onChange={(val) => {
@@ -461,66 +460,70 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     setFilterTopicId('');
                     setPage(0); setExtra(0);
                   }}
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="w-full text-sm p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                 >
                   <option value="">Все главы</option>
                   {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Тема</label>
-                <CustomSelect
+              <Field label="Тема">
+<CustomSelect
                   disabled={!filterChapterId}
                   value={filterTopicId}
                   onChange={(val) => {
                     setFilterTopicId(val);
                     setPage(0); setExtra(0);
                   }}
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="w-full text-sm p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                 >
                   <option value="">Все темы</option>
                   {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Проблемные вопросы</label>
-                <CustomSelect
+              <Field label="Проблемные вопросы">
+<CustomSelect
                   value={filterIssue}
                   onChange={(val) => {
                     setFilterIssue(val as IssueFilter);
                     setPage(0); setExtra(0);
                   }}
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500"
+                  className="w-full text-sm p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500"
                 >
                   {(Object.keys(ISSUE_FILTER_LABELS) as IssueFilter[]).map((k) => (
                     <option key={k} value={k}>{ISSUE_FILTER_LABELS[k]}</option>
                   ))}
                 </CustomSelect>
-              </div>
+</Field>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Язык отображения</label>
-                <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
+                <div role="radiogroup" aria-label="Язык вопросов" className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-semibold">
                   <button
                     type="button"
                     onClick={() => setDisplayLang('ru')}
-                    className={`py-2 rounded-lg transition ${displayLang === 'ru' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'}`}
+                    role="radio"
+                    aria-checked={displayLang === 'ru'}
+                    className={`py-2 rounded-lg transition ${displayLang === 'ru' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'} min-h-[40px]`}
                   >
                     Русский
                   </button>
                   <button
                     type="button"
                     onClick={() => setDisplayLang('tg')}
-                    className={`py-2 rounded-lg transition ${displayLang === 'tg' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'}`}
+                    role="radio"
+                    aria-checked={displayLang === 'tg'}
+                    className={`py-2 rounded-lg transition ${displayLang === 'tg' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'} min-h-[40px]`}
                   >
                     Тоҷикӣ
                   </button>
                   <button
                     type="button"
                     onClick={() => setDisplayLang('both')}
-                    className={`py-2 rounded-lg transition ${displayLang === 'both' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'}`}
+                    role="radio"
+                    aria-checked={displayLang === 'both'}
+                    className={`py-2 rounded-lg transition ${displayLang === 'both' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600'} min-h-[40px]`}
                   >
                     RU + TJ
                   </button>
@@ -540,30 +543,28 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   setSearchQuery('');
                   setPage(0); setExtra(0);
                 }}
-                className="py-3 px-4 rounded-xl text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 transition active:scale-95"
+                className="py-3 px-4 rounded-xl text-sm font-semibold text-rose-600 bg-rose-50 border border-rose-200 transition active:scale-95 min-h-[40px]"
               >
                 Сбросить
               </button>
-              <button
-                type="button"
-                onClick={() => setIsFilterSheetOpen(false)}
-                className="flex-1 py-3 px-4 rounded-xl text-xs font-bold text-white bg-indigo-600 shadow-md shadow-indigo-500/20 transition active:scale-95"
-              >
+              <Button variant="primary" className="flex-1" type="button" onClick={() => setIsFilterSheetOpen(false)}>
                 Показать вопросы ({totalCount})
-              </button>
+              </Button>
             </div>
           </div>
         </div>
       )}
 
+      </div>
+
       {/* Десктопная панель фильтров (в стиле Bento) */}
-      <div className="hidden md:block bento-card p-4 rounded-2xl space-y-3">
+      <Card padding="none" className="hidden md:block p-4 space-y-3 xl:col-start-1 xl:row-start-1 xl:row-span-2 xl:self-start xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto">
         <div className="flex items-center text-xs font-bold text-slate-700 uppercase tracking-wider">
           <Filter className="w-3.5 h-3.5 mr-1.5 text-indigo-500" />
           Фильтры и поиск
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 xl:grid-cols-1 gap-2.5">
           {/* Поиск */}
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -575,7 +576,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 setPage(0); setExtra(0);
               }}
               placeholder="Поиск по тексту..."
-              className="w-full text-xs pl-9 pr-3 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full text-sm pl-9 pr-3 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
 
@@ -588,7 +589,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterTopicId('');
               setPage(0); setExtra(0);
             }}
-            className="text-xs px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="text-sm px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             <option value="">Все предметы</option>
             {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -603,7 +604,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterTopicId('');
               setPage(0); setExtra(0);
             }}
-            className="text-xs px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+            className="text-sm px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
           >
             <option value="">Все главы</option>
             {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -617,7 +618,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterTopicId(val);
               setPage(0); setExtra(0);
             }}
-            className="text-xs px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+            className="text-sm px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
           >
             <option value="">Все темы</option>
             {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -630,7 +631,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterType(val);
               setPage(0); setExtra(0);
             }}
-            className="text-xs px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="text-sm px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             <option value="all">Все типы вопросов</option>
             <option value="test">Тестовые</option>
@@ -645,7 +646,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setFilterIssue(val as IssueFilter);
               setPage(0); setExtra(0);
             }}
-            className={`text-xs px-2.5 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 ${filterIssue !== 'all' ? 'border-amber-400 bg-amber-50' : 'bg-slate-50/70 border-slate-200'}`}
+            className={`text-sm px-2.5 py-2 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 ${filterIssue !== 'all' ? 'border-amber-400 bg-amber-50' : 'bg-slate-50/70 border-slate-200'}`}
           >
             {(Object.keys(ISSUE_FILTER_LABELS) as IssueFilter[]).map((k) => (
               <option key={k} value={k}>{ISSUE_FILTER_LABELS[k]}</option>
@@ -654,56 +655,57 @@ export const QuestionList: React.FC<QuestionListProps> = ({
         </div>
 
         {/* Выбор языка отображения */}
-        <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-100 gap-2">
-          <div className="flex items-center space-x-2">
-            <span className="text-xs font-semibold text-slate-500">Язык вопросов:</span>
-            <div className="inline-flex rounded-xl border border-slate-200/90 p-0.5 bg-slate-100/70 text-xs">
+        <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-100 gap-2 xl:flex-col xl:items-stretch">
+          <div className="flex items-center space-x-2 xl:flex-col xl:items-stretch xl:space-x-0 xl:gap-1.5">
+            <span className="text-xs font-semibold text-slate-600">Язык вопросов:</span>
+            <div role="radiogroup" aria-label="Язык вопросов" className="inline-flex xl:flex rounded-xl border border-slate-200/90 p-0.5 bg-slate-100/70 text-xs [&>button]:whitespace-nowrap xl:[&>button]:flex-1">
               <button
                 type="button"
                 onClick={() => setDisplayLang('ru')}
+                role="radio"
+                aria-checked={displayLang === 'ru'}
                 className={`px-3 py-1 rounded-lg font-medium transition ${
                   displayLang === 'ru'
                     ? 'bg-indigo-600 text-white shadow-xs font-bold'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                } min-h-[40px]`}
               >
                 Русский
               </button>
               <button
                 type="button"
                 onClick={() => setDisplayLang('tg')}
+                role="radio"
+                aria-checked={displayLang === 'tg'}
                 className={`px-3 py-1 rounded-lg font-medium transition ${
                   displayLang === 'tg'
                     ? 'bg-emerald-600 text-white shadow-xs font-bold'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                } min-h-[40px]`}
               >
                 Тоҷикӣ
               </button>
               <button
                 type="button"
                 onClick={() => setDisplayLang('both')}
+                role="radio"
+                aria-checked={displayLang === 'both'}
                 className={`px-3 py-1 rounded-lg font-medium transition ${
                   displayLang === 'both'
                     ? 'bg-purple-600 text-white shadow-xs font-bold'
                     : 'text-slate-600 hover:text-slate-900'
-                }`}
+                } min-h-[40px]`}
               >
-                RU + TJ (Параллельно)
+                RU + TJ
               </button>
             </div>
           </div>
           <div className="flex items-center space-x-3">
             {(filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || filterIssue !== 'all' || searchQuery) && (
-              <button
-                type="button"
-                onClick={resetFilters}
-                className="inline-flex items-center space-x-1.5 text-sm text-slate-800 bg-white hover:bg-slate-50 min-h-[40px] px-3 rounded-xl transition font-semibold border border-slate-300"
-                title="Сбросить все установленные фильтры и поиск"
-              >
+              <Button variant="secondary" className="bg-white" type="button" onClick={resetFilters} title="Сбросить все установленные фильтры и поиск">
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Сбросить фильтры</span>
-              </button>
+              </Button>
             )}
             {data?.totalCount !== undefined && (
               <span className="text-xs text-slate-500">
@@ -712,36 +714,23 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             )}
           </div>
         </div>
-      </div>
+      </Card>
 
+      <div className="space-y-4 sm:space-y-6 min-w-0 xl:col-start-2 xl:row-start-2">
       {/* Список карточек вопросов */}
       {isLoading ? (
-        <div className="bento-card p-12 rounded-2xl text-center text-slate-500 flex flex-col items-center justify-center">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-2" />
-          <p className="text-xs font-semibold text-slate-600">Загрузка вопросов...</p>
-        </div>
+        <div role="status" aria-label="Загрузка вопросов" className="space-y-3.5">{[0, 1, 2, 3, 4, 5].slice(0, 3).map((i) => <Skeleton key={i} className="h-44 rounded-card" />)}</div>
       ) : questions.length === 0 ? (
-        <div className="bento-card p-12 rounded-2xl text-center space-y-3">
-          <HelpCircle className="w-10 h-10 text-slate-300 mx-auto" />
-          <h3 className="font-bold text-slate-800 text-base">Вопросы не найдены</h3>
-          {searchQuery || filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || filterIssue !== 'all' ? (
-            <>
-              <p className="text-sm text-slate-600 max-w-sm mx-auto">По заданным фильтрам ничего не найдено.</p>
-              <button onClick={resetFilters} className="min-h-[44px] px-4 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-800">
-                Сбросить фильтры
-              </button>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-slate-600 max-w-sm mx-auto">В банке ещё нет вопросов.</p>
-              {isStaff && (
-                <button onClick={onAddQuestion} className="min-h-[44px] px-5 rounded-xl bg-indigo-600 text-white text-sm font-bold inline-flex items-center gap-2">
-                  <Plus className="w-4 h-4" /> Добавить первый вопрос
-                </button>
-              )}
-            </>
-          )}
-        </div>
+        <Card>
+          <EmptyState
+            icon={HelpCircle}
+            title="Вопросы не найдены"
+            description={(searchQuery || filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || filterIssue !== 'all') ? 'По заданным фильтрам ничего не найдено.' : 'В банке ещё нет вопросов.'}
+            action={(searchQuery || filterSubjectId || filterChapterId || filterTopicId || filterType !== 'all' || filterIssue !== 'all')
+              ? <Button variant="secondary" onClick={resetFilters}>Сбросить фильтры</Button>
+              : isStaff ? <Button variant="primary" icon={Plus} onClick={onAddQuestion}>Добавить первый вопрос</Button> : undefined}
+          />
+        </Card>
       ) : (
         <div className="space-y-3.5">
           {questions.map((q) => (
@@ -758,46 +747,40 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               {/* Верхняя строка карточки: метки и действия */}
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                  <span className={`text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg ${
-                    q.type === 'test'
-                      ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
-                      : q.type === 'matching'
-                      ? 'bg-purple-50 text-purple-700 border border-purple-100'
-                      : 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                  }`}>
+                  <Badge tone={q.type === 'test' ? 'primary' : q.type === 'matching' ? 'purple' : 'success'} className="font-bold uppercase tracking-wider px-2.5 py-1">
                     {q.type === 'test' ? 'Тест' : q.type === 'matching' ? 'Соответствие' : 'Открытый'}
-                  </span>
+                  </Badge>
 
                   {q.num != null && (
-                    <span className="text-xs font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200/60" title="Номер вопроса в теме">
+                    <Badge tone="neutral" className="font-bold text-slate-800" title="Номер вопроса в теме">
                       № {q.num}
-                    </span>
+                    </Badge>
                   )}
 
                   {q.chapter && (
-                    <span className="text-xs text-slate-600 bg-slate-100/90 px-2 py-0.5 rounded-lg">
+                    <Badge tone="neutral" className="font-normal">
                       Гл: {(q.chapter as any).name}
-                    </span>
+                    </Badge>
                   )}
                   {q.topic && (
-                    <span className="text-xs text-slate-600 bg-slate-100/90 px-2 py-0.5 rounded-lg">
+                    <Badge tone="neutral" className="font-normal">
                       Тема: {(q.topic as any).name}
-                    </span>
+                    </Badge>
                   )}
                   {q.source && (
-                    <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+                    <Badge tone="warning" className="font-normal">
                       {(q.source as any).name}
-                    </span>
+                    </Badge>
                   )}
                   {questionIssues(q).map((code) => (
-                    <span key={code} className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-lg">
+                    <Badge tone="danger" key={code}>
                       ⚠ {ISSUE_LABELS[code]}
-                    </span>
+                    </Badge>
                   ))}
                   {(links?.get(q.id) || []).length > 0 && (
-                    <span className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg" title="Эти вопросы не попадут в один билет">
+                    <Badge tone="primary" className="font-normal" title="Эти вопросы не попадут в один билет">
                       🔗 Связан: {(links?.get(q.id) || []).join(', ')}
-                    </span>
+                    </Badge>
                   )}
                   <span className="text-xs text-slate-500 font-mono">
                     v{q.version}
@@ -806,22 +789,20 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
                 <div className="flex items-center space-x-1">
                   {canManage(q.subject_id) && (
-                    <button
+                    <IconButton
+                      icon={Edit3}
+                      label="Редактировать вопрос"
                       onClick={() => onEditQuestion(q)}
-                      className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 active:scale-90 transition"
-                      title="Редактировать"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
+                      className="w-10 h-10 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50"
+                    />
                   )}
                   {canManage(q.subject_id) && (
-                    <button
+                    <IconButton
+                      icon={Trash2}
+                      label="Удалить вопрос"
                       onClick={() => removeQuestion(q.id)}
-                      className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center text-slate-500 hover:text-red-600 hover:bg-red-50 active:scale-90 transition"
-                      title="Удалить"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      className="w-10 h-10 text-slate-500 hover:text-red-600 hover:bg-red-50"
+                    />
                   )}
                 </div>
               </div>
@@ -953,7 +934,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                               return k >= 0 ? (
                                 <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold text-xs shadow-sm" title="Правильный ответ">→ {k + 1}</span>
                               ) : (
-                                <span className="shrink-0 px-1.5 py-0.5 rounded bg-red-50 border border-red-200 text-red-600 font-semibold text-xs" title="Ответ не задан">нет ответа</span>
+                                <Badge tone="danger" className="shrink-0 px-1.5" title="Ответ не задан">нет ответа</Badge>
                               );
                             })()}
                             {m.image_url && (
@@ -1024,17 +1005,17 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             <button
               onClick={() => setExtra((x) => x + 1)}
               disabled={loadingMore}
-              className="w-full bento-card p-3.5 rounded-2xl text-xs font-bold text-indigo-700 hover:bg-indigo-50/70 border-indigo-200/80 active:scale-98 transition shadow-xs disabled:opacity-60"
+              className="w-full bento-card p-3.5 rounded-2xl text-sm font-bold text-indigo-700 hover:bg-indigo-50/70 border-indigo-200/80 active:scale-98 transition shadow-xs disabled:opacity-60 min-h-[40px]"
             >
               {loadingMore ? 'Загрузка…' : `Показать ещё (следующие ${Math.min(PAGE_SIZE, totalCount - (lastShown + 1) * PAGE_SIZE)} вопросов, страница ${lastShown + 2})`}
             </button>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 bento-card p-3.5 sm:p-4 rounded-2xl">
+          <Card padding="none" className="flex flex-wrap items-center justify-between gap-3 p-3.5 sm:p-4">
             <button
               onClick={() => goToPage(page - 1)}
               disabled={page === 0}
-              className="px-3.5 py-2 border border-slate-200/90 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1 active:scale-95 transition"
+              className="px-3.5 py-2 border border-slate-200/90 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1 active:scale-95 transition min-h-[40px]"
             >
               <ChevronLeft className="w-4 h-4" />
               <span>Назад</span>
@@ -1057,12 +1038,12 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   value={jumpTo}
                   onChange={(ev) => setJumpTo(ev.target.value)}
                   placeholder="№ стр."
-                  className="w-18 px-2.5 py-1.5 border border-slate-200/90 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/80"
+                  className="w-18 px-2.5 py-1.5 border border-slate-200/90 rounded-xl text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/80"
                 />
                 <button
                   type="submit"
                   disabled={!jumpTo}
-                  className="px-3 py-1.5 border border-slate-200/90 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 active:scale-95 transition"
+                  className="px-3 py-1.5 border border-slate-200/90 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 active:scale-95 transition min-h-[40px]"
                 >
                   Перейти
                 </button>
@@ -1072,14 +1053,17 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             <button
               onClick={() => goToPage(lastShown + 1)}
               disabled={lastShown >= totalPages - 1}
-              className="px-3.5 py-2 border border-slate-200/90 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1 active:scale-95 transition"
+              className="px-3.5 py-2 border border-slate-200/90 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 flex items-center space-x-1 active:scale-95 transition min-h-[40px]"
             >
               <span>Вперед</span>
               <ChevronRight className="w-4 h-4" />
             </button>
-          </div>
+          </Card>
         </div>
       )}
+
+      </div>
+      </div>
 
       {/* Модальное окно увеличения изображения (Lightbox) */}
       {previewImage && (

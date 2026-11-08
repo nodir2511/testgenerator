@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { authErrorText } from '../lib/errors';
 import { LogIn, ShieldAlert, Lock, Mail, Eye, EyeOff, Loader2, Sparkles } from 'lucide-react';
+import { Button, Field } from './ui';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -70,8 +71,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               </div>
             )}
 
-            <label className="block">
-              <span className="block text-sm font-semibold text-slate-800 mb-1">Электронная почта</span>
+            <Field label="Электронная почта">
               <span className="relative block">
                 <Mail className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -86,10 +86,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   className={`${inputCls} pr-3`}
                 />
               </span>
-            </label>
+            </Field>
 
-            <label className="block">
-              <span className="block text-sm font-semibold text-slate-800 mb-1">Пароль</span>
+            <Field label="Пароль">
               <span className="relative block">
                 <Lock className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -112,16 +111,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </span>
-            </label>
+            </Field>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full min-h-[52px] px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-70 text-white font-bold rounded-xl text-base shadow-sm transition flex items-center justify-center gap-2"
-            >
+            <Button variant="primary" size="lg" className="w-full" type="submit" disabled={loading}>
               {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
               <span>{loading ? 'Входим…' : 'Войти'}</span>
-            </button>
+            </Button>
 
             <div className="text-center">
               <button type="button" onClick={() => setShowForgot((v) => !v)} className="min-h-[40px] text-sm font-semibold text-indigo-700">

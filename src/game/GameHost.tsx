@@ -14,6 +14,7 @@ import {
   Bi, BoardGrid, BuzzQueue, CloseCallNote, CountdownView, GameShell, GameTitle, IntroOverlay, LinkOverlay, ModeStatus, NetBadge, Podium, QuestionBody, TeamGrid, TimerView, WonBanner,
   fmt, layoutRound, pick, tc, teamName, useLang,
 } from './ui';
+import { confirmAction } from '../lib/confirm';
 
 type View = string; // id уровня, 'rules', 'host' или 'history'
 const PACK_ID = 'chem-1';
@@ -314,10 +315,14 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[]; connected: 
     rpc('game_buzz_clear', { p_code: code });
     if (wasExtra) saveResults();
   };
-  const backToBoard = () => {
+  const backToBoard = async () => {
     const q = boardRef.current.q; if (!q) return;
     const started = boardRef.current.timer.running || boardRef.current.timer.left < boardRef.current.secs || queue.length > 0 || q.wrong.length > 0 || q.won != null;
-    if (started && !window.confirm('Вернуть вопрос на табло? Нажатия команд сбросятся, а вопрос можно будет открыть заново.')) return;
+    if (started && !(await confirmAction({
+      title: 'Вернуть вопрос на табло?',
+      message: 'Нажатия команд сбросятся, а вопрос можно будет открыть заново.',
+      confirmLabel: 'Вернуть вопрос', cancelLabel: 'Остаться',
+    }))) return;
     closeQ(false);
   };
   const closeQ = (markUsed: boolean) => {
@@ -372,8 +377,8 @@ const HostBoard: React.FC<{ session: GameSession; pack: GameRound[]; connected: 
   const adjust = (n: number, d: number) => commit((b) => ({ ...b, scores: { ...b.scores, [n]: (b.scores[n] ?? 0) + d } }), true);
   const rename = (n: number, name: string) => { rpc('game_rename', { p_code: code, p_n: n, p_name: name }); };
   const setChooser = (n: number) => commit((b) => ({ ...b, chooser: n }));
-  const removeTeam = (n: number) => {
-    if (!window.confirm('Убрать команду из игры?')) return;
+  const removeTeam = async (n: number) => {
+    if (!(await confirmAction({ title: 'Убрать команду из игры?', message: 'Её очки будут потеряны.', confirmLabel: 'Убрать команду', cancelLabel: 'Оставить', tone: 'danger' }))) return;
     rpc('game_remove_team', { p_code: code, p_n: n });
     commit((b) => {
       const scores = { ...b.scores }; delete scores[n];

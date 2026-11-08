@@ -27,6 +27,7 @@ import { CustomSelect } from './CustomSelect';
 import { useUserLimits } from '../lib/generationLimits';
 import { autoBatchTitle, DEFAULT_BATCH_TITLE } from '../lib/batchTitle';
 import { DownloadButton, useExportLang, type Lang } from './DownloadButton';
+import { Badge, Button, Card, Field, PageHeader } from './ui';
 
 type CountRow = { chapter_id: string | null; topic_id: string | null; type: string; cnt: number };
 
@@ -144,14 +145,9 @@ const Stepper: React.FC<{ label: string; hint?: string; value: number; min: numb
       {hint && <div className="text-xs text-slate-500">{hint}</div>}
     </div>
     <div className="flex items-center gap-1.5 shrink-0">
-      <button
-        type="button"
-        onClick={() => onChange(Math.max(min, value - 1))}
-        className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-lg active:scale-90 transition hover:bg-slate-50"
-        aria-label={`${label}: меньше`}
-      >
+      <Button variant="secondary" className="w-10 h-10 bg-white text-lg" type="button" onClick={() => onChange(Math.max(min, value - 1))} aria-label={`${label}: меньше`}>
         −
-      </button>
+      </Button>
       <input
         type="number"
         inputMode="numeric"
@@ -162,14 +158,9 @@ const Stepper: React.FC<{ label: string; hint?: string; value: number; min: numb
         className="w-14 h-10 text-center text-base font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
         aria-label={label}
       />
-      <button
-        type="button"
-        onClick={() => onChange(Math.min(max, value + 1))}
-        className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-lg active:scale-90 transition hover:bg-slate-50"
-        aria-label={`${label}: больше`}
-      >
+      <Button variant="secondary" className="w-10 h-10 bg-white text-lg" type="button" onClick={() => onChange(Math.min(max, value + 1))} aria-label={`${label}: больше`}>
         +
-      </button>
+      </Button>
     </div>
   </div>
 );
@@ -787,14 +778,12 @@ export const TicketGenerator: React.FC = () => {
   }).length;
 
   return (
-    <div className="space-y-4 sm:space-y-5 max-w-5xl mx-auto">
+    <div className="space-y-4 sm:space-y-5 max-w-5xl xl:max-w-none mx-auto">
       {/* Заголовок */}
-      <div className="px-1">
-        <h2 className="text-xl font-bold text-slate-900 leading-tight">Генератор билетов</h2>
-        <p className="text-sm text-slate-600 mt-1">
-          Выберите предмет и нажмите «Генерировать» — получите Word с билетами и ключами.
-        </p>
-      </div>
+      <PageHeader
+        title="Генератор билетов"
+        description="Выберите предмет и нажмите «Генерировать» — получите Word с билетами и ключами."
+      />
 
       {/* Результат генерации — первым, чтобы сразу было видно, что всё готово */}
       {generatedBatch && (
@@ -845,14 +834,10 @@ export const TicketGenerator: React.FC = () => {
               )}
             />
             {canShare && (
-              <button
-                onClick={handleShareTickets}
-                disabled={isSharing}
-                className="min-h-[40px] px-3.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-sm font-semibold flex items-center gap-1.5 transition active:scale-95 disabled:opacity-50"
-              >
+              <Button variant="secondary" className="bg-white" onClick={handleShareTickets} disabled={isSharing}>
                 {isSharing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
                 <span>Поделиться</span>
-              </button>
+              </Button>
             )}
             {generatedHasKey && (
               <button
@@ -874,7 +859,7 @@ export const TicketGenerator: React.FC = () => {
               <ChevronDown className={`w-5 h-5 text-slate-500 transition-transform ${showVariants ? 'rotate-180' : ''}`} />
             </button>
             {showVariants && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mt-2">
                 {generatedBatch.tickets.map((t: any) => (
                   <div key={t.id} className="p-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -884,7 +869,7 @@ export const TicketGenerator: React.FC = () => {
                           <button
                             key={l}
                             onClick={() => exportSingleWithKey(t, l)}
-                            className="min-h-[36px] px-2.5 text-xs bg-white hover:bg-indigo-50 text-indigo-700 font-semibold rounded-lg border border-indigo-200/70 flex items-center gap-1 transition active:scale-95"
+                            className="min-h-[36px] px-2.5 text-sm bg-white hover:bg-indigo-50 text-indigo-700 font-semibold rounded-lg border border-indigo-200/70 flex items-center gap-1 transition active:scale-95"
                           >
                             <Download className="w-3.5 h-3.5" />
                             {l === 'tg' ? 'TJ' : 'RU'}
@@ -952,7 +937,7 @@ export const TicketGenerator: React.FC = () => {
                   key={b.id}
                   onClick={() => repeatBatch(b)}
                   disabled={isGenerating}
-                  className="shrink-0 text-left pl-3 pr-3.5 py-2 bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 rounded-2xl transition active:scale-95 disabled:opacity-50 flex items-center gap-2.5"
+                  className="shrink-0 text-left pl-3 pr-3.5 py-2 bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 rounded-2xl transition active:scale-95 disabled:opacity-50 flex items-center gap-2.5 min-h-[40px]"
                   title={`${b.title} — сгенерировать заново с теми же настройками`}
                 >
                   <RotateCcw className="w-4 h-4 text-indigo-600 shrink-0" />
@@ -971,10 +956,10 @@ export const TicketGenerator: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 sm:gap-5 items-start">
-        <div className="md:col-span-3 space-y-4 sm:space-y-5">
+      <div className="grid grid-cols-1 md:grid-cols-5 xl:grid-cols-12 gap-4 sm:gap-5 items-start">
+        <div className="md:col-span-3 xl:col-span-7 space-y-4 sm:space-y-5">
           {/* 1. Предмет */}
-          <section className="bento-card p-4 sm:p-5 rounded-2xl space-y-3">
+          <Card as="section" padding="none" className="p-4 sm:p-5 space-y-3">
             <h3 className="font-bold text-slate-900 text-base">1. Предмет</h3>
             {subjects.length <= 8 ? (
               <div className="flex flex-wrap gap-2">
@@ -1003,10 +988,10 @@ export const TicketGenerator: React.FC = () => {
                 {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </CustomSelect>
             )}
-          </section>
+          </Card>
 
           {/* 2. Что включить: весь предмет или выбранные главы */}
-          <section className="bento-card p-4 sm:p-5 rounded-2xl space-y-3">
+          <Card as="section" padding="none" className="p-4 sm:p-5 space-y-3">
             <h3 className="font-bold text-slate-900 text-base">2. Какие главы</h3>
             <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-2xl" role="radiogroup" aria-label="Какие главы">
               {([['all', 'Весь предмет'], ['pick', 'Выбрать главы']] as const).map(([mode, label]) => (
@@ -1072,7 +1057,7 @@ export const TicketGenerator: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => toggleChapterExpanded(ch.id)}
-                              className="w-12 shrink-0 flex items-center justify-center text-slate-500 hover:text-slate-700 border-l border-slate-100"
+                              className="w-12 shrink-0 flex items-center justify-center text-slate-500 hover:text-slate-700 border-l border-slate-100 min-h-[40px]"
                               aria-label={isExpanded ? `Свернуть темы главы ${chIdx + 1}` : `Показать темы главы ${chIdx + 1}`}
                               aria-expanded={isExpanded}
                             >
@@ -1109,12 +1094,12 @@ export const TicketGenerator: React.FC = () => {
                 </div>
               </>
             )}
-          </section>
+          </Card>
         </div>
 
-        <div className="md:col-span-2 space-y-4 sm:space-y-5">
+        <div className="md:col-span-2 xl:col-span-5 space-y-4 sm:space-y-5 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto xl:pb-1">
           {/* 3. Состав билета: по умолчанию — стандарт предмета одной строкой */}
-          <section className="bento-card p-4 sm:p-5 rounded-2xl space-y-4">
+          <Card as="section" padding="none" className="p-4 sm:p-5 space-y-4">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <h3 className="font-bold text-slate-900 text-base">3. Состав билета</h3>
@@ -1124,9 +1109,9 @@ export const TicketGenerator: React.FC = () => {
                   </p>
                 )}
                 {!editComposition && isStandard && (
-                  <span className="inline-block mt-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <Badge tone="success" className="mt-1.5 rounded-full">
                     Стандарт для предмета «{subjectName}»
-                  </span>
+                  </Badge>
                 )}
               </div>
               <button
@@ -1247,8 +1232,14 @@ export const TicketGenerator: React.FC = () => {
               </button>
               {showExtra && (
                 <div className="space-y-3 pb-1">
-                  <label className="block">
-                    <span className="block text-sm font-semibold text-slate-700 mb-1">Название набора</span>
+                  <Field
+                    label="Название набора"
+                    hint={customTitle.trim() ? (
+                      <button type="button" onClick={() => setCustomTitle('')} className="font-semibold text-indigo-700 min-h-[32px]">
+                        Вернуть автоматическое название
+                      </button>
+                    ) : 'Можно не заполнять — название подставится само'}
+                  >
                     <input
                       type="text"
                       value={customTitle}
@@ -1257,14 +1248,7 @@ export const TicketGenerator: React.FC = () => {
                       maxLength={100}
                       className="w-full min-h-[44px] text-base px-3 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
-                    <span className="block text-xs text-slate-600 mt-1">
-                      {customTitle.trim() ? (
-                        <button type="button" onClick={() => setCustomTitle('')} className="font-semibold text-indigo-700 min-h-[32px]">
-                          Вернуть автоматическое название
-                        </button>
-                      ) : 'Можно не заполнять — название подставится само'}
-                    </span>
-                  </label>
+                  </Field>
                   <label className="flex items-center gap-3 min-h-[40px] text-sm text-slate-700 cursor-pointer select-none">
                     <input
                       type="checkbox"
@@ -1286,11 +1270,11 @@ export const TicketGenerator: React.FC = () => {
                 </div>
               )}
             </div>
-          </section>
+          </Card>
 
           {/* Кнопка генерации: на телефоне закреплена над нижним меню, на компьютере — под настройками */}
           <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 px-3 pb-2 pt-2 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent md:static md:inset-auto md:z-auto md:p-0 md:bg-none">
-            <div className="max-w-5xl mx-auto bento-card rounded-2xl p-2 pl-3.5 flex items-center gap-3 shadow-lg md:shadow-sm md:p-3">
+            <Card padding="none" className="max-w-5xl mx-auto p-2 pl-3.5 flex items-center gap-3 shadow-lg md:shadow-sm md:p-3">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
                   <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${healthDot}`} />
@@ -1329,7 +1313,7 @@ export const TicketGenerator: React.FC = () => {
                   )}
                 </span>
               </button>
-            </div>
+            </Card>
           </div>
           {/* Место под закреплённой кнопкой, чтобы она не закрывала конец страницы */}
           <div className="h-20 md:hidden" aria-hidden />

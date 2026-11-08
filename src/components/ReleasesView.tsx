@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Loader2, Pencil, Plus, Trash2, X, Megaphone } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useReleases } from '../hooks/useReleases';
@@ -8,6 +8,8 @@ import { KIND_LABELS, RANK_LABELS } from '../lib/releases';
 import { ReleaseItemKind, ReleaseRank, SiteRelease } from '../types/database';
 import { ReleaseCard } from './ReleaseCard';
 import { CustomSelect } from './CustomSelect';
+import { confirmAction } from '../lib/confirm';
+import { Button, Card, EmptyState, PageHeader, SkeletonList } from './ui';
 
 interface DraftItem { kind: ReleaseItemKind; text: string; min_rank: ReleaseRank; subject_id: string }
 type SubjectOpt = { id: string; name: string };
@@ -54,10 +56,10 @@ const ReleaseEditor: React.FC<{ initial: Draft; subjects: SubjectOpt[]; onClose:
   const field = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white';
 
   return (
-    <div className="bg-white border border-blue-200 rounded-2xl p-4 sm:p-5 space-y-3">
+    <div className="bg-white border border-indigo-200 rounded-2xl p-4 sm:p-5 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-sm text-slate-900">{draft.id ? 'Правка обновления' : 'Новое обновление'}</h3>
-        <button onClick={onClose} className="p-1 text-slate-500 hover:text-slate-700" aria-label="Закрыть"><X className="w-4 h-4" /></button>
+        <button onClick={onClose} className="p-1 text-slate-500 hover:text-slate-700 min-h-[40px]" aria-label="Закрыть"><X className="w-4 h-4" /></button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <input className={field} placeholder="Версия, напр. 0.3.0" value={draft.version} onChange={(e) => setDraft({ ...draft, version: e.target.value })} />
@@ -80,19 +82,19 @@ const ReleaseEditor: React.FC<{ initial: Draft; subjects: SubjectOpt[]; onClose:
             </CustomSelect>
             <button
               onClick={() => setDraft((d) => ({ ...d, items: d.items.filter((_, k) => k !== n) }))}
-              className="p-2 text-slate-500 hover:text-red-600" aria-label="Удалить пункт"
+              className="p-2 text-slate-500 hover:text-red-600 min-h-[40px]" aria-label="Удалить пункт"
             ><Trash2 className="w-4 h-4" /></button>
           </div>
         ))}
-        <button onClick={() => setDraft((d) => ({ ...d, items: [...d.items, { kind: 'new', text: '', min_rank: 1, subject_id: '' }] }))} className="text-xs font-semibold text-blue-600 hover:underline">
+        <button onClick={() => setDraft((d) => ({ ...d, items: [...d.items, { kind: 'new', text: '', min_rank: 1, subject_id: '' }] }))} className="text-sm font-semibold text-indigo-600 hover:underline min-h-[40px]">
           + Добавить пункт
         </button>
       </div>
       <div className="flex justify-end gap-2">
-        <button onClick={onClose} className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100">Отмена</button>
-        <button disabled={!valid || save.isPending} onClick={() => save.mutate()} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+        <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 min-h-[40px]">Отмена</button>
+        <Button variant="primary" disabled={!valid || save.isPending} onClick={() => save.mutate()}>
           {save.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Сохранить
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -141,34 +143,30 @@ export const ReleasesView: React.FC = () => {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">История обновлений</h2>
-          <p className="text-xs text-slate-500">Показаны изменения, относящиеся к вашей роли</p>
-        </div>
-        {isOwner && !draft && (
-          <button onClick={() => setDraft(emptyDraft())} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700">
-            <Plus className="w-4 h-4" /> Добавить
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="История обновлений"
+        description="Показаны изменения, относящиеся к вашей роли"
+        actions={isOwner && !draft && <Button variant="primary" icon={Plus} onClick={() => setDraft(emptyDraft())}>Добавить</Button>}
+      />
 
       {draft && <ReleaseEditor key={draft.id ?? 'new'} initial={draft} subjects={subjects} onClose={() => setDraft(null)} />}
 
       {isLoading ? (
-        <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 text-blue-600 animate-spin" /></div>
+        <SkeletonList rows={2} />
       ) : releases.length === 0 ? (
-        <div className="text-sm text-slate-500 py-8 text-center">Пока нет записей об обновлениях</div>
+        <Card><EmptyState icon={Megaphone} title="Пока нет записей об обновлениях" description="Когда на сайте что-то изменится, это появится здесь." /></Card>
       ) : (
         releases.map((r) => (
           <div key={r.id} className="relative">
             <ReleaseCard release={r} showAudience={isOwner} subjectNames={subjectNames} unread={unreadIds.has(r.id)} />
             {isOwner && (
               <div className="absolute top-3 right-3 flex gap-1">
-                <button onClick={() => edit(r)} className="p-1.5 text-slate-500 hover:text-blue-600" aria-label="Править"><Pencil className="w-4 h-4" /></button>
+                <button onClick={() => edit(r)} className="p-1.5 text-slate-500 hover:text-indigo-600 min-h-[40px]" aria-label="Править"><Pencil className="w-4 h-4" /></button>
                 <button
-                  onClick={() => { if (window.confirm(`Удалить версию ${r.version}?`)) remove.mutate(r.id); }}
-                  className="p-1.5 text-slate-500 hover:text-red-600" aria-label="Удалить"
+                  onClick={async () => {
+                    if (await confirmAction({ title: `Удалить версию ${r.version}?`, message: 'Запись пропадёт из истории обновлений у всех пользователей.', confirmLabel: 'Удалить версию', cancelLabel: 'Оставить', tone: 'danger' })) remove.mutate(r.id);
+                  }}
+                  className="p-1.5 text-slate-500 hover:text-red-600 min-h-[40px]" aria-label="Удалить"
                 ><Trash2 className="w-4 h-4" /></button>
               </div>
             )}

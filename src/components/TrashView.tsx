@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, RotateCcw } from 'lucide-react';
+import { RotateCcw, Trash2 } from 'lucide-react';
+import { Button, Card, EmptyState, PageHeader, SkeletonList } from './ui';
 import { supabase } from '../lib/supabase';
 import { assertRowsChanged, notifyInfo } from '../lib/errors';
 
@@ -52,34 +53,47 @@ export const TrashView: React.FC = () => {
     },
   });
 
-  if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>;
+  if (isLoading) return (
+    <div className="space-y-3 max-w-5xl mx-auto">
+      <PageHeader icon={Trash2} title="Корзина" description="Удалённые вопросы. Восстановленный вопрос вернётся в банк на прежнее место." />
+      <SkeletonList rows={3} />
+    </div>
+  );
   const list = data?.list ?? [];
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-slate-500">Удалённые вопросы. Восстановленный вопрос вернётся в банк.</p>
-      {list.length === 0 && <div className="text-center text-slate-500 py-10">Корзина пуста</div>}
+    <div className="space-y-3 max-w-5xl mx-auto">
+      <PageHeader
+        icon={Trash2}
+        title="Корзина"
+        description="Удалённые вопросы. Восстановленный вопрос вернётся в банк на прежнее место."
+      />
+      {list.length === 0 && (
+        <Card>
+          <EmptyState
+            icon={Trash2}
+            title="Корзина пуста"
+            description="Сюда попадают вопросы, удалённые из банка. Отсюда их можно вернуть."
+          />
+        </Card>
+      )}
       {list.map((r) => (
-        <div key={r.id} className="bg-white border border-slate-200 rounded-xl p-3 flex items-start gap-3">
+        <Card key={r.id} padding="sm" className="flex items-start gap-3">
           <div className="flex-1 min-w-0">
             <div className="text-sm text-slate-800 line-clamp-3 break-words">{r.content_ru || r.content || '(без текста)'}</div>
-            <div className="text-xs text-slate-500 mt-1">
+            <div className="text-xs text-slate-600 mt-1">
               {r.topics?.name ? `${r.topics.name} · ` : ''}
               {r.deleted_at ? new Date(r.deleted_at).toLocaleString('ru-RU') : 'дата неизвестна'}
               {' · '}{r.deleted_by ? (data?.names[r.deleted_by] ?? 'удалил пользователь') : 'кто удалил — неизвестно'}
             </div>
           </div>
-          <button
-            onClick={() => restore.mutate(r.id)}
-            disabled={restore.isPending}
-            className="min-h-[44px] px-3 text-sm font-semibold text-indigo-700 border border-indigo-200 rounded-lg flex items-center gap-1 shrink-0 disabled:opacity-50"
-          >
-            <RotateCcw className="w-4 h-4" /> Вернуть
-          </button>
-        </div>
+          <Button variant="secondary" icon={RotateCcw} onClick={() => restore.mutate(r.id)} loading={restore.isPending} className="shrink-0 text-primary-ink border-indigo-200">
+            Вернуть
+          </Button>
+        </Card>
       ))}
       {list.length >= limit && (
-        <button onClick={() => setLimit(limit + PAGE)} className="w-full min-h-[44px] text-sm font-semibold text-indigo-700">Показать ещё</button>
+        <Button variant="ghost" onClick={() => setLimit(limit + PAGE)} className="w-full text-primary-ink">Показать ещё</Button>
       )}
     </div>
   );

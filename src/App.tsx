@@ -17,6 +17,9 @@ import { AuthModal } from './components/AuthModal';
 import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { TelegramLink } from './components/TelegramLink';
 import { WhatsNewModal } from './components/WhatsNewModal';
+import { confirmAction } from './lib/confirm';
+import { SideNav, type SideNavGroup } from './components/SideNav';
+import { ThemeButton, ThemeSegmented } from './components/ThemeToggle';
 import { useReleases } from './hooks/useReleases';
 import { Question, ROLE_LABELS } from './types/database';
 import { 
@@ -40,6 +43,7 @@ import {
   MoreHorizontal,
   ChevronRight
 } from 'lucide-react';
+import { IconButton } from './components/ui';
 
 type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'trash' | 'cluster' | 'releases';
 
@@ -53,7 +57,14 @@ const tabFromHash = (hash: string): TabType | null => {
   return (Object.keys(TAB_HASH) as TabType[]).find((t) => TAB_HASH[t] === key) ?? null;
 };
 const isFormHash = (hash: string) => hash.startsWith('#questions/');
-const LEAVE_FORM_TEXT = 'Есть несохранённые изменения в вопросе. Закрыть без сохранения?';
+// Несохранённые изменения в форме вопроса: true — можно уходить
+const confirmLeaveForm = () => confirmAction({
+  title: 'Закрыть вопрос без сохранения?',
+  message: 'Внесённые изменения пропадут.',
+  confirmLabel: 'Закрыть без сохранения',
+  cancelLabel: 'Продолжить редактирование',
+  tone: 'danger',
+});
 
 export const App: React.FC = () => {
   const { user, profile, isAdmin, isOwner, isStaff, signOut, isLoading } = useAuth();
@@ -96,8 +107,14 @@ export const App: React.FC = () => {
       }
       const hash = window.location.hash;
       if (formOpenRef.current && !isFormHash(hash)) {
-        if (formDirtyRef.current && !window.confirm(LEAVE_FORM_TEXT)) {
+        if (formDirtyRef.current) {
+          // Шаг формы сразу возвращаем в историю, пока человек отвечает; «Закрыть» — снова шаг назад
           window.history.pushState(null, '', '#questions/edit');
+          confirmLeaveForm().then((ok) => {
+            if (!ok) return;
+            formDirtyRef.current = false;
+            window.history.back();
+          });
           return;
         }
         formOpenRef.current = false;
@@ -131,8 +148,8 @@ export const App: React.FC = () => {
   };
 
   // Переход в раздел. Из формы или меню «Ещё» — заменяем их шаг истории, чтобы «Назад» не открывал их снова
-  const goTab = (tab: TabType) => {
-    if (formOpenRef.current && formDirtyRef.current && !window.confirm(LEAVE_FORM_TEXT)) return false;
+  const goTab = async (tab: TabType) => {
+    if (formOpenRef.current && formDirtyRef.current && !(await confirmLeaveForm())) return false;
     const replace = formOpenRef.current || sheetOpenRef.current;
     sheetOpenRef.current = false;
     setMobileMenuOpen(false);
@@ -176,6 +193,33 @@ export const App: React.FC = () => {
     ...(isAdmin ? [{ id: 'admin', label: 'Администрирование', icon: Users }] : []),
     ...(isOwner ? [{ id: 'game', label: 'Своя игра', icon: Gamepad2 }] : []),
   ];
+  // Боковое меню (широкие экраны): те же разделы, но по группам, а «Администрирование» раскрыто в три пункта
+  const sideGroups: SideNavGroup[] = [
+    { title: 'Билеты', items: [
+      { id: 'generator', label: 'Генератор билетов', icon: Sparkles },
+      { id: 'saved_tickets', label: 'Архив билетов', icon: FileCheck2 },
+    ] },
+    { title: 'Вопросы', items: [
+      { id: 'questions', label: 'Банк вопросов', icon: FileQuestion },
+      ...(isStaff ? [{ id: 'taxonomy', label: 'Предметы и темы', icon: Layers }, { id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
+    ] },
+    ...(isAdmin ? [{ title: 'Администрирование', items: [
+      { id: 'users', label: 'Пользователи', icon: Users },
+      { id: 'stats', label: 'Статистика', icon: BarChart3 },
+      { id: 'trash', label: 'Корзина', icon: Trash2 },
+    ] }] : []),
+    ...(isOwner ? [{ title: 'Дополнительно', items: [
+      { id: 'cluster', label: 'Экзамен-кластер', icon: BookOpen },
+      { id: 'game', label: 'Своя игра', icon: Gamepad2, external: true },
+    ] }] : []),
+  ];
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try { return localStorage.getItem('examiner_sidenav_collapsed') === 'true'; } catch { return false; }
+  });
+  const toggleNav = () => setNavCollapsed((v) => {
+    try { localStorage.setItem('examiner_sidenav_collapsed', String(!v)); } catch { /* память браузера недоступна — не страшно */ }
+    return !v;
+  });
   const isAdminSection = currentTab === 'users' || currentTab === 'stats' || currentTab === 'trash';
 
   const openForm = (q: Question | null) => {
@@ -190,8 +234,8 @@ export const App: React.FC = () => {
   const handleEditQuestion = (q: Question) => openForm(q);
 
   // Закрыть форму: шаг формы в истории убираем «Назад»-ом (popstate закроет форму)
-  const closeForm = (force = false) => {
-    if (!force && formDirtyRef.current && !window.confirm(LEAVE_FORM_TEXT)) return;
+  const closeForm = async (force = false) => {
+    if (!force && formDirtyRef.current && !(await confirmLeaveForm())) return;
     formDirtyRef.current = false;
     if (isFormHash(window.location.hash)) window.history.back();
     else closeFormState();
@@ -201,7 +245,7 @@ export const App: React.FC = () => {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+        <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
       </div>
     );
   }
@@ -224,7 +268,7 @@ export const App: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans text-slate-900 antialiased selection:bg-indigo-500/20 selection:text-indigo-900">
       {/* Главный заголовок */}
       <header className="bg-white/85 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 shadow-xs pt-[env(safe-area-inset-top)]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-[1680px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           {/* Логотип */}
           <div
             role="link"
@@ -268,26 +312,26 @@ export const App: React.FC = () => {
                 </div>
               </div>
               <TelegramLink />
+              <ThemeButton />
               <button 
                 onClick={openReleases} 
-                className="relative p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition" 
+                className="relative p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition min-h-[40px]" 
                 title="Что нового" 
                 aria-label="Что нового"
               >
                 <Bell className="w-4 h-4" />
                 {unread.length > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center animate-pulse">
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-red-600 text-white text-[11px] leading-none font-bold flex items-center justify-center animate-pulse motion-reduce:animate-none">
                     {unread.length}
                   </span>
                 )}
               </button>
-              <button
+              <IconButton
+                icon={LogOut}
+                label="Выйти"
                 onClick={() => signOut()}
-                className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl transition"
-                title="Выйти"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
+                className="w-10 h-10 text-slate-500 hover:text-red-600 hover:bg-red-50"
+              />
             </div>
           </div>
 
@@ -296,20 +340,20 @@ export const App: React.FC = () => {
             <TelegramLink />
             <button 
               onClick={openReleases} 
-              className="relative p-2 text-slate-500 hover:text-indigo-600 active:scale-90 rounded-xl transition hover:bg-slate-100" 
+              className="relative p-2 text-slate-500 hover:text-indigo-600 active:scale-90 rounded-xl transition hover:bg-slate-100 min-h-[40px]" 
               title="Что нового" 
               aria-label="Что нового"
             >
               <Bell className="w-4 h-4" />
               {unread.length > 0 && (
-                <span className="absolute 1 top-1 right-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center">
+                <span className="absolute top-1 right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-red-600 text-white text-[11px] leading-none font-bold flex items-center justify-center">
                   {unread.length}
                 </span>
               )}
             </button>
             <button
               onClick={openSheet}
-              className="flex items-center space-x-1.5 p-1.5 pl-2.5 bg-slate-100/90 active:scale-95 border border-slate-200/80 rounded-2xl text-slate-700"
+              className="flex items-center space-x-1.5 p-1.5 pl-2.5 bg-slate-100/90 active:scale-95 border border-slate-200/80 rounded-2xl text-slate-700 min-h-[40px]"
               aria-label="Открыть меню профиля"
             >
               <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-xs font-bold">
@@ -321,8 +365,8 @@ export const App: React.FC = () => {
         </div>
 
         {/* Навигационная панель табов (десктоп) в Bento-стиле */}
-        <div className="hidden md:block bg-white/70 border-t border-slate-200/60 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto flex space-x-1 py-1.5 overflow-x-auto no-scrollbar">
+        <div className="hidden md:block xl:hidden bg-white/70 border-t border-slate-200/60 px-4 sm:px-6 lg:px-8">
+          <div className="max-w-[1680px] mx-auto flex space-x-1 py-1.5 overflow-x-auto no-scrollbar">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = item.id === 'admin' ? isAdminSection : currentTab === item.id;
@@ -333,11 +377,11 @@ export const App: React.FC = () => {
                     if (item.id === 'game') { window.open('/game', '_blank'); return; }
                     goTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
                   }}
-                  className={`py-2 px-3.5 rounded-xl text-xs font-semibold flex items-center space-x-2 whitespace-nowrap transition-all duration-150 active:scale-98 ${
+                  className={`py-2 px-3.5 rounded-xl text-sm font-semibold flex items-center space-x-2 whitespace-nowrap transition-all duration-150 active:scale-98 ${
                     isActive
                       ? 'bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-xs font-bold'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 border border-transparent'
-                  }`}
+                  } min-h-[40px]`}
                 >
                   <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-indigo-600' : 'text-slate-500'}`} />
                   <span>{item.label}</span>
@@ -401,11 +445,11 @@ export const App: React.FC = () => {
                       if (item.id === 'game') { window.open('/game', '_blank'); closeSheet(); return; }
                       goTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
                     }}
-                    className={`w-full text-left py-3 px-3.5 rounded-2xl text-xs font-semibold flex items-center justify-between transition active:scale-98 ${
+                    className={`w-full text-left py-3 px-3.5 rounded-2xl text-sm font-semibold flex items-center justify-between transition active:scale-98 ${
                       isActive 
                         ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/25' 
                         : 'text-slate-700 hover:bg-slate-100 active:bg-slate-100'
-                    }`}
+                    } min-h-[40px]`}
                   >
                     <div className="flex items-center space-x-3">
                       <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-500'}`} />
@@ -419,9 +463,11 @@ export const App: React.FC = () => {
 
             {/* Быстрые действия */}
             <div className="mt-4 pt-4 border-t border-slate-100 space-y-2">
+              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 pb-0.5">Тема оформления</div>
+              <ThemeSegmented />
               <button
                 onClick={openReleases}
-                className="w-full py-2.5 px-3.5 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100/70 flex items-center justify-between"
+                className="w-full py-2.5 px-3.5 rounded-xl text-sm font-semibold text-slate-700 bg-slate-100/70 flex items-center justify-between min-h-[40px]"
               >
                 <div className="flex items-center space-x-2">
                   <Bell className="w-4 h-4 text-indigo-600" />
@@ -439,7 +485,7 @@ export const App: React.FC = () => {
                   closeSheet();
                   signOut();
                 }}
-                className="w-full py-2.5 px-3.5 rounded-xl text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100/80 flex items-center justify-center space-x-2 transition active:scale-98"
+                className="w-full py-2.5 px-3.5 rounded-xl text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100/80 flex items-center justify-center space-x-2 transition active:scale-98 min-h-[40px]"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Выйти из аккаунта</span>
@@ -450,8 +496,19 @@ export const App: React.FC = () => {
       )}
 
       {/* Основной контент */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-8">
-        <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-blue-600 animate-spin" /></div>}>
+      <div className="flex-1 w-full max-w-[1680px] mx-auto flex">
+      <SideNav
+        groups={sideGroups}
+        activeId={currentTab}
+        collapsed={navCollapsed}
+        onToggle={toggleNav}
+        onSelect={(item) => {
+          if (item.id === 'game') { window.open('/game', '_blank'); return; }
+          goTab(item.id as TabType);
+        }}
+      />
+      <main className="flex-1 min-w-0 px-3 sm:px-6 lg:px-8 py-4 sm:py-6 pb-24 md:pb-8">
+        <Suspense fallback={<div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-indigo-600 animate-spin" /></div>}>
         {/* Экран формы создания / редактирования вопроса */}
         {isQuestionFormOpen && isStaff ? (
           <QuestionForm
@@ -463,16 +520,16 @@ export const App: React.FC = () => {
         ) : (
           <>
             {isAdminSection && (
-              <div className="flex space-x-1 mb-5 border-b border-slate-200">
+              <div className="flex space-x-1 mb-5 border-b border-slate-200 xl:hidden">
                 {([['users', 'Пользователи', Users], ['stats', 'Статистика', BarChart3], ['trash', 'Корзина', Trash2]] as const).map(([id, label, Icon]) => (
                   <button
                     key={id}
                     onClick={() => goTab(id)}
-                    className={`flex-1 sm:flex-none justify-center min-h-[44px] px-4 text-sm font-semibold border-b-2 -mb-px flex items-center space-x-2 transition-all ${
+                    className={`flex-1 sm:flex-none justify-center min-h-[44px] px-3 sm:px-4 text-sm font-semibold border-b-2 -mb-px flex items-center space-x-2 whitespace-nowrap transition-all ${
                       currentTab === id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'
                     }`}
                   >
-                    <Icon className="w-4 h-4" />
+                    <Icon className="w-4 h-4 hidden sm:block" />
                     <span>{label}</span>
                   </button>
                 ))}
@@ -499,6 +556,7 @@ export const App: React.FC = () => {
         )}
         </Suspense>
       </main>
+      </div>
 
       {showNews && <WhatsNewModal releases={unread} onClose={closeNews} onOpenHistory={() => { closeNews(); openReleases(); }} />}
 
@@ -517,7 +575,7 @@ export const App: React.FC = () => {
               currentTab === 'generator' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
                 : 'text-slate-500 hover:text-slate-900'
-            }`}
+            } min-h-[40px]`}
           >
             <div className={`p-1.5 rounded-xl transition-colors ${
               currentTab === 'generator' && !isQuestionFormOpen ? 'bg-indigo-50 text-indigo-600 shadow-xs' : ''
@@ -534,7 +592,7 @@ export const App: React.FC = () => {
               currentTab === 'questions' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
                 : 'text-slate-500 hover:text-slate-900'
-            }`}
+            } min-h-[40px]`}
           >
             <div className={`p-1.5 rounded-xl transition-colors ${
               currentTab === 'questions' && !isQuestionFormOpen ? 'bg-indigo-50 text-indigo-600 shadow-xs' : ''
@@ -551,7 +609,7 @@ export const App: React.FC = () => {
               currentTab === 'saved_tickets' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
                 : 'text-slate-500 hover:text-slate-900'
-            }`}
+            } min-h-[40px]`}
           >
             <div className={`p-1.5 rounded-xl transition-colors ${
               currentTab === 'saved_tickets' && !isQuestionFormOpen ? 'bg-indigo-50 text-indigo-600 shadow-xs' : ''
@@ -568,7 +626,7 @@ export const App: React.FC = () => {
               mobileMenuOpen || (!['generator', 'questions', 'saved_tickets'].includes(currentTab) && !isQuestionFormOpen)
                 ? 'text-indigo-600 font-bold'
                 : 'text-slate-500 hover:text-slate-900'
-            }`}
+            } min-h-[40px]`}
           >
             <div className={`p-1.5 rounded-xl transition-colors ${
               !['generator', 'questions', 'saved_tickets'].includes(currentTab) && !isQuestionFormOpen ? 'bg-indigo-50 text-indigo-600 shadow-xs' : ''

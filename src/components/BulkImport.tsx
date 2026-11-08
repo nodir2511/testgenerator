@@ -27,6 +27,8 @@ import {
   Sparkles,
   Layers
 } from 'lucide-react';
+import { confirmAction } from '../lib/confirm';
+import { Badge, Button, Field, Hint, IconButton, PageHeader } from './ui';
 
 type ImportLang = 'ru' | 'tg';
 
@@ -780,26 +782,22 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const warningRowsCount = visibleRows.filter(r => r.errors.length === 0 && (r.warnings?.length || 0) > 0).length;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-w-5xl mx-auto my-6">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-w-5xl xl:max-w-7xl mx-auto my-6">
       {/* Header */}
       <div className="p-6 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center">
-            <Upload className="w-5 h-5 mr-2 text-blue-600" />
-            Импорт вопросов (Word .docx, Excel, CSV)
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Прямой импорт документов Word с автоматическим извлечением картинок и формул
-          </p>
+          <PageHeader
+            icon={Upload}
+            title="Импорт вопросов"
+            description="Загрузите Word (.docx), Excel или CSV — картинки и формулы подтянутся сами"
+            className="px-0"
+          />
         </div>
 
-        <button
-          onClick={handleDownloadTemplate}
-          className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-xl border border-slate-300 shadow-sm flex items-center space-x-1.5 transition"
-        >
+        <Button variant="secondary" className="bg-white" onClick={handleDownloadTemplate}>
           <Download className="w-4 h-4 text-emerald-600" />
           <span>Скачать шаблон Excel</span>
-        </button>
+        </Button>
       </div>
 
       {/* Tabs */}
@@ -807,8 +805,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         <button
           onClick={() => setActiveTab('file')}
           className={`py-3 px-4 border-b-2 transition flex items-center space-x-1.5 ${
-            activeTab === 'file' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
+            activeTab === 'file' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+          } min-h-[40px]`}
         >
           <FileText className="w-4 h-4" />
           <span>Word (.docx) / Excel / CSV</span>
@@ -816,8 +814,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         <button
           onClick={() => setActiveTab('text')}
           className={`py-3 px-4 border-b-2 transition flex items-center space-x-1.5 ${
-            activeTab === 'text' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
+            activeTab === 'text' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+          } min-h-[40px]`}
         >
           <span>Вставка текста</span>
         </button>
@@ -825,15 +823,16 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
           <button
             onClick={() => setActiveTab('history')}
             className={`py-3 px-4 border-b-2 transition flex items-center space-x-1.5 ${
-              activeTab === 'history' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
+              activeTab === 'history' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+            } min-h-[40px]`}
           >
             <span>История партий и откат</span>
           </button>
         )}
       </div>
 
-      <div className="p-6 space-y-6">
+      <div className={`p-6 space-y-6 ${parsedRows.length > 0 && activeTab !== 'history' ? 'xl:space-y-0 xl:grid xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)] xl:gap-8 xl:items-start' : ''}`}>
+      <div className="space-y-6 min-w-0">
         {globalError && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">
             {globalError}
@@ -845,14 +844,14 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center">
-                <Layers className="w-3.5 h-3.5 mr-1.5 text-blue-600" />
+                <Layers className="w-3.5 h-3.5 mr-1.5 text-indigo-600" />
                 Раздел для вопросов (по умолчанию):
               </span>
               {parsedRows.length > 0 && (
                 <button
                   type="button"
                   onClick={handleApplyTaxonomyToAll}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-semibold underline"
+                  className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold underline min-h-[40px]"
                 >
                   Применить ко всем ({parsedRows.length})
                 </button>
@@ -860,47 +859,44 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Предмет</label>
-                <CustomSelect
+              <Field label="Предмет">
+<CustomSelect
                   value={defaultSubjectId}
                   onChange={(val) => {
                     setDefaultSubjectId(val);
                     setDefaultChapterId('');
                     setDefaultTopicId('');
                   }}
-                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Глава</label>
-                <CustomSelect
+              <Field label="Глава">
+<CustomSelect
                   value={defaultChapterId}
                   onChange={(val) => {
                     setDefaultChapterId(val);
                     setDefaultTopicId('');
                   }}
-                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="">-- Выберите главу --</option>
                   {availableChapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Тема</label>
-                <CustomSelect
+              <Field label="Тема">
+<CustomSelect
                   value={defaultTopicId}
                   onChange={(val) => setDefaultTopicId(val)}
-                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="">-- Выберите тему --</option>
                   {availableTopics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </CustomSelect>
-              </div>
+</Field>
             </div>
           </div>
         )}
@@ -913,14 +909,14 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 <button
                   type="button"
                   onClick={() => setPairMode(false)}
-                  className={`px-3 py-1.5 font-semibold ${!pairMode ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                  className={`px-3 py-1.5 font-semibold ${!pairMode ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} min-h-[40px]`}
                 >
                   Один файл
                 </button>
                 <button
                   type="button"
                   onClick={() => setPairMode(true)}
-                  className={`px-3 py-1.5 font-semibold border-l border-slate-300 ${pairMode ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`}
+                  className={`px-3 py-1.5 font-semibold border-l border-slate-300 ${pairMode ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} min-h-[40px]`}
                 >
                   Пара файлов: русский + таджикский
                 </button>
@@ -931,7 +927,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                   <CustomSelect
                     value={fileLang}
                     onChange={(val) => setFileLang(val as ImportLang)}
-                    className="text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
                     <option value="ru">Русский</option>
                     <option value="tg">Таджикский</option>
@@ -949,28 +945,22 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {([['Русский файл (.docx)', pairRu, setPairRu], ['Таджикский файл (.docx)', pairTg, setPairTg]] as const).map(([label, file, setFile]) => (
-                    <label key={label} className="block text-xs font-semibold text-slate-600 space-y-1">
-                      <span>{label}</span>
+                    <Field key={label} label={label} hint={file ? <span className="block truncate">{file.name}</span> : undefined}>
                       <input
                         type="file"
                         accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         onChange={(e) => setFile(e.target.files?.[0] || null)}
                         disabled={isProcessing}
-                        className="block w-full text-xs file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:font-semibold"
+                        className="block w-full text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-indigo-600 file:text-white file:font-semibold"
                       />
-                      {file && <span className="block text-xs text-slate-500 truncate">{file.name}</span>}
-                    </label>
+                    </Field>
                   ))}
                 </div>
-                <button
-                  onClick={handleParsePair}
-                  disabled={!pairRu || !pairTg || isProcessing}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold disabled:opacity-50 flex items-center space-x-1.5"
-                >
+                <Button variant="primary" onClick={handleParsePair} disabled={!pairRu || !pairTg || isProcessing}>
                   {isProcessing && <Loader2 className="w-4 h-4 animate-spin" />}
                   <span>Распознать пару и сопоставить</span>
-                </button>
-                {isProcessing && statusMessage && <p className="text-xs text-blue-600 font-medium">{statusMessage}</p>}
+                </Button>
+                {isProcessing && statusMessage && <p className="text-xs text-indigo-600 font-medium">{statusMessage}</p>}
               </div>
             ) : (
           <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center bg-slate-50 hover:bg-slate-100/60 transition cursor-pointer relative">
@@ -983,14 +973,14 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
             />
             {isProcessing ? (
               <div className="space-y-2 py-4">
-                <Loader2 className="w-10 h-10 text-blue-600 mx-auto animate-spin" />
+                <Loader2 className="w-10 h-10 text-indigo-600 mx-auto animate-spin" />
                 <p className="font-bold text-slate-800 text-sm">Обработка документа...</p>
-                {statusMessage && <p className="text-xs text-blue-600 font-medium">{statusMessage}</p>}
+                {statusMessage && <p className="text-xs text-indigo-600 font-medium">{statusMessage}</p>}
               </div>
             ) : (
               <>
                 <div className="flex items-center justify-center space-x-3 mb-3">
-                  <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 shadow-sm">
+                  <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
                     <FileText className="w-6 h-6" />
                   </div>
                   <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
@@ -1018,22 +1008,21 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               value={pastedText}
               onChange={(e) => setPastedText(e.target.value)}
               placeholder="Вставьте таблицу с заголовками (например, скопированную из Excel или CSV)..."
-              className="w-full p-3 font-mono text-xs border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full p-3 font-mono text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            <button
-              onClick={handleParseText}
-              disabled={!pastedText.trim() || isProcessing}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold disabled:opacity-50"
-            >
+            <Button variant="primary" onClick={handleParseText} disabled={!pastedText.trim() || isProcessing}>
               Распознать и проверить текст
-            </button>
+            </Button>
           </div>
         )}
 
         {/* Вкладка 3: История партий (для админа) */}
         {activeTab === 'history' && (
           <div className="space-y-3">
-            <h3 className="font-semibold text-slate-900 text-sm">Ранее загруженные партии вопросов</h3>
+            <h3 className="font-semibold text-slate-900 text-sm flex items-center gap-1">
+              Ранее загруженные партии вопросов
+              <Hint label="Что такое партия">Партия — один загруженный файл или вставленный текст. «Откатить партию» скроет из банка все вопросы из неё, остальные вопросы не затрагиваются.</Hint>
+            </h3>
             <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
               {batches.map((b: any) => (
                 <div key={b.id} className="p-4 flex items-center justify-between bg-white hover:bg-slate-50">
@@ -1048,12 +1037,17 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                       <span className="text-xs text-slate-500 font-medium">Откачено</span>
                     ) : (
                       <button
-                        onClick={() => {
-                          if (confirm(`Откатить эту партию (${b.items_count} вопр.)? Все они будут скрыты.`)) {
+                        onClick={async () => {
+                          if (await confirmAction({
+                            title: 'Откатить эту партию импорта?',
+                            message: 'Все вопросы партии будут скрыты из банка.',
+                            details: [`Вопросов: ${b.items_count}`],
+                            confirmLabel: 'Откатить партию', cancelLabel: 'Оставить', tone: 'danger',
+                          })) {
                             revertBatchMutation.mutate(b.id);
                           }
                         }}
-                        className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 border border-red-200 rounded-lg flex items-center space-x-1 font-semibold"
+                        className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 border border-red-200 rounded-lg flex items-center space-x-1 font-semibold min-h-[40px]"
                       >
                         <Undo2 className="w-3.5 h-3.5" />
                         <span>Откатить партию</span>
@@ -1075,9 +1069,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 {importReport.skipped > 0 && <> • пропущено как дубли: {importReport.skipped}</>}
                 {importReport.failed.length > 0 && <> • не удалось: <span className="text-red-600">{importReport.failed.length}</span></>}
               </div>
-              <button onClick={() => setImportReport(null)} className="text-slate-500 hover:text-slate-700" title="Закрыть">
-                <X className="w-4 h-4" />
-              </button>
+              <IconButton icon={X} label="Закрыть отчёт" onClick={() => setImportReport(null)} className="w-10 h-10 -m-2 text-slate-500 hover:text-slate-700" />
             </div>
             {importReport.skipped > 0 && (
               <p className="text-slate-600">Дубли — вопросы с тем же текстом и вариантами, которые уже есть в этой теме. Повторный запуск импорта безопасен.</p>
@@ -1092,9 +1084,11 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
           </div>
         )}
 
-        {/* Предпросмотр распознанных строк */}
+        </div>
+
+        {/* Предпросмотр распознанных строк: на широком экране — справа от настроек */}
         {parsedRows.length > 0 && activeTab !== 'history' && (
-          <div className="space-y-4 pt-4 border-t border-slate-200">
+          <div className="space-y-4 pt-4 border-t border-slate-200 xl:border-t-0 xl:pt-0 min-w-0">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="font-bold text-slate-900 text-sm">Предварительный просмотр перед сохранением</h3>
@@ -1107,25 +1101,18 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 </p>
               </div>
 
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setParsedRows([])}
-                  className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 rounded-lg"
-                >
-                  Очистить
-                </button>
-                <button
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="ghost" onClick={() => setParsedRows([])} className="text-slate-600">Очистить</Button>
+                <Button
+                  variant="primary"
+                  icon={CheckCircle2}
+                  loading={importMutation.isPending}
+                  disabled={validRows.length === 0}
                   onClick={() => importMutation.mutate(validRows)}
-                  disabled={validRows.length === 0 || importMutation.isPending}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow flex items-center space-x-1.5 disabled:opacity-50"
+                  className="whitespace-nowrap"
                 >
-                  {importMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="w-4 h-4" />
-                  )}
-                  <span>Импортировать в базу ({validRows.length})</span>
-                </button>
+                  Импортировать в базу ({validRows.length})
+                </Button>
               </div>
             </div>
 
@@ -1135,7 +1122,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                 <CustomSelect
                   value={sectionFilter}
                   onChange={(val) => setSectionFilter(val)}
-                  className="flex-1 min-w-0 text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 min-w-0 text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="">Все разделы ({parsedRows.length} вопр.)</option>
                   {sectionNames.map(name => (
@@ -1147,28 +1134,26 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               </div>
             )}
 
-            <div className="max-h-96 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-xs">
+            <div className="max-h-96 xl:max-h-[calc(100vh-18rem)] overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-sm">
               {visibleRows.map((r, i) => (
                 <div key={i} className={`p-3 ${r.errors.length > 0 ? 'bg-red-50/50' : 'bg-white'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 space-y-1">
                       <div className="flex items-center space-x-2">
                         <span className="font-mono text-slate-500 font-semibold">#{r.rowNum}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-xs font-bold uppercase ${
-                          r.type === 'test' ? 'bg-blue-100 text-blue-800' : r.type === 'matching' ? 'bg-purple-100 text-purple-800' : 'bg-emerald-100 text-emerald-800'
-                        }`}>
+                        <Badge tone={r.type === 'test' ? 'primary' : r.type === 'matching' ? 'purple' : 'success'} className="px-1.5 font-bold uppercase">
                           {r.type === 'test' ? 'Тест' : r.type === 'matching' ? 'Соответствие' : 'Открытый'}
-                        </span>
+                        </Badge>
                         <div className="font-semibold text-slate-800 leading-snug">
                           <FormattedText text={r.content} />
                           {r.lang === 'tg' && r.contentTg === undefined && (
-                            <span className="ml-2 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">ТЖ</span>
+                            <Badge tone="warning" className="ml-2 px-1 font-bold">ТЖ</Badge>
                           )}
                         </div>
                       </div>
                       {r.contentTg && (
                         <div className="pl-8 text-slate-600 leading-snug">
-                          <span className="mr-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1">ТЖ</span>
+                          <Badge tone="warning" className="mr-1.5 px-1 font-bold">ТЖ</Badge>
                           <FormattedText text={r.contentTg} />
                         </div>
                       )}
@@ -1183,14 +1168,14 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                           {r.type === 'test' && r.rawOptions && (
                             <div className="flex flex-wrap gap-2 pt-0.5">
                               {r.rawOptions.map((opt, oIdx) => (
-                                <span key={oIdx} className="inline-flex items-center px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                                <Badge tone="neutral" className="font-normal" key={oIdx}>
                                   <strong className="mr-1">{['A', 'B', 'C', 'D', 'E'][oIdx] || String(oIdx + 1)})</strong>
                                   <FormattedText text={opt.text} />
                                   {opt.textTg && opt.textTg !== opt.text && (
                                     <span className="ml-1 text-slate-500">/ <FormattedText text={opt.textTg} /></span>
                                   )}
-                                  {opt.imageUrl && <ImageIcon className="w-3 h-3 text-blue-500 ml-1 inline" />}
-                                </span>
+                                  {opt.imageUrl && <ImageIcon className="w-3 h-3 text-indigo-500 ml-1 inline" />}
+                                </Badge>
                               ))}
                             </div>
                           )}

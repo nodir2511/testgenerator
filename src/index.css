@@ -4,32 +4,49 @@
 
 @layer base {
   :root {
+    /* Поверхности и текст */
     --background: 210 40% 98%;
     --foreground: 222.2 84% 4.9%;
-
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
-
-    --primary: 226 70% 55.5%;
-    --primary-foreground: 210 40% 98%;
-
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215 19% 35%;      /* slate-600: контраст 7:1 на белом */
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
-
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-
     --accent: 210 40% 96.1%;
     --accent-foreground: 222.2 47.4% 11.2%;
-
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-
     --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 226 70% 55.5%;
+    --input: 214.3 31.8% 84%;
 
+    /* Главный цвет сайта — индиго (раньше в коде был то indigo, то blue) */
+    --primary: 243 75% 59%;               /* indigo-600 */
+    --primary-hover: 245 58% 51%;         /* indigo-700 */
+    --primary-soft: 226 100% 97%;         /* indigo-50 */
+    --primary-ink: 244 55% 41%;           /* indigo-800 */
+    --primary-foreground: 0 0% 100%;
+    --ring: 243 75% 59%;
+
+    /* Смысловые цвета: успех / внимание / опасность / подсказка */
+    --success: 160 84% 29%;               /* emerald-700 (текст), заливка — success-solid */
+    --success-solid: 161 94% 30%;         /* emerald-600 */
+    --success-soft: 152 81% 96%;          /* emerald-50 */
+    --success-line: 152 76% 80%;          /* emerald-200 */
+    --warning: 26 90% 37%;                /* amber-700 */
+    --warning-solid: 32 95% 44%;          /* amber-600 */
+    --warning-soft: 48 100% 96%;          /* amber-50 */
+    --warning-line: 48 97% 77%;           /* amber-200 */
+    --destructive: 0 72% 51%;             /* red-600 */
+    --destructive-hover: 0 74% 42%;       /* red-700 */
+    --destructive-soft: 0 86% 97%;        /* red-50 */
+    --destructive-line: 0 96% 89%;        /* red-200 */
+    --destructive-foreground: 0 0% 100%;
+    --info: 224 76% 40%;                  /* blue-700 */
+    --info-soft: 214 100% 97%;            /* blue-50 */
+    --info-line: 213 97% 87%;             /* blue-200 */
+
+    /* Форма: карточки — крупнее, кнопки и поля — чуть меньше */
     --radius: 0.75rem;
+    --radius-card: 1rem;
   }
 }
 

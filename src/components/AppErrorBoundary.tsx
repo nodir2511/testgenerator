@@ -20,7 +20,7 @@ export class AppErrorBoundary extends React.Component<{ children: React.ReactNod
         <div className="max-w-md bg-white rounded-2xl shadow-sm border border-slate-200 p-6 text-center space-y-3">
           <h1 className="text-lg font-bold text-slate-900">Что-то пошло не так</h1>
           <p className="text-sm text-slate-600">Ошибка уже записана в журнал. Обновите страницу, и всё продолжится с того же места.</p>
-          <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium">
+          <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium min-h-[40px]">
             Обновить страницу
           </button>
         </div>

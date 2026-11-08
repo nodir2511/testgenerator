@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { Loader2, SlidersHorizontal, TrendingUp, TrendingDown } from 'lucide-react';
+import { BarChart3, Loader2, SlidersHorizontal, TrendingUp, TrendingDown } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { notifyError, notifyInfo } from '../lib/errors';
 import { useGenerationSettings, type GenerationSettings } from '../lib/generationLimits';
 import { type UserRole } from '../types/database';
+import { Button, Card as UiCard, Hint, PageHeader, Skeleton } from './ui';
 
 // Статистика использования (только для администратора): RPC admin_usage_stats_v3 (supabase/sql/usage_stats_v3.sql).
 // Поля, которых нет в старой версии функции, необязательны — экран работает и с ней.
@@ -85,7 +86,7 @@ const Empty = () => <p className="text-sm text-slate-600">За этот пери
 const Kpi: React.FC<{ label: string; value: number; prev?: number; prevLabel: string; note?: string }> = ({ label, value, prev, prevLabel, note }) => {
   const pct = prev !== undefined && prev > 0 ? Math.round(((value - prev) / prev) * 100) : null;
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-3.5">
+    <UiCard padding="none" className="p-3.5">
       <div className="text-sm font-semibold text-slate-600 leading-tight">{label}</div>
       <div className="text-3xl font-bold text-slate-900 mt-1 tabular-nums">{value}</div>
       {note ? (
@@ -98,7 +99,7 @@ const Kpi: React.FC<{ label: string; value: number; prev?: number; prevLabel: st
       ) : (
         <div className="text-xs text-slate-500 mt-1">Раньше данных нет</div>
       )}
-    </div>
+    </UiCard>
   );
 };
 
@@ -149,7 +150,7 @@ function TimeBars({ buckets, unit }: { buckets: Array<{ label: string; batches: 
             role="listitem"
             onClick={() => setSel(i)}
             onMouseEnter={() => setSel(i)}
-            className="flex-1 h-full flex items-end justify-center px-px"
+            className="flex-1 h-full flex items-end justify-center px-px min-h-[40px]"
             aria-label={`${b.label}: ${b.batches}`}
           >
             <span
@@ -216,10 +217,10 @@ const GenerationLimitsCard: React.FC<{ hint?: string }> = ({ hint }) => {
   };
 
   return (
-    <section className="bg-white border border-slate-200 rounded-2xl p-4">
-      <h3 className="font-bold text-slate-900 text-base flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-indigo-600" /> Лимиты генерации</h3>
+    <UiCard as="section" padding="none" className="p-4">
+      <h3 className="font-bold text-slate-900 text-base flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-indigo-600" /> Лимиты генерации <Hint label="Что такое лимиты">Ограничения для преподавателей: сколько раз в сутки и как часто можно создавать билеты. Администраторов они не касаются.</Hint></h3>
       <p className="text-sm text-slate-600 mt-0.5 mb-3">
-        Для всех, кроме администраторов: сайт, Telegram-бот и Mini App.{isOwner ? '' : ' Менять может только главный админ.'}
+        Для всех, кроме администраторов: сайт, Telegram-бот и мини-приложение внутри Telegram.{isOwner ? '' : ' Менять может только главный админ.'}
         {hint ? ` ${hint}` : ''}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -236,12 +237,11 @@ const GenerationLimitsCard: React.FC<{ hint?: string }> = ({ hint }) => {
         ))}
       </div>
       {isOwner && (
-        <button onClick={save} disabled={!dirty || !valid || saving}
-          className="mt-3 w-full sm:w-auto min-h-[44px] px-5 rounded-xl bg-indigo-600 text-white text-sm font-bold disabled:opacity-40">
+        <Button variant="primary" className="mt-3 w-full sm:w-auto" onClick={save} disabled={!dirty || !valid || saving}>
           {saving ? 'Сохранение…' : 'Сохранить лимиты'}
-        </button>
+        </Button>
       )}
-    </section>
+    </UiCard>
   );
 };
 
@@ -288,7 +288,15 @@ export const StatsView: React.FC = () => {
     </div>
   );
 
-  if (isLoading) return <div className="space-y-4">{header}<div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-indigo-600 animate-spin" /></div></div>;
+  if (isLoading) return (
+    <div className="space-y-4">
+      {header}
+      <div role="status" aria-label="Загрузка статистики" className="space-y-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24 rounded-card" />)}</div>
+        <Skeleton className="h-64 rounded-card" />
+      </div>
+    </div>
+  );
   if (error || !data) return <div className="space-y-4">{header}<div className="p-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-2xl">Не удалось загрузить статистику. Убедитесь, что вы администратор.</div></div>;
 
   const people = data.people;
@@ -303,7 +311,8 @@ export const StatsView: React.FC = () => {
     : undefined;
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto">
+    <div className="space-y-4 max-w-7xl mx-auto">
+      <PageHeader icon={BarChart3} title="Статистика" description="Как пользуются сайтом: генерации, люди, предметы и банк вопросов" />
       {header}
 
       {/* Главные цифры */}
@@ -313,7 +322,7 @@ export const StatsView: React.FC = () => {
         <Kpi label="Пользовались" value={data.totals.users} prev={data.prev?.users} prevLabel={period.prevLabel} note={people ? `из ${people.total} аккаунтов` : undefined} />
         {data.today
           ? <Kpi label="Сегодня" value={data.today.batches} prevLabel="" note={`${data.today.users} ${plural(data.today.users, 'человек', 'человека', 'человек')}`} />
-          : <Kpi label="Через Telegram" value={data.totals.telegram ?? 0} prevLabel="" note="бот и Mini App" />}
+          : <Kpi label="Через Telegram" value={data.totals.telegram ?? 0} prevLabel="" note="бот и мини-приложение" />}
       </div>
 
       <Card title="Активность" hint={days <= 31 ? 'Генерации по дням — коснитесь столбика' : days <= 120 ? 'Генерации по неделям' : 'Генерации по месяцам'}>

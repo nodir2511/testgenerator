@@ -65,7 +65,7 @@ export default function ErrorToaster() {
                 ? <Info className="h-5 w-5 shrink-0 text-amber-600" />
                 : <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />}
               <p className={`min-w-0 flex-1 text-sm ${it.kind === "info" ? "text-slate-700" : "font-semibold text-slate-900"}`}>{it.title}</p>
-              <button onClick={() => close(it.id)} className="text-slate-500 hover:text-slate-600" aria-label="Закрыть">
+              <button onClick={() => close(it.id)} className="text-slate-500 hover:text-slate-600 min-h-[40px]" aria-label="Закрыть">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -84,7 +84,7 @@ export default function ErrorToaster() {
                   </details>
                 )}
               </div>
-              <button onClick={() => close(it.id)} className="text-slate-500 hover:text-slate-600" aria-label="Закрыть">
+              <button onClick={() => close(it.id)} className="text-slate-500 hover:text-slate-600 min-h-[40px]" aria-label="Закрыть">
                 <X className="h-4 w-4" />
               </button>
             </div>

@@ -41,7 +41,7 @@ export default function UpdateBanner() {
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] max-w-[calc(100vw-2rem)]" role="status">
       <button
         onClick={() => window.location.reload()}
-        className="flex items-center gap-2 rounded-full bg-slate-900 text-white shadow-lg px-4 py-2.5 text-sm font-medium hover:bg-slate-700 transition"
+        className="flex items-center gap-2 rounded-full bg-slate-900 text-white shadow-lg px-4 py-2.5 text-sm font-medium hover:bg-slate-700 transition min-h-[40px]"
       >
         <RefreshCw className="w-4 h-4 shrink-0" />
         <span>Вышло обновление — нажмите, чтобы применить</span>
