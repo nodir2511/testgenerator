@@ -653,3 +653,176 @@ body.tg-body {
 .tg-btn-secondary:active {
   transform: scale(0.98);
 }
+
+/* ---- Минималистичная доработка: единые радиусы, тонкие рамки вместо теней ---- */
+body.tg-body {
+  --line: color-mix(in srgb, var(--fg) 9%, transparent);
+  --tint: color-mix(in srgb, var(--btn) 10%, transparent);
+}
+
+.tg-app {
+  padding-top: 16px;
+}
+
+.tg-app h1 {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 8px 2px 6px;
+}
+
+.tg-app h2 {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  margin: 20px 4px 8px;
+}
+
+.tg-hint {
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.tg-nav,
+.tg-card,
+.tg-step,
+.tg-presets,
+.tg-row,
+.tg-chip,
+.tg-field input {
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+
+.tg-nav {
+  padding: 12px 16px 14px;
+  border-radius: 16px;
+}
+
+.tg-nav-badge {
+  background: var(--tint);
+  letter-spacing: 0.08em;
+}
+
+.tg-progress-track {
+  height: 3px;
+}
+
+.tg-progress-fill {
+  background: var(--btn);
+}
+
+.tg-row {
+  border-radius: 16px;
+  padding: 13px 14px;
+  margin-bottom: 8px;
+}
+
+.tg-row.on,
+.tg-row.on:active {
+  border-color: var(--btn);
+  background: var(--tint);
+}
+
+.tg-subject-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: var(--bg2);
+}
+
+.tg-subject-row:active {
+  border-color: var(--btn);
+}
+
+.tg-step,
+.tg-presets {
+  border-radius: 16px;
+}
+
+.tg-stepper button,
+.tg-stepper input {
+  border-radius: 12px;
+}
+
+.tg-preset-btn {
+  border: 1px solid transparent;
+  border-radius: 13px;
+}
+
+.tg-preset-btn.on {
+  border-color: var(--btn);
+  background: var(--tint);
+}
+
+.tg-chip {
+  border-radius: 13px;
+}
+
+.tg-chip.on {
+  border-color: var(--btn);
+  box-shadow: none;
+}
+
+.tg-field input {
+  border-radius: 14px;
+}
+
+.tg-field input:focus {
+  border-color: var(--btn);
+}
+
+.tg-health {
+  border-radius: 16px;
+}
+
+.tg-health-dot {
+  box-shadow: none !important;
+}
+
+.tg-btn-primary {
+  height: 50px;
+  border-radius: 14px;
+  box-shadow: none;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+
+.tg-btn-secondary {
+  height: 46px;
+  border-radius: 14px;
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
+.tg-done-icon {
+  background: #10b981;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.25);
+}
+
+.tg-done-summary {
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 16px;
+}
+
+.tg-done-row {
+  border-bottom-color: var(--line);
+}
+
+/* Мягкое появление экрана при смене шага */
+@keyframes tg-fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tg-app > h1,
+.tg-app > .tg-hint,
+.tg-app > .tg-row,
+.tg-app > .tg-step,
+.tg-app > .tg-card {
+  animation: tg-fade-up 0.28s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tg-app > * { animation: none !important; }
+}
