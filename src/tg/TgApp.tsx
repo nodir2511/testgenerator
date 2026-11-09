@@ -26,6 +26,7 @@ interface WebApp {
     onClick(cb: () => void): void; offClick(cb: () => void): void;
   };
   BackButton: { show(): void; hide(): void; onClick(cb: () => void): void; offClick(cb: () => void): void };
+  colorScheme?: 'light' | 'dark';
   onEvent?(e: string, cb: () => void): void;
   CloudStorage?: {
     getItem(key: string, cb: (err: unknown, value?: string) => void): void;
@@ -741,8 +742,11 @@ export default function TgApp() {
 
 function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
+    const sync = () => document.body.classList.toggle('tg-dark', wa()?.colorScheme === 'dark');
     document.body.classList.add('tg-body');
-    return () => document.body.classList.remove('tg-body');
+    sync();
+    wa()?.onEvent?.('themeChanged', sync);
+    return () => document.body.classList.remove('tg-body', 'tg-dark');
   }, []);
   return <main className="tg-app">{children}</main>;
 }
