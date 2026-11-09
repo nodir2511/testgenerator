@@ -211,7 +211,12 @@ export const QualityView: React.FC = () => {
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [scan]);
   const shownIssues = scan ? scan.issues.filter((x) => code === 'all' || x.codes.includes(code)) : [];
-  const isApproved = (p: { a: string; b: string }) => approved.has(keyOf(p.a, p.b));
+  // Связанные вопросы в один билет не попадают, поэтому как дубли не показываются: они в «Одобренных» (с отметкой «Связаны»)
+  const isLinkedPair = (p: { a: string; b: string }) => {
+    const x = scan?.byId.get(p.a), y = scan?.byId.get(p.b);
+    return !!x && !!y && linked(x, y);
+  };
+  const isApproved = (p: { a: string; b: string }) => approved.has(keyOf(p.a, p.b)) || isLinkedPair(p);
   const shownPairs = scan ? scan.pairs.filter((p) => p.score >= level && (pairKind === 'approved' ? isApproved(p) : !isApproved(p) && p.answerDiffers === (pairKind === 'answers'))) : [];
   const approvedCount = scan ? scan.pairs.filter((p) => p.score >= level && isApproved(p)).length : 0;
 
@@ -348,7 +353,9 @@ export const QualityView: React.FC = () => {
                       ))}
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         {pairKind === 'approved' ? (
-                          <Button variant="secondary" size="sm" onClick={() => setPair(p.a, p.b, false)}>Вернуть в список</Button>
+                          linked(a, b)
+                            ? <Badge tone="success">Связаны: в один билет не попадут</Badge>
+                            : <Button variant="secondary" size="sm" onClick={() => setPair(p.a, p.b, false)}>Вернуть в список</Button>
                         ) : (
                           <>
                             <Button variant="secondary" size="sm" onClick={() => setPair(p.a, p.b, true)}>
