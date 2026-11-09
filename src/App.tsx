@@ -83,6 +83,10 @@ export const App: React.FC = () => {
   const ownerOnlyTabs: TabType[] = ['cluster', 'usage', 'quality'];
   const currentTab: TabType = (!isAdmin && adminOnlyTabs.includes(activeTab)) || (!isStaff && staffOnlyTabs.includes(activeTab)) || (!isOwner && ownerOnlyTabs.includes(activeTab)) ? 'generator' : activeTab;
 
+  // Вкладок администрирования больше, чем помещается на телефоне: полосу можно листать, активная вкладка всегда в кадре
+  React.useEffect(() => {
+    document.querySelector('[data-admin-tab-active="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }, [currentTab]);
   React.useEffect(() => {
     localStorage.setItem('examiner_active_tab', activeTab);
   }, [activeTab]);
@@ -528,12 +532,13 @@ export const App: React.FC = () => {
         ) : (
           <>
             {isAdminSection && (
-              <div className="flex space-x-1 mb-5 border-b border-slate-200 xl:hidden">
+              <div className="flex space-x-1 mb-5 border-b border-slate-200 xl:hidden overflow-x-auto no-scrollbar max-w-full">
                 {([['users', 'Пользователи', Users], ['stats', 'Статистика', BarChart3], ...(isOwner ? [['usage', 'Подборы', Layers] as const, ['quality', 'Качество', ShieldCheck] as const] : []), ['trash', 'Корзина', Trash2]] as const).map(([id, label, Icon]) => (
                   <button
                     key={id}
                     onClick={() => goTab(id)}
-                    className={`flex-1 sm:flex-none justify-center min-h-[44px] px-3 sm:px-4 text-sm font-semibold border-b-2 -mb-px flex items-center space-x-2 whitespace-nowrap transition-all ${
+                    data-admin-tab-active={currentTab === id}
+                    className={`flex-1 shrink-0 sm:flex-none justify-center min-h-[44px] px-3 sm:px-4 text-sm font-semibold border-b-2 -mb-px flex items-center space-x-2 whitespace-nowrap transition-all ${
                       currentTab === id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'
                     }`}
                   >
