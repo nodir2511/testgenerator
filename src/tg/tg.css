@@ -826,3 +826,105 @@ body.tg-body {
 @media (prefers-reduced-motion: reduce) {
   .tg-app > * { animation: none !important; }
 }
+
+/* ---- Стиль сайта: Plus Jakarta Sans, индиго-акцент, палитра slate, мягкие карточки ---- */
+body.tg-body {
+  --btn: #4f46e5;
+  --btn-fg: #ffffff;
+  --link: #4f46e5;
+  --tint: rgba(79, 70, 229, 0.08);
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Светлая тема — как на сайте: slate-50 фон, белые карточки, рамка slate-200 */
+body.tg-body:not(.tg-dark) {
+  --bg: #ffffff;
+  --bg2: #f8fafc;
+  --fg: #0f172a;
+  --hint: #64748b;
+  --line: rgba(226, 232, 240, 0.95);
+  background: #f8fafc;
+}
+
+/* Тёмная тема — slate-900 и индиго чуть светлее для контраста */
+body.tg-body.tg-dark {
+  --bg: #1e293b;
+  --bg2: #0f172a;
+  --fg: #f1f5f9;
+  --hint: #94a3b8;
+  --btn: #6366f1;
+  --link: #818cf8;
+  --tint: rgba(99, 102, 241, 0.16);
+  --line: rgba(51, 65, 85, 0.9);
+  background: #0f172a;
+}
+
+.tg-app h1 {
+  letter-spacing: -0.025em;
+}
+
+.tg-nav,
+.tg-card,
+.tg-step,
+.tg-presets,
+.tg-row,
+.tg-done-summary {
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.02);
+}
+
+body.tg-dark .tg-nav,
+body.tg-dark .tg-card,
+body.tg-dark .tg-step,
+body.tg-dark .tg-presets,
+body.tg-dark .tg-row {
+  box-shadow: none;
+}
+
+.tg-nav-badge {
+  background: rgba(79, 70, 229, 0.1);
+  color: var(--btn);
+}
+
+.tg-progress-fill {
+  background: var(--btn);
+}
+
+.tg-btn-primary {
+  background: var(--btn);
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.3);
+}
+
+.tg-chip.on,
+.tg-preset-btn.on {
+  border-color: var(--btn);
+}
+
+.tg-chip.on {
+  background: var(--btn);
+  color: #ffffff;
+}
+
+.tg-preset-btn.on {
+  background: var(--tint);
+  color: var(--btn);
+}
+
+.tg-row.on {
+  border-color: var(--btn);
+  background: var(--tint);
+}
+
+.tg-error { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+.tg-warn  { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+.tg-health.green  { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+.tg-health.yellow { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+.tg-health.red    { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+.tg-done-icon { background: #059669; }
+
+body.tg-dark .tg-error  { background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5; }
+body.tg-dark .tg-warn   { background: rgba(245, 158, 11, 0.14); border-color: rgba(245, 158, 11, 0.3); color: #fcd34d; }
+body.tg-dark .tg-health.green  { background: rgba(16, 185, 129, 0.14); border-color: rgba(16, 185, 129, 0.3); color: #6ee7b7; }
+body.tg-dark .tg-health.yellow { background: rgba(245, 158, 11, 0.14); border-color: rgba(245, 158, 11, 0.3); color: #fcd34d; }
+body.tg-dark .tg-health.red    { background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5; }
