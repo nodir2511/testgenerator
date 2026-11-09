@@ -14,6 +14,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
 import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser as linkedUserOf, userMessage } from '../_shared/generate.ts';
 import { LAW_RE } from '../_shared/answerKey.ts';
+import { chunkLines, itemVisible, rankOf, releaseLines, type ReleaseItem, type ReleaseRow } from '../_shared/releases.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -30,7 +31,8 @@ const MAIN_KEYBOARD = {
     [{ text: '🚀 Конструктор билетов' }],
     [{ text: '📝 Пошагово в чате' }],
     [{ text: '⚡ Быстрый билет' }, { text: '📂 Мои билеты' }],
-    [{ text: 'ℹ️ Профиль и лимиты' }, { text: '❓ Помощь' }],
+    [{ text: 'ℹ️ Профиль и лимиты' }],
+    [{ text: '🆕 Что нового' }, { text: '❓ Помощь' }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -467,6 +469,31 @@ async function handleResend(chat: number, msgId: number, batchId: string, user: 
   }
 }
 
+// «Что нового»: последние версии, только изменения сайта, по роли и предметам пользователя
+async function screenWhatsNew(chat: number, user: { id: string; role?: string }) {
+  const [{ data: prof }, allowed, { data: rels }] = await Promise.all([
+    sb.from('profiles').select('is_owner').eq('id', user.id).maybeSingle(),
+    allowedSubjectIds(sb, user),
+    sb.from('site_releases').select('id, version, title, released_at').order('released_at', { ascending: false }).limit(10),
+  ]);
+  const rank = rankOf(user.role, prof?.is_owner);
+  const ids = (rels ?? []).map((r: any) => r.id);
+  const { data: itemRows } = ids.length
+    ? await sb.from('site_release_items').select('release_id, kind, scope, text, min_rank, subject_id, order_index')
+        .in('release_id', ids).eq('scope', 'site').lte('min_rank', rank).order('order_index')
+    : { data: [] as any[] };
+  const rows: ReleaseRow[] = (rels ?? []).map((r: any) => ({
+    version: r.version,
+    title: r.title,
+    items: (itemRows ?? [])
+      .filter((i: any) => i.release_id === r.id && itemVisible(i, rank, allowed))
+      .map((i: any): ReleaseItem => ({ kind: i.kind, scope: 'site', text: i.text, min_rank: i.min_rank, subject_id: i.subject_id })),
+  })).filter((r: ReleaseRow) => r.items.length).slice(0, 3);
+  if (!rows.length) return send(chat, 'Пока нет обновлений сайта для вашей роли.');
+  const lines = ['🆕 <b>Что нового на сайте</b>', '', ...releaseLines(rows), '', '<i>Полный список — на сайте, во вкладке «Что нового».</i>'];
+  for (const chunk of chunkLines(lines)) await send(chat, chunk);
+}
+
 async function screenHelp(chat: number) {
   const text = (
     `❓ <b>Справка по генератору билетов</b>\n\n` +
@@ -475,12 +502,14 @@ async function screenHelp(chat: number) {
     `1. <b>🚀 Конструктор билетов</b> — полноценное визуальное приложение с фильтрами тем и индикатором запаса вопросов (рекомендуется).\n` +
     `2. <b>⚡ Быстрый билет</b> — экспресс-составление вариантов по стандартам (Физ/Хим 18+2+7, Био/Гос 20+4+2, Право 20+5+0) в 2 клика.\n` +
     `3. <b>📝 Пошагово в чате</b> — выбор предмета, затем глав и тем сообщением с номерами (например 1-4 или 1,2,3,4).\n` +
-    `4. <b>📂 Мои билеты</b> — доступ к ранее созданным наборам с возможностью повторно скачать файл.\n\n` +
+    `4. <b>🆕 Что нового</b> — последние обновления сайта для вашей роли. О каждой новой версии бот пишет сам.\n` +
+    `5. <b>📂 Мои билеты</b> — доступ к ранее созданным наборам с возможностью повторно скачать файл.\n\n` +
     `<b>Команды:</b>\n` +
     `• /app — открыть конструктор билетов\n` +
     `• /quick — экспресс-билет\n` +
     `• /history — история билетов\n` +
     `• /profile — лимиты и статус аккаунта\n` +
+    `• /whatsnew — что нового\n` +
     `• /ticket — пошаговый мастер в чате\n` +
     `• /unlink — отвязать Telegram от аккаунта`
   );
@@ -616,6 +645,9 @@ async function onMessage(m: any) {
   }
   if (text === 'ℹ️ Профиль и лимиты' || text === '/profile') {
     return screenProfile(chat, user);
+  }
+  if (text === '🆕 Что нового' || text === '/whatsnew') {
+    return screenWhatsNew(chat, user);
   }
   if (text === '❓ Помощь' || text === '/help') {
     return screenHelp(chat);

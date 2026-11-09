@@ -195,11 +195,15 @@ export interface AuditLog {
 /** Уровень роли для видимости обновлений: 4 главный админ, 3 админ, 2 админ по предметам, 1 преподаватель */
 export type ReleaseRank = 1 | 2 | 3 | 4;
 export type ReleaseItemKind = 'new' | 'fixed' | 'improved';
+/** Где произошло изменение: сайт, чат-бот Telegram или мини-приложение */
+export type ReleaseItemScope = 'site' | 'bot' | 'app';
 
 export interface SiteReleaseItem {
   id: string;
   release_id: string;
   kind: ReleaseItemKind;
+  /** Где изменение; у старых записей может отсутствовать (тогда — сайт) */
+  scope?: ReleaseItemScope;
   text: string;
   min_rank: ReleaseRank;
   /** Если задан, пункт видят только те, кому доступен этот предмет */

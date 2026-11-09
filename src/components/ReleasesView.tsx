@@ -4,19 +4,19 @@ import { Loader2, Pencil, Plus, Trash2, X, Megaphone } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 import { useReleases } from '../hooks/useReleases';
-import { KIND_LABELS, RANK_LABELS } from '../lib/releases';
-import { ReleaseItemKind, ReleaseRank, SiteRelease } from '../types/database';
+import { KIND_LABELS, RANK_LABELS, SCOPE_LABELS } from '../lib/releases';
+import { ReleaseItemKind, ReleaseItemScope, ReleaseRank, SiteRelease } from '../types/database';
 import { ReleaseCard } from './ReleaseCard';
 import { CustomSelect } from './CustomSelect';
 import { confirmAction } from '../lib/confirm';
 import { Button, Card, EmptyState, PageHeader, SkeletonList } from './ui';
 
-interface DraftItem { kind: ReleaseItemKind; text: string; min_rank: ReleaseRank; subject_id: string }
+interface DraftItem { kind: ReleaseItemKind; scope: ReleaseItemScope; text: string; min_rank: ReleaseRank; subject_id: string }
 type SubjectOpt = { id: string; name: string };
 interface Draft { id?: string; version: string; title: string; released_at: string; items: DraftItem[] }
 
 const today = () => new Date().toISOString().slice(0, 10);
-const emptyDraft = (): Draft => ({ version: '', title: '', released_at: today(), items: [{ kind: 'new', text: '', min_rank: 1, subject_id: '' }] });
+const emptyDraft = (): Draft => ({ version: '', title: '', released_at: today(), items: [{ kind: 'new', scope: 'site', text: '', min_rank: 1, subject_id: '' }] });
 
 /** Форма главного админа: добавление и правка записей об обновлениях */
 const ReleaseEditor: React.FC<{ initial: Draft; subjects: SubjectOpt[]; onClose: () => void }> = ({ initial, subjects, onClose }) => {
@@ -40,7 +40,7 @@ const ReleaseEditor: React.FC<{ initial: Draft; subjects: SubjectOpt[]; onClose:
         id = data.id as string;
       }
       const { error } = await supabase.from('site_release_items').insert(
-        items.map((i, n) => ({ release_id: id, kind: i.kind, text: i.text.trim(), min_rank: i.min_rank, subject_id: i.subject_id || null, order_index: n })),
+        items.map((i, n) => ({ release_id: id, kind: i.kind, scope: i.scope, text: i.text.trim(), min_rank: i.min_rank, subject_id: i.subject_id || null, order_index: n })),
       );
       if (error) throw error;
     },
@@ -68,9 +68,12 @@ const ReleaseEditor: React.FC<{ initial: Draft; subjects: SubjectOpt[]; onClose:
       </div>
       <div className="space-y-2">
         {draft.items.map((it, n) => (
-          <div key={n} className="grid grid-cols-1 sm:grid-cols-[8rem_1fr_14rem_10rem_auto] gap-2 items-start">
+          <div key={n} className="grid grid-cols-1 sm:grid-cols-[8rem_9rem_1fr_14rem_10rem_auto] gap-2 items-start">
             <CustomSelect className={field} value={it.kind} onChange={(val) => setItem(n, { kind: val as ReleaseItemKind })}>
               {(Object.keys(KIND_LABELS) as ReleaseItemKind[]).map((k) => <option key={k} value={k}>{KIND_LABELS[k]}</option>)}
+            </CustomSelect>
+            <CustomSelect className={field} value={it.scope} onChange={(val) => setItem(n, { scope: val as ReleaseItemScope })}>
+              {(Object.keys(SCOPE_LABELS) as ReleaseItemScope[]).map((k) => <option key={k} value={k}>{SCOPE_LABELS[k]}</option>)}
             </CustomSelect>
             <textarea className={field} rows={2} placeholder="Что изменилось" value={it.text} onChange={(e) => setItem(n, { text: e.target.value })} />
             <CustomSelect className={field} value={it.min_rank} onChange={(val) => setItem(n, { min_rank: Number(val) as ReleaseRank })}>
@@ -86,7 +89,7 @@ const ReleaseEditor: React.FC<{ initial: Draft; subjects: SubjectOpt[]; onClose:
             ><Trash2 className="w-4 h-4" /></button>
           </div>
         ))}
-        <button onClick={() => setDraft((d) => ({ ...d, items: [...d.items, { kind: 'new', text: '', min_rank: 1, subject_id: '' }] }))} className="text-sm font-semibold text-indigo-600 hover:underline min-h-[40px]">
+        <button onClick={() => setDraft((d) => ({ ...d, items: [...d.items, { kind: 'new', scope: 'site', text: '', min_rank: 1, subject_id: '' }] }))} className="text-sm font-semibold text-indigo-600 hover:underline min-h-[40px]">
           + Добавить пункт
         </button>
       </div>
@@ -138,7 +141,7 @@ export const ReleasesView: React.FC = () => {
   const edit = (r: SiteRelease) =>
     setDraft({
       id: r.id, version: r.version, title: r.title, released_at: r.released_at.slice(0, 10),
-      items: [...r.site_release_items].sort((a, b) => a.order_index - b.order_index).map((i) => ({ kind: i.kind, text: i.text, min_rank: i.min_rank, subject_id: i.subject_id ?? '' })),
+      items: [...r.site_release_items].sort((a, b) => a.order_index - b.order_index).map((i) => ({ kind: i.kind, scope: i.scope ?? 'site', text: i.text, min_rank: i.min_rank, subject_id: i.subject_id ?? '' })),
     });
 
   return (

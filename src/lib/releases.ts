@@ -7,6 +7,7 @@ export const RANK_LABELS: Record<ReleaseRank, string> = {
   4: 'Только главный админ',
 };
 
+export const SCOPE_LABELS = { site: 'Сайт', bot: 'Чат-бот', app: 'Мини-приложение' } as const;
 export const KIND_LABELS = { new: 'Новое', fixed: 'Исправлено', improved: 'Улучшено' } as const;
 
 /** Уровень пользователя; совпадает с public.my_rank() в БД (преподаватели — одинаковый уровень) */
