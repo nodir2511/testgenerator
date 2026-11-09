@@ -37,6 +37,7 @@ export const QualityView: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [level, setLevel] = useState(0.85);
   const [code, setCode] = useState<AnyIssue | 'all'>('all');
+  const [pairKind, setPairKind] = useState<'dups' | 'answers'>('dups');
 
   const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
@@ -56,7 +57,7 @@ export const QualityView: React.FC = () => {
       // Дать браузеру перерисоваться перед тяжёлым расчётом
       await new Promise((r) => setTimeout(r, 30));
       const issues = qs.map((q) => ({ q, codes: bankIssues(q) })).filter((x) => x.codes.length > 0);
-      const pairs = findPairs(qs.map(bankDupDoc), { threshold: 0.75 }).sort((x, y) => Number(y.answerDiffers) - Number(x.answerDiffers) || y.score - x.score);
+      const pairs = findPairs(qs.map(bankDupDoc), { threshold: 0.75 });
       setScan({ total: qs.length, byId: new Map(qs.map((q) => [q.id, q])), issues, pairs, at: Date.now() });
     } catch (e) {
       notifyError(e, 'Не удалось проверить банк');
@@ -71,14 +72,14 @@ export const QualityView: React.FC = () => {
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [scan]);
   const shownIssues = scan ? scan.issues.filter((x) => code === 'all' || x.codes.includes(code)) : [];
-  const shownPairs = scan ? scan.pairs.filter((p) => p.score >= level) : [];
+  const shownPairs = scan ? scan.pairs.filter((p) => p.score >= level && p.answerDiffers === (pairKind === 'answers')) : [];
 
   return (
     <div className="space-y-4">
       <PageHeader
         icon={ShieldCheck}
         title="Качество банка"
-        description={<>Поиск ошибок в вопросах и повторов внутри предмета. <Hint label="Что проверяется">Ошибки: нет правильного ответа, не по стандарту, пустой текст или вариант, одинаковые варианты, сломанные теги оформления, неверная ссылка на картинку. Дубли: одинаковые и почти одинаковые вопросы (по русскому и таджикскому тексту). Если вопрос тот же, а правильный ответ разный, пара помечается отдельно: это не повтор, а противоречие, и такие пары идут первыми. Смысловые перефразировки не находятся. Раздел ничего не меняет.</Hint></>}
+        description={<>Поиск ошибок в вопросах и повторов внутри предмета. <Hint label="Что проверяется">Ошибки: нет правильного ответа, не по стандарту, пустой текст или вариант, одинаковые варианты, сломанные теги оформления, неверная ссылка на картинку. Дубли: одинаковые и почти одинаковые вопросы (по русскому и таджикскому тексту). Вопросы с одной формулировкой, но другими вариантами и другим верным ответом («какой из вариантов щёлочь») разными и считаются. «Ответы расходятся» — это когда формулировка и набор вариантов те же, а верный ответ другой: стоит проверить, какая запись верна. Смысловые перефразировки не находятся. Раздел ничего не меняет.</Hint></>}
       />
       <div className="flex flex-col sm:flex-row gap-3">
         <select
@@ -142,7 +143,19 @@ export const QualityView: React.FC = () => {
 
           <Card as="section" padding="none" className="p-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <h3 className="font-bold text-slate-900 text-base">Возможные дубли ({shownPairs.length})</h3>
+              <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl" role="radiogroup" aria-label="Что показывать">
+                {([['dups', 'Дубли'], ['answers', 'Ответы расходятся']] as const).map(([k, l]) => (
+                  <button
+                    key={k}
+                    role="radio"
+                    aria-checked={pairKind === k}
+                    onClick={() => setPairKind(k)}
+                    className={`min-h-[40px] px-3 rounded-lg text-sm font-semibold transition ${pairKind === k ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600'}`}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
               <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl" role="radiogroup" aria-label="Строгость поиска">
                 {LEVELS.map((l) => (
                   <button
@@ -159,7 +172,7 @@ export const QualityView: React.FC = () => {
               </div>
             </div>
             {shownPairs.length === 0 ? (
-              <p className="text-sm text-slate-600 mt-2">Похожих вопросов не найдено.</p>
+              <p className="text-sm text-slate-600 mt-2">{pairKind === 'answers' ? 'Таких вопросов не найдено.' : 'Похожих вопросов не найдено.'}</p>
             ) : (
               <ul className="mt-3 space-y-3">
                 {shownPairs.slice(0, SHOW).map((p) => {
@@ -169,7 +182,7 @@ export const QualityView: React.FC = () => {
                     <li key={`${p.a}-${p.b}`} className="rounded-xl border border-slate-200 p-3">
                       <div className="flex items-center gap-2 mb-2">
                         {p.answerDiffers
-                          ? <Badge tone="danger">Вопрос тот же, ответы разные — одна запись неверна</Badge>
+                          ? <Badge tone="warning">Те же варианты, но верный ответ другой — проверьте</Badge>
                           : <Badge tone={p.exact ? 'danger' : 'warning'}>{p.exact ? 'Точный дубль' : `Похожи на ${Math.round(p.score * 100)}%`}</Badge>}
                       </div>
                       {[a, b].map((q) => (

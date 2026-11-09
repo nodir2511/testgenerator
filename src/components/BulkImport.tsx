@@ -1250,13 +1250,13 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                               <div className="flex flex-wrap gap-1">{c.codes.map((k) => <Badge key={k} tone="warning">{CHECK_LABELS[k]}</Badge>)}</div>
                             )}
                             {c.inFile.map((d) => (
-                              <div key={d.rowNum} className={d.answerDiffers ? 'text-red-700 font-semibold' : 'text-amber-700'}>
-                                {d.answerDiffers ? 'Тот же вопрос, но ответ другой, чем в строке' : d.exact ? 'Повторяет строку' : `Похож на ${Math.round(d.score * 100)}% на строку`} #{d.rowNum} этого файла
+                              <div key={d.rowNum} className={'text-amber-700'}>
+                                {d.answerDiffers ? 'Те же варианты, но верный ответ другой, чем в строке' : d.exact ? 'Повторяет строку' : `Похож на ${Math.round(d.score * 100)}% на строку`} #{d.rowNum} этого файла
                               </div>
                             ))}
                             {c.bank.map((d) => (
-                              <div key={d.id} className={d.answerDiffers ? 'text-red-700 font-semibold' : 'text-amber-700'}>
-                                {d.answerDiffers ? 'Такой вопрос есть в банке, но ответ другой — проверьте, какой верный' : d.exact ? 'Уже есть в банке' : `Похож на ${Math.round(d.score * 100)}% на вопрос из банка`}: «{d.text}» <span className="text-slate-500">({d.where})</span>
+                              <div key={d.id} className={'text-amber-700'}>
+                                {d.answerDiffers ? 'Такой вопрос с теми же вариантами есть в банке, но верный ответ другой — проверьте' : d.exact ? 'Уже есть в банке' : `Похож на ${Math.round(d.score * 100)}% на вопрос из банка`}: «{d.text}» <span className="text-slate-500">({d.where})</span>
                               </div>
                             ))}
                           </div>

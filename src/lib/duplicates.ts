@@ -17,7 +17,7 @@ export interface DupDoc {
   /** Ответ открытого вопроса: с разными ответами вопросы не считаются одинаковыми */
   answer?: string | null;
 }
-/** answerDiffers: вопрос тот же, но правильные ответы разные — это не повтор, а противоречие, одна из записей ошибочна */
+/** answerDiffers: вопрос и набор вариантов те же, а верный ответ другой — стоит проверить, какая запись верна (не повтор). С другими вариантами такие вопросы разными считаются и не находятся */
 export interface DupMatch { id: string; score: number; exact: boolean; answerDiffers: boolean }
 
 export const normalizeText = (s?: string | null) =>
@@ -75,8 +75,12 @@ function docScore(a: PreparedDoc, b: PreparedDoc): { score: number; exact: boole
   let best = { score: 0, exact: false, answerDiffers: false };
   for (const va of a.variants) for (const vb of b.variants) {
     const r = pairScore(va, vb);
+    const differs = va.answer !== null && vb.answer !== null && va.answer !== vb.answer;
+    // Тот же вопрос, но варианты разные и верный ответ другой («какой из вариантов щёлочь»: NaOH, KOH, Ca(OH)2) —
+    // это разные вопросы, а не повтор и не ошибка. Расхождением считается только набор вариантов один в один.
+    if (differs && va.hasOptions && vb.hasOptions && va.options !== vb.options) continue;
     if (r.score > best.score || (r.score === best.score && r.exact)) {
-      best = { ...r, answerDiffers: va.answer !== null && vb.answer !== null && va.answer !== vb.answer };
+      best = { ...r, answerDiffers: differs };
     }
   }
   // Открытый вопрос: числовой ответ хранится на уровне вопроса

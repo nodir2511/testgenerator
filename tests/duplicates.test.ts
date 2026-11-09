@@ -48,6 +48,15 @@ describe('findSimilar', () => {
     expect(same[0]).toMatchObject({ id: 'a', answerDiffers: false, exact: true });
   });
 
+  it('«какой из вариантов щёлочь»: другие варианты и другой верный ответ — разные вопросы', () => {
+    const q = 'Какой из вариантов является щёлочью?';
+    const base = buildIndex([
+      doc('a', q, ['NaOH', 'HCl', 'H2SO4', 'NaCl'], undefined, ['NaOH']),
+      doc('b', q, ['KOH', 'HCl', 'H2SO4', 'NaCl'], undefined, ['KOH']),
+    ]);
+    expect(findSimilar(base, doc('n', q, ['Ca(OH)<sub>2</sub>', 'HCl', 'H2SO4', 'NaCl'], undefined, ['Ca(OH)2']), { threshold: 0.5 })).toHaveLength(0);
+  });
+
   it('если верный ответ у одного из вопросов неизвестен — расхождением не считается', () => {
     const base = buildIndex([doc('a', 'Вопрос про воздух и газы', ['Азот', 'Кислород'], undefined, ['Азот'])]);
     expect(findSimilar(base, doc('n', 'Вопрос про воздух и газы', ['Азот', 'Кислород']))[0].answerDiffers).toBe(false);
