@@ -481,23 +481,16 @@ export function parseNumbers(text: string, max: number): number[] | 'all' | null
   return out.size ? [...out].sort((x, y) => x - y) : null;
 }
 
-// Сетка кнопок-номеров (6 в ряд): нажатие переключает пункт
-function numGrid(count: number, isOn: (i: number) => boolean, prefix: string): Kb {
-  const btns: Btn[] = [];
-  for (let i = 0; i < count; i++) btns.push({ text: `${isOn(i) ? '✅' : ''}${i + 1}`, callback_data: `${prefix}:${i}` });
-  return chunk(btns, 6);
-}
-
 function numberedList(items: Array<{ id: string; name: string }>, selected: string[]): string {
   return items.map((c, i) => `${selected.includes(c.id) ? '✅' : '▫️'} ${i + 1}. ${shortName(c.name)}`).join('\n');
 }
 
 export function chaptersText(chapters: Array<{ id: string; name: string }>, selected: string[]): string {
-  return `Выберите главы: нажимайте номера или отправьте текстом, например 1-3, 5 (или «все»).\n\n${numberedList(chapters, selected)}`;
+  return `Выберите главы: отправьте номера сообщением — например 1-4 или 1,2,3,4 (или «все»).\n\n${numberedList(chapters, selected)}`;
 }
 
 export function kbChapters(chapters: Array<{ id: string; name: string }>, selected: string[]): Kb {
-  const rows = numGrid(chapters.length, (i) => selected.includes(chapters[i].id), 'C');
+  const rows: Kb = [];
   rows.push([{ text: 'Все главы', callback_data: 'CA' }, { text: 'Сбросить', callback_data: 'CR' }]);
   rows.push([{ text: 'Далее ▶', callback_data: 'CN' }]);
   return rows;
@@ -508,11 +501,11 @@ export function topicsText(chapterName: string, pos: number, total: number, topi
   if (!topics.length) return `${head}\n\nВ этой главе нет тем — будут взяты все вопросы главы.`;
   const n = topics.filter((t) => selected.includes(t.id)).length;
   const note = n ? `Выбрано: ${n} из ${topics.length}.` : 'Ничего не выбрано — возьмутся все темы главы.';
-  return `${head}\n${note}\nНажимайте номера или отправьте текстом, например 1-4, 7 (или «все»).\n\n${numberedList(topics, selected)}`;
+  return `${head}\n${note}\nОтправьте номера тем сообщением — например 1-4 или 1,2,3,4 (или «все»).\n\n${numberedList(topics, selected)}`;
 }
 
 export function kbTopics(topics: Array<{ id: string; name: string }>, selected: string[], isLast: boolean): Kb {
-  const rows = numGrid(topics.length, (i) => selected.includes(topics[i].id), 'T');
+  const rows: Kb = [];
   rows.push([{ text: 'Все темы главы', callback_data: 'TX' }]);
   rows.push([{ text: '◀ Назад', callback_data: 'TB' }, { text: isLast ? 'Далее ▶' : 'След. глава ▶', callback_data: 'TN' }]);
   return rows;
