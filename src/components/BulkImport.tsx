@@ -4,7 +4,7 @@ import { readSheet } from 'read-excel-file/browser';
 import writeExcelFile from 'write-excel-file/browser';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { must, notifySuccess } from '../lib/errors';
+import { must, notifyError, notifySuccess } from '../lib/errors';
 import { Subject, Chapter, Topic, Source, QuestionType } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { parseDocxFile } from '../lib/docxImport';
@@ -28,6 +28,8 @@ import {
   Layers
 } from 'lucide-react';
 import { confirmAction } from '../lib/confirm';
+import { checkImportRows, type RowCheck } from '../lib/importCheck';
+import { CHECK_LABELS } from '../lib/questionChecks';
 import { Badge, Button, Field, Hint, IconButton, PageHeader } from './ui';
 
 type ImportLang = 'ru' | 'tg';
@@ -104,7 +106,7 @@ interface ImportReport {
 
 export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
   const queryClient = useQueryClient();
-  const { user, isStaff: isAdmin } = useAuth();
+  const { user, isStaff: isAdmin, isOwner } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'file' | 'text' | 'history'>('file');
   const [pastedText, setPastedText] = useState('');
@@ -114,6 +116,11 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [sectionFilter, setSectionFilter] = useState('');
+  // Проверка на ошибки и дубли (только главный админ): результаты по номеру строки; сбрасываются при смене строк
+  const [rowChecks, setRowChecks] = useState<Record<number, RowCheck> | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [onlyFlagged, setOnlyFlagged] = useState(false);
+  React.useEffect(() => { setRowChecks(null); setOnlyFlagged(false); }, [parsedRows]);
   // Язык одного файла и режим «пара файлов» (русский + таджикский → двуязычные вопросы)
   const [fileLang, setFileLang] = useState<ImportLang>('ru');
   const [pairMode, setPairMode] = useState(false);
@@ -775,8 +782,21 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     },
   });
 
+  const runChecks = async () => {
+    if (checking) return;
+    setChecking(true);
+    try {
+      setRowChecks(await checkImportRows(parsedRows, subjects, defaultSubjectId));
+    } catch (e) {
+      notifyError(e, 'Не удалось проверить вопросы');
+    } finally {
+      setChecking(false);
+    }
+  };
+  const flagged = (r: ParsedRow) => { const c = rowChecks?.[r.rowNum]; return !!c && (c.codes.length > 0 || c.bank.length > 0 || c.inFile.length > 0); };
+  const flaggedCount = rowChecks ? parsedRows.filter(flagged).length : 0;
   const sectionNames = Array.from(new Set(parsedRows.map(r => r.section).filter((x): x is string => !!x)));
-  const visibleRows = sectionFilter ? parsedRows.filter(r => r.section === sectionFilter) : parsedRows;
+  const visibleRows = (sectionFilter ? parsedRows.filter(r => r.section === sectionFilter) : parsedRows).filter(r => !onlyFlagged || flagged(r));
   const validRows = visibleRows.filter(r => r.errors.length === 0);
   const errorRowsCount = visibleRows.filter(r => r.errors.length > 0).length;
   const warningRowsCount = visibleRows.filter(r => r.errors.length === 0 && (r.warnings?.length || 0) > 0).length;
@@ -1116,6 +1136,27 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               </div>
             </div>
 
+            {isOwner && (
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                <Button variant="secondary" onClick={runChecks} loading={checking} className="whitespace-nowrap">
+                  {rowChecks ? 'Проверить заново' : 'Проверить на дубли и ошибки'}
+                </Button>
+                {rowChecks && (
+                  <>
+                    <span className="text-slate-700">
+                      {flaggedCount === 0 ? 'Замечаний нет' : <>С замечаниями: <b>{flaggedCount}</b> из {parsedRows.length}</>}
+                    </span>
+                    {flaggedCount > 0 && (
+                      <label className="flex items-center gap-2 cursor-pointer select-none text-slate-800">
+                        <input type="checkbox" checked={onlyFlagged} onChange={(e) => setOnlyFlagged(e.target.checked)} className="w-4 h-4 rounded text-indigo-600" />
+                        Только с замечаниями
+                      </label>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             {sectionNames.length > 1 && (
               <div className="flex items-center gap-2 text-xs">
                 <label className="font-semibold text-slate-600 shrink-0">Раздел документа:</label>
@@ -1201,6 +1242,24 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
                           <span>{r.warnings.join('; ')}</span>
                         </div>
                       )}
+                      {rowChecks?.[r.rowNum] && (() => {
+                        const c = rowChecks[r.rowNum];
+                        return (
+                          <div className="mt-1 space-y-1 text-xs">
+                            {c.codes.length > 0 && (
+                              <div className="flex flex-wrap gap-1">{c.codes.map((k) => <Badge key={k} tone="warning">{CHECK_LABELS[k]}</Badge>)}</div>
+                            )}
+                            {c.inFile.map((d) => (
+                              <div key={d.rowNum} className="text-amber-700">{d.exact ? 'Повторяет' : `Похож на ${Math.round(d.score * 100)}%:`} строку #{d.rowNum} этого файла</div>
+                            ))}
+                            {c.bank.map((d) => (
+                              <div key={d.id} className="text-amber-700">
+                                {d.exact ? 'Уже есть в банке' : `Похож на ${Math.round(d.score * 100)}% на вопрос из банка`}: «{d.text}» <span className="text-slate-500">({d.where})</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     <div className="flex items-center space-x-3 shrink-0">
