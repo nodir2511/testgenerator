@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildIndex, findPairs, findSimilar, normalizeText, type DupDoc } from '../src/lib/duplicates';
 
-const doc = (id: string, content: string, options?: string[], answer?: string): DupDoc => ({ id, variants: [{ content, options }], answer });
+const doc = (id: string, content: string, options?: string[], answer?: string, correct?: string[]): DupDoc => ({ id, variants: [{ content, options, answer: correct ?? null }], answer });
 
 describe('normalizeText', () => {
   it('убирает теги, регистр, знаки и ё', () => {
@@ -34,9 +34,23 @@ describe('findSimilar', () => {
     expect(m.find((x) => x.id === 'a')).toBeUndefined();
   });
 
-  it('открытый вопрос с другим ответом — не дубль', () => {
-    expect(findSimilar(index, doc('new', 'Найдите скорость тела, если путь 10 м, время 2 с', undefined, '7'))).toHaveLength(0);
-    expect(findSimilar(index, doc('new', 'Найдите скорость тела, если путь 10 м, время 2 с', undefined, '5'))[0]?.id).toBe('c');
+  it('открытый вопрос с другим ответом — расхождение ответов, а не дубль', () => {
+    const diff = findSimilar(index, doc('new', 'Найдите скорость тела, если путь 10 м, время 2 с', undefined, '7'));
+    expect(diff[0]).toMatchObject({ id: 'c', answerDiffers: true, exact: false });
+    expect(findSimilar(index, doc('new', 'Найдите скорость тела, если путь 10 м, время 2 с', undefined, '5'))[0]).toMatchObject({ id: 'c', answerDiffers: false, exact: true });
+  });
+
+  it('тест с теми же вариантами, но другим верным ответом — расхождение ответов', () => {
+    const base = buildIndex([doc('a', 'Какой газ входит в состав воздуха больше всего?', ['Азот', 'Кислород', 'Аргон', 'Углекислый газ'], undefined, ['Азот'])]);
+    const other = findSimilar(base, doc('n', 'Какой газ входит в состав воздуха больше всего?', ['Кислород', 'Азот', 'Углекислый газ', 'Аргон'], undefined, ['Кислород']));
+    expect(other[0]).toMatchObject({ id: 'a', answerDiffers: true, exact: false });
+    const same = findSimilar(base, doc('n', 'Какой газ входит в состав воздуха больше всего?', ['Кислород', 'Азот', 'Углекислый газ', 'Аргон'], undefined, ['Азот']));
+    expect(same[0]).toMatchObject({ id: 'a', answerDiffers: false, exact: true });
+  });
+
+  it('если верный ответ у одного из вопросов неизвестен — расхождением не считается', () => {
+    const base = buildIndex([doc('a', 'Вопрос про воздух и газы', ['Азот', 'Кислород'], undefined, ['Азот'])]);
+    expect(findSimilar(base, doc('n', 'Вопрос про воздух и газы', ['Азот', 'Кислород']))[0].answerDiffers).toBe(false);
   });
 
   it('разные вопросы не находятся', () => {

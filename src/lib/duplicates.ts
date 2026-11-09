@@ -7,6 +7,8 @@ export interface DupVariant {
   content: string;
   /** Варианты теста или пункты соответствия (порядок не важен) */
   options?: string[];
+  /** Правильный ответ этой языковой версии (тексты верных вариантов, пары соответствия); не задан — неизвестен */
+  answer?: string[] | null;
 }
 export interface DupDoc {
   id: string;
@@ -15,7 +17,8 @@ export interface DupDoc {
   /** Ответ открытого вопроса: с разными ответами вопросы не считаются одинаковыми */
   answer?: string | null;
 }
-export interface DupMatch { id: string; score: number; exact: boolean }
+/** answerDiffers: вопрос тот же, но правильные ответы разные — это не повтор, а противоречие, одна из записей ошибочна */
+export interface DupMatch { id: string; score: number; exact: boolean; answerDiffers: boolean }
 
 export const normalizeText = (s?: string | null) =>
   (s ?? '')
@@ -44,7 +47,7 @@ const jaccard = (a: Set<string>, b: Set<string>) => {
   return inter / (a.size + b.size - inter);
 };
 
-interface Prepared { content: string; contentGrams: Set<string>; options: string; optionGrams: Set<string>; hasOptions: boolean }
+interface Prepared { content: string; contentGrams: Set<string>; options: string; optionGrams: Set<string>; hasOptions: boolean; answer: string | null }
 interface PreparedDoc { id: string; variants: Prepared[]; answer: string | null }
 
 function prepare(doc: DupDoc): PreparedDoc {
@@ -53,7 +56,8 @@ function prepare(doc: DupDoc): PreparedDoc {
       const content = normalizeText(v.content);
       const opts = (v.options ?? []).map(normalizeText).filter(Boolean).sort();
       const options = opts.join(' | ');
-      return { content, contentGrams: grams(content), options, optionGrams: grams(options), hasOptions: opts.length > 0 };
+      const ans = (v.answer ?? []).map(normalizeText).filter(Boolean).sort().join(' | ');
+      return { content, contentGrams: grams(content), options, optionGrams: grams(options), hasOptions: opts.length > 0, answer: ans || null };
     })
     .filter((v) => v.content !== '');
   return { id: doc.id, variants, answer: doc.answer == null || doc.answer === '' ? null : String(doc.answer).trim() };
@@ -67,13 +71,16 @@ function pairScore(a: Prepared, b: Prepared): { score: number; exact: boolean } 
   return { score: 0.6 * c + 0.4 * o, exact: a.content === b.content && a.options === b.options };
 }
 
-function docScore(a: PreparedDoc, b: PreparedDoc): { score: number; exact: boolean } {
-  if (a.answer !== null && b.answer !== null && a.answer !== b.answer) return { score: 0, exact: false };
-  let best = { score: 0, exact: false };
+function docScore(a: PreparedDoc, b: PreparedDoc): { score: number; exact: boolean; answerDiffers: boolean } {
+  let best = { score: 0, exact: false, answerDiffers: false };
   for (const va of a.variants) for (const vb of b.variants) {
     const r = pairScore(va, vb);
-    if (r.score > best.score || (r.score === best.score && r.exact)) best = r;
+    if (r.score > best.score || (r.score === best.score && r.exact)) {
+      best = { ...r, answerDiffers: va.answer !== null && vb.answer !== null && va.answer !== vb.answer };
+    }
   }
+  // Открытый вопрос: числовой ответ хранится на уровне вопроса
+  if (a.answer !== null && b.answer !== null && a.answer !== b.answer) best.answerDiffers = true;
   return best;
 }
 
@@ -126,17 +133,17 @@ export function findSimilar(index: DupIndex, doc: DupDoc, opts: FindOptions = {}
     const other = index.docs[i];
     if (other.id === me.id) continue;
     const r = docScore(me, other);
-    if (r.score >= threshold) out.push({ id: other.id, score: r.score, exact: r.exact });
+    if (r.score >= threshold) out.push({ id: other.id, score: r.score, exact: r.exact && !r.answerDiffers, answerDiffers: r.answerDiffers });
   }
   return out.sort((a, b) => b.score - a.score).slice(0, max);
 }
 
 /** Пары похожих вопросов внутри одного набора (каждая пара один раз) */
-export function findPairs(docs: DupDoc[], opts: Omit<FindOptions, 'onlyBefore' | 'max'> = {}): Array<{ a: string; b: string; score: number; exact: boolean }> {
+export function findPairs(docs: DupDoc[], opts: Omit<FindOptions, 'onlyBefore' | 'max'> = {}): Array<{ a: string; b: string; score: number; exact: boolean; answerDiffers: boolean }> {
   const index = buildIndex(docs);
-  const pairs: Array<{ a: string; b: string; score: number; exact: boolean }> = [];
+  const pairs: Array<{ a: string; b: string; score: number; exact: boolean; answerDiffers: boolean }> = [];
   docs.forEach((d, i) => {
-    for (const m of findSimilar(index, d, { ...opts, max: 5, onlyBefore: i })) pairs.push({ a: m.id, b: d.id, score: m.score, exact: m.exact });
+    for (const m of findSimilar(index, d, { ...opts, max: 5, onlyBefore: i })) pairs.push({ a: m.id, b: d.id, score: m.score, exact: m.exact, answerDiffers: m.answerDiffers });
   });
   return pairs.sort((x, y) => y.score - x.score);
 }

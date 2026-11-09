@@ -35,13 +35,25 @@ export async function loadBankQuestions(subjectId: string): Promise<BankQ[]> {
 
 /** Вопрос банка → документ для поиска дублей: русский и таджикский тексты считаются отдельно */
 export function bankDupDoc(q: BankQ): DupDoc {
-  const opts = (pick: (o: { text: string; text_ru?: string | null; text_tg?: string | null }) => string | null | undefined) => [
-    ...(q.options ?? []).map(pick),
-    ...(q.matching_items ?? []).map(pick),
-  ].filter((t): t is string => !!t);
-  const variants = [{ content: q.content, options: opts((o) => o.text) }];
-  if (q.content_ru && q.content_ru !== q.content) variants.push({ content: q.content_ru, options: opts((o) => o.text_ru || o.text) });
-  if (q.content_tg && q.content_tg !== q.content) variants.push({ content: q.content_tg, options: opts((o) => o.text_tg || o.text) });
+  type T = { text: string; text_ru?: string | null; text_tg?: string | null };
+  const lang = (pick: (o: T) => string | null | undefined) => {
+    const options = [...(q.options ?? []), ...(q.matching_items ?? [])].map(pick).filter((t): t is string => !!t);
+    let answer: string[] | null = null;
+    if (q.type === 'test') {
+      const ok = (q.options ?? []).filter((o) => o.is_correct).map(pick).filter((t): t is string => !!t);
+      answer = ok.length ? ok : null;
+    } else if (q.type === 'matching') {
+      const items = q.matching_items ?? [];
+      const right = new Map(items.filter((m) => m.side === 'right').map((m) => [m.id, pick(m) ?? '']));
+      const pairs = items.filter((m) => m.side === 'left' && m.correct_match_id && right.has(m.correct_match_id))
+        .map((m) => `${pick(m) ?? ''}=${right.get(m.correct_match_id!)}`);
+      answer = pairs.length ? pairs : null;
+    }
+    return { options, answer };
+  };
+  const variants = [{ content: q.content, ...lang((o) => o.text) }];
+  if (q.content_ru && q.content_ru !== q.content) variants.push({ content: q.content_ru, ...lang((o) => o.text_ru || o.text) });
+  if (q.content_tg && q.content_tg !== q.content) variants.push({ content: q.content_tg, ...lang((o) => o.text_tg || o.text) });
   return { id: q.id, variants, answer: q.type === 'open' && q.correct_numeric_answer != null ? String(q.correct_numeric_answer) : null };
 }
 

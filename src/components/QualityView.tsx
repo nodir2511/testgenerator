@@ -15,7 +15,7 @@ interface Scan {
   total: number;
   byId: Map<string, BankQ>;
   issues: Array<{ q: BankQ; codes: AnyIssue[] }>;
-  pairs: Array<{ a: string; b: string; score: number; exact: boolean }>;
+  pairs: Array<{ a: string; b: string; score: number; exact: boolean; answerDiffers: boolean }>;
   at: number;
 }
 
@@ -56,7 +56,7 @@ export const QualityView: React.FC = () => {
       // Дать браузеру перерисоваться перед тяжёлым расчётом
       await new Promise((r) => setTimeout(r, 30));
       const issues = qs.map((q) => ({ q, codes: bankIssues(q) })).filter((x) => x.codes.length > 0);
-      const pairs = findPairs(qs.map(bankDupDoc), { threshold: 0.75 });
+      const pairs = findPairs(qs.map(bankDupDoc), { threshold: 0.75 }).sort((x, y) => Number(y.answerDiffers) - Number(x.answerDiffers) || y.score - x.score);
       setScan({ total: qs.length, byId: new Map(qs.map((q) => [q.id, q])), issues, pairs, at: Date.now() });
     } catch (e) {
       notifyError(e, 'Не удалось проверить банк');
@@ -78,7 +78,7 @@ export const QualityView: React.FC = () => {
       <PageHeader
         icon={ShieldCheck}
         title="Качество банка"
-        description={<>Поиск ошибок в вопросах и повторов внутри предмета. <Hint label="Что проверяется">Ошибки: нет правильного ответа, не по стандарту, пустой текст или вариант, одинаковые варианты, сломанные теги оформления, неверная ссылка на картинку. Дубли: одинаковые и почти одинаковые вопросы (по русскому и таджикскому тексту). Смысловые перефразировки не находятся. Раздел ничего не меняет.</Hint></>}
+        description={<>Поиск ошибок в вопросах и повторов внутри предмета. <Hint label="Что проверяется">Ошибки: нет правильного ответа, не по стандарту, пустой текст или вариант, одинаковые варианты, сломанные теги оформления, неверная ссылка на картинку. Дубли: одинаковые и почти одинаковые вопросы (по русскому и таджикскому тексту). Если вопрос тот же, а правильный ответ разный, пара помечается отдельно: это не повтор, а противоречие, и такие пары идут первыми. Смысловые перефразировки не находятся. Раздел ничего не меняет.</Hint></>}
       />
       <div className="flex flex-col sm:flex-row gap-3">
         <select
@@ -98,8 +98,8 @@ export const QualityView: React.FC = () => {
 
       {scan && (
         <>
-          <div className="grid grid-cols-3 gap-3">
-            {([['Проверено вопросов', scan.total], ['С замечаниями', scan.issues.length], ['Пар-дублей', scan.pairs.filter((p) => p.score >= 0.85).length]] as const).map(([l, v]) => (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {([['Проверено вопросов', scan.total], ['С замечаниями', scan.issues.length], ['Пар-дублей', scan.pairs.filter((p) => p.score >= 0.85 && !p.answerDiffers).length], ['Ответы расходятся', scan.pairs.filter((p) => p.score >= 0.85 && p.answerDiffers).length]] as const).map(([l, v]) => (
               <Card key={l} padding="none" className="p-3.5">
                 <div className="text-sm font-semibold text-slate-600 leading-tight">{l}</div>
                 <div className="text-3xl font-bold text-slate-900 mt-1 tabular-nums">{v}</div>
@@ -168,7 +168,9 @@ export const QualityView: React.FC = () => {
                   return (
                     <li key={`${p.a}-${p.b}`} className="rounded-xl border border-slate-200 p-3">
                       <div className="flex items-center gap-2 mb-2">
-                        <Badge tone={p.exact ? 'danger' : 'warning'}>{p.exact ? 'Точный дубль' : `Похожи на ${Math.round(p.score * 100)}%`}</Badge>
+                        {p.answerDiffers
+                          ? <Badge tone="danger">Вопрос тот же, ответы разные — одна запись неверна</Badge>
+                          : <Badge tone={p.exact ? 'danger' : 'warning'}>{p.exact ? 'Точный дубль' : `Похожи на ${Math.round(p.score * 100)}%`}</Badge>}
                       </div>
                       {[a, b].map((q) => (
                         <div key={q.id} className="py-1">
