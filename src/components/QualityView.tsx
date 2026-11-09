@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo, withUndo } from '../lib/errors';
 import { findPairs } from '../lib/duplicates';
 import { ANY_LABELS, bankDupDoc, bankIssues, loadBankQuestions, snippet, type AnyIssue, type BankQ } from '../lib/bankScan';
+import { compactQuestion, readScanCache, subjectFingerprint, writeScanCache, type CompactQ } from '../lib/scanCache';
 import { Badge, Button, Card, EmptyState, Hint, PageHeader } from './ui';
 import type { Subject } from '../types/database';
 
@@ -13,8 +14,9 @@ import type { Subject } from '../types/database';
 
 interface Scan {
   total: number;
-  byId: Map<string, BankQ>;
-  issues: Array<{ q: BankQ; codes: AnyIssue[] }>;
+  /** Только вопросы из замечаний и пар (для показа), в сжатом виде */
+  byId: Map<string, CompactQ>;
+  issues: Array<{ q: CompactQ; codes: AnyIssue[] }>;
   pairs: Array<{ a: string; b: string; score: number; exact: boolean; answerDiffers: boolean }>;
   at: number;
 }
@@ -26,11 +28,11 @@ const LEVELS = [
   { v: 0.75, label: 'Широко', hint: 'больше ложных' },
 ];
 const SHOW = 100;
-const linked = (x: BankQ, y: BankQ) => !!(x.linked_ids?.includes(y.id) || y.linked_ids?.includes(x.id));
+const linked = (x: CompactQ, y: CompactQ) => !!(x.linked_ids?.includes(y.id) || y.linked_ids?.includes(x.id));
 const pairKey = (x: string, y: string) => (x < y ? [x, y] : [y, x]) as [string, string];
 const keyOf = (x: string, y: string) => pairKey(x, y).join('|');
 
-const Where: React.FC<{ q: BankQ }> = ({ q }) => (
+const Where: React.FC<{ q: CompactQ }> = ({ q }) => (
   <span className="text-xs text-slate-600">{TYPE_LABEL[q.type] ?? q.type} · {q.chapter?.name} · {q.topic?.name}{q.num ? ` · №${q.num}` : ''}</span>
 );
 
@@ -46,6 +48,10 @@ export const QualityView: React.FC = () => {
     pairs: rawScan.pairs.filter((p) => !hidden.has(p.a) && !hidden.has(p.b)),
   }), [rawScan, hidden]);
   const [busy, setBusy] = useState(false);
+  // Сверка результата с базой: проверяется, менялся ли банк с момента проверки
+  const [fresh, setFresh] = useState<'checking' | 'fresh' | 'stale' | null>(null);
+  const latest = React.useRef({ scan: null as Scan | null, fresh: null as typeof fresh });
+  latest.current = { scan: rawScan, fresh };
   const [level, setLevel] = useState(0.85);
   const [code, setCode] = useState<AnyIssue | 'all'>('all');
   const [pairKind, setPairKind] = useState<'dups' | 'answers' | 'approved'>('dups');
@@ -60,22 +66,59 @@ export const QualityView: React.FC = () => {
     },
   });
   React.useEffect(() => { if (!subjectId && subjects.length) setSubjectId(subjects[0].id); }, [subjects, subjectId]);
-  React.useEffect(() => { setScan(null); setHidden(new Set()); setCode('all'); }, [subjectId]);
+  const loadApproved = async () => {
+    const dis = await supabase.from('duplicate_dismissals').select('a, b').limit(10000);
+    // Нет таблицы (SQL ещё не применён) — работаем без одобренных пар
+    setApproved(new Set(dis.error ? [] : (dis.data ?? []).map((r: { a: string; b: string }) => `${r.a}|${r.b}`)));
+  };
+  // При выборе предмета сразу показываем сохранённую проверку и сверяем её с базой
+  React.useEffect(() => {
+    setScan(null); setHidden(new Set()); setCode('all'); setFresh(null);
+    if (!subjectId) return;
+    const c = readScanCache(subjectId);
+    if (!c) return;
+    let cancelled = false;
+    setScan({ total: c.total, byId: new Map(c.questions.map((q) => [q.id, q])), issues: c.issues.flatMap((x) => { const q = c.questions.find((y) => y.id === x.id); return q ? [{ q, codes: x.codes }] : []; }), pairs: c.pairs, at: c.at });
+    setFresh('checking');
+    void loadApproved();
+    subjectFingerprint(subjectId).then((fp) => { if (!cancelled) setFresh(fp === c.fingerprint ? 'fresh' : 'stale'); }).catch(() => { if (!cancelled) setFresh('stale'); });
+    return () => { cancelled = true; };
+  }, [subjectId]);
+
+  const saveCache = (sid: string, s: Scan, fingerprint: string) => writeScanCache(sid, {
+    v: 1, at: s.at, fingerprint, total: s.total,
+    questions: [...s.byId.values()],
+    issues: s.issues.map((x) => ({ id: x.q.id, codes: x.codes })),
+    pairs: s.pairs,
+  });
+  // После своего действия (удаление, связь) результат остаётся актуальным: обновляем отпечаток, если до этого он совпадал
+  const keepCacheFresh = async () => {
+    const cur = latest.current;
+    if (!subjectId || !cur.scan || cur.fresh !== 'fresh') return;
+    try { saveCache(subjectId, cur.scan, await subjectFingerprint(subjectId)); } catch { /* не страшно: просто будет предложена перепроверка */ }
+  };
 
   const run = async () => {
     if (!subjectId || busy) return;
     setBusy(true);
     setHidden(new Set());
     try {
+      // Отпечаток снимаем до загрузки: если банк изменят во время проверки, это будет видно при следующем входе
+      const fingerprint = await subjectFingerprint(subjectId).catch(() => '');
       const qs = await loadBankQuestions(subjectId);
       // Дать браузеру перерисоваться перед тяжёлым расчётом
       await new Promise((r) => setTimeout(r, 30));
       const issues = qs.map((q) => ({ q, codes: bankIssues(q) })).filter((x) => x.codes.length > 0);
       const pairs = findPairs(qs.map(bankDupDoc), { threshold: 0.75 });
-      const dis = await supabase.from('duplicate_dismissals').select('a, b').limit(10000);
-      // Нет таблицы (SQL ещё не применён) — работаем без одобренных пар
-      setApproved(new Set(dis.error ? [] : (dis.data ?? []).map((r: { a: string; b: string }) => `${r.a}|${r.b}`)));
-      setScan({ total: qs.length, byId: new Map(qs.map((q) => [q.id, q])), issues, pairs, at: Date.now() });
+      await loadApproved();
+      const need = new Set<string>([...issues.map((x) => x.q.id), ...pairs.flatMap((p) => [p.a, p.b])]);
+      const byId = new Map(qs.filter((q) => need.has(q.id)).map((q) => [q.id, compactQuestion(q)]));
+      const next: Scan = {
+        total: qs.length, byId, at: Date.now(), pairs,
+        issues: issues.map((x) => ({ q: byId.get(x.q.id)!, codes: x.codes })),
+      };
+      setScan(next);
+      if (fingerprint) { saveCache(subjectId, next, fingerprint); setFresh('fresh'); } else setFresh(null);
     } catch (e) {
       notifyError(e, 'Не удалось проверить банк');
     } finally {
@@ -86,7 +129,7 @@ export const QualityView: React.FC = () => {
   const setPair = async (x: string, y: string, on: boolean, silent = false): Promise<boolean> => {
     const [a, b] = pairKey(x, y);
     const { error } = on
-      ? await supabase.from('duplicate_dismissals').upsert({ a, b })
+      ? await supabase.from('duplicate_dismissals').upsert({ a, b }, { onConflict: 'a,b', ignoreDuplicates: true })
       : await supabase.from('duplicate_dismissals').delete().eq('a', a).eq('b', b);
     if (error) { notifyError(error, 'Не удалось сохранить. Применён ли supabase/sql/duplicate_dismissals.sql?'); return false; }
     setApproved((prev) => { const n = new Set(prev); if (on) n.add(`${a}|${b}`); else n.delete(`${a}|${b}`); return n; });
@@ -104,6 +147,16 @@ export const QualityView: React.FC = () => {
         if (error || !data || data.length === 0) {
           unhide();
           notifyError(error ?? new Error('Вопрос не удалён: нет прав или он не найден'), 'Не удалось удалить вопрос');
+          return;
+        }
+        // Из сохранённого результата вопрос тоже убираем
+        const cur = latest.current.scan;
+        if (cur && subjectId) {
+          const trimmed: Scan = { ...cur, total: cur.total - 1, issues: cur.issues.filter((x) => x.q.id !== id), pairs: cur.pairs.filter((p) => p.a !== id && p.b !== id) };
+          setScan((prev) => prev && trimmed);
+          setHidden((prev) => { const n = new Set(prev); n.delete(id); return n; });
+          latest.current = { ...latest.current, scan: trimmed };
+          void keepCacheFresh();
         }
       })();
     }, unhide);
@@ -117,7 +170,10 @@ export const QualityView: React.FC = () => {
     const next = Array.from(new Set([...(b.linked_ids ?? []), a.id]));
     const { data, error } = await supabase.from('questions').update({ linked_ids: next }).eq('id', b.id).select('id');
     if (error || !data || data.length === 0) { notifyError(error ?? new Error('Связь не сохранена: нет прав'), 'Не удалось связать вопросы'); return; }
-    setScan((prev) => prev && { ...prev, byId: new Map(prev.byId).set(b.id, { ...b, linked_ids: next }) });
+    const updated = rawScan ? { ...rawScan, byId: new Map(rawScan.byId).set(b.id, { ...b, linked_ids: next }) } : null;
+    setScan(updated);
+    latest.current = { ...latest.current, scan: updated };
+    void keepCacheFresh();
     if (await setPair(p.a, p.b, true, true)) notifyInfo('Вопросы связаны: в один билет не попадут. Пара одобрена');
   };
 
@@ -152,6 +208,14 @@ export const QualityView: React.FC = () => {
         </Button>
       </div>
 
+      {scan && !busy && (
+        <p className="text-sm text-slate-600 px-1" role="status">
+          Проверено {new Date(scan.at).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}.{' '}
+          {fresh === 'checking' && 'Сверяю с базой…'}
+          {fresh === 'fresh' && <span className="text-emerald-700 font-semibold">Банк не менялся с тех пор — результат актуален.</span>}
+          {fresh === 'stale' && <span className="text-amber-700 font-semibold">Банк изменился с тех пор — нажмите «Проверить заново», чтобы обновить.</span>}
+        </p>
+      )}
       {!scan && !busy && <EmptyState title="Выберите предмет и нажмите «Проверить банк»" description="Проверка занимает несколько секунд и ничего не меняет в вопросах." />}
 
       {scan && (
