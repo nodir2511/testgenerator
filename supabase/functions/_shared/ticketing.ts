@@ -153,6 +153,50 @@ function compareInTopic(a: any, b: any): number {
 
 const randInt = (n: number, rnd: Rnd) => Math.floor(rnd() * n);
 
+/** Сколько раз вопрос уже попадал в билеты (question_usage.times_used; нет данных — 0) */
+export function usageOf(q: any): number {
+  const u = Array.isArray(q?.usage) ? q.usage[0] : q?.usage;
+  const n = Number(u?.times_used);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** Сколько случайных сдвигов сравнивается в запасном режиме при поиске наименее использованных вопросов */
+export const FRESH_TRIES = 24;
+
+/**
+ * Начала `slots` непересекающихся полос по T соседних вопросов с наименьшим суммарным числом
+ * использований (динамическое программирование). Целая часть стоимости — использования, поэтому
+ * менее использованные вопросы всегда предпочтительнее; случайный шум меньше единицы лишь
+ * разводит равные варианты. Результат — по возрастанию позиции.
+ */
+function freshestStrips(list: any[], slots: number, T: number, rnd: Rnd): number[] {
+  const L = list.length;
+  const starts = L - T + 1; // допустимые начала полос: 0..L-T
+  const cost: number[] = [];
+  for (let p = 0; p < starts; p++) {
+    let c = 0;
+    for (let k = 0; k < T; k++) c += usageOf(list[p + k]);
+    cost.push(c + (rnd() * 0.999) / slots);
+  }
+  // f[s][i] — минимальная стоимость s полос с началами не раньше i
+  const f: number[][] = Array.from({ length: slots + 1 }, () => new Array(starts + T + 1).fill(Infinity));
+  for (let i = 0; i < f[0].length; i++) f[0][i] = 0;
+  for (let s = 1; s <= slots; s++) {
+    for (let i = starts - 1; i >= 0; i--) {
+      const take = i + T < f[s - 1].length ? cost[i] + f[s - 1][i + T] : Infinity;
+      f[s][i] = Math.min(f[s][i + 1], take);
+    }
+  }
+  const out: number[] = [];
+  let i = 0;
+  for (let s = slots; s > 0; s--) {
+    while (i < starts && f[s][i] === f[s][i + 1]) i++;
+    out.push(i);
+    i += T;
+  }
+  return out;
+}
+
 // Случайно делит total на parts неотрицательных частей
 function randomComposition(total: number, parts: number, rnd: Rnd): number[] {
   const out = new Array(parts).fill(0);
@@ -198,7 +242,7 @@ export const LARGE_CHAPTER = 100;
 // Позиции главы по темам. Сначала каждой теме по одной (если квоты хватает на все; иначе — случайным
 // темам, шанс пропорционален размеру), остальное: в большой главе — случайно по вопросам пула
 // (тема выпадает с шансом, пропорциональным числу её вопросов), в малой — пропорционально размеру.
-function allocateInChapter(quota: number, items: Array<{ w: number; cap: number }>, large: boolean, rnd: Rnd): number[] {
+function allocateInChapter(quota: number, items: Array<{ w: number; cap: number; f?: number }>, large: boolean, rnd: Rnd): number[] {
   const alloc = items.map(() => 0);
   const eligible = items.map((_, i) => i).filter((i) => items[i].cap > 0);
   if (quota >= eligible.length) {
@@ -213,10 +257,11 @@ function allocateInChapter(quota: number, items: Array<{ w: number; cap: number 
     while (remaining > 0) {
       const open = items.map((_, i) => i).filter((i) => alloc[i] < items[i].cap);
       if (open.length === 0) break;
-      let r = rnd() * open.reduce((s, i) => s + items[i].w, 0);
+      const wt = (i: number) => items[i].w * (items[i].f ?? 1);
+      let r = rnd() * open.reduce((s, i) => s + wt(i), 0);
       let pick = open[open.length - 1];
       for (const i of open) {
-        r -= items[i].w;
+        r -= wt(i);
         if (r < 0) { pick = i; break; }
       }
       alloc[pick]++;
@@ -275,7 +320,20 @@ export function pickParallel(
     // Запасной режим
     const W = topics.flatMap((t) => t.list);
     const n = W.length;
-    const r = randInt(n, rnd);
+    let r = randInt(n, rnd);
+    if (W.some((q) => usageOf(q) > 0)) {
+      // Из нескольких случайных сдвигов берётся тот, что даёт меньше уже использованных вопросов
+      let bestCost = Infinity;
+      for (let a = 0; a < Math.min(n, FRESH_TRIES); a++) {
+        const cand = a === 0 ? r : randInt(n, rnd);
+        let cost = 0;
+        for (let j = 0; j < P; j++) {
+          const off = cand + Math.floor((j * n) / P);
+          for (let k = 0; k < T; k++) cost += usageOf(W[(off + k) % n]);
+        }
+        if (cost < bestCost) { bestCost = cost; r = cand; }
+      }
+    }
     for (let j = 0; j < P; j++) {
       const off = r + Math.floor((j * n) / P); // равномерно по кругу; соседние полосы не короче n/P
       for (let k = 0; k < T; k++) tickets[k].push(W[(off + k) % n]);
@@ -311,7 +369,12 @@ export function pickParallel(
   chList.forEach((c, ci) => {
     const alloc = allocateInChapter(
       quotas[ci],
-      c.topics.map((t) => ({ w: t.list.length, cap: Math.floor(t.list.length / T) })),
+      c.topics.map((t) => ({
+        w: t.list.length,
+        cap: Math.floor(t.list.length / T),
+        // свежесть темы: у реже использованных тем больше шансов получить лишние позиции
+        f: 1 / (1 + t.list.reduce((s, q) => s + usageOf(q), 0) / t.list.length),
+      })),
       c.size >= LARGE_CHAPTER,
       rnd,
     );
@@ -320,7 +383,15 @@ export function pickParallel(
 
   for (const t of topics) {
     if (t.slots === 0) continue;
-    // Полосы длиной T со случайными промежутками между ними
+    // Полосы длиной T со случайными промежутками между ними. Если в теме есть статистика
+    // использования, из нескольких случайных раскладок берётся та, где вопросов, уже бывших
+    // в билетах, меньше всего (при равенстве — случайная).
+    if (t.list.some((q) => usageOf(q) > 0)) {
+      for (const pos of freshestStrips(t.list, t.slots, T, rnd)) {
+        for (let k = 0; k < T; k++) tickets[k].push(t.list[pos + k]);
+      }
+      continue;
+    }
     const gaps = randomComposition(t.list.length - t.slots * T, t.slots + 1, rnd);
     let pos = gaps[0];
     for (let j = 0; j < t.slots; j++) {

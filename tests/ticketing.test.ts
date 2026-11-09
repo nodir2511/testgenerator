@@ -364,6 +364,56 @@ describe('ключи ответов', () => {
   });
 });
 
+describe('pickParallel: статистика использования (usage.times_used)', () => {
+  // 1 тема, 40 вопросов; первые 30 «использованы» 5 раз, последние 10 — ни разу
+  const withUsage = () => makePool('test', 1, 40).map((q, i) => ({ ...q, usage: { times_used: i < 30 ? 5 : 0 } }));
+  const avg = (qs: any[]) => qs.reduce((s, q) => s + (q.usage?.times_used ?? 0), 0) / qs.length;
+
+  it('основной режим: берёт неиспользованные вопросы чаще случайного', () => {
+    const used = (q: any) => (Number(q.num) <= 30 ? 5 : 0);
+    let fresh = 0, base = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      fresh += avg(pickParallel(withUsage(), 4, 2, rng(seed)).flat());
+      base += pickParallel(makePool('test', 1, 40), 4, 2, rng(seed)).flat().reduce((s, q) => s + used(q), 0) / 8;
+    }
+    expect(fresh).toBeLessThan(base * 0.5);
+  });
+
+  it('структура не ломается: без повторов и соседними вопросами сборника', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const tickets = pickParallel(withUsage(), 4, 3, rng(seed));
+      const ids = tickets.flat().map((q) => q.id);
+      expect(new Set(ids).size).toBe(ids.length);
+      for (let j = 0; j < 4; j++) {
+        const nums = tickets.map((t) => Number(t[j].num));
+        expect(nums[1]).toBe(nums[0] + 1);
+        expect(nums[2]).toBe(nums[0] + 2);
+      }
+    }
+  });
+
+  it('запасной режим (мало вопросов): тоже смещается к неиспользованным', () => {
+    const pool = makePool('test', 1, 10).map((q, i) => ({ ...q, usage: { times_used: i < 7 ? 9 : 0 } }));
+    let total = 0;
+    for (let seed = 1; seed <= 30; seed++) total += avg(pickParallel(pool, 3, 3, rng(seed)).flat());
+    expect(total / 30).toBeLessThan(0.7 * 9); // случайный выбор давал бы в среднем 6,3
+  });
+
+  it('без статистики результат тот же, что и раньше', () => {
+    const plain = makePool('test', 3, 20);
+    const zero = plain.map((q) => ({ ...q, usage: { times_used: 0 } }));
+    expect(pickParallel(zero, 6, 3, rng(5)).map((t) => t.map((q) => q.id)))
+      .toEqual(pickParallel(plain, 6, 3, rng(5)).map((t) => t.map((q) => q.id)));
+  });
+
+  it('usage может быть массивом (связь «один ко многим» в PostgREST)', () => {
+    const pool = makePool('test', 1, 40).map((q, i) => ({ ...q, usage: [{ times_used: i < 30 ? 5 : 0 }] }));
+    let sum = 0;
+    for (let seed = 1; seed <= 20; seed++) sum += pickParallel(pool, 4, 2, rng(seed)).flat().filter((q) => Number(q.num) <= 30).length;
+    expect(sum / 20).toBeLessThan(4); // из 8 вопросов случайный выбор дал бы в среднем 6 использованных
+  });
+});
+
 describe('preferUnused (кластер: без повторов с прошлыми экзаменами)', () => {
   const pool = Array.from({ length: 10 }, (_, i) => ({ id: 'q' + i }));
   it('без прошлых экзаменов берёт весь пул', () => {

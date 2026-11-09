@@ -14,7 +14,7 @@ export interface PoolSelection {
 }
 
 /** Поля, которые читают pickParallel и separateLinked */
-export const POOL_SELECT = 'id, type, topic_id, chapter_id, num, seq, created_at, linked_ids, chapter:chapters(order_index), topic:topics(order_index)';
+export const POOL_SELECT = 'id, type, topic_id, chapter_id, num, seq, created_at, linked_ids, chapter:chapters(order_index), topic:topics(order_index), usage:question_usage(times_used)';
 
 /** Полный вопрос для снимка билета */
 export const QUESTION_FULL_SELECT = '*, chapter:chapters(name, order_index), topic:topics(name, order_index), options:question_options(*), matching_items:matching_items(*)';
@@ -28,11 +28,21 @@ const IDS_PER_REQUEST = 100; // идентификаторы идут в адр�
  * Первая страница одна; если она полная, следующие читаются пачками по PARALLEL (порядок строк сохраняется).
  */
 export async function loadLightPool(sb: any, sel: PoolSelection): Promise<any[]> {
+  // Статистика использования (question_usage) — необязательная: если таблицы ещё нет в базе,
+  // подбор работает как раньше, без учёта частоты.
+  let select = POOL_SELECT;
   const page = async (from: number): Promise<any[]> => {
-    let q = sb.from('questions').select(POOL_SELECT).eq('subject_id', sel.subjectId).eq('is_deleted', false);
-    if (sel.topicIds.length) q = q.in('topic_id', sel.topicIds);
-    else if (sel.chapterIds.length) q = q.in('chapter_id', sel.chapterIds);
-    const { data, error } = await q.order('id').range(from, from + PAGE - 1);
+    const run = async () => {
+      let q = sb.from('questions').select(select).eq('subject_id', sel.subjectId).eq('is_deleted', false);
+      if (sel.topicIds.length) q = q.in('topic_id', sel.topicIds);
+      else if (sel.chapterIds.length) q = q.in('chapter_id', sel.chapterIds);
+      return q.order('id').range(from, from + PAGE - 1);
+    };
+    let { data, error } = await run();
+    if (error && select === POOL_SELECT && /question_usage/.test(`${error.message ?? ''} ${error.details ?? ''}`)) {
+      select = POOL_SELECT.replace(/, usage:question_usage\(times_used\)/, '');
+      ({ data, error } = await run());
+    }
     if (error) throw error;
     return data ?? [];
   };
