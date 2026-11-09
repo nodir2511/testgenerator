@@ -15,6 +15,8 @@ export interface BankQ {
   content_tg?: string | null;
   image_url?: string | null;
   correct_numeric_answer?: number | null;
+  /** Связанные вопросы: с ними этот вопрос не попадает в один билет */
+  linked_ids?: string[] | null;
   chapter?: { name: string } | null;
   topic?: { name: string } | null;
   options?: Array<{ id: string; text: string; text_ru?: string | null; text_tg?: string | null; image_url?: string | null; is_correct?: boolean }> | null;
@@ -22,7 +24,7 @@ export interface BankQ {
 }
 
 const SELECT = `
-  id, type, num, content, content_ru, content_tg, image_url, correct_numeric_answer,
+  id, type, num, content, content_ru, content_tg, image_url, correct_numeric_answer, linked_ids,
   chapter:chapters(name), topic:topics(name),
   options:question_options(*), matching_items:matching_items(*)`;
 

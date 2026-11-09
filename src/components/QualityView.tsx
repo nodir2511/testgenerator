@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { notifyError, notifyInfo } from '../lib/errors';
+import { notifyError, notifyInfo, withUndo } from '../lib/errors';
 import { findPairs } from '../lib/duplicates';
 import { ANY_LABELS, bankDupDoc, bankIssues, loadBankQuestions, snippet, type AnyIssue, type BankQ } from '../lib/bankScan';
 import { Badge, Button, Card, EmptyState, Hint, PageHeader } from './ui';
@@ -26,6 +26,7 @@ const LEVELS = [
   { v: 0.75, label: 'Широко', hint: 'больше ложных' },
 ];
 const SHOW = 100;
+const linked = (x: BankQ, y: BankQ) => !!(x.linked_ids?.includes(y.id) || y.linked_ids?.includes(x.id));
 const pairKey = (x: string, y: string) => (x < y ? [x, y] : [y, x]) as [string, string];
 const keyOf = (x: string, y: string) => pairKey(x, y).join('|');
 
@@ -35,7 +36,15 @@ const Where: React.FC<{ q: BankQ }> = ({ q }) => (
 
 export const QualityView: React.FC = () => {
   const [subjectId, setSubjectId] = useState('');
-  const [scan, setScan] = useState<Scan | null>(null);
+  const [rawScan, setScan] = useState<Scan | null>(null);
+  // Вопросы, которые удалили в этой проверке (сразу скрываются, в базе удаляются через 5 секунд, если не отменить)
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const scan = React.useMemo<Scan | null>(() => rawScan && (hidden.size === 0 ? rawScan : {
+    ...rawScan,
+    total: rawScan.total - hidden.size,
+    issues: rawScan.issues.filter((x) => !hidden.has(x.q.id)),
+    pairs: rawScan.pairs.filter((p) => !hidden.has(p.a) && !hidden.has(p.b)),
+  }), [rawScan, hidden]);
   const [busy, setBusy] = useState(false);
   const [level, setLevel] = useState(0.85);
   const [code, setCode] = useState<AnyIssue | 'all'>('all');
@@ -51,11 +60,12 @@ export const QualityView: React.FC = () => {
     },
   });
   React.useEffect(() => { if (!subjectId && subjects.length) setSubjectId(subjects[0].id); }, [subjects, subjectId]);
-  React.useEffect(() => { setScan(null); setCode('all'); }, [subjectId]);
+  React.useEffect(() => { setScan(null); setHidden(new Set()); setCode('all'); }, [subjectId]);
 
   const run = async () => {
     if (!subjectId || busy) return;
     setBusy(true);
+    setHidden(new Set());
     try {
       const qs = await loadBankQuestions(subjectId);
       // Дать браузеру перерисоваться перед тяжёлым расчётом
@@ -73,14 +83,42 @@ export const QualityView: React.FC = () => {
     }
   };
 
-  const setPair = async (x: string, y: string, on: boolean) => {
+  const setPair = async (x: string, y: string, on: boolean, silent = false): Promise<boolean> => {
     const [a, b] = pairKey(x, y);
     const { error } = on
       ? await supabase.from('duplicate_dismissals').upsert({ a, b })
       : await supabase.from('duplicate_dismissals').delete().eq('a', a).eq('b', b);
-    if (error) { notifyError(error, 'Не удалось сохранить. Применён ли supabase/sql/duplicate_dismissals.sql?'); return; }
+    if (error) { notifyError(error, 'Не удалось сохранить. Применён ли supabase/sql/duplicate_dismissals.sql?'); return false; }
     setApproved((prev) => { const n = new Set(prev); if (on) n.add(`${a}|${b}`); else n.delete(`${a}|${b}`); return n; });
-    notifyInfo(on ? 'Пара одобрена и больше не показывается' : 'Пара возвращена в список');
+    if (!silent) notifyInfo(on ? 'Пара одобрена и больше не показывается' : 'Пара возвращена в список');
+    return true;
+  };
+
+  // Удалить вопрос в корзину: сразу скрывается, в базе удаляется через 5 секунд, пока можно отменить (как в банке вопросов)
+  const removeQuestion = (id: string) => {
+    setHidden((prev) => new Set(prev).add(id));
+    const unhide = () => setHidden((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    withUndo('Вопрос удалён', () => {
+      void (async () => {
+        const { data, error } = await supabase.from('questions').update({ is_deleted: true, deleted_at: new Date().toISOString() }).eq('id', id).select('id');
+        if (error || !data || data.length === 0) {
+          unhide();
+          notifyError(error ?? new Error('Вопрос не удалён: нет прав или он не найден'), 'Не удалось удалить вопрос');
+        }
+      })();
+    }, unhide);
+  };
+
+  // Связать вопросы: в один билет они больше не попадут (та же связь, что у «теста и открытого вопроса из него»).
+  // Связь хранится у второго вопроса пары. Связанная пара сразу одобряется.
+  const linkPair = async (p: { a: string; b: string }) => {
+    const a = rawScan?.byId.get(p.a), b = rawScan?.byId.get(p.b);
+    if (!a || !b) return;
+    const next = Array.from(new Set([...(b.linked_ids ?? []), a.id]));
+    const { data, error } = await supabase.from('questions').update({ linked_ids: next }).eq('id', b.id).select('id');
+    if (error || !data || data.length === 0) { notifyError(error ?? new Error('Связь не сохранена: нет прав'), 'Не удалось связать вопросы'); return; }
+    setScan((prev) => prev && { ...prev, byId: new Map(prev.byId).set(b.id, { ...b, linked_ids: next }) });
+    if (await setPair(p.a, p.b, true, true)) notifyInfo('Вопросы связаны: в один билет не попадут. Пара одобрена');
   };
 
   const counts = React.useMemo(() => {
@@ -98,7 +136,7 @@ export const QualityView: React.FC = () => {
       <PageHeader
         icon={ShieldCheck}
         title="Качество банка"
-        description={<>Поиск ошибок в вопросах и повторов внутри предмета. <Hint label="Что проверяется">Ошибки: нет правильного ответа, не по стандарту, пустой текст или вариант, одинаковые варианты, сломанные теги оформления, неверная ссылка на картинку. Дубли: одинаковые и почти одинаковые вопросы (по русскому и таджикскому тексту). Вопросы с одной формулировкой, но другими вариантами и другим верным ответом («какой из вариантов щёлочь») разными и считаются. «Ответы расходятся» — это когда формулировка и набор вариантов те же, а верный ответ другой: стоит проверить, какая запись верна. Смысловые перефразировки не находятся. Кнопка «Не дубль» (или «Так и задумано») одобряет пару: она пропадает из списков и видна в «Одобренных», откуда её можно вернуть. Сами вопросы раздел не меняет.</Hint></>}
+        description={<>Поиск ошибок в вопросах и повторов внутри предмета. <Hint label="Что проверяется">Ошибки: нет правильного ответа, не по стандарту, пустой текст или вариант, одинаковые варианты, сломанные теги оформления, неверная ссылка на картинку. Дубли: одинаковые и почти одинаковые вопросы (по русскому и таджикскому тексту). Вопросы с одной формулировкой, но другими вариантами и другим верным ответом («какой из вариантов щёлочь») разными и считаются. «Ответы расходятся» — это когда формулировка и набор вариантов те же, а верный ответ другой: стоит проверить, какая запись верна. Смысловые перефразировки не находятся. Действия с парой: «Не дубль» (или «Так и задумано») одобряет её, и она уходит в «Одобренные», откуда её можно вернуть; «Связать вопросы» делает так, что они не попадают в один билет, и тоже одобряет пару; «Удалить» отправляет вопрос в корзину (5 секунд на отмену).</Hint></>}
       />
       <div className="flex flex-col sm:flex-row gap-3">
         <select
@@ -204,19 +242,31 @@ export const QualityView: React.FC = () => {
                           ? <Badge tone="warning">Те же варианты, но верный ответ другой — проверьте</Badge>
                           : <Badge tone={p.exact ? 'danger' : 'warning'}>{p.exact ? 'Точный дубль' : `Похожи на ${Math.round(p.score * 100)}%`}</Badge>}
                       </div>
-                      {pairKind === 'approved' ? (
-                        <Button variant="secondary" size="sm" onClick={() => setPair(p.a, p.b, false)} className="mb-2">Вернуть в список</Button>
-                      ) : (
-                        <Button variant="secondary" size="sm" onClick={() => setPair(p.a, p.b, true)} className="mb-2">
-                          {p.answerDiffers ? 'Так и задумано' : 'Не дубль'}
-                        </Button>
-                      )}
                       {[a, b].map((q) => (
-                        <div key={q.id} className="py-1">
-                          <div className="text-sm text-slate-900">{snippet(q.content)}</div>
-                          <Where q={q} />
+                        <div key={q.id} className="py-1 flex items-start gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm text-slate-900">{snippet(q.content)}</div>
+                            <Where q={q} />
+                          </div>
+                          {pairKind !== 'approved' && (
+                            <Button variant="danger-soft" size="sm" onClick={() => removeQuestion(q.id)} className="shrink-0">Удалить</Button>
+                          )}
                         </div>
                       ))}
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {pairKind === 'approved' ? (
+                          <Button variant="secondary" size="sm" onClick={() => setPair(p.a, p.b, false)}>Вернуть в список</Button>
+                        ) : (
+                          <>
+                            <Button variant="secondary" size="sm" onClick={() => setPair(p.a, p.b, true)}>
+                              {p.answerDiffers ? 'Так и задумано' : 'Не дубль'}
+                            </Button>
+                            {linked(a, b)
+                              ? <Badge tone="success">Связаны</Badge>
+                              : <Button variant="secondary" size="sm" onClick={() => linkPair(p)}>Связать вопросы</Button>}
+                          </>
+                        )}
+                      </div>
                     </li>
                   );
                 })}
