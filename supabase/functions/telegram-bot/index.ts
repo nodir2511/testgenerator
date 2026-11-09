@@ -28,6 +28,7 @@ const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 const MAIN_KEYBOARD = {
   keyboard: [
     [{ text: '🚀 Конструктор билетов' }],
+    [{ text: '📝 Пошагово в чате' }],
     [{ text: '⚡ Быстрый билет' }, { text: '📂 Мои билеты' }],
     [{ text: 'ℹ️ Профиль и лимиты' }, { text: '❓ Помощь' }],
   ],
@@ -214,6 +215,7 @@ async function screenStart(chat: number, user: any) {
 
   const kb = [
     [{ text: '🚀 Открыть конструктор билетов', web_app: { url: APP_URL } }],
+    [{ text: '📝 Составить билет пошагово', callback_data: 'ACT:NEW' }],
     [{ text: '⚡ Быстрый билет в 1 клик', callback_data: 'ACT:QUICK' }],
     [{ text: '📂 Мои билеты (История)', callback_data: 'ACT:HISTORY' }],
   ];
@@ -472,7 +474,8 @@ async function screenHelp(chat: number) {
     `<b>Основные функции:</b>\n` +
     `1. <b>🚀 Конструктор билетов</b> — полноценное визуальное приложение с фильтрами тем и индикатором запаса вопросов (рекомендуется).\n` +
     `2. <b>⚡ Быстрый билет</b> — экспресс-составление вариантов по стандартам (Физ/Хим 18+2+7, Био/Гос 20+4+2, Право 20+5+0) в 2 клика.\n` +
-    `3. <b>📂 Мои билеты</b> — доступ к ранее созданным наборам с возможностью повторно скачать файл.\n\n` +
+    `3. <b>📝 Пошагово в чате</b> — выбор предмета, затем глав и тем сообщением с номерами (например 1-4 или 1,2,3,4).\n` +
+    `4. <b>📂 Мои билеты</b> — доступ к ранее созданным наборам с возможностью повторно скачать файл.\n\n` +
     `<b>Команды:</b>\n` +
     `• /app — открыть конструктор билетов\n` +
     `• /quick — экспресс-билет\n` +
@@ -636,7 +639,7 @@ async function onMessage(m: any) {
     await sb.from('telegram_sessions').delete().eq('chat_id', chat);
     return send(chat, '✅ Аккаунт отвязан. Чтобы войти снова, отправьте <code>/start КОД</code>');
   }
-  if (text === '/ticket' || text === '/new') {
+  if (text === '📝 Пошагово в чате' || text === '/ticket' || text === '/new') {
     const old = await loadState(chat);
     await saveState(chat, freshState(old.settings));
     return screenSubjects(chat);
@@ -700,6 +703,10 @@ async function onCallback(cb: any) {
   // Меню быстрых действий
   if (data === 'ACT:QUICK') {
     return screenQuick(chat, user, msgId);
+  }
+  if (data === 'ACT:NEW') {
+    await saveState(chat, freshState(st.settings));
+    return screenSubjects(chat, msgId);
   }
   if (data === 'ACT:HISTORY') {
     return screenMyTickets(chat, user);
