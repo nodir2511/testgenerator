@@ -70,3 +70,24 @@ export const snippet = (s: string | null | undefined, n = 140) => {
   const t = plainText(s);
   return t.length > n ? `${t.slice(0, n)}…` : t || '(без текста)';
 };
+
+/** Ответы вопроса для показа рядом с текстом: варианты теста с отметкой верного, пары соответствия, число открытого */
+export interface AnswerView {
+  options?: Array<{ text: string; correct: boolean }>;
+  pairs?: Array<{ left: string; right: string }>;
+  answer?: string;
+}
+const cut = (s: string | null | undefined) => { const t = s ?? ''; return t.length > 160 ? `${t.slice(0, 160)}…` : t; };
+export function answerView(q: BankQ): AnswerView {
+  if (q.type === 'test') {
+    const opts = [...(q.options ?? [])].sort((a, b) => ((a as { order_index?: number }).order_index ?? 0) - ((b as { order_index?: number }).order_index ?? 0));
+    return { options: opts.map((o) => ({ text: cut(o.text || o.text_ru || o.text_tg) || (o.image_url ? '(картинка)' : ''), correct: !!o.is_correct })) };
+  }
+  if (q.type === 'matching') {
+    const items = q.matching_items ?? [];
+    const label = (m: { text: string; text_ru?: string | null; text_tg?: string | null; image_url?: string | null }) => cut(m.text || m.text_ru || m.text_tg) || (m.image_url ? '(картинка)' : '');
+    const right = new Map(items.filter((m) => m.side === 'right').map((m) => [m.id, label(m)]));
+    return { pairs: items.filter((m) => m.side === 'left').map((m) => ({ left: label(m), right: (m.correct_match_id && right.get(m.correct_match_id)) || '—' })) };
+  }
+  return { answer: q.correct_numeric_answer != null ? String(q.correct_numeric_answer) : '—' };
+}
