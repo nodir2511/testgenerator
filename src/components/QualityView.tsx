@@ -6,6 +6,7 @@ import { notifyError, notifyInfo, withUndo } from '../lib/errors';
 import { findPairs } from '../lib/duplicates';
 import { ANY_LABELS, bankDupDoc, bankIssues, loadBankQuestions, snippet, type AnyIssue, type BankQ } from '../lib/bankScan';
 import { compactQuestion, readScanCache, subjectFingerprint, writeScanCache, type CompactQ } from '../lib/scanCache';
+import { FormattedText } from './FormulaEditor';
 import { Badge, Button, Card, EmptyState, Hint, PageHeader } from './ui';
 import type { Subject } from '../types/database';
 
@@ -31,6 +32,33 @@ const SHOW = 100;
 const linked = (x: CompactQ, y: CompactQ) => !!(x.linked_ids?.includes(y.id) || y.linked_ids?.includes(x.id));
 const pairKey = (x: string, y: string) => (x < y ? [x, y] : [y, x]) as [string, string];
 const keyOf = (x: string, y: string) => pairKey(x, y).join('|');
+
+// Ответы вопроса: верный вариант отмечен галочкой и словом «верный» (не только цветом)
+const Answers: React.FC<{ q: CompactQ }> = ({ q }) => {
+  const v = q.view;
+  if (!v) return null;
+  return (
+    <div className="mt-1 text-xs">
+      {v.options && (
+        <ul className="space-y-0.5">
+          {v.options.map((o, i) => (
+            <li key={i} className={o.correct ? 'text-emerald-800 font-semibold' : 'text-slate-700'}>
+              <span className="mr-1">{o.correct ? '✓' : '○'}</span>
+              <FormattedText text={o.text} className="inline" />
+              {o.correct && <span className="ml-1.5">(верный)</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {v.pairs && (
+        <ul className="space-y-0.5 text-slate-700">
+          {v.pairs.map((p, i) => <li key={i}><FormattedText text={p.left} className="inline" /> <span className="text-emerald-800 font-semibold">→ <FormattedText text={p.right} className="inline" /></span></li>)}
+        </ul>
+      )}
+      {v.answer !== undefined && <div className="text-emerald-800 font-semibold">Ответ: {v.answer}</div>}
+    </div>
+  );
+};
 
 const Where: React.FC<{ q: CompactQ }> = ({ q }) => (
   <span className="text-xs text-slate-600">{TYPE_LABEL[q.type] ?? q.type} · {q.chapter?.name} · {q.topic?.name}{q.num ? ` · №${q.num}` : ''}</span>
@@ -86,7 +114,7 @@ export const QualityView: React.FC = () => {
   }, [subjectId]);
 
   const saveCache = (sid: string, s: Scan, fingerprint: string) => writeScanCache(sid, {
-    v: 1, at: s.at, fingerprint, total: s.total,
+    v: 2, at: s.at, fingerprint, total: s.total,
     questions: [...s.byId.values()],
     issues: s.issues.map((x) => ({ id: x.q.id, codes: x.codes })),
     pairs: s.pairs,
@@ -309,8 +337,9 @@ export const QualityView: React.FC = () => {
                       {[a, b].map((q) => (
                         <div key={q.id} className="py-1 flex items-start gap-3">
                           <div className="min-w-0 flex-1">
-                            <div className="text-sm text-slate-900">{snippet(q.content)}</div>
+                            <div className="text-sm text-slate-900"><FormattedText text={q.content} /></div>
                             <Where q={q} />
+                            <Answers q={q} />
                           </div>
                           {pairKind !== 'approved' && (
                             <Button variant="danger-soft" size="sm" onClick={() => removeQuestion(q.id)} className="shrink-0">Удалить</Button>

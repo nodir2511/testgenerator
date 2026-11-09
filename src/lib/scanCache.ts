@@ -1,13 +1,13 @@
 import { supabase } from './supabase';
-import type { AnyIssue, BankQ } from './bankScan';
+import { answerView, type AnswerView, type AnyIssue, type BankQ } from './bankScan';
 
 // Кэш результата проверки банка (раздел «Качество банка») в браузере главного админа: повторный вход не ждёт
 // полной проверки предмета. Сверка с базой — одним лёгким запросом: сколько вопросов в предмете и когда
 // последний раз что-то менялось (правка, удаление, импорт). Совпало — банк не менялся, результат актуален.
 
-export type CompactQ = Pick<BankQ, 'id' | 'type' | 'num' | 'content' | 'chapter' | 'topic' | 'linked_ids'>;
+export type CompactQ = Pick<BankQ, 'id' | 'type' | 'num' | 'content' | 'chapter' | 'topic' | 'linked_ids'> & { view?: AnswerView };
 export interface CachedScan {
-  v: 1;
+  v: 2;
   at: number;
   fingerprint: string;
   total: number;
@@ -21,7 +21,7 @@ const MAX_CHARS = 3_000_000;
 
 export const compactQuestion = (q: BankQ): CompactQ => ({
   id: q.id, type: q.type, num: q.num, content: q.content.length > 240 ? q.content.slice(0, 240) : q.content,
-  chapter: q.chapter ? { name: q.chapter.name } : null, topic: q.topic ? { name: q.topic.name } : null, linked_ids: q.linked_ids ?? [],
+  chapter: q.chapter ? { name: q.chapter.name } : null, topic: q.topic ? { name: q.topic.name } : null, linked_ids: q.linked_ids ?? [], view: answerView(q),
 });
 
 /** Отпечаток предмета: число неудалённых вопросов и время последнего изменения любого вопроса (в т. ч. удаления) */
@@ -39,7 +39,7 @@ export function readScanCache(subjectId: string): CachedScan | null {
   try {
     const raw = localStorage.getItem(key(subjectId));
     const c = raw ? (JSON.parse(raw) as CachedScan) : null;
-    return c && c.v === 1 && Array.isArray(c.pairs) && Array.isArray(c.issues) && Array.isArray(c.questions) ? c : null;
+    return c && c.v === 2 && Array.isArray(c.pairs) && Array.isArray(c.issues) && Array.isArray(c.questions) ? c : null;
   } catch { return null; }
 }
 
