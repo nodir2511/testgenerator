@@ -26,6 +26,7 @@ import { useUserLimits } from '../lib/generationLimits';
 import { autoBatchTitle, DEFAULT_BATCH_TITLE } from '../lib/batchTitle';
 import { DownloadButton, useExportLang, type Lang } from './DownloadButton';
 import { Badge, Button, Card, Field, PageHeader } from './ui';
+import { BatchTopicsBar, BatchVariants } from './BatchEditor';
 
 type CountRow = { chapter_id: string | null; topic_id: string | null; type: string; cnt: number };
 
@@ -646,6 +647,12 @@ export const TicketGenerator: React.FC = () => {
   const generatedHasKey = hasKeyTemplate(generatedSubjectName);
   const selectionOf = () => ({ subjectId: generatedBatch.subject_id || subjectId, params: generatedBatch.generation_params });
 
+  // Набор изменили (замена вопросов или темы): обновляем билеты и параметры, чтобы Word, ключи и Telegram взяли новые вопросы
+  const handleBatchChanged = async (params: any, tickets: any[]) => {
+    const withInfo = await withSelectionInfo(tickets, generatedBatch?.subject_id || subjectId, params);
+    setGeneratedBatch((prev: any) => (prev ? { ...prev, generation_params: params, tickets: withInfo } : prev));
+  };
+
   // Экспорт созданных билетов в Word на выбранном языке (ключи ответов кладутся в тот же архив)
   const handleDownload = async (lang: Lang) => {
     if (!generatedBatch || !generatedBatch.tickets || isDownloading) return;
@@ -776,6 +783,9 @@ export const TicketGenerator: React.FC = () => {
             </button>
           </div>
 
+          {/* Темы набора: можно убрать тему — её вопросы заменятся вопросами других тем поровну */}
+          <BatchTopicsBar batch={generatedBatch} onChanged={handleBatchChanged} />
+
           {/* Главное действие: скачать на запомненном языке; стрелка — выбрать другой язык */}
           <div className="sm:max-w-md sm:mx-auto">
             <DownloadButton lang={exportLang} busy={isDownloading} onDownload={handleDownload} />
@@ -824,34 +834,25 @@ export const TicketGenerator: React.FC = () => {
               <ChevronDown className={`w-5 h-5 text-slate-500 transition-transform ${showVariants ? 'rotate-180' : ''}`} />
             </button>
             {showVariants && (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3 mt-2">
-                {generatedBatch.tickets.map((t: any) => (
-                  <div key={t.id} className="p-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 space-y-2">
-                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
-                      <span className="font-bold text-sm text-slate-900 min-w-0">Вариант {t.ticket_number}</span>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {(exportLang === 'both' ? (['ru', 'tg'] as const) : [exportLang]).map((l) => (
-                          <button
-                            key={l}
-                            onClick={() => exportSingleWithKey(t, l)}
-                            className="min-h-[36px] px-2.5 text-sm bg-white hover:bg-indigo-50 text-indigo-700 font-semibold rounded-lg border border-indigo-200/70 flex items-center gap-1 transition active:scale-95"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            {l === 'tg' ? 'TJ' : 'RU'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-1 text-sm text-slate-700 max-h-48 overflow-y-auto pr-1">
-                      {t.questions.map((tq: any, i: number) => (
-                        <div key={i} className="px-2 py-1.5 bg-white rounded-lg border border-slate-100 truncate">
-                          <span className="font-bold text-slate-500 mr-1.5">{i + 1}.</span>
-                          {tq.question_snapshot.content.replace(/<.*?>/g, '')}
-                        </div>
+              <div className="mt-2">
+                <BatchVariants
+                  batch={generatedBatch}
+                  onChanged={handleBatchChanged}
+                  renderActions={(t) => (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {(exportLang === 'both' ? (['ru', 'tg'] as const) : [exportLang]).map((l) => (
+                        <button
+                          key={l}
+                          onClick={() => exportSingleWithKey(t, l)}
+                          className="min-h-[36px] px-2.5 text-sm bg-white hover:bg-indigo-50 text-indigo-700 font-semibold rounded-lg border border-indigo-200/70 flex items-center gap-1 transition active:scale-95"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          {l === 'tg' ? 'TJ' : 'RU'}
+                        </button>
                       ))}
                     </div>
-                  </div>
-                ))}
+                  )}
+                />
               </div>
             )}
           </div>

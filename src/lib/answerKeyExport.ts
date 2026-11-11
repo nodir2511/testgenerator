@@ -12,6 +12,7 @@ const chunk = <T,>(a: T[], n: number): T[][] => {
 };
 
 const needsAnswers = (snap: any) =>
+  !snap.empty && // пустое место (вопрос не нашёлся) ответов не имеет — в ключе оно красное
   (snap.type === 'test' && (snap.options || []).some((o: any) => !('is_correct' in o))) ||
   (snap.type === 'matching' && (snap.matching_items || []).some((m: any) => m.side === 'left' && !('correct_match_id' in m))) ||
   (snap.type === 'open' && !('correct_numeric_answer' in snap));

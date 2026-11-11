@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { Badge, Button, Card, EmptyState, PageHeader, Skeleton } from './ui';
+import { BatchTopicsBar, BatchVariants } from './BatchEditor';
 
 const PAGE = 15;
 
@@ -314,7 +315,7 @@ const BatchCard: React.FC<{
   const tickets = useQuery({
     queryKey: ticketsQueryKey(batch.id),
     queryFn: () => fetchBatchTickets(batch),
-    enabled: expanded,
+    enabled: expanded && cluster,
     staleTime: Infinity,
     meta: { action: 'Не удалось загрузить варианты' },
   });
@@ -426,7 +427,29 @@ const BatchCard: React.FC<{
 
       {expanded && (
         <div className="border-t border-slate-100 p-3 sm:p-5 bg-slate-50/60 rounded-b-2xl">
-          {tickets.isLoading ? (
+          {!cluster ? (
+            // Обычный набор: можно заменить вопрос или убрать тему, исправленный набор скачивается как обычно
+            <div className="space-y-3">
+              <BatchTopicsBar batch={batch} />
+              <BatchVariants
+                batch={batch}
+                renderActions={(t) => (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {(exportLang === 'both' ? (['ru', 'tg'] as const) : [exportLang]).map((l) => (
+                      <button
+                        key={l}
+                        onClick={() => exportOne(t, l)}
+                        className="min-h-[36px] px-2.5 text-sm bg-white hover:bg-indigo-50 text-indigo-700 font-semibold rounded-lg border border-indigo-200 flex items-center gap-1"
+                      >
+                        <Download className="w-4 h-4" />
+                        {l === 'tg' ? 'TJ' : 'RU'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              />
+            </div>
+          ) : tickets.isLoading ? (
             <div className="py-6 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3">
