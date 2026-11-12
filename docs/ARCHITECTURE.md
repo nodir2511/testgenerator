@@ -503,6 +503,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `.env` в git не хранится, переменные — в `.env.example`:
   - сайт: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_TELEGRAM_BOT_USERNAME`, `VITE_SUPPORT_TELEGRAM` (необязательно);
   - скрипты импорта: `IMPORT_ADMIN_*`.
+- **Импорт сборников** (рус+тадж, ключи, дубли, связи, вставка, сверка) — порядок в `CLAUDE.md`, раздел «Импорт сборников». В базе новая глава = глава + темы «RU / TG» + источник + партия в `import_batches`.
 - **Версия и «Что нового»** (правила — в `CLAUDE.md`):
   1. `git fetch`.
   2. Взять следующий номер после последнего файла в `supabase/sql/releases/` на `origin/main`.
