@@ -11,7 +11,20 @@ interface ChapterRow { id: string; name: string; counts: Counts; topics: TopicRo
 interface Subject { id: string; name: string }
 interface Limits { perType: number; tickets: number; total?: number; perDay: number | null }
 interface Result { missingAnswers: number; keySent: boolean }
-type Step = 'subject' | 'chapters' | 'topics' | 'counts' | 'final' | 'done' | 'check';
+type Step = 'home' | 'subject' | 'chapters' | 'topics' | 'counts' | 'final' | 'done' | 'check' | 'templates';
+
+// Бланки для печати: файлы лежат в public/blanks (PDF A4, масштаб 100 %)
+const BLANK_FILES: Array<{ file: string; name: string; hint: string }> = [
+  { file: 'chem-27', name: 'Химия', hint: '27 заданий' },
+  { file: 'phys-27', name: 'Физика', hint: '27 заданий' },
+  { file: 'math-27', name: 'Математика', hint: '27 заданий' },
+  { file: 'bio-26', name: 'Биология', hint: '26 заданий' },
+  { file: 'taj-26', name: 'Таджикский язык', hint: '26 заданий' },
+  { file: 'hist-26', name: 'История', hint: '26 заданий' },
+  { file: 'law-26', name: 'Право', hint: '26 заданий' },
+  { file: 'eng-26', name: 'Английский язык', hint: '26 заданий' },
+  { file: 'chemphys-12', name: 'Химия / физика', hint: '12 заданий' },
+];
 
 // Проверка бланков по фото — отдельный кусок кода, грузится только при открытии раздела
 const CheckScreen = React.lazy(() => import('./CheckScreen'));
@@ -22,6 +35,7 @@ interface WebApp {
   ready(): void;
   expand(): void;
   close(): void;
+  openLink?(url: string): void;
   HapticFeedback?: { impactOccurred(s: string): void; notificationOccurred(s: string): void };
   MainButton: {
     setText(t: string): void; show(): void; hide(): void; enable(): void; disable(): void;
@@ -141,7 +155,7 @@ export default function TgApp() {
   const [fatal, setFatal] = useState<{ code: string; message: string } | null>(null);
   const [name, setName] = useState('');
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [step, setStep] = useState<Step>('subject');
+  const [step, setStep] = useState<Step>('home');
   const [subject, setSubject] = useState<Subject | null>(null);
   const [chapters, setChapters] = useState<ChapterRow[]>([]);
   const [chapterIds, setChapterIds] = useState<string[]>([]);
@@ -199,7 +213,7 @@ export default function TgApp() {
       setChapters(ch);
       setChapterIds([]);
       setTopicSel([]);
-      setStep('chapters');
+      if (!auto) setStep('chapters');
     } catch (e) {
       if (auto) throw e;
       setError((e as Error).message);
@@ -312,7 +326,8 @@ export default function TgApp() {
   const back = useCallback(() => {
     setError('');
     setStep((s) => {
-      if (s === 'chapters') return subjects.length > 1 ? 'subject' : s;
+      if (s === 'subject' || s === 'templates') return 'home';
+      if (s === 'chapters') return subjects.length > 1 ? 'subject' : 'home';
       if (s === 'topics') return 'chapters';
       if (s === 'counts') return 'topics';
       if (s === 'final') return 'counts';
@@ -396,7 +411,7 @@ export default function TgApp() {
       if (blocked || busy) app.MainButton.disable(); else app.MainButton.enable();
     }
     if (busy) app.MainButton.showProgress(true); else app.MainButton.hideProgress();
-    const canBack = (step === 'chapters' && subjects.length > 1) || step === 'topics' || step === 'counts' || step === 'final';
+    const canBack = step === 'subject' || step === 'templates' || step === 'chapters' || step === 'topics' || step === 'counts' || step === 'final';
     if (canBack) app.BackButton.show(); else app.BackButton.hide();
   }, [step, ready, busy, chapterIds.length, settingsError, fit.error, subjects.length]);
 
@@ -452,8 +467,50 @@ export default function TgApp() {
 
       {error && <div className="tg-error" role="alert">{error}</div>}
 
-      {(step === 'subject' || step === 'chapters') && (
-        <button className="tg-link" style={{ marginBottom: 8 }} onClick={() => { setError(''); setStep('check'); }}>📷 Проверка работ по фото бланка</button>
+      {step === 'home' && (
+        <>
+          <h1>Что делаем?</h1>
+          <p className="tg-hint">{name ? `Вы вошли как ${name}.` : ''} Выберите действие.</p>
+          <button className="tg-row" onClick={() => {
+            wa()?.HapticFeedback?.impactOccurred('light');
+            if (!subjects.length) return setError('Вам пока не назначен ни один предмет.');
+            setError('');
+            setStep(subjects.length > 1 ? 'subject' : 'chapters');
+          }}>
+            <span className="tg-subject-icon">📝</span>
+            <span className="tg-grow"><b>Сделать билет</b><br /><span className="tg-hint">выбрать предмет, главы и состав</span></span>
+            <span className="tg-chev">›</span>
+          </button>
+          <button className="tg-row" onClick={() => { wa()?.HapticFeedback?.impactOccurred('light'); setError(''); setStep('check'); }}>
+            <span className="tg-subject-icon">📷</span>
+            <span className="tg-grow"><b>Проверить бланки</b><br /><span className="tg-hint">сфотографировать заполненный бланк</span></span>
+            <span className="tg-chev">›</span>
+          </button>
+          <button className="tg-row" onClick={() => { wa()?.HapticFeedback?.impactOccurred('light'); setError(''); setStep('templates'); }}>
+            <span className="tg-subject-icon">🖨️</span>
+            <span className="tg-grow"><b>Взять шаблоны</b><br /><span className="tg-hint">бланки ответов для печати (PDF)</span></span>
+            <span className="tg-chev">›</span>
+          </button>
+        </>
+      )}
+
+      {step === 'templates' && (
+        <>
+          <h1>Шаблоны бланков</h1>
+          <p className="tg-hint">Печатайте на A4 в масштабе 100 % (без «по размеру страницы»), бланки режутся по пунктирной линии. Файл откроется в браузере: оттуда его можно сохранить или отправить на печать.</p>
+          {BLANK_FILES.map((b) => (
+            <button key={b.file} className="tg-row" onClick={() => {
+              wa()?.HapticFeedback?.impactOccurred('light');
+              const url = `${window.location.origin}/blanks/${b.file}.pdf`;
+              const app = wa();
+              if (app?.openLink) app.openLink(url); else window.open(url, '_blank');
+            }}>
+              <span className="tg-subject-icon">📄</span>
+              <span className="tg-grow"><b>{b.name}</b><br /><span className="tg-hint">{b.hint}</span></span>
+              <span className="tg-chev">›</span>
+            </button>
+          ))}
+        </>
       )}
 
       {step === 'check' && (
@@ -461,7 +518,7 @@ export default function TgApp() {
           <CheckScreen
             api={api}
             haptic={(k) => wa()?.HapticFeedback?.notificationOccurred(k === 'err' ? 'error' : 'success')}
-            onExit={() => setStep(subject && subjects.length <= 1 ? 'chapters' : 'subject')}
+            onExit={() => setStep('home')}
           />
         </React.Suspense>
       )}

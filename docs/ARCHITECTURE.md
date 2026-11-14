@@ -28,7 +28,7 @@
 index.html              <head>: favicon.svg, preconnect к Google Fonts, /font-loader.js (defer), noscript-шрифт; точка входа /src/main.tsx
 vite.config.ts          alias @ → src; manualChunks: vendor (react), supabase, query; define `__BUILD_ID__`, `__APP_VERSION__`; при сборке кладёт `version.json` (идентификатор сборки)
 vercel.json             rewrites /tg /game /play → index.html; заголовки безопасности (CSP, HSTS, X-Frame-Options; для /tg — frame-ancestors web.telegram.org); Cache-Control для /assets, /key-templates, /cluster-assets; `/version.json` без кэша
-public/                 favicon (svg, ico, png разных размеров), site.webmanifest, font-loader.js, theme-init.js (тема до загрузки React), key-templates/{bio,chem,phys,taj,taj-cluster,hist,law,math}.docx, cluster-assets/{ru,tj}_*.png
+public/                 favicon (svg, ico, png разных размеров), site.webmanifest, font-loader.js, theme-init.js (тема до загрузки React), key-templates/{bio,chem,phys,taj,taj-cluster,hist,law,math}.docx, blanks/*.pdf (бланки ответов для печати, раздел «Взять шаблоны»), cluster-assets/{ru,tj}_*.png
 src/main.tsx            QueryClient; маршрутизация по пути (раздел 6.1); prefetchOnStartup
 src/App.tsx             Боковая навигация (SideNav) и меню «Ещё» на телефоне, вкладки, форма вопроса, окно «Что нового», ChangePasswordScreen; раздел виден в адресе (`#archive`), кнопка «Назад» работает по шагам
 src/components/         Экраны и элементы интерфейса (раздел 6.3); ui/ — Button, Card, Badge, Field, Hint, PageHeader, EmptyState, Skeleton
@@ -373,6 +373,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `countPool` считает вопросы тремя запросами `count: 'exact', head: true`.
 
 **Mini App** (`src/tg/TgApp.tsx`):
+- Первый экран (`step = 'home'`): «Сделать билет» (предмет → главы → …), «Проверить бланки» (`CheckScreen`), «Взять шаблоны» (`BLANK_FILES` → `openLink` на `/blanks/<файл>.pdf`). Меняя раскладку бланков, заново выгрузите PDF (Edge, масштаб 100 %) и замените файлы в `public/blanks`.
 - Скрипт Telegram подгружается динамически (`loadTelegramScript`).
 - Все данные идут через `api(action)` → `/functions/v1/tg-app`.
 - Дерево предмета кэшируется на сессию (`treeCache`).
