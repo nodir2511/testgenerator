@@ -11,7 +11,10 @@ interface ChapterRow { id: string; name: string; counts: Counts; topics: TopicRo
 interface Subject { id: string; name: string }
 interface Limits { perType: number; tickets: number; total?: number; perDay: number | null }
 interface Result { missingAnswers: number; keySent: boolean }
-type Step = 'subject' | 'chapters' | 'topics' | 'counts' | 'final' | 'done';
+type Step = 'subject' | 'chapters' | 'topics' | 'counts' | 'final' | 'done' | 'check';
+
+// Проверка бланков по фото — отдельный кусок кода, грузится только при открытии раздела
+const CheckScreen = React.lazy(() => import('./CheckScreen'));
 type Lang = 'ru' | 'tg' | 'both';
 
 interface WebApp {
@@ -448,6 +451,20 @@ export default function TgApp() {
       )}
 
       {error && <div className="tg-error" role="alert">{error}</div>}
+
+      {(step === 'subject' || step === 'chapters') && (
+        <button className="tg-link" style={{ marginBottom: 8 }} onClick={() => { setError(''); setStep('check'); }}>📷 Проверка работ по фото бланка</button>
+      )}
+
+      {step === 'check' && (
+        <React.Suspense fallback={<p className="tg-hint">Загрузка…</p>}>
+          <CheckScreen
+            api={api}
+            haptic={(k) => wa()?.HapticFeedback?.notificationOccurred(k === 'err' ? 'error' : 'success')}
+            onExit={() => setStep(subject && subjects.length <= 1 ? 'chapters' : 'subject')}
+          />
+        </React.Suspense>
+      )}
 
       {step === 'subject' && (
         <>

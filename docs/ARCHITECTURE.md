@@ -35,13 +35,13 @@ src/components/         Экраны и элементы интерфейса (�
 src/lib/                Логика без интерфейса (раздел 7)
 src/hooks/              useAuth.tsx, useReleases.ts, useTheme.ts
 src/game/               «Своя игра»: GameHost, GamePlay, GameScreen, api.ts, ui.tsx, content.ts, review.ts, game.css
-src/tg/                 TgApp.tsx + tg.css — Telegram Mini App (/tg)
+src/tg/                 TgApp.tsx + tg.css — Telegram Mini App (/tg); CheckScreen.tsx — «Проверка работ по фото бланка» (грузится лениво, раздел 8)
 src/types/database.ts   Типы таблиц и ролей
 src/dark.css            Тёмная тема: создаётся автоматически (`npm run theme:dark`, `scripts/gen-dark-css.mjs`), руками не править
 supabase/functions/     Edge Functions + _shared (разделы 8, 9)
 supabase/sql/           SQL базы (раздел 5); releases/ — записи «Что нового», по файлу на версию
 templates/key/*.docx    Исходники шаблонов ключей
-scripts/                sync-docx-shared.mjs, build-key-templates.mjs, gen-dark-css.mjs, backup-to-telegram.sh, одноразовые import_*.mjs и generate_*
+scripts/                omr-blanks.mjs (бланки ответов для печати и раскладки), sync-docx-shared.mjs, build-key-templates.mjs, gen-dark-css.mjs, backup-to-telegram.sh, одноразовые import_*.mjs и generate_*
 tests/                  vitest (раздел 14)
 docs/ARCHITECTURE.md    Этот файл
 .github/workflows/      ci.yml — на каждый пуш: `npm audit` и `npm run build` (тесты, типы, сборка); backup.yml — копия базы (запуск вручную, ночной cron выключен)
@@ -129,6 +129,10 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `telegram_links(chat_id, user_id)`
 - `telegram_link_codes(code, user_id, expires_at)`
 - `telegram_sessions(chat_id, state jsonb)` — состояние диалога бота.
+
+**Проверка бланков** (`omr_checks.sql`):
+- `omr_digit_samples(id, created_at, user_id → auth.users (set null), digit 0–9, px text (14×14 байт в base64, 264 символа), layout)` — картинки цифр без имён для подсказок; доступа с сайта и из приложения нет, читает/пишет `tg-app` (`digits_get` — по 60 последних каждой цифры, `digits_save` — до 40 за раз, не больше 500 в сутки на пользователя).
+- `omr_checks(id, created_at, user_id, batch_id → ticket_batches (set null), ticket_number, student, layout, score, max_score, details jsonb {answers, key, ok})` — пользователь читает и удаляет только свои; пишет `tg-app` сервисным ключом, баллы считает по ключу из базы.
 
 **Своя игра**:
 - `game_sessions(code, host_id, teams, board, buzz, input)` — живое состояние, Realtime.
@@ -233,6 +237,8 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `telegram_bot.sql` | привязка Telegram, сессии бота |
 | `telegram_release_notify.sql` | `scope` у пунктов, `notified_at`, задание pg_cron раз в минуту вызывает `release-notify` |
 | `user_prefs.sql` | `user_prefs` |
+| `omr_checks.sql` | `omr_checks`: результаты проверки бланков (пишет только `tg-app`) |
+| `omr_digit_samples.sql` | `omr_digit_samples`: собранные картинки цифр из клеток (только `tg-app`) |
 | `game.sql`, `game_v2.sql` … `game_v6.sql` | «Своя игра» по версиям; все применены (v6 — 1 ноября 2026) |
 
 
@@ -333,6 +339,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `errorReporter.ts` | `reportError`, `installGlobalErrorReporting` | отправка необработанных ошибок в `client_errors` (не больше 5 разных за сеанс) |
 | `imageCompression.ts` | `compressImage`, `uploadQuestionImage` | сжатие и загрузка в `question-images` |
 | `passwordRules.ts` | `passwordChecks`, `passwordOk`, `PASSWORD_MIN` = 9 | требования к паролю |
+| `omr/` | `recognize.ts`: `omrRead(img, layout, {codes?})`; `image.ts`: `loadGrayImage(file)`; `answers.ts`: `answersFromResult`, `doubts`, `keyFromAnswers`, `variantFromResult`; `types.ts`; `layouts.generated.ts` (**автогенерация** `node scripts/omr-blanks.mjs`, руками не править) | Проверка бланков по фото: четыре угловые метки → выравнивание → код бланка (он же определяет поворот снимка) → вариант, тесты, соответствия, клетки открытых. Цифры: `digits.ts` (клетка → 28×28 как у MNIST → 14×14, синтетические примеры из штрихов), `knn.ts` (`DigitKnn`, K=5, «не уверен» при голосах <60 % или расстоянии >5,5), `model.ts` (загрузка собранных примеров один раз за сеанс, подсказки `guessOpen`, сбор `collectSamples`). Подсказка подставляется в пустое поле числа, последнее слово за проверяющим; уверенные цифры и правки проверяющего уходят в `digits_save` (галочка в экране проверки, по умолчанию включена). Пять бланков: `chem`, `phys` (18+2+7), `bio`, `taj` (20+4+2), `chemphys` (8+2+2); у химии и физики раскладка общая, коды разные |
 | `cn.ts` | `cn` | классы Tailwind (`clsx` + `tailwind-merge`) |
 | `utils.ts` | вспомогательные функции | общее |
 
@@ -343,7 +350,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | Функция | Вход и проверка | Что делает | Секреты |
 |---|---|---|---|
 | `telegram-bot` | вебхук Telegram, `--no-verify-jwt`, заголовок `X-Telegram-Bot-Api-Secret-Token` = `TELEGRAM_WEBHOOK_SECRET` | диалог бота (ниже) | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` |
-| `tg-app` | `POST {action, …}`, заголовок `X-Tg-Init-Data` (подпись по токену бота), `--no-verify-jwt` | действия `me` → `{name, subjects, limits}`, `history` (8 последних наборов без кластерных), `tree` (главы и темы со счётчиками; проверка назначенных предметов), `generate`, `resend`; файл присылает бот | `TELEGRAM_BOT_TOKEN` |
+| `tg-app` | `POST {action, …}`, заголовок `X-Tg-Init-Data` (подпись по токену бота), `--no-verify-jwt` | действия `me` → `{name, subjects, limits}`, `history` (8 последних наборов без кластерных), `tree` (главы и темы со счётчиками; проверка назначенных предметов), `generate`, `resend`; файл присылает бот; проверка бланков: `check_sets` (свои наборы с составом и признаком `supported`), `check_key` (ключи всех билетов набора из снимков вопросов; отказ, если состав не 18/2/7, 20/4/2, 8/2/2), `check_save` (проверяет форму ответов, считает баллы по ключу из базы или по присланному ключу, пишет в `omr_checks`), `check_list`; цифры: `digits_get` (общий набор картинок), `digits_save` | `TELEGRAM_BOT_TOKEN` |
 | `release-notify` | вызывает pg_cron раз в минуту, `--no-verify-jwt`, тела запроса не читает | «занимает» версии с `notified_at is null` и шлёт каждому привязанному пользователю пункты, видимые его роли и предметам (все `scope`: сайт, бот, мини-приложение) | `TELEGRAM_BOT_TOKEN` |
 | `send-to-telegram` | JWT пользователя | принимает собранный браузером файл и шлёт его в `chat_id` из `telegram_links`; `{action:'bot'}` отдаёт имя бота | `TELEGRAM_BOT_TOKEN` |
 | `admin-create-user` | JWT админа | пишет `account_invites`, создаёт пользователя с паролем, ставит `must_change_password` | — |
@@ -371,6 +378,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - Дерево предмета кэшируется на сессию (`treeCache`).
 - Настройки хранятся в CloudStorage Telegram, запасной вариант — localStorage.
 - Навигация через MainButton и BackButton Telegram.
+- **Проверка работ** (`CheckScreen.tsx`, шаг `check`, кнопка на шагах «Предмет» и «Главы»; свои кнопки «Назад», MainButton скрыт): бланк снимается системной камерой (`<input type=file capture=environment>`, политика `camera=()` не мешает), распознавание — в телефоне, фото никуда не уходят. Ключ: из набора билетов, введённый вручную (хранится в localStorage `omr_custom_keys_v1`, только на устройстве) или снятый с эталонного бланка (один билет — одно фото). Баллы: тест 1, пункт соответствия 1 (4 на задание), открытый 2.
 
 ## 9. Общий код `supabase/functions/_shared`
 
@@ -391,6 +399,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
   - пул: `loadPool` (без выбора — пусто), `loadQuestionCounts`, `loadChapterTotals`;
   - генерация: `generateAndSend` (блокировка → лёгкий пул и счётчики → `pickTickets` → `hydrateTickets` → `save_ticket_batch` → `deliverBatch` вместе с `audit_logs`);
   - отправка: `deliverBatch` (Word по вариантам, ключи из `KEY_TEMPLATES`, ZIP или один файл, `sendDocument`), `resendBatch`.
+- `omrScore.ts` — без импортов, общий для сайта и `tg-app`: `BLANKS`/`blankFor(состав)`, `maxPoints`, `scoreAnswers`, разбор введённого ключа (`parseKey`).
 - `docxExport.ts`, `answerKey.ts`, `fractions.ts` — **автогенерация** из `src/lib` (`node scripts/sync-docx-shared.mjs`), руками не править.
 - `releases.ts` — для рассылки: `rankOf`, `itemVisible`, `releaseLines`, `chunkLines` (сообщения Telegram до 3800 знаков).
 - `keyTemplates.ts` — **автогенерация** (`node scripts/build-key-templates.mjs`): base64 шаблонов из `templates/key`.
@@ -527,6 +536,9 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `pool.test.ts` | лёгкий пул (страницы, только лёгкие поля), подбор по лёгкому пулу совпадает с подбором по полному, догрузка пачками, ошибка при пропавшем вопросе |
 | `answerKey.test.ts` | ответы в ключах, шаблоны, универсальная таблица, `selectionInfo` |
 | `cluster.test.ts` | книжка кластера |
+| `omr.test.ts` | распознавание бланков на нарисованных снимках (наклон, поворот на 180°, чужой код, пустой стол) для всех пяти бланков |
+| `omrDigits.test.ts` | картинка цифры 28×28/14×14, base64, kNN на новых рисунках, добавление примеров, цифры по снимкам бланков (общий рисовальщик `omrRender.ts`) |
+| `omrScore.test.ts` | баллы, соответствие состава билета бланку, разбор введённого ключа |
 | `game.test.ts` | очередь нажатий по номеру вопроса, действия команд («кот», ставки), места |
 | `questionSwap.test.ts` | замена вопросов и снятие темы (виды, повторы, связанные, пустые места) |
 | `duplicates.test.ts`, `questionChecks.test.ts` | поиск дублей и локальные проверки вопроса |
@@ -548,6 +560,8 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - Сборка Word идёт в основном потоке: 4 варианта ≈ 0,3 с, 20 RU+TJ ≈ 2 с, 50 RU+TJ ≈ 4,5 с.
 - Внутри `onAuthStateChange` не делайте долгих цепочек запросов: колбэк держит блокировку сессии supabase-js.
 - Счётчик `question_usage` ведёт триггер: не обновляйте его из кода.
+- Бланки ответов строит `scripts/omr-blanks.mjs`: HTML для печати (`scratch/blanks/out`, PDF из Edge/Chrome, масштаб 100 %) и `layouts.generated.ts` одним запуском. Меняя размеры или места кружков, перепечатайте бланки, иначе распознавание сдвинется; код бланка (квадратики внизу справа) нельзя менять без правки раскладки и `BLANKS`.
+- Распознавание проверено только на нарисованных снимках: порог закрашенности `FILL_ON` подбирался без реальных бланков.
 - «Пустое место» в билете: `question_id = null` и `snapshot.empty`. Код, читающий билеты, должен это учитывать.
 - Анонимы не имеют прав на таблицы (`security_round4.sql`): новые таблицы для игры открывайте только через `security definer`-функции.
 - Путь проекта на кириллице («генератор тестов»): в командах берите его в кавычки. Git предупреждает о CRLF, это нормально.
