@@ -136,6 +136,8 @@ function parseGenerate(b: any, limits: Limits): { error: string } | { subjectId:
 }
 
 // ---------------- Проверка бланков ----------------
+/** Сколько примеров каждой цифры хранить; более старые удаляются при сохранении новых */
+const MAX_DIGIT_SAMPLES = 2000;
 const LAYOUT_IDS = ['chem', 'phys', 'bio', 'taj', 'chemphys'];
 
 // Ключ билета по снимкам вопросов: порядок как в билете, у соответствия всегда четыре пункта A–D
@@ -344,6 +346,11 @@ Deno.serve(async (req) => {
         if (error) {
           console.error('tg-app digits_save', error);
           return json({ error: 'Не удалось сохранить' }, 500);
+        }
+        // Автоочистка: на каждую цифру оставляем MAX_DIGIT_SAMPLES свежих примеров, старые удаляем
+        for (const d of new Set(rows.map((r) => r.digit))) {
+          const { data: old } = await sb.from('omr_digit_samples').select('id').eq('digit', d).order('id', { ascending: false }).range(MAX_DIGIT_SAMPLES, MAX_DIGIT_SAMPLES).limit(1);
+          if (old?.[0]) await sb.from('omr_digit_samples').delete().eq('digit', d).lte('id', old[0].id);
         }
         return json({ ok: true, saved: rows.length });
       }

@@ -131,7 +131,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `telegram_sessions(chat_id, state jsonb)` — состояние диалога бота.
 
 **Проверка бланков** (`omr_checks.sql`):
-- `omr_digit_samples(id, created_at, user_id → auth.users (set null), digit 0–9, px text (14×14 байт в base64, 264 символа), layout)` — картинки цифр без имён для подсказок; доступа с сайта и из приложения нет, читает/пишет `tg-app` (`digits_get` — по 60 последних каждой цифры, `digits_save` — до 40 за раз, не больше 500 в сутки на пользователя).
+- `omr_digit_samples(id, created_at, user_id → auth.users (set null), digit 0–9, px text (14×14 байт в base64, 264 символа), layout)` — картинки цифр без имён для подсказок; доступа с сайта и из приложения нет, читает/пишет `tg-app` (`digits_get` — по 60 последних каждой цифры, `digits_save` — до 40 за раз, не больше 500 в сутки на пользователя; после записи на каждую цифру остаётся 2000 свежих примеров, старые удаляются).
 - `omr_checks(id, created_at, user_id, batch_id → ticket_batches (set null), ticket_number, student, layout, score, max_score, details jsonb {answers, key, ok})` — пользователь читает и удаляет только свои; пишет `tg-app` сервисным ключом, баллы считает по ключу из базы.
 
 **Своя игра**:
