@@ -35,7 +35,6 @@ interface WebApp {
   ready(): void;
   expand(): void;
   close(): void;
-  openLink?(url: string): void;
   HapticFeedback?: { impactOccurred(s: string): void; notificationOccurred(s: string): void };
   MainButton: {
     setText(t: string): void; show(): void; hide(): void; enable(): void; disable(): void;
@@ -169,6 +168,7 @@ export default function TgApp() {
   const [error, setError] = useState('');
   const [limits, setLimits] = useState<Limits>({ ...TG_LIMITS });
   const [result, setResult] = useState<Result | null>(null);
+  const [sentNote, setSentNote] = useState('');
 
   // ---- загрузка ----
   useEffect(() => {
@@ -486,7 +486,7 @@ export default function TgApp() {
             <span className="tg-grow"><b>Проверить бланки</b><br /><span className="tg-hint">сфотографировать заполненный бланк</span></span>
             <span className="tg-chev">›</span>
           </button>
-          <button className="tg-row" onClick={() => { wa()?.HapticFeedback?.impactOccurred('light'); setError(''); setStep('templates'); }}>
+          <button className="tg-row" onClick={() => { wa()?.HapticFeedback?.impactOccurred('light'); setError(''); setSentNote(''); setStep('templates'); }}>
             <span className="tg-subject-icon">🖨️</span>
             <span className="tg-grow"><b>Взять шаблоны</b><br /><span className="tg-hint">бланки ответов для печати (PDF)</span></span>
             <span className="tg-chev">›</span>
@@ -497,13 +497,20 @@ export default function TgApp() {
       {step === 'templates' && (
         <>
           <h1>Шаблоны бланков</h1>
-          <p className="tg-hint">Печатайте на A4 в масштабе 100 % (без «по размеру страницы»), бланки режутся по пунктирной линии. Файл откроется в браузере: оттуда его можно сохранить или отправить на печать.</p>
+          <p className="tg-hint">Нажмите на бланк — бот пришлёт PDF в чат. Печатайте на A4 в масштабе 100 % (без «по размеру страницы»), бланки режутся по пунктирной линии.</p>
+          {sentNote && <div className="tg-card">✅ {sentNote}</div>}
           {BLANK_FILES.map((b) => (
-            <button key={b.file} className="tg-row" onClick={() => {
+            <button key={b.file} className="tg-row" disabled={busy} onClick={async () => {
               wa()?.HapticFeedback?.impactOccurred('light');
-              const url = `${window.location.origin}/blanks/${b.file}.pdf`;
-              const app = wa();
-              if (app?.openLink) app.openLink(url); else window.open(url, '_blank');
+              setBusy(true); setError(''); setSentNote('');
+              try {
+                await api('blank_send', { file: b.file });
+                wa()?.HapticFeedback?.notificationOccurred('success');
+                setSentNote(`«${b.name}» отправлен в чат с ботом.`);
+              } catch (e) {
+                wa()?.HapticFeedback?.notificationOccurred('error');
+                setError((e as Error).message);
+              } finally { setBusy(false); }
             }}>
               <span className="tg-subject-icon">📄</span>
               <span className="tg-grow"><b>{b.name}</b><br /><span className="tg-hint">{b.hint}</span></span>

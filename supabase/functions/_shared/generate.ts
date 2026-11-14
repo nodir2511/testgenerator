@@ -116,7 +116,7 @@ function escapeHtml(s: string): string {
   return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-async function sendDocument(botToken: string, chat: number, bytes: Uint8Array, filename: string, caption: string) {
+export async function sendDocument(botToken: string, chat: number, bytes: Uint8Array, filename: string, caption: string) {
   const form = new FormData();
   form.append('chat_id', String(chat));
   form.append('parse_mode', 'HTML');

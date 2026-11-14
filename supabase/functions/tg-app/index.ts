@@ -11,7 +11,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
-import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser, resendBatch, userMessage, type Limits } from '../_shared/generate.ts';
+import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser, resendBatch, sendDocument, userMessage, type Limits } from '../_shared/generate.ts';
 import { matchingAnswer, openAnswer, testAnswer } from '../_shared/answerKey.ts';
 import { MATCHING_ROWS, blankFor, maxPoints, scoreAnswers, type Answers, type Composition, type TicketKey } from '../_shared/omrScore.ts';
 
@@ -136,6 +136,14 @@ function parseGenerate(b: any, limits: Limits): { error: string } | { subjectId:
 }
 
 // ---------------- Проверка бланков ----------------
+/** Бланки для печати: файлы лежат в репозитории (public/blanks); бот берёт их с GitHub по фиксированному адресу */
+const BLANK_FILES: Record<string, string> = {
+  'chem-27': 'Бланк химия 27', 'phys-27': 'Бланк физика 27', 'math-27': 'Бланк математика 27',
+  'bio-26': 'Бланк биология 26', 'taj-26': 'Бланк таджикский язык 26', 'hist-26': 'Бланк история 26',
+  'law-26': 'Бланк право 26', 'eng-26': 'Бланк английский язык 26', 'chemphys-12': 'Бланк химия-физика 12',
+};
+const BLANKS_URL = 'https://raw.githubusercontent.com/nodir2511/testgenerator/main/public/blanks';
+
 /** Сколько примеров каждой цифры хранить; более старые удаляются при сохранении новых */
 const MAX_DIGIT_SAMPLES = 2000;
 const LAYOUT_IDS = ['chem', 'phys', 'bio', 'taj', 'chemphys'];
@@ -357,6 +365,20 @@ Deno.serve(async (req) => {
           if (old?.[0]) await sb.from('omr_digit_samples').delete().eq('digit', d).lte('id', old[0].id);
         }
         return json({ ok: true, saved: rows.length });
+      }
+      // Шаблон бланка в чат с ботом
+      case 'blank_send': {
+        const name = typeof body.file === 'string' ? BLANK_FILES[body.file] : undefined;
+        if (!name) return json({ error: 'Неизвестный шаблон' }, 400);
+        const res = await fetch(`${BLANKS_URL}/${body.file}.pdf`).catch(() => null);
+        if (!res?.ok) return json({ error: 'Не удалось получить файл шаблона. Попробуйте ещё раз.' }, 502);
+        try {
+          await sendDocument(BOT_TOKEN, tgUser.id, new Uint8Array(await res.arrayBuffer()), `${name}.pdf`, `🖨️ ${name}. Печать на A4, масштаб 100 %.`);
+        } catch (e) {
+          console.error('tg-app blank_send', e);
+          return json({ error: userMessage(e, 'Не удалось отправить файл') }, 422);
+        }
+        return json({ ok: true });
       }
       // Чистка собранных цифр — только главный админ
       case 'digits_admin':
