@@ -263,14 +263,18 @@ Deno.serve(async (req) => {
       }
       // Проверка бланков по фото. Наборы — только свои; бланк подбирается по составу билета.
       case 'check_sets': {
+        // Поиск q: по названию, предмету и дате (дд.мм.гггг или гггг-мм-дд) среди последних 200 наборов
+        const q = typeof body.q === 'string' ? body.q.trim().toLowerCase().slice(0, 60) : '';
         const { data } = await sb.from('ticket_batches').select('id, title, created_at, generation_params, subject:subjects(name)')
-          .eq('created_by', user.id).order('created_at', { ascending: false }).limit(30);
+          .eq('created_by', user.id).order('created_at', { ascending: false }).limit(q ? 200 : 30);
         const sets = (data ?? []).filter((b: any) => b.generation_params?.source !== 'cluster').map((b: any) => {
           const p = b.generation_params ?? {};
           const comp = { test: p.test_count ?? 0, matching: p.matching_count ?? 0, open: p.open_count ?? 0 };
           return { id: b.id, title: b.title, createdAt: b.created_at, subject: b.subject?.name ?? '', tickets: p.ticket_count ?? null, comp, supported: !!blankFor(comp) };
         });
-        return json({ sets: sets.slice(0, 12) });
+        const dmy = (iso: string) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`;
+        const found = q ? sets.filter((s: any) => `${s.title} ${s.subject} ${dmy(s.createdAt)} ${s.createdAt.slice(0, 10)}`.toLowerCase().includes(q)) : sets;
+        return json({ sets: found.slice(0, q ? 30 : 12) });
       }
       case 'check_key': {
         if (typeof body.batchId !== 'string') return json({ error: 'Не выбран набор' }, 400);
@@ -353,6 +357,34 @@ Deno.serve(async (req) => {
           if (old?.[0]) await sb.from('omr_digit_samples').delete().eq('digit', d).lte('id', old[0].id);
         }
         return json({ ok: true, saved: rows.length });
+      }
+      // Чистка собранных цифр — только главный админ
+      case 'digits_admin':
+      case 'digits_admin_delete':
+      case 'digits_admin_relabel': {
+        const { data: prof } = await sb.from('profiles').select('role, is_owner').eq('id', user.id).maybeSingle();
+        if (!(prof?.is_owner && prof?.role === 'admin')) {
+          if (body.action === 'digits_admin') return json({ owner: false });
+          return json({ error: 'Только для главного админа' }, 403);
+        }
+        const ids = (Array.isArray(body.ids) ? body.ids : []).filter((x: unknown) => Number.isInteger(x)).slice(0, 200);
+        if (body.action === 'digits_admin_delete') {
+          if (ids.length) await sb.from('omr_digit_samples').delete().in('id', ids);
+          return json({ ok: true, deleted: ids.length });
+        }
+        if (body.action === 'digits_admin_relabel') {
+          if (!Number.isInteger(body.digit) || body.digit < 0 || body.digit > 9) return json({ error: 'Некорректная цифра' }, 400);
+          if (ids.length) await sb.from('omr_digit_samples').update({ digit: body.digit }).in('id', ids);
+          return json({ ok: true, changed: ids.length });
+        }
+        const counts = await Promise.all(Array.from({ length: 10 }, (_, d) =>
+          sb.from('omr_digit_samples').select('id', { count: 'exact', head: true }).eq('digit', d).then((r: any) => r.count ?? 0)));
+        let items: unknown[] | undefined;
+        if (Number.isInteger(body.digit) && body.digit >= 0 && body.digit <= 9) {
+          const { data } = await sb.from('omr_digit_samples').select('id, px, created_at').eq('digit', body.digit).order('id', { ascending: false }).limit(150);
+          items = data ?? [];
+        }
+        return json({ owner: true, counts, items });
       }
       default:
         return json({ error: 'Неизвестное действие' }, 400);

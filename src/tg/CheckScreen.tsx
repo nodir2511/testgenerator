@@ -6,8 +6,9 @@ import {
 import { OMR_LAYOUTS } from '../lib/omr/layouts.generated';
 import { omrRead } from '../lib/omr/recognize';
 import { loadGrayImage } from '../lib/omr/image';
-import { answersFromResult, doubts, keyFromAnswers, variantFromResult, type Doubt } from '../lib/omr/answers';
+import { answersFromResult, doubts, keyFromAnswers, qualityWarnings, variantFromResult, type Doubt } from '../lib/omr/answers';
 import type { OmrResult } from '../lib/omr/types';
+import { PIX, pixFromBase64 } from '../lib/omr/digits';
 import { collectEnabled, collectSamples, guessOpen, loadDigitModel, setCollectEnabled, type OpenHint } from '../lib/omr/model';
 
 // Раздел «Проверка» мини-приложения: фото бланка → ответы → баллы.
@@ -43,7 +44,7 @@ const CODE_TEXT = 'Не удалось определить вид бланка.
 
 const compText = (c: Composition) => `${c.test} тестов, ${c.matching} соответствий, ${c.open} открытых`;
 const doubtLabel = (d: Doubt) => (d.kind === 'test' ? `Тест ${d.q}` : d.kind === 'matching' ? `Соответствие ${d.q}, пункт ${d.row}` : d.kind === 'variant' ? 'Вариант' : `Открытый ${d.q}`);
-const WHY: Record<Doubt['why'], string> = { multi: 'отмечено несколько', unsure: 'неуверенно', empty: 'не отмечено', digit: 'цифры' };
+const WHY: Record<Doubt['why'], string> = { multi: 'отмечено несколько — засчитано неверно', unsure: 'неуверенно', empty: 'не отмечено', digit: 'цифры' };
 
 type View =
   | { name: 'home' }
@@ -54,7 +55,8 @@ type View =
   | { name: 'review'; src: KeySource; res: Ok; mode: 'check' }
   | { name: 'refScan'; custom: string }
   | { name: 'refReview'; custom: string; res: Ok }
-  | { name: 'results' };
+  | { name: 'results' }
+  | { name: 'digits' };
 
 export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit: () => void; haptic: (kind: 'light' | 'ok' | 'err') => void }) {
   const [view, setView] = useState<View>({ name: 'home' });
@@ -62,18 +64,29 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
   const [busy, setBusy] = useState(false);
   const [custom, setCustom] = useState<CustomKey[]>(() => loadCustom());
   const [sets, setSets] = useState<SetRow[] | null>(null);
+  const [search, setSearch] = useState('');
   const [done, setDone] = useState<Array<{ student: string; score: number; max: number }>>([]);
+  const [owner, setOwner] = useState(false);
+  useEffect(() => { void api<{ owner: boolean }>('digits_admin').then((r) => setOwner(!!r.owner)).catch(() => {}); }, [api]);
 
   const upCustom = (fn: (l: CustomKey[]) => CustomKey[]) => setCustom((l) => { const n = fn(l); saveCustom(n); return n; });
   const go = (v: View) => { setError(''); setView(v); };
   const fail = (e: unknown) => { haptic('err'); setError((e as Error).message || 'Ошибка'); };
 
-  async function openSets() {
-    go({ name: 'sets' });
-    if (sets) return;
-    setBusy(true);
-    try { setSets((await api<{ sets: SetRow[] }>('check_sets')).sets); } catch (e) { fail(e); } finally { setBusy(false); }
-  }
+  // Список наборов: при открытии и при поиске (с небольшой задержкой, чтобы не слать запрос на каждую букву)
+  useEffect(() => {
+    if (view.name !== 'sets') return;
+    let off = false;
+    const id = setTimeout(() => {
+      setBusy(true);
+      api<{ sets: SetRow[] }>('check_sets', search.trim() ? { q: search.trim() } : {})
+        .then((r) => { if (!off) setSets(r.sets); })
+        .catch((e) => { if (!off) fail(e); })
+        .finally(() => { if (!off) setBusy(false); });
+    }, search ? 300 : 0);
+    return () => { off = true; clearTimeout(id); };
+  }, [view.name, search]); // eslint-disable-line react-hooks/exhaustive-deps
+  const openSets = () => go({ name: 'sets' });
 
   async function pickSet(s: SetRow) {
     setBusy(true); setError('');
@@ -110,6 +123,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
           <button className="tg-row" onClick={() => void openSets()}><span className="tg-subject-icon">📋</span><span className="tg-grow"><b>По моим билетам</b><br /><span className="tg-hint">ключ берётся из созданного набора</span></span><span className="tg-chev">›</span></button>
           <button className="tg-row" onClick={() => go({ name: 'custom' })}><span className="tg-subject-icon">🔑</span><span className="tg-grow"><b>По своему ключу</b><br /><span className="tg-hint">ввести ответы или снять эталонный бланк</span></span><span className="tg-chev">›</span></button>
           <button className="tg-row" onClick={() => go({ name: 'results' })}><span className="tg-subject-icon">📊</span><span className="tg-grow"><b>Результаты</b></span><span className="tg-chev">›</span></button>
+          {owner && <button className="tg-row" onClick={() => go({ name: 'digits' })}><span className="tg-subject-icon">🔢</span><span className="tg-grow"><b>Собранные цифры</b><br /><span className="tg-hint">просмотр и чистка картинок для подсказок</span></span><span className="tg-chev">›</span></button>}
         </>
       )}
 
@@ -117,7 +131,8 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
         <>
           <h1>Набор билетов</h1>
           <p className="tg-hint">Подходят наборы с составом 18/2/7, 20/4/2 или 8/2/2 (тесты / соответствия / открытые).</p>
-          {sets?.length === 0 && <p className="tg-hint">Наборов пока нет — создайте билеты в конструкторе.</p>}
+          <label className="tg-field"><span>Поиск</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="название, предмет или дата (например 14.11.2026)" /></label>
+          {sets?.length === 0 && <p className="tg-hint">{search.trim() ? 'Ничего не найдено.' : 'Наборов пока нет — создайте билеты в конструкторе.'}</p>}
           {sets?.map((s) => (
             <button key={s.id} className="tg-row" disabled={busy || !s.supported} onClick={() => void pickSet(s)}>
               <span className="tg-grow"><b>{s.title}</b><br /><span className="tg-hint">{s.subject} · {new Date(s.createdAt).toLocaleDateString('ru-RU')} · {s.comp.test}/{s.comp.matching}/{s.comp.open}{s.tickets ? ` · ${s.tickets} вар.` : ''}{s.supported ? '' : ' · нет бланка'}</span></span>
@@ -180,6 +195,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
           res={view.res}
           onDone={(r) => { setDone((d) => [...d, r]); haptic('ok'); go({ name: 'scan', src: view.src }); }}
           onError={fail}
+          onRetake={() => go({ name: 'scan', src: view.src })}
         />
       )}
 
@@ -213,6 +229,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
       })()}
 
       {view.name === 'results' && <Results api={api} onError={fail} />}
+      {view.name === 'digits' && <DigitsAdmin api={api} onError={fail} />}
     </>
   );
 }
@@ -339,7 +356,8 @@ function AnswerEditor({ res, answers, setAnswers, onlyDoubts, withEmpty, hints }
   );
 }
 
-function Review({ api, src, res, onDone, onError }: { api: Api; src: KeySource; res: Ok; onDone: (r: { student: string; score: number; max: number }) => void; onError: (e: unknown) => void }) {
+function Review({ api, src, res, onDone, onError, onRetake }: { api: Api; src: KeySource; res: Ok; onDone: (r: { student: string; score: number; max: number }) => void; onError: (e: unknown) => void; onRetake: () => void }) {
+  const warnings = useMemo(() => qualityWarnings(res), [res]);
   const [answers, setAnswers] = useState<Answers>(() => answersFromResult(res));
   const [variant, setVariant] = useState<string>(() => String(variantFromResult(res) ?? ''));
   const [student, setStudent] = useState('');
@@ -371,6 +389,13 @@ function Review({ api, src, res, onDone, onError }: { api: Api; src: KeySource; 
   return (
     <>
       <h1>Проверка бланка</h1>
+      {warnings.length > 0 && (
+        <div className="tg-card" style={{ borderLeft: '4px solid #e0a100' }}>
+          <b>⚠️ Снимок читается ненадёжно</b>
+          {warnings.map((w) => <p key={w} className="tg-hint">{w}</p>)}
+          <button className="tg-btn-primary" onClick={onRetake}>📷 Переснять</button>
+        </div>
+      )}
       <div className="tg-card">
         <b>Вариант</b>
         {variantFromResult(res) === null && <p className="tg-hint">Вариант на бланке не отмечен или отмечено несколько кружков — выберите вручную.</p>}
@@ -406,7 +431,7 @@ function RefReview({ api, c, res, onSave }: { api: Api; c: CustomKey; res: Ok; o
       <h1>Ключ по эталону</h1>
       <div className="tg-card">
         <b>Номер варианта</b>
-        <Choice value={variant || null} options={Array.from({ length: 10 }, (_, i) => String(i + 1))} onChange={(v) => setVariant(v ?? '')} />
+        <Choice value={variant || null} options={Array.from({ length: 4 }, (_, i) => String(i + 1))} onChange={(v) => setVariant(v ?? '')} />
       </div>
       <p className="tg-hint">В ключе должны быть заполнены все задания. Не заполнено: {missing}. <button className="tg-link" onClick={() => setAll(!all)}>{all ? 'Только сомнительные' : 'Показать все'}</button></p>
       <AnswerEditor res={res} answers={answers} setAnswers={setAnswers} onlyDoubts={!all} withEmpty hints={hints} />
@@ -456,7 +481,7 @@ function CustomEdit({ c, onSave, onRemove, onScan, onUse }: { c: CustomKey; onSa
       <p className="tg-hint">{compText(c.comp)}. Варианты с ключом: {have.join(', ') || 'пока нет'}.</p>
       <button className="tg-btn-secondary" onClick={onScan}>📷 Снять эталонный бланк</button>
       <h2>Ввести ключ вручную</h2>
-      <Choice value={n} options={Array.from({ length: 10 }, (_, i) => String(i + 1))} onChange={(v) => setN(v ?? n)} />
+      <Choice value={n} options={Array.from({ length: 4 }, (_, i) => String(i + 1))} onChange={(v) => setN(v ?? n)} />
       <label className="tg-field"><span>Тесты: {c.comp.test} букв (ABCD…)</span><input value={t.tests} onChange={(e) => setT({ ...t, tests: e.target.value })} placeholder="ABCDABCD…" /></label>
       {c.comp.matching > 0 && <label className="tg-field"><span>Соответствия: {c.comp.matching} групп по 4 цифры 1–5</span><input value={t.matching} onChange={(e) => setT({ ...t, matching: e.target.value })} placeholder="3124 2541" /></label>}
       {c.comp.open > 0 && <label className="tg-field"><span>Открытые: {c.comp.open} чисел через пробел</span><input value={t.open} onChange={(e) => setT({ ...t, open: e.target.value })} placeholder="12 5 700" /></label>}
@@ -486,6 +511,83 @@ function Results({ api, onError }: { api: Api; onError: (e: unknown) => void }) 
           <span className="tg-badge">{r.score} / {r.max_score}</span>
         </div>
       ))}
+    </>
+  );
+}
+
+// ---------- чистка собранных цифр (главный админ) ----------
+function PxPic({ px, on, onClick }: { px: string; on: boolean; onClick: () => void }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current, p = pixFromBase64(px);
+    if (!cv || !p) return;
+    const k = 3;
+    cv.width = cv.height = PIX * k;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    for (let y = 0; y < PIX; y++) for (let x = 0; x < PIX; x++) {
+      const v = p[y * PIX + x];
+      if (v) { ctx.fillStyle = 'rgba(0,0,0,' + v / 255 + ')'; ctx.fillRect(x * k, y * k, k, k); }
+    }
+  }, [px]);
+  return <canvas ref={ref} onClick={onClick} style={{ width: 48, height: 48, border: on ? '2px solid #d33' : '1px solid var(--hint)', borderRadius: 4, background: '#fff' }} />;
+}
+
+function DigitsAdmin({ api, onError }: { api: Api; onError: (e: unknown) => void }) {
+  const [counts, setCounts] = useState<number[]>([]);
+  const [digit, setDigit] = useState<number | null>(null);
+  const [items, setItems] = useState<Array<{ id: number; px: string }>>([]);
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  async function load(d: number | null) {
+    setBusy(true);
+    try {
+      const r = await api<{ counts: number[]; items?: Array<{ id: number; px: string }> }>('digits_admin', d === null ? {} : { digit: d });
+      setCounts(r.counts);
+      setItems(r.items ?? []);
+      setSel(new Set());
+    } catch (e) { onError(e); } finally { setBusy(false); }
+  }
+  useEffect(() => { void load(null); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function act(action: 'digits_admin_delete' | 'digits_admin_relabel', extra: Record<string, unknown> = {}) {
+    if (!sel.size) return;
+    setBusy(true);
+    try {
+      await api(action, { ids: [...sel], ...extra });
+      await load(digit);
+    } catch (e) { onError(e); setBusy(false); }
+  }
+
+  return (
+    <>
+      <h1>Собранные цифры</h1>
+      <p className="tg-hint">Картинки, из которых строятся подсказки. Выберите цифру, отметьте ошибочные картинки и удалите их или перенесите в нужную цифру. Показаны 150 последних.</p>
+      <div className="tg-chips">
+        {Array.from({ length: 10 }, (_, d) => (
+          <button key={d} className={'tg-chip ' + (digit === d ? 'on' : '')} onClick={() => { setDigit(d); void load(d); }}>{d} · {counts[d] ?? '…'}</button>
+        ))}
+      </div>
+      {busy && <p className="tg-hint">Загрузка…</p>}
+      {digit !== null && !busy && items.length === 0 && <p className="tg-hint">Картинок этой цифры пока нет.</p>}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '10px 0' }}>
+        {items.map((it) => (
+          <PxPic key={it.id} px={it.px} on={sel.has(it.id)} onClick={() => setSel((s) => { const n = new Set(s); if (n.has(it.id)) n.delete(it.id); else n.add(it.id); return n; })} />
+        ))}
+      </div>
+      {sel.size > 0 && (
+        <div className="tg-card">
+          <b>Выбрано: {sel.size}</b>
+          <button className="tg-btn-primary" disabled={busy} onClick={() => { if (window.confirm('Удалить ' + sel.size + ' картинок? Это нельзя отменить.')) void act('digits_admin_delete'); }}>Удалить выбранные</button>
+          <p className="tg-hint">Перенести в цифру:</p>
+          <div className="tg-chips">
+            {Array.from({ length: 10 }, (_, d) => (d === digit ? null : <button key={d} className="tg-chip" disabled={busy} onClick={() => void act('digits_admin_relabel', { digit: d })}>{d}</button>))}
+          </div>
+        </div>
+      )}
     </>
   );
 }

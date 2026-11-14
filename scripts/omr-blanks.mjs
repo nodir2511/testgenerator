@@ -13,16 +13,16 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const PAGE = { w: 210, h: 297 };
 const LETTERS = ['A', 'B', 'C', 'D'];
-const VARIANTS = 10;
+const VARIANTS = 4; // на бланке четыре варианта (кружки 1–4)
 
 // Виды бланков: высота, сколько на листе, отступ сверху, вертикали шапки и меток
 const KINDS = {
   // 18 тестов, 2 соответствия, 7 открытых
-  k18: { h: 99, perPage: 3, top: 0, total: 27, markY: [6, 88], headY: 15.5, ruleY: 17.2, titleY: 24.2, varNumY: 21.2, varY: 24.6, varX: 147.5, varStep: 5.4, varD: 4.2, codeY: 88.5, footY: 91 },
+  k18: { h: 99, perPage: 3, top: 0, total: 27, markY: [6, 88], headY: 15.5, ruleY: 17.2, titleY: 24.2, varNumY: 10.9, varY: 14.3, varX: 175, varStep: 5.4, varD: 4.2, codeY: 88.5, footY: 91 },
   // 20 тестов, 4 соответствия, 2 открытых
-  k20: { h: 99, perPage: 3, top: 0, total: 26, markY: [6, 88], headY: 15.5, ruleY: 17.2, titleY: 24.2, varNumY: 21.2, varY: 24.6, varX: 147.5, varStep: 5.4, varD: 4.2, codeY: 88.5, footY: 91 },
+  k20: { h: 99, perPage: 3, top: 0, total: 26, markY: [6, 88], headY: 15.5, ruleY: 17.2, titleY: 24.2, varNumY: 10.9, varY: 14.3, varX: 175, varStep: 5.4, varD: 4.2, codeY: 88.5, footY: 91 },
   // 8 тестов, 2 соответствия, 2 открытых — расположение как в прежнем бланке, шесть на листе
-  k12: { h: 47.5, perPage: 6, top: 6, total: 12, markY: [1.5, 42], headY: 8.3, ruleY: 9.8, titleY: 14, varNumY: 13, varY: 16.1, varX: 151.5, varStep: 5, varD: 4, codeY: 43.2, footY: 45.7 },
+  k12: { h: 47.5, perPage: 6, top: 6, total: 12, markY: [1.5, 42], headY: 8.3, ruleY: 9.8, titleY: 14, varNumY: 3.9, varY: 7.2, varX: 175, varStep: 5, varD: 4, codeY: 43.2, footY: 45.7 },
 };
 
 const SUBJECTS = [
@@ -31,6 +31,12 @@ const SUBJECTS = [
   { id: 'phys', code: 3, title: 'ФИЗИКА', kind: 'k18', file: 'Бланк физика 27' },
   { id: 'taj', code: 4, title: 'ЗАБОНИ ТОҶИКӢ (ТАДЖИКСКИЙ ЯЗЫК)', kind: 'k20', file: 'Бланк таджикский язык 26' },
   { id: 'chemphys', code: 5, title: 'ХИМИЯ/ФИЗИКА', kind: 'k12', file: 'Бланк химия-физика 12' },
+  // Только для печати: раскладка и код те же, что у `like`, меняется лишь название предмета.
+  // Бланк читается как `like` (состав билета тот же), в layouts.generated.ts такие не попадают.
+  { id: 'hist', like: 'bio', code: 2, title: 'ИСТОРИЯ', kind: 'k20', file: 'Бланк история 26' },
+  { id: 'law', like: 'bio', code: 2, title: 'ПРАВО', kind: 'k20', file: 'Бланк право 26' },
+  { id: 'eng', like: 'bio', code: 2, title: 'АНГЛИЙСКИЙ ЯЗЫК', kind: 'k20', file: 'Бланк английский язык 26' },
+  { id: 'math', like: 'chem', code: 1, title: 'МАТЕМАТИКА', kind: 'k18', file: 'Бланк математика 27' },
 ];
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -168,6 +174,7 @@ for (const s of SUBJECTS) {
     path.join(OUT, `${s.id}.layout.json`),
     JSON.stringify({ id: s.id, code: s.code, title: s.title, kind: s.kind, strip: { w: PAGE.w, h: K.h }, perPage: K.perPage, pageTop: K.top, ...layout }, null, 1),
   );
+  if (s.like) continue;
   all[s.id] = { id: s.id, code: s.code, kind: s.kind, strip: { w: PAGE.w, h: K.h }, markers: layout.markers, codeCells: layout.code, variant: layout.variant, tests: layout.tests, matching: layout.matching, open: layout.open };
   console.log(s.id, 'tests', layout.tests.length, 'matching', layout.matching.length, 'open', layout.open.length);
 }

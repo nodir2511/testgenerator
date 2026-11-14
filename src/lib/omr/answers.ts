@@ -40,7 +40,18 @@ export function keyFromAnswers(a: Answers, comp: Composition): TicketKey {
   };
 }
 
-/** Номер варианта, отмеченный на бланке (1–10), либо null, если не отмечен или отмечено несколько */
+/** Номер варианта, отмеченный на бланке (1–4), либо null, если не отмечен или отмечено несколько */
 export function variantFromResult(res: Ok): number | null {
   return typeof res.variant.answer === 'number' ? res.variant.answer : null;
+}
+
+/** Предупреждения о снимке: что мешает прочитать надёжно (пустой список — всё хорошо) */
+export function qualityWarnings(res: Ok): string[] {
+  const out: string[] = [];
+  if (res.quality.pxPerMm < 4) out.push('Бланк снят слишком далеко или в низком разрешении: приблизьте камеру так, чтобы бланк занял весь кадр.');
+  if (res.quality.skew > 1.25) out.push('Бланк снят под сильным углом: держите телефон прямо над бланком.');
+  const picks: Picked[] = [res.variant, ...res.tests, ...res.matching.flatMap((m) => m.rows)];
+  const bad = picks.filter((p) => p.answer === 'multi' || p.unsure).length;
+  if (bad >= 3 && bad / picks.length > 0.08) out.push(`Много неясных отметок (${bad}): возможны блики, тень или смятая бумага. Переснимите при ровном свете, без бликов.`);
+  return out;
 }

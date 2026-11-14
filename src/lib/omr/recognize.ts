@@ -253,9 +253,17 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
   if (!best) return { ok: false, reason: 'homography' };
   const { at } = best;
 
+  // Качество снимка: сколько пикселей приходится на мм бланка и насколько сильно он снят под углом
+  const edge = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
+  const e = [edge(ring[0], ring[1]), edge(ring[1], ring[2]), edge(ring[2], ring[3]), edge(ring[3], ring[0])];
+  const mmE = [0, 1, 2, 3].map((i) => Math.hypot(dstRing[(i + 1) % 4][0] - dstRing[i][0], dstRing[(i + 1) % 4][1] - dstRing[i][1]));
+  const pxPerMm = e.reduce((a, v) => a + v, 0) / mmE.reduce((a, v) => a + v, 0);
+  const skew = Math.max(Math.max(e[0], e[2]) / Math.min(e[0], e[2]), Math.max(e[1], e[3]) / Math.min(e[1], e[3]));
+
   return {
     ok: true,
     codeOk: best.mism === 0,
+    quality: { pxPerMm, skew },
     rotation: best.rot * 90,
     variant: pickOne(layout.variant, at),
     tests: layout.tests.map((t) => ({ q: t.q, ...pickOne(t.options, at) })),

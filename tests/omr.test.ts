@@ -51,3 +51,47 @@ describe('распознавание бланка по снимку', () => {
     expect(res.ok && res.codeOk).toBe(false);
   });
 });
+
+import { qualityWarnings, answersFromResult } from '../src/lib/omr/answers';
+import { scoreAnswers } from '../supabase/functions/_shared/omrScore';
+
+describe('качество снимка и несколько отметок', () => {
+  it('нормальный снимок без предупреждений, качество измеряется', () => {
+    const layout = OMR_LAYOUTS.chem;
+    const { img } = render(layout, 77, 5);
+    const res = omrRead(img, layout);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.quality.pxPerMm).toBeGreaterThan(5);
+    expect(res.quality.skew).toBeLessThan(1.1);
+    expect(qualityWarnings(res)).toEqual([]);
+  });
+
+  it('далёкий снимок и перекос дают предупреждения', () => {
+    const layout = OMR_LAYOUTS.chem;
+    const { img } = render(layout, 78, 3);
+    const res = omrRead(img, layout);
+    if (!res.ok) throw new Error('не прочитано');
+    expect(qualityWarnings({ ...res, quality: { pxPerMm: 3, skew: 1.4 } }).length).toBe(2);
+  });
+
+  it('много неуверенных отметок — предупреждение про блики', () => {
+    const layout = OMR_LAYOUTS.chem;
+    const { img } = render(layout, 79, 2);
+    const res = omrRead(img, layout);
+    if (!res.ok) throw new Error('не прочитано');
+    const bad = { ...res, tests: res.tests.map((t, i) => (i < 4 ? { ...t, answer: 'multi' as const, unsure: true } : t)) };
+    expect(qualityWarnings(bad).some((w) => w.includes('блики'))).toBe(true);
+  });
+
+  it('несколько отметок засчитываются как неверный ответ', () => {
+    const layout = OMR_LAYOUTS.bio;
+    const { img } = render(layout, 80, 2);
+    const res = omrRead(img, layout);
+    if (!res.ok) throw new Error('не прочитано');
+    const key = { tests: res.tests.map(() => 'A'), matching: res.matching.map((m) => m.rows.map(() => '1')), open: res.open.map(() => null) };
+    const a = answersFromResult({ ...res, tests: res.tests.map((t) => ({ ...t, answer: 'multi' as const, unsure: true })) });
+    expect(a.tests.every((x) => x === null)).toBe(true);
+    expect(scoreAnswers(key, a).tests.every((x) => x === false)).toBe(true);
+  });
+});

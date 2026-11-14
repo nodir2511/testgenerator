@@ -6,8 +6,8 @@ export interface Composition { test: number; matching: number; open: number }
 
 /** Какие раскладки бланков подходят составу билета. У химии и физики раскладка одна, коды бланков разные. */
 export const BLANKS: Array<{ layouts: string[]; comp: Composition; label: string }> = [
-  { layouts: ['chem', 'phys'], comp: { test: 18, matching: 2, open: 7 }, label: 'Химия / Физика (27 заданий)' },
-  { layouts: ['bio', 'taj'], comp: { test: 20, matching: 4, open: 2 }, label: 'Биология / Таджикский язык (26 заданий)' },
+  { layouts: ['chem', 'phys'], comp: { test: 18, matching: 2, open: 7 }, label: 'Химия / Физика / Математика (27 заданий)' },
+  { layouts: ['bio', 'taj'], comp: { test: 20, matching: 4, open: 2 }, label: 'Биология / Таджикский язык / История / Право / Английский язык (26 заданий)' },
   { layouts: ['chemphys'], comp: { test: 8, matching: 2, open: 2 }, label: 'Химия / Физика (12 заданий)' },
 ];
 
