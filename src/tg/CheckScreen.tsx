@@ -29,6 +29,8 @@ interface KeySource {
   keys: Record<number, TicketKey>;
 }
 interface CustomKey { id: string; name: string; comp: Composition; layouts: string[]; keys: Record<number, TicketKey> }
+/** Снимок в стопке на проверку: прочитан (res) или не удалось прочитать (error) */
+interface QItem { id: number; name: string; res?: Ok; error?: string }
 interface SavedCheck { id: string; created_at: string; student: string; ticket_number: number | null; score: number; max_score: number }
 
 const CUSTOM_KEY = 'omr_custom_keys_v1';
@@ -52,7 +54,7 @@ type View =
   | { name: 'custom' }
   | { name: 'customEdit'; id: string }
   | { name: 'scan'; src: KeySource }
-  | { name: 'review'; src: KeySource; res: Ok; mode: 'check' }
+  | { name: 'review'; src: KeySource; itemId: number }
   | { name: 'refScan'; custom: string }
   | { name: 'refReview'; custom: string; res: Ok }
   | { name: 'results' }
@@ -67,10 +69,19 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
   const [search, setSearch] = useState('');
   const [done, setDone] = useState<Array<{ student: string; score: number; max: number }>>([]);
   const [owner, setOwner] = useState(false);
+  const [queue, setQueue] = useState<QItem[]>([]);
+  const nextId = useRef(1);
   useEffect(() => { void api<{ owner: boolean }>('digits_admin').then((r) => setOwner(!!r.owner)).catch(() => {}); }, [api]);
 
   const upCustom = (fn: (l: CustomKey[]) => CustomKey[]) => setCustom((l) => { const n = fn(l); saveCustom(n); return n; });
   const go = (v: View) => { setError(''); setView(v); };
+  const addToQueue = (items: Array<Omit<QItem, 'id'>>) => setQueue((q) => [...q, ...items.map((i) => ({ ...i, id: nextId.current++ }))]);
+  const dropFromQueue = (id: number) => setQueue((q) => q.filter((i) => i.id !== id));
+  const leaveScan = (to: View) => {
+    if (queue.length && !window.confirm(`В стопке ${queue.length} ${queue.length === 1 ? 'снимок' : 'снимков'} без сохранения. Выйти и потерять их?`)) return;
+    setQueue([]);
+    go(to);
+  };
   const fail = (e: unknown) => { haptic('err'); setError((e as Error).message || 'Ошибка'); };
 
   // Список наборов: при открытии и при поиске (с небольшой задержкой, чтобы не слать запрос на каждую букву)
@@ -104,7 +115,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
     if (view.name === 'review') return setView({ name: 'scan', src: view.src });
     if (view.name === 'refScan' || view.name === 'refReview') return setView({ name: 'customEdit', id: view.custom });
     if (view.name === 'customEdit') return setView({ name: 'custom' });
-    if (view.name === 'scan') return setView(view.src.kind === 'set' ? { name: 'sets' } : { name: 'custom' });
+    if (view.name === 'scan') return leaveScan(view.src.kind === 'set' ? { name: 'sets' } : { name: 'custom' });
     setView({ name: 'home' });
   };
 
@@ -172,32 +183,68 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
         );
       })()}
 
-      {view.name === 'scan' && (
-        <>
-          <h1>{view.src.title}</h1>
-          <p className="tg-hint">Варианты с ключом: {Object.keys(view.src.keys).sort((a, b) => Number(a) - Number(b)).join(', ') || 'нет'}. Состав: {compText(view.src.comp)}.</p>
-          {done.length > 0 && <p className="tg-hint">Проверено за сеанс: {done.length}. Последний: {done[done.length - 1].student || 'без имени'} — {done[done.length - 1].score} из {done[done.length - 1].max}.</p>}
-          <Capture
-            label="📷 Сфотографировать бланк"
-            layouts={view.src.layouts}
-            onResult={(res) => go({ name: 'review', src: view.src, res, mode: 'check' })}
-            onError={(m) => { haptic('err'); setError(m); }}
-          />
-          <p className="tg-hint">Снимайте один бланк целиком (одну полоску): все четыре чёрных метки по углам должны быть в кадре, свет ровный, без бликов.</p>
-        </>
-      )}
+      {view.name === 'scan' && (() => {
+        const src = view.src;
+        const ready = queue.filter((i) => i.res);
+        return (
+          <>
+            <h1>{src.title}</h1>
+            <p className="tg-hint">Варианты с ключом: {Object.keys(src.keys).sort((a, b) => Number(a) - Number(b)).join(', ') || 'нет'}. Состав: {compText(src.comp)}.</p>
+            <QueueCapture
+              layouts={src.layouts}
+              hasItems={queue.length > 0}
+              onAdd={addToQueue}
+              onFirstError={() => haptic('err')}
+            />
+            <p className="tg-hint">Снимайте один бланк целиком (одну полоску): все четыре чёрных метки по углам в кадре, свет ровный, без бликов. Можно снимать бланк за бланком или выбрать из галереи сразу много фото — они встанут в стопку, потом проверите их по очереди.</p>
+            {queue.length > 0 && (
+              <>
+                <h2>Стопка: {queue.length}</h2>
+                {queue.map((i) => (
+                  <div key={i.id} className="tg-row" style={{ cursor: 'default' }}>
+                    <span className="tg-grow"><b>{i.name}</b><br /><span className="tg-hint">{i.res ? 'прочитан, ждёт проверки' : i.error}</span></span>
+                    {i.res && <button className="tg-link" onClick={() => go({ name: 'review', src, itemId: i.id })}>Открыть</button>}
+                    <button className="tg-link" aria-label={`Убрать ${i.name}`} onClick={() => dropFromQueue(i.id)}>✕</button>
+                  </div>
+                ))}
+                {ready.length > 0 && <button className="tg-btn-primary" onClick={() => go({ name: 'review', src, itemId: ready[0].id })}>Проверить по очереди ({ready.length})</button>}
+              </>
+            )}
+            {done.length > 0 && (
+              <>
+                <h2>Проверено за сеанс: {done.length}</h2>
+                {done.slice(-30).map((d, k) => <p key={k} className="tg-hint">{d.student || 'без имени'} — {d.score} из {d.max}</p>)}
+              </>
+            )}
+          </>
+        );
+      })()}
 
-      {view.name === 'review' && (
-        <Review
-          key={`${view.src.id}-${view.res.rotation}-${done.length}`}
-          api={api}
-          src={view.src}
-          res={view.res}
-          onDone={(r) => { setDone((d) => [...d, r]); haptic('ok'); go({ name: 'scan', src: view.src }); }}
-          onError={fail}
-          onRetake={() => go({ name: 'scan', src: view.src })}
-        />
-      )}
+      {view.name === 'review' && (() => {
+        const item = queue.find((i) => i.id === view.itemId);
+        const src = view.src;
+        if (!item?.res) return <p className="tg-hint">Снимок уже проверен или убран. <button className="tg-link" onClick={() => go({ name: 'scan', src })}>К стопке</button></p>;
+        const left = queue.filter((i) => i.res).length;
+        return (
+          <Review
+            key={`${src.id}-${item.id}`}
+            api={api}
+            src={src}
+            res={item.res}
+            title={item.name}
+            left={left}
+            onDone={(r) => {
+              setDone((d) => [...d, r]);
+              haptic('ok');
+              const nextItem = queue.find((i) => i.res && i.id !== item.id);
+              dropFromQueue(item.id);
+              go(nextItem ? { name: 'review', src, itemId: nextItem.id } : { name: 'scan', src });
+            }}
+            onError={fail}
+            onRetake={() => { dropFromQueue(item.id); go({ name: 'scan', src }); }}
+          />
+        );
+      })()}
 
       {view.name === 'refScan' && (() => {
         const c = custom.find((x) => x.id === view.custom);
@@ -235,6 +282,52 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
 }
 
 // ---------- съёмка и чтение ----------
+const readFile = async (f: File, layouts: string[]): Promise<{ res?: Ok; error?: string }> => {
+  try {
+    const img = await loadGrayImage(f);
+    const res = omrRead(img, OMR_LAYOUTS[layouts[0]], { codes: layouts.map((id) => OMR_LAYOUTS[id].code) });
+    if (!res.ok) return { error: FAIL_TEXT };
+    if (!res.codeOk) return { error: CODE_TEXT };
+    return { res };
+  } catch {
+    return { error: 'Не удалось обработать фото. Попробуйте ещё раз.' };
+  }
+};
+
+/** Съёмка в стопку: камера (снимок за снимком) и галерея (много фото сразу); каждое фото читается сразу */
+function QueueCapture({ layouts, hasItems, onAdd, onFirstError }: { layouts: string[]; hasItems: boolean; onAdd: (items: Array<Omit<QItem, 'id'>>) => void; onFirstError: () => void }) {
+  const cam = useRef<HTMLInputElement>(null);
+  const gal = useRef<HTMLInputElement>(null);
+  const counter = useRef(1);
+  const [progress, setProgress] = useState<{ i: number; n: number } | null>(null);
+  async function onFiles(e: React.ChangeEvent<HTMLInputElement>, fromCamera: boolean) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (!files.length) return;
+    let failed = false;
+    for (let i = 0; i < files.length; i++) {
+      setProgress({ i: i + 1, n: files.length });
+      const r = await readFile(files[i], layouts);
+      if (r.error) failed = true;
+      const name = fromCamera ? `Бланк ${counter.current}` : (files[i].name || `Бланк ${counter.current}`).slice(0, 60);
+      counter.current++;
+      onAdd([{ name, ...r }]);
+    }
+    setProgress(null);
+    if (failed) onFirstError();
+  }
+  return (
+    <>
+      <input ref={cam} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => void onFiles(e, true)} />
+      <input ref={gal} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => void onFiles(e, false)} />
+      <button className="tg-btn-primary" disabled={!!progress} onClick={() => cam.current?.click()}>
+        {progress ? `Распознаю ${progress.i} из ${progress.n}…` : hasItems ? '📷 Снять ещё бланк' : '📷 Сфотографировать бланк'}
+      </button>
+      <button className="tg-btn-secondary" disabled={!!progress} onClick={() => gal.current?.click()}>🖼 Выбрать фото из галереи (несколько)</button>
+    </>
+  );
+}
+
 function Capture({ label, layouts, onResult, onError }: { label: string; layouts: string[]; onResult: (r: Ok) => void; onError: (m: string) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -356,7 +449,7 @@ function AnswerEditor({ res, answers, setAnswers, onlyDoubts, withEmpty, hints }
   );
 }
 
-function Review({ api, src, res, onDone, onError, onRetake }: { api: Api; src: KeySource; res: Ok; onDone: (r: { student: string; score: number; max: number }) => void; onError: (e: unknown) => void; onRetake: () => void }) {
+function Review({ api, src, res, title, left, onDone, onError, onRetake }: { api: Api; src: KeySource; res: Ok; title: string; left: number; onDone: (r: { student: string; score: number; max: number }) => void; onError: (e: unknown) => void; onRetake: () => void }) {
   const warnings = useMemo(() => qualityWarnings(res), [res]);
   const [answers, setAnswers] = useState<Answers>(() => answersFromResult(res));
   const [variant, setVariant] = useState<string>(() => String(variantFromResult(res) ?? ''));
@@ -389,11 +482,12 @@ function Review({ api, src, res, onDone, onError, onRetake }: { api: Api; src: K
   return (
     <>
       <h1>Проверка бланка</h1>
+      <p className="tg-hint">{title}{left > 1 ? ` · в стопке ещё ${left - 1}` : ''}</p>
       {warnings.length > 0 && (
         <div className="tg-card" style={{ borderLeft: '4px solid #e0a100' }}>
           <b>⚠️ Снимок читается ненадёжно</b>
           {warnings.map((w) => <p key={w} className="tg-hint">{w}</p>)}
-          <button className="tg-btn-primary" onClick={onRetake}>📷 Переснять</button>
+          <button className="tg-btn-primary" onClick={onRetake}>📷 Убрать и переснять</button>
         </div>
       )}
       <div className="tg-card">

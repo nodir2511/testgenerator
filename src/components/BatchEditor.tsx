@@ -15,7 +15,7 @@ import { CustomSelect } from './CustomSelect';
 // Замена вопросов в готовом наборе билетов — и сразу после генерации, и в архиве.
 // Все изменения идут одной транзакцией (update_batch_questions); после них набор перечитывается из базы.
 
-export interface EditBatch { id: string; title?: string; subject_id: string; generation_params: any }
+export interface EditBatch { id: string; title?: string; subject_id: string; generation_params: any; created_by?: string | null }
 type Changed = (params: any, tickets: BatchSlots['tickets']) => void;
 
 const plain = (s: string) => (s || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
@@ -27,6 +27,12 @@ const plural = (n: number, one: string, few: string, many: string) => {
   if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
   return many;
 };
+
+// Менять набор может его автор или главный админ (так же проверяет база). Свежесозданный набор без created_by — свой.
+function useCanEdit(batch: EditBatch): boolean {
+  const { isOwner, user } = useAuth();
+  return isOwner || !batch.created_by || batch.created_by === user?.id;
+}
 
 // ---------- Данные набора ----------
 
@@ -82,11 +88,11 @@ const Modal: React.FC<{ title: string; onClose: () => void; children: React.Reac
 // ---------- Темы набора и массовая замена ----------
 
 export const BatchTopicsBar: React.FC<{ batch: EditBatch; enabled?: boolean; onChanged?: Changed }> = ({ batch, enabled = true, onChanged }) => {
-  const { isOwner } = useAuth(); // пока замену пробует только главный админ
-  const ed = useBatchEdit(batch, enabled && isOwner, onChanged);
+  const canEdit = useCanEdit(batch);
+  const ed = useBatchEdit(batch, enabled && canEdit, onChanged);
   const [removing, setRemoving] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
-  if (!isOwner) return null;
+  if (!canEdit) return null;
   if (ed.loading || !ed.data) return enabled ? <div className="py-2"><Loader2 className="w-5 h-5 animate-spin text-indigo-600" /></div> : null;
   const counts = topicCounts(ed.data.slots).sort((a, b) => {
     const ta = ed.topicById.get(a.topicId), tb = ed.topicById.get(b.topicId);
@@ -216,7 +222,7 @@ export const BatchVariants: React.FC<{
   /** Кнопки скачивания варианта; получает билет с вопросами и снимками */
   renderActions?: (t: BatchSlots['tickets'][number]) => React.ReactNode;
 }> = ({ batch, enabled = true, onChanged, renderActions }) => {
-  const { isOwner } = useAuth(); // пока замену пробует только главный админ
+  const canEdit = useCanEdit(batch);
   const ed = useBatchEdit(batch, enabled, onChanged);
   const [swap, setSwap] = useState<Slot | null>(null);
   if (ed.loading || !ed.data) return <div className="py-6 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>;
@@ -241,7 +247,7 @@ export const BatchVariants: React.FC<{
                       <span className="font-bold text-slate-500 mr-1.5">{i + 1}.</span>
                       {empty ? <b>Пустое место — нужен вопрос ({TYPE_LABEL[snap.type as keyof typeof TYPE_LABEL] ?? snap.type})</b> : plain(snap?.content ?? '')}
                     </div>
-                    {isOwner && <button
+                    {canEdit && <button
                       onClick={() => setSwap(slotOf.get(tq.id) ?? null)}
                       className="w-9 h-9 shrink-0 rounded-lg text-indigo-700 hover:bg-indigo-50 flex items-center justify-center"
                       aria-label={`Заменить вопрос ${i + 1} варианта ${t.ticket_number}`}

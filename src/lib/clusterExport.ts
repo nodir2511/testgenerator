@@ -299,7 +299,7 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
   const grid = await assetNeutral('grid');
   const [header, subjectImgs, attention, instr1Top, instr1Rest, instr2, plaque, auxPhys, auxChem, title, digit] = await Promise.all([
     asset(lang, 'header'), Promise.all(CLUSTER_SLOTS.map((s, i) => (included[i] ? asset(lang, `subj_${s.kind}`) : Promise.resolve(new Uint8Array())))), asset(lang, 'attention'), asset(lang, 'instr1_top'), asset(lang, 'instr1_rest'), asset(lang, 'instr2'),
-    asset(lang, 'plaque'), asset(lang, 'aux_phys'), asset(lang, 'aux_chem'), titleWithDate(lang, settings.date), bigNumber(variant.number),
+    asset(lang, 'plaque'), Promise.all([asset(lang, 'aux_phys1'), asset(lang, 'aux_phys2')]), Promise.all([asset(lang, 'aux_chem1'), asset(lang, 'aux_chem2')]), titleWithDate(lang, settings.date), bigNumber(variant.number),
   ]);
 
   // Обложка
@@ -416,13 +416,13 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
   if (included[physIdx]) {
     sections.push({
       properties: { page, type: SectionType.NEXT_PAGE }, footers: { default: footer(footLabel(t.aux.phys)) },
-      children: [imgPara(auxPhys, 640, { after: 0, maxHeightPx: 940 })],
+      children: [band(t.aux.phys.toLocaleUpperCase()), gap(160), imgPara(auxPhys[0], 600, { after: 160 }), imgPara(auxPhys[1], 600, { after: 0 })],
     });
   }
   if (included[chemIdx]) {
     sections.push({
       properties: { page, type: SectionType.NEXT_PAGE }, footers: { default: footer(footLabel(t.aux.chem)) },
-      children: [imgPara(auxChem, 640, { after: 0, maxHeightPx: 940 })],
+      children: [band(t.aux.chem.toLocaleUpperCase()), gap(160), imgPara(auxChem[0], 620, { after: 160 }), imgPara(auxChem[1], 620, { after: 0 })],
     });
   }
 

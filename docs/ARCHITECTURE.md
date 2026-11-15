@@ -35,7 +35,7 @@ src/components/         Экраны и элементы интерфейса (�
 src/lib/                Логика без интерфейса (раздел 7)
 src/hooks/              useAuth.tsx, useReleases.ts, useTheme.ts
 src/game/               «Своя игра»: GameHost, GamePlay, GameScreen, api.ts, ui.tsx, content.ts, review.ts, game.css
-src/tg/                 TgApp.tsx + tg.css — Telegram Mini App (/tg); CheckScreen.tsx — «Проверка работ по фото бланка» (грузится лениво, раздел 8)
+src/tg/                 TgApp.tsx + tg.css — Telegram Mini App (/tg); CheckScreen.tsx — «Проверка работ по фото бланка» (грузится лениво, раздел 8); снимки идут в стопку (камера снимок за снимком или много фото из галереи), читаются сразу, проверяются по очереди
 src/types/database.ts   Типы таблиц и ролей
 src/dark.css            Тёмная тема: создаётся автоматически (`npm run theme:dark`, `scripts/gen-dark-css.mjs`), руками не править
 supabase/functions/     Edge Functions + _shared (разделы 8, 9)
@@ -290,7 +290,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `UserManagementView.tsx` | Пользователи: создание, правка, удаление, роль, предметы; журнал аудита | Т profiles, user_subjects, subjects, audit_logs · EF admin-create-user, admin-update-user, admin-delete-user · QK admin_* |
 | `StatsView.tsx` | Статистика за период (без админов), правка лимитов | RPC admin_usage_stats_v3 (запасной — admin_usage_stats) · Т generation_settings · LS `examiner_stats_*` |
 | `TrashView.tsx` | Корзина: удалённые вопросы, кто удалил, восстановление | Т questions, profiles · QK trash |
-| `BatchEditor.tsx` | Правка готового набора (в Генераторе и в Архиве): `BatchVariants` — заменить любой вопрос, `BatchTopicsBar` — убрать тему (вопросы заменяются вопросами других тем набора поровну). Только owner; кластерные наборы нельзя | RPC update_batch_questions · `lib/batchEdit.ts`, `lib/questionSwap.ts` |
+| `BatchEditor.tsx` | Правка готового набора (в Генераторе и в Архиве): `BatchVariants` — заменить любой вопрос, `BatchTopicsBar` — убрать тему (вопросы заменяются вопросами других тем набора поровну). Автор набора или owner (чужие наборы видит только owner); кластерные наборы нельзя | RPC update_batch_questions · `lib/batchEdit.ts`, `lib/questionSwap.ts` |
 | `QualityView.tsx` | «Качество банка» (owner): проверка вопросов предмета, дубли и похожие пары, «Не дубль» с возвратом, результат кэшируется в браузере | Т questions, duplicate_dismissals, subjects · `lib/bankScan.ts`, `duplicates.ts`, `questionChecks.ts`, `scanCache.ts` |
 | `QuestionUsageView.tsx` | «Подборы» (owner): сколько вопросов использовано, по темам, самые частые, ни разу не попавшие | RPC owner_question_usage |
 | `QuestionPreview.tsx`, `QuestionProgress.tsx` | Предпросмотр вопроса и список шагов заполнения в `QuestionForm` | — |
@@ -317,7 +317,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `answerKey.ts` | `keyKindOf` (виды: chem, phys, bio, taj, law, hist, math), `buildAnswerKeyDocx(template, tickets, info)`, `buildUniversalKeyDocx`, `testAnswer`, `matchingAnswer`, `openAnswer`, `selectionInfo`, `selectionChips`, `numberList` | Ключи по Word-шаблону; универсальная таблица, если состав не помещается. **Копируется в `_shared`** |
 | `answerKeyExport.ts` | `buildAnswerKeyFile`, `exportAnswerKey`, `keyArchiveExtras`, `withSelectionInfo`, `describeSelection`, `makeSelectionInfoLoader`, `hasKeyTemplate` | Скачивание ключей: шаблон из `/key-templates`, `enrich` догружает верные ответы для старых снимков |
 | `exportLazy.ts` | ленивые обёртки над двумя модулями выше, `warmKeyModule`, `hasKeyTemplate` (regex) | docx и jszip грузятся только при скачивании |
-| `clusterExport.ts` | `buildClusterVariantBlob`, `buildClusterZip`, `instructionIntro` | книжка кластера по образцу, картинки из `cluster-assets` |
+| `clusterExport.ts` | `buildClusterVariantBlob`, `buildClusterZip`, `instructionIntro` | книжка кластера по образцу, картинки из `cluster-assets`; справочные страницы — заголовок текстом + две серые 4-битные картинки (`{lang}_aux_phys1/2`, `aux_chem1/2`, взяты из Word-образца и ужаты) |
 | `clusterSlots.ts` | `CLUSTER_SLOTS`, типы | предметы кластера и их состав (лёгкий модуль) |
 | `clusterStore.ts` | `saveClusterBatch`, `clusterVariantsFromBatch`, `loadUsedQuestionIds`, `isClusterBatch` | хранение кластера как партии |
 | `docxParse.ts` / `docxImport.ts` / `docxPair.ts` | `parseDocumentXml`, `cleanXmlRunsToFormattedText` / `parseDocxFile` / `pairBilingual`, `pairOptions` | разбор Word при импорте, пары RU+TG |

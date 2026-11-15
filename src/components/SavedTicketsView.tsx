@@ -95,7 +95,7 @@ export const SavedTicketsView: React.FC = () => {
     queryFn: async ({ pageParam }) => {
       let q = supabase
         .from('ticket_batches')
-        .select('id, title, created_at, subject_id, generation_params, subject:subjects(name), creator:profiles!created_by(full_name, email), tickets(count)', { count: 'exact' })
+        .select('id, title, created_at, created_by, subject_id, generation_params, subject:subjects(name), creator:profiles!created_by(full_name, email), tickets(count)', { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(pageParam, pageParam + PAGE - 1);
       if (subjectFilter) q = q.eq('subject_id', subjectFilter);
