@@ -154,9 +154,19 @@ export function getEmbedIdFromXml(xml: string): string | null {
  * Чистый разбор document.xml (без файловой системы и сети): применяется и в приложении, и в Node-скриптах.
  * rIdToPublicUrl — готовая карта rId изображения -> URL (можно передать пустую).
  */
+export interface DocxParseOptions {
+  /**
+   * Соответствия в обычном (абзацном) виде, как в сборниках: таблица «A)…D) | 1)…5)» под условием
+   * или строки «1)…5)» после вариантов. Включает только книжка кластера из готовых билетов;
+   * «Массовый импорт» разбирает файлы как прежде (такие таблицы — часть условия).
+   */
+  matching?: boolean;
+}
+
 export function parseDocumentXml(
   docXml: string,
-  rIdToPublicUrl: Record<string, string> = {}
+  rIdToPublicUrl: Record<string, string> = {},
+  opts: DocxParseOptions = {}
 ): DocxParsedQuestion[] {
   const blocks = splitBody(docXml);
   const tables = blocks
@@ -168,7 +178,7 @@ export function parseDocumentXml(
   const ticketTables = tables.filter(isTicketQuestionTable);
   return ticketTables.length > 0
     ? parseTicketTables(ticketTables)
-    : parseListFormat(blocks, rIdToPublicUrl);
+    : parseListFormat(blocks, rIdToPublicUrl, opts.matching === true);
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +261,48 @@ function parseTableRows(tblXml: string, rIdToPublicUrl: Record<string, string>):
       };
     });
   });
+}
+
+type MatchItem = { side: 'left' | 'right'; text: string; imageUrl?: string | null; orderIndex: number };
+
+// Маркеры строк соответствия: слева A–D (или русские А–Г), справа 1–6; после маркера «)» или «.»
+const LEFT_MARK_RE = /^\s*(?:<[^>]+>)*\s*([A-DА-Г])\s*[).]\s*(?:<\/[^>]+>)*\s*/i;
+const RIGHT_MARK_RE = /^\s*(?:<[^>]+>)*\s*([1-6])\s*[).]\s*(?:<\/[^>]+>)*\s*/;
+
+/**
+ * Таблица соответствия из сборников (не из системы): две колонки, слева «A) … D)», справа «1) … 5)».
+ * Пункты лежат либо по одному в строке таблицы, либо все в одной ячейке абзацами.
+ * Абзац без маркера продолжает предыдущий пункт. Не похоже на соответствие — null.
+ */
+function matchingFromTable(tblXml: string, rIdToPublicUrl: Record<string, string>): MatchItem[] | null {
+  const rows = [...tblXml.matchAll(/<w:tr\b[\s\S]*?<\/w:tr>/g)].map((r) => [...r[0].matchAll(/<w:tc\b[\s\S]*?<\/w:tc>/g)].map((c) => c[0]));
+  if (!rows.length || rows.some((r) => r.length !== 2)) return null;
+  const left: MatchItem[] = [];
+  const right: MatchItem[] = [];
+  const take = (cellXml: string, side: 'left' | 'right', list: MatchItem[]): boolean => {
+    const re = side === 'left' ? LEFT_MARK_RE : RIGHT_MARK_RE;
+    for (const p of cellXml.match(/<w:p[\s>][\s\S]*?<\/w:p>/g) || []) {
+      const text = cleanXmlRunsToFormattedText(p);
+      const rId = getEmbedIdFromXml(p);
+      const img = rId ? rIdToPublicUrl[rId] || null : null;
+      if (!plainOf(text) && !img) continue;
+      if (re.test(plainOf(text))) {
+        list.push({ side, text: text.replace(re, '').trim(), imageUrl: img, orderIndex: list.length + 1 });
+      } else if (list.length) {
+        const last = list[list.length - 1];
+        if (plainOf(text)) last.text = `${last.text} ${text}`.trim();
+        if (img && !last.imageUrl) last.imageUrl = img;
+      } else {
+        return false; // первая строка колонки без маркера — это не соответствие
+      }
+    }
+    return true;
+  };
+  for (const [l, r] of rows) {
+    if (!take(l, 'left', left) || !take(r, 'right', right)) return null;
+  }
+  if (left.length < 2 || right.length < 2) return null;
+  return [...left, ...right];
 }
 
 /** Убирает маркер «A) » / «1) » в начале, даже если он обёрнут в <b>. */
@@ -539,7 +591,8 @@ function normalizeAnswer(raw: string, hasOptions: boolean, markers?: string[]): 
 
 function parseListFormat(
   blocks: Block[],
-  rIdToPublicUrl: Record<string, string>
+  rIdToPublicUrl: Record<string, string>,
+  withMatching: boolean
 ): DocxParsedQuestion[] {
   const sections = new Map<string, Section>();
   let secId = '0';
@@ -560,10 +613,18 @@ function parseListFormat(
   for (const b of blocks) {
     if (b.kind === 'tbl') {
       const rows = parseTableRows(b.xml, rIdToPublicUrl);
+      const matchItems = withMatching && cur && contOk ? matchingFromTable(b.xml, rIdToPublicUrl) : null;
       if (isKeyTable(rows)) {
         getSection(secId).keys.push(parseKeyTable(rows));
         cur = null;
         contOk = false;
+      } else if (cur && matchItems) {
+        // Соответствие: условие — абзац с номером, пункты — в таблице под ним
+        cur.type = 'matching';
+        cur.matchingItems = matchItems;
+        delete cur.options;
+        delete cur.markers;
+        contOk = true;
       } else if (cur && contOk) {
         const flat = flattenDataTable(rows);
         if (flat) {
@@ -599,6 +660,26 @@ function parseListFormat(
     const numbered = /<w:numPr>[\s\S]*?<w:numId w:val="(?!0")\d+"/.test(b.xml);
     const explicit = plain.match(EXPLICIT_NUM_RE);
     const startsOption = SINGLE_OPTION_RE.test(plain);
+
+    // Соответствие абзацами: после вариантов «A) … D)» идут «1) … 5)» (именно со скобкой и по порядку).
+    // Без этого «1) …» принимается за новый вопрос
+    const rightMark = withMatching && !numbered && cur && contOk ? plain.match(/^([1-6])\)\s*/) : null;
+    if (cur && rightMark) {
+      const rights = (cur.matchingItems || []).filter((m) => m.side === 'right');
+      const n = Number(rightMark[1]);
+      const canStart = cur.type !== 'matching' && n === 1 && (cur.options?.length || 0) >= 2 && (cur.markers?.length || 0) >= 2;
+      if (canStart || (cur.type === 'matching' && n === rights.length + 1)) {
+        if (canStart) {
+          cur.type = 'matching';
+          cur.matchingItems = (cur.options || []).map((o, i) => ({ side: 'left' as const, text: o.text, imageUrl: o.imageUrl ?? null, orderIndex: i + 1 }));
+          delete cur.options;
+          delete cur.markers;
+        }
+        cur.matchingItems!.push({ side: 'right', text: text.replace(/^(?:<[^>]+>)*\s*\d\)\s*(?:<\/[^>]+>)*\s*/, '').trim(), imageUrl: pImgUrl, orderIndex: n });
+        contOk = true;
+        continue;
+      }
+    }
 
     // Новый вопрос
     if ((numbered || (explicit && !startsOption)) && plain) {
@@ -687,6 +768,15 @@ function parseListFormat(
       const keys = sec.keys[k];
       qb.questions.forEach((q) => {
         const raw = keys?.get(Number(q.num)) ?? q.correctAnswer;
+        if (q.type === 'matching') {
+          // Ключ соответствия — как в сборнике («1352», «А-1, Б-3…»): разбирается при использовании
+          if (raw !== undefined) q.correctAnswer = raw.trim();
+          q.section = sec.title;
+          q.sectionNum = id;
+          q.block = qb.title;
+          result.push(q);
+          return;
+        }
         const hasOptions = (q.options?.length || 0) >= 2;
         // В ключе буква, а вариантов в документе нет: это тест с потерянными вариантами, не открытый вопрос
         const isTest = hasOptions || (raw !== undefined && /^[A-FА-Е]$/i.test(raw.trim()));

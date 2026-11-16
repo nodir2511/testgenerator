@@ -1,0 +1,23 @@
+{
+  "topics": [
+    { "id": "ulcer", "sec": "Педиатрия", "name": "Язвенная болезнь" },
+    { "id": "thyro", "sec": "Эндокринология", "name": "Тиреотоксикоз" },
+    { "id": "hypo", "sec": "Эндокринология", "name": "Гипотиреоз" }
+  ],
+  "cases": [
+    { "key": "hp", "title": "Язва двенадцатиперстной кишки", "topic": "ulcer", "emer": false },
+    { "key": "nsaid", "title": "Язва желудка от НПВС", "topic": "ulcer", "emer": false },
+    { "key": "bleed", "title": "Язвенное кровотечение", "topic": "ulcer", "emer": true },
+    { "key": "perf", "title": "Перфорация язвы", "topic": "ulcer", "emer": true },
+    { "key": "twin", "title": "Двойник: аппендицит", "topic": "ulcer", "emer": false },
+    { "key": "graves", "title": "Болезнь Грейвса", "topic": "thyro", "emer": false },
+    { "key": "subac", "title": "Двойник: подострый тиреоидит", "topic": "thyro", "emer": false },
+    { "key": "ait", "title": "Двойник: амиодарон", "topic": "thyro", "emer": false },
+    { "key": "afib", "title": "Тиреотоксикоз и мерцательная аритмия", "topic": "thyro", "emer": false },
+    { "key": "relapse", "title": "Рецидив болезни Грейвса", "topic": "thyro", "emer": false },
+    { "key": "storm", "title": "Тиреотоксический криз", "topic": "thyro", "emer": true },
+    { "key": "hypo1", "title": "Микседематозная кома", "topic": "hypo", "emer": true },
+    { "key": "hypo2", "title": "Двойник: септический шок", "topic": "hypo", "emer": true },
+    { "key": "hypo3", "title": "Двойник: синдром Шмидта", "topic": "hypo", "emer": true }
+  ]
+}

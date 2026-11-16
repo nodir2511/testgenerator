@@ -325,6 +325,7 @@ export const UserManagementView: React.FC = () => {
                 {isOwner && <option value="admin">{ROLE_LABELS.admin}</option>}
                 {isOwner && <option value="subject_teacher">{ROLE_LABELS.subject_teacher}</option>}
                 {isOwner && <option value="subject_admin">{ROLE_LABELS.subject_admin}</option>}
+                {isOwner && <option value="game_teacher">{ROLE_LABELS.game_teacher}</option>}
               </CustomSelect>
             </Field>
           </div>

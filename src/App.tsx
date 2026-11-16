@@ -11,6 +11,7 @@ const BulkImport = lazy(() => import('./components/BulkImport').then((m) => ({ d
 const UserManagementView = lazy(() => import('./components/UserManagementView').then((m) => ({ default: m.UserManagementView })));
 const ClusterExam = lazy(() => import('./components/ClusterExam').then((m) => ({ default: m.ClusterExam })));
 const TrashView = lazy(() => import('./components/TrashView').then((m) => ({ default: m.TrashView })));
+const GamesView = lazy(() => import('./components/GamesView').then((m) => ({ default: m.GamesView })));
 const ReleasesView = lazy(() => import('./components/ReleasesView').then((m) => ({ default: m.ReleasesView })));
 const QuestionUsageView = lazy(() => import('./components/QuestionUsageView').then((m) => ({ default: m.QuestionUsageView })));
 const QualityView = lazy(() => import('./components/QualityView').then((m) => ({ default: m.QualityView })));
@@ -48,12 +49,12 @@ import {
 } from 'lucide-react';
 import { IconButton } from './components/ui';
 
-type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'usage' | 'quality' | 'trash' | 'cluster' | 'releases';
+type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'usage' | 'quality' | 'trash' | 'cluster' | 'releases' | 'games';
 
 // Раздел виден в адресе (#archive и т. п.): работает кнопка «Назад» на телефоне, на раздел можно дать ссылку
 const TAB_HASH: Record<TabType, string> = {
   generator: 'generator', saved_tickets: 'archive', questions: 'questions', taxonomy: 'taxonomy',
-  bulk_import: 'import', users: 'users', stats: 'stats', usage: 'usage', quality: 'quality', trash: 'trash', cluster: 'cluster', releases: 'news',
+  bulk_import: 'import', users: 'users', stats: 'stats', usage: 'usage', quality: 'quality', trash: 'trash', cluster: 'cluster', releases: 'news', games: 'games',
 };
 const tabFromHash = (hash: string): TabType | null => {
   const key = hash.replace(/^#/, '').split('/')[0];
@@ -75,13 +76,14 @@ export const App: React.FC = () => {
     const fromHash = tabFromHash(window.location.hash);
     if (fromHash) return fromHash;
     const saved = localStorage.getItem('examiner_active_tab');
-    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats', 'usage', 'quality', 'trash', 'cluster', 'releases'];
+    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats', 'usage', 'quality', 'trash', 'cluster', 'releases', 'games'];
     return (validTabs.includes(saved as TabType)) ? (saved as TabType) : 'generator';
   });
   const adminOnlyTabs: TabType[] = ['users', 'stats', 'trash'];
-  const staffOnlyTabs: TabType[] = ['taxonomy', 'bulk_import'];
-  const ownerOnlyTabs: TabType[] = ['cluster', 'usage', 'quality'];
-  const currentTab: TabType = (!isAdmin && adminOnlyTabs.includes(activeTab)) || (!isStaff && staffOnlyTabs.includes(activeTab)) || (!isOwner && ownerOnlyTabs.includes(activeTab)) ? 'generator' : activeTab;
+  const staffOnlyTabs: TabType[] = ['taxonomy', 'bulk_import', 'quality'];
+  const ownerOnlyTabs: TabType[] = ['cluster', 'usage'];
+  const isGameOnly = profile?.role === 'game_teacher';
+  const currentTab: TabType = isGameOnly ? 'games' : (!isAdmin && adminOnlyTabs.includes(activeTab)) || (!isStaff && staffOnlyTabs.includes(activeTab)) || (!isOwner && ownerOnlyTabs.includes(activeTab)) ? 'generator' : activeTab;
 
   // Вкладок администрирования больше, чем помещается на телефоне: полосу можно листать, активная вкладка всегда в кадре
   React.useEffect(() => {
@@ -180,7 +182,7 @@ export const App: React.FC = () => {
   // Обновления сайта: окно «Что нового» при входе, пока есть непрочитанные версии
   const { unread, markRead } = useReleases();
   const [newsDismissed, setNewsDismissed] = useState(false);
-  const showNews = !!user && !newsDismissed && unread.length > 0 && currentTab !== 'releases';
+  const showNews = !!user && !isGameOnly && !newsDismissed && unread.length > 0 && currentTab !== 'releases';
   const closeNews = () => {
     setNewsDismissed(true);
     markRead(unread.map((r) => r.id));
@@ -190,36 +192,36 @@ export const App: React.FC = () => {
   };
 
   // Навигационные ссылки
-  const navItems = [
+  const navItems = isGameOnly ? [{ id: 'games', label: 'Игры', icon: Gamepad2 }] : [
     { id: 'questions', label: 'Банк вопросов', icon: FileQuestion },
     ...(isStaff ? [{ id: 'taxonomy', label: 'Предметы и темы', icon: Layers }] : []),
     { id: 'generator', label: 'Генератор билетов', icon: Sparkles },
     { id: 'saved_tickets', label: 'Сохраненные билеты', icon: FileCheck2 },
-    ...(isStaff ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
+    ...(isStaff ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }, { id: 'quality', label: 'Качество банка', icon: ShieldCheck }] : []),
     ...(isOwner ? [{ id: 'cluster', label: 'Экзамен-кластер', icon: BookOpen }] : []),
     ...(isAdmin ? [{ id: 'admin', label: 'Администрирование', icon: Users }] : []),
-    ...(isOwner ? [{ id: 'game', label: 'Своя игра', icon: Gamepad2 }] : []),
+    { id: 'games', label: 'Игры', icon: Gamepad2 },
   ];
   // Боковое меню (широкие экраны): те же разделы, но по группам, а «Администрирование» раскрыто в три пункта
-  const sideGroups: SideNavGroup[] = [
+  const sideGroups: SideNavGroup[] = isGameOnly ? [{ title: 'Игры', items: [{ id: 'games', label: 'Игры', icon: Gamepad2 }] }] : [
     { title: 'Билеты', items: [
       { id: 'generator', label: 'Генератор билетов', icon: Sparkles },
       { id: 'saved_tickets', label: 'Архив билетов', icon: FileCheck2 },
     ] },
     { title: 'Вопросы', items: [
       { id: 'questions', label: 'Банк вопросов', icon: FileQuestion },
-      ...(isStaff ? [{ id: 'taxonomy', label: 'Предметы и темы', icon: Layers }, { id: 'bulk_import', label: 'Массовый импорт', icon: Upload }] : []),
+      ...(isStaff ? [{ id: 'taxonomy', label: 'Предметы и темы', icon: Layers }, { id: 'bulk_import', label: 'Массовый импорт', icon: Upload }, { id: 'quality', label: 'Качество банка', icon: ShieldCheck }] : []),
     ] },
     ...(isAdmin ? [{ title: 'Администрирование', items: [
       { id: 'users', label: 'Пользователи', icon: Users },
       { id: 'stats', label: 'Статистика', icon: BarChart3 },
-      ...(isOwner ? [{ id: 'usage', label: 'Подборы', icon: Layers }, { id: 'quality', label: 'Качество банка', icon: ShieldCheck }] : []),
+      ...(isOwner ? [{ id: 'usage', label: 'Подборы', icon: Layers }] : []),
       { id: 'trash', label: 'Корзина', icon: Trash2 },
     ] }] : []),
     ...(isOwner ? [{ title: 'Дополнительно', items: [
       { id: 'cluster', label: 'Экзамен-кластер', icon: BookOpen },
-      { id: 'game', label: 'Своя игра', icon: Gamepad2, external: true },
     ] }] : []),
+    { title: 'Игры', items: [{ id: 'games', label: 'Игры', icon: Gamepad2 }] },
   ];
   const [navCollapsed, setNavCollapsed] = useState(() => {
     try { return localStorage.getItem('examiner_sidenav_collapsed') === 'true'; } catch { return false; }
@@ -228,7 +230,7 @@ export const App: React.FC = () => {
     try { localStorage.setItem('examiner_sidenav_collapsed', String(!v)); } catch { /* память браузера недоступна — не страшно */ }
     return !v;
   });
-  const isAdminSection = currentTab === 'users' || currentTab === 'stats' || currentTab === 'usage' || currentTab === 'quality' || currentTab === 'trash';
+  const isAdminSection = currentTab === 'users' || currentTab === 'stats' || currentTab === 'usage' || currentTab === 'trash';
 
   const openForm = (q: Question | null) => {
     setEditingQuestion(q);
@@ -533,7 +535,7 @@ export const App: React.FC = () => {
           <>
             {isAdminSection && (
               <div className="flex space-x-1 mb-5 border-b border-slate-200 xl:hidden overflow-x-auto no-scrollbar max-w-full">
-                {([['users', 'Пользователи', Users], ['stats', 'Статистика', BarChart3], ...(isOwner ? [['usage', 'Подборы', Layers] as const, ['quality', 'Качество', ShieldCheck] as const] : []), ['trash', 'Корзина', Trash2]] as const).map(([id, label, Icon]) => (
+                {([['users', 'Пользователи', Users], ['stats', 'Статистика', BarChart3], ...(isOwner ? [['usage', 'Подборы', Layers] as const] : []), ['trash', 'Корзина', Trash2]] as const).map(([id, label, Icon]) => (
                   <button
                     key={id}
                     onClick={() => goTab(id)}
@@ -563,10 +565,11 @@ export const App: React.FC = () => {
             {currentTab === 'users' && <UserManagementView />}
             {currentTab === 'stats' && <StatsView />}
             {currentTab === 'usage' && isOwner && <QuestionUsageView />}
-            {currentTab === 'quality' && isOwner && <QualityView />}
+            {currentTab === 'quality' && isStaff && <QualityView />}
             {currentTab === 'trash' && <TrashView />}
             {currentTab === 'cluster' && isOwner && <ClusterExam />}
             {currentTab === 'releases' && <ReleasesView />}
+            {currentTab === 'games' && <GamesView isOwner={isOwner} canHost={isGameOnly || isAdmin} />}
           </>
         )}
         </Suspense>
@@ -582,7 +585,7 @@ export const App: React.FC = () => {
 
       {/* Мобильная нижняя навигация (Floating Bottom Bar под большой палец) */}
       {!isQuestionFormOpen && (
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-slate-200/80 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(15,23,42,0.06)]">
+      <nav className={`${isGameOnly ? 'hidden' : 'md:hidden'} fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-slate-200/80 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_20px_rgba(15,23,42,0.06)]`}>
         <div className="grid grid-cols-4 h-16 items-center px-2">
           {/* Генератор */}
           <button

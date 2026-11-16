@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
     const email = String(body.email ?? '').trim().toLowerCase();
     const password = String(body.password ?? '');
     const fullName = String(body.fullName ?? '').trim().slice(0, 200);
-    const ROLES = ['user', 'admin', 'subject_teacher', 'subject_admin'];
+    const ROLES = ['user', 'admin', 'subject_teacher', 'subject_admin', 'game_teacher'];
     const role = ROLES.includes(body.role) ? String(body.role) : 'user';
     const bySubject = role === 'subject_teacher' || role === 'subject_admin';
     const subjectIds: string[] = Array.isArray(body.subjectIds) ? body.subjectIds.filter((x: unknown) => typeof x === 'string') : [];

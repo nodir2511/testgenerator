@@ -1,11 +1,12 @@
 /** user — преподаватель; admin — администратор; *_ по предметам — доступ только к назначенным предметам */
-export type UserRole = 'user' | 'admin' | 'subject_teacher' | 'subject_admin';
+export type UserRole = 'user' | 'admin' | 'subject_teacher' | 'subject_admin' | 'game_teacher';
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   user: 'Преподаватель',
   admin: 'Администратор',
   subject_teacher: 'Преподаватель по предметам',
   subject_admin: 'Администратор по предметам',
+  game_teacher: 'Учитель игры',
 };
 
 export type QuestionType = 'test' | 'matching' | 'open';

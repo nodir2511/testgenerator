@@ -28,7 +28,7 @@
 index.html              <head>: favicon.svg, preconnect к Google Fonts, /font-loader.js (defer), noscript-шрифт; точка входа /src/main.tsx
 vite.config.ts          alias @ → src; manualChunks: vendor (react), supabase, query; define `__BUILD_ID__`, `__APP_VERSION__`; при сборке кладёт `version.json` (идентификатор сборки)
 vercel.json             rewrites /tg /game /play → index.html; заголовки безопасности (CSP, HSTS, X-Frame-Options; для /tg — frame-ancestors web.telegram.org); Cache-Control для /assets, /key-templates, /cluster-assets; `/version.json` без кэша
-public/                 favicon (svg, ico, png разных размеров), site.webmanifest, font-loader.js, theme-init.js (тема до загрузки React), key-templates/{bio,chem,phys,taj,taj-cluster,hist,law,math}.docx, blanks/*.pdf (бланки ответов для печати, раздел «Взять шаблоны»), cluster-assets/{ru,tj}_*.png
+public/                 favicon (svg, ico, png разных размеров), site.webmanifest, font-loader.js, theme-init.js (тема до загрузки React), key-templates/{bio,chem,phys,taj,taj-cluster,hist,law,math}.docx, blanks/*.pdf (бланки ответов для печати, раздел «Взять шаблоны»), cluster-assets/{ru,tj}_*.png, games/<имя>/{index.html,app.js,class.js,config.js,cases.json} (автономные игры раздела «Игры»; скрипт обязан лежать отдельным файлом — CSP запрещает встроенные; `app.js` минифицирован — правьте исходник `games-src/<имя>/app.js` и запускайте `npm run games:build`; список игр — `GAMES` в `src/components/GamesView.tsx`)
 src/main.tsx            QueryClient; маршрутизация по пути (раздел 6.1); prefetchOnStartup
 src/App.tsx             Боковая навигация (SideNav) и меню «Ещё» на телефоне, вкладки, форма вопроса, окно «Что нового», ChangePasswordScreen; раздел виден в адресе (`#archive`), кнопка «Назад» работает по шагам
 src/components/         Экраны и элементы интерфейса (раздел 6.3); ui/ — Button, Card, Badge, Field, Hint, PageHeader, EmptyState, Skeleton
@@ -57,9 +57,11 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 |---|---|---|---|---|
 | user | Преподаватель | 1 | читает все неудалённые | — |
 | subject_teacher | Преподаватель по предметам | 1 | только свои предметы | — |
-| subject_admin | Администратор по предметам | 2 | свои предметы, правит их, видит удалённые | Предметы и темы, Массовый импорт |
+| subject_admin | Администратор по предметам | 2 | свои предметы, правит их, видит удалённые | Предметы и темы, Массовый импорт, Качество банка (только свои предметы) |
 | admin | Администратор | 3 | все, включая удалённые | + Пользователи, Статистика, Корзина |
-| admin + is_owner | Главный админ | 4 | все | + Экзамен-кластер, Своя игра, Подборы, Качество банка; один удаляет созданные наборы билетов |
+| admin + is_owner | Главный админ | 4 | все | + Экзамен-кластер, Своя игра, Подборы; один удаляет созданные наборы билетов |
+
+Отдельная роль **game_teacher** («Учитель игры», ранг 1, только главный админ назначает): сайт показывает ей один раздел «Игры» (`isGameOnly` в `App.tsx`), банк вопросов закрыт RLS (`can_view_subject` её не пускает). Занятия по «Приёму пациента» ведут game_teacher и admin (`is_clinic_teacher()`).
 
 Общие вкладки: Банк вопросов, Генератор, Сохранённые билеты, Что нового.
 
@@ -134,6 +136,8 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `omr_digit_samples(id, created_at, user_id → auth.users (set null), digit 0–9, px text (14×14 байт в base64, 264 символа), layout)` — картинки цифр без имён для подсказок; доступа с сайта и из приложения нет, читает/пишет `tg-app` (`digits_get` — по 60 последних каждой цифры, `digits_save` — до 40 за раз, не больше 500 в сутки на пользователя; после записи на каждую цифру остаётся 2000 свежих примеров, старые удаляются).
 - `omr_checks(id, created_at, user_id, batch_id → ticket_batches (set null), ticket_number, student, layout, score, max_score, details jsonb {answers, key, ok})` — пользователь читает и удаляет только свои; пишет `tg-app` сервисным ключом, баллы считает по ключу из базы.
 
+**Занятия «Приём пациента»** (`supabase/sql/clinic_class.sql`): `clinic_sessions(code, host_id, title, case_keys, status)`, `clinic_players(code, n, name, secret, results, score)`. Прямого доступа к таблицам нет; всё через RPC: `clinic_create`, `clinic_board`, `clinic_close`, `clinic_my_sessions` (учитель) и `clinic_info`, `clinic_join`, `clinic_state`, `clinic_report` (ординатор без входа, по секрету из `localStorage`). Засчитывается первое прохождение случая, баллы присылает игра (учитель видит их как есть). Экран учителя — `ClinicClass.tsx`, опрос `clinic_board` раз в 3 с. В игре режим включается ссылкой `?c=КОД` (`public/games/priem-patsienta/class.js`, `config.js` — публичный URL и anon-ключ); список случаев для выбора — `cases.json`, при добавлении случая в `app.js` обновите его.
+
 **Своя игра**:
 - `game_sessions(code, host_id, teams, board, buzz, input)` — живое состояние, Realtime.
 - `game_secrets(code, n, secret, pin, fails)` — ключи команд.
@@ -189,7 +193,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - **chapters, topics, subjects**: SELECT для вошедших, DELETE только админ, INSERT и UPDATE для управляющих предметом.
 - **ticket_batches, tickets, ticket_questions**: свои наборы; owner видит все. Кластерные (`is_cluster_batch`) видит и создаёт только owner. DELETE наборов — только owner.
 - **question_usage**: SELECT для вошедших; пишет только триггер.
-- **duplicate_dismissals, client_errors**: просмотр, правка и очистка — только owner (`client_errors` пишется через RPC `report_client_error`).
+- **duplicate_dismissals**: просмотр, добавление и удаление — `can_manage_question` (админ и главный админ, админ по предметам — только своих предметов). **client_errors**: только owner (пишется через RPC `report_client_error`).
 - **Анонимы**: `security_round4.sql` отозвал все права на таблицы, кроме SELECT на `game_sessions`; игра ходит через `game_*` (security definer).
 - **profiles**:
   - SELECT — себя или админ.
@@ -265,7 +269,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
   - без пользователя — `AuthModal`;
   - при `profile.must_change_password` — `ChangePasswordScreen`.
 - `TabType` = questions | taxonomy | generator | saved_tickets | bulk_import | users | stats | usage | quality | trash | cluster | releases.
-- Ограничения вкладок: admin — users, stats, trash; staff — taxonomy, bulk_import; owner — cluster, usage («Подборы»), quality («Качество банка»). При недоступной вкладке открывается generator.
+- Ограничения вкладок: admin — users, stats, trash; staff — taxonomy, bulk_import, quality («Качество банка», админ по предметам видит только свои предметы); owner — cluster, usage («Подборы»). При недоступной вкладке открывается generator.
 - Раздел записывается в адрес (`TAB_HASH`: `#generator`, `#archive`, `#import`, `#news` …). Форма вопроса (`#questions/…`) и меню «Ещё» на телефоне — отдельные шаги истории, «Назад» закрывает их по очереди.
 - Навигация: `SideNav` (группы разделов), на телефоне нижняя полоса и меню «Ещё». Тема: `useTheme` (`light` | `dark` | `system`, `localStorage.examiner_theme`), кнопка `ThemeToggle`; `theme-init.js` ставит класс `dark` до загрузки React.
 - `UpdateBanner` периодически и при возврате на вкладку сверяет `/version.json` с `__BUILD_ID__` и предлагает обновить страницу.
@@ -286,12 +290,13 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `BulkImport.tsx` | Импорт из .docx (картинки внутри), пары файлов RU+TG, .xlsx/.xls, .csv, текста; предпросмотр, защита от дублей в теме, шаблон Excel, откат партии; для owner — проверка строк (`importCheck.ts`: ошибки оформления, повторы, совпадения с банком) | Т questions, question_options, matching_items, import_batches, справочники · LS `examiner_import_*` |
 | `SavedTicketsView.tsx` | Архив наборов: страницы, фильтр по предмету, поиск, повтор, скачивание, правка набора (`BatchEditor`), удаление (только owner); кластерные книжки (owner) | Т ticket_batches, tickets, subjects · QK saved_ticket_batches, recent_batches · LS `examiner_archive_subject` |
 | `TaxonomyManager.tsx` | Предметы, главы, темы, источники: добавление, удаление (каскадно мягко удаляет вопросы) | Т subjects, chapters, topics, sources, questions · сбрасывает QK chapters, topics, topics_for_generation, question_counts, questions |
-| `ClusterExam.tsx` | Экзамен-кластер (owner): 4 предмета, лёгкий пул и догрузка выбранных, режим без повторов прошлых экзаменов, сохранение партией `source='cluster'`, ZIP книжек RU и TJ с ключами | Т questions, subjects, chapters, topics, user_prefs · QK cluster_topics, saved_ticket_batches |
+| `ClusterExam.tsx` | Экзамен-кластер (owner): 4 предмета, лёгкий пул и догрузка выбранных, режим без повторов прошлых экзаменов, сохранение партией `source='cluster'`, ZIP книжек RU и TJ с ключами; вкладки «Подбор из банка» и «Из готовых билетов» (`ClusterFromTickets`) | Т questions, subjects, chapters, topics, user_prefs · QK cluster_topics, saved_ticket_batches |
+| `ClusterFromTickets.tsx` | Вкладка «Из готовых билетов» (owner): по одному билету на предмет — из «Архива билетов» (набор + номер) или пара Word RU+TJ (разбор как в импорте, в банк не пишет); состав «Все 4» или «Химия + биология (ХБ)»; один вариант книжки RU и TJ без ключей (`buildClusterZip(…, { keys: false })`); в базу ничего не сохраняет | Т ticket_batches, tickets · QK cluster_ticket_batches · `lib/clusterTickets.ts`, `docxImport`, `docxPair` (лениво) |
 | `UserManagementView.tsx` | Пользователи: создание, правка, удаление, роль, предметы; журнал аудита | Т profiles, user_subjects, subjects, audit_logs · EF admin-create-user, admin-update-user, admin-delete-user · QK admin_* |
 | `StatsView.tsx` | Статистика за период (без админов), правка лимитов | RPC admin_usage_stats_v3 (запасной — admin_usage_stats) · Т generation_settings · LS `examiner_stats_*` |
 | `TrashView.tsx` | Корзина: удалённые вопросы, кто удалил, восстановление | Т questions, profiles · QK trash |
 | `BatchEditor.tsx` | Правка готового набора (в Генераторе и в Архиве): `BatchVariants` — заменить любой вопрос, `BatchTopicsBar` — убрать тему (вопросы заменяются вопросами других тем набора поровну). Автор набора или owner (чужие наборы видит только owner); кластерные наборы нельзя | RPC update_batch_questions · `lib/batchEdit.ts`, `lib/questionSwap.ts` |
-| `QualityView.tsx` | «Качество банка» (owner): проверка вопросов предмета, дубли и похожие пары, «Не дубль» с возвратом, результат кэшируется в браузере | Т questions, duplicate_dismissals, subjects · `lib/bankScan.ts`, `duplicates.ts`, `questionChecks.ts`, `scanCache.ts` |
+| `QualityView.tsx` | «Качество банка» (staff; админ по предметам — только свои предметы): проверка вопросов предмета, дубли и похожие пары (только выше 90 % сходства), «Не дубль» с возвратом, результат кэшируется в браузере | Т questions, duplicate_dismissals, subjects · `lib/bankScan.ts`, `duplicates.ts`, `questionChecks.ts`, `scanCache.ts` |
 | `QuestionUsageView.tsx` | «Подборы» (owner): сколько вопросов использовано, по темам, самые частые, ни разу не попавшие | RPC owner_question_usage |
 | `QuestionPreview.tsx`, `QuestionProgress.tsx` | Предпросмотр вопроса и список шагов заполнения в `QuestionForm` | — |
 | `SideNav.tsx`, `ThemeToggle.tsx`, `UpdateBanner.tsx`, `ConfirmDialog.tsx`, `CustomSelect.tsx`, `Logo.tsx`, `AppErrorBoundary.tsx` | Навигация, тема, баннер новой версии, окно подтверждения, выпадающий список, логотип, граница ошибок | — |
@@ -320,7 +325,8 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `clusterExport.ts` | `buildClusterVariantBlob`, `buildClusterZip`, `instructionIntro` | книжка кластера по образцу, картинки из `cluster-assets`; справочные страницы — заголовок текстом + две серые 4-битные картинки (`{lang}_aux_phys1/2`, `aux_chem1/2`, взяты из Word-образца и ужаты) |
 | `clusterSlots.ts` | `CLUSTER_SLOTS`, типы | предметы кластера и их состав (лёгкий модуль) |
 | `clusterStore.ts` | `saveClusterBatch`, `clusterVariantsFromBatch`, `loadUsedQuestionIds`, `isClusterBatch` | хранение кластера как партии |
-| `docxParse.ts` / `docxImport.ts` / `docxPair.ts` | `parseDocumentXml`, `cleanXmlRunsToFormattedText` / `parseDocxFile` / `pairBilingual`, `pairOptions` | разбор Word при импорте, пары RU+TG |
+| `clusterTickets.ts` | `snapshotFromPaired`, `withAnswer`, `answerText`, `hasAnswer`, `checkSlot`, `parseMatchKey`, `parseNumber`, `orderByType` | книжка из готовых билетов: снимок вопроса из пары Word, ручные ответы (тест A–D с кириллическими двойниками, соответствие «1352» / «А-1, Б-3…», открытый — число), проверка состава |
+| `docxParse.ts` / `docxImport.ts` / `docxPair.ts` | `parseDocumentXml`, `cleanXmlRunsToFormattedText` / `parseDocxFile` / `pairBilingual`, `pairOptions` | разбор Word при импорте, пары RU+TG; опция `{ matching: true }` (только книжка кластера из готовых билетов, импорт — без неё) — соответствия в абзацном виде: таблица в две колонки «A)…D)» / «1)…5)» под условием или строки «1)…5)» сразу после вариантов, ключ как в сборнике («1352») |
 | `fractions.ts` | `splitFractions`, `tokenizeFormatted`, `hasFraction` | дроби и разметка b, i, u, sub, sup. **Копируется в `_shared`** |
 | `errors.ts` | `explainError`, `notifyError`, `notifySuccess`, `notifyInfo`, `withUndo`, `must`, `assertRowsChanged`, `describeError`, `authErrorText`, `passwordErrorText` | понятные ошибки и уведомления |
 | `generationLimits.ts` | `useGenerationSettings`, `useUserLimits`, `DEFAULT_GENERATION_SETTINGS`, `formatCooldown` | лимиты обычного пользователя |
@@ -428,7 +434,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 3. `saveBatchChanges` вызывает `rpc("update_batch_questions")` одной транзакцией, `generation_params` обновляется (`paramsAfterEdit`).
 4. Если вопросов не хватило, остаётся «пустое место», в Word оно выделено красным. Скачивание как обычно.
 
-**Качество банка** (owner): `loadBankQuestions` → `bankIssues` и `findPairs`; результат кэшируется (`scanCache`), при заходе сверяется по числу вопросов и времени последнего изменения. «Не дубль» пишет `duplicate_dismissals`.
+**Качество банка** (staff): `loadBankQuestions` → `bankIssues` и `findPairs`; результат кэшируется (`scanCache`), при заходе сверяется по числу вопросов и времени последнего изменения. «Не дубль» пишет `duplicate_dismissals`.
 
 **Правка вопроса** (`QuestionForm`):
 1. Вставить новые варианты.
@@ -537,6 +543,8 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `pool.test.ts` | лёгкий пул (страницы, только лёгкие поля), подбор по лёгкому пулу совпадает с подбором по полному, догрузка пачками, ошибка при пропавшем вопросе |
 | `answerKey.test.ts` | ответы в ключах, шаблоны, универсальная таблица, `selectionInfo` |
 | `cluster.test.ts` | книжка кластера |
+| `clusterTickets.test.ts` | книжка из готовых билетов: ответы из Word, ключи соответствия, ручная правка, состав |
+| `docxParse.test.ts` | разбор Word не из системы (опция `matching`): соответствия таблицей и строками, таблица данных в условии, пара RU+TJ; без опции (импорт) — как прежде |
 | `omr.test.ts` | распознавание бланков на нарисованных снимках (наклон, поворот на 180°, чужой код, пустой стол) для всех пяти бланков |
 | `omrDigits.test.ts` | картинка цифры 28×28/14×14, base64, kNN на новых рисунках, добавление примеров, цифры по снимкам бланков (общий рисовальщик `omrRender.ts`) |
 | `omrScore.test.ts` | баллы, соответствие состава билета бланку, разбор введённого ключа |
@@ -566,3 +574,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - «Пустое место» в билете: `question_id = null` и `snapshot.empty`. Код, читающий билеты, должен это учитывать.
 - Анонимы не имеют прав на таблицы (`security_round4.sql`): новые таблицы для игры открывайте только через `security definer`-функции.
 - Путь проекта на кириллице («генератор тестов»): в командах берите его в кавычки. Git предупреждает о CRLF, это нормально.
+
+## 16. Эталонные данные по предметам
+
+- **Химия, расчётные задачи уровней 2 и 3:** эталонные единицы — литр (л) и грамм (г). В таких задачах не должно быть шагов перевода из одной единицы в другую (кг → г, л → мл и обратно): все величины в условии и в ответе даются сразу в л и г.

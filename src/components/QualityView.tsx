@@ -8,6 +8,7 @@ import { ANY_LABELS, bankDupDoc, bankIssues, loadBankQuestions, snippet, type An
 import { compactQuestion, readScanCache, subjectFingerprint, writeScanCache, type CompactQ } from '../lib/scanCache';
 import { FormattedText } from './FormulaEditor';
 import { Badge, Button, Card, EmptyState, Hint, PageHeader } from './ui';
+import { useAuth } from '../hooks/useAuth';
 import type { Subject } from '../types/database';
 
 // Раздел «Качество банка» (только главный админ): ошибки в вопросах и возможные дубли внутри предмета.
@@ -23,11 +24,13 @@ interface Scan {
 }
 
 const TYPE_LABEL: Record<string, string> = { test: 'Тест', matching: 'Соответствие', open: 'Открытый' };
+// Пары, похожие на 90 % и меньше, не показываются вообще: ниже этого порога слишком много ложных
+const MIN_PAIR = 0.9;
 const LEVELS = [
   { v: 0.95, label: 'Строго', hint: 'почти одинаковые' },
-  { v: 0.85, label: 'Обычно', hint: '' },
-  { v: 0.75, label: 'Широко', hint: 'больше ложных' },
+  { v: MIN_PAIR, label: 'Обычно', hint: 'больше 90 %' },
 ];
+const pairVisible = (p: { score: number }, level: number) => p.score > MIN_PAIR && p.score >= level;
 const SHOW = 100;
 const linked = (x: CompactQ, y: CompactQ) => !!(x.linked_ids?.includes(y.id) || y.linked_ids?.includes(x.id));
 const pairKey = (x: string, y: string) => (x < y ? [x, y] : [y, x]) as [string, string];
@@ -80,19 +83,21 @@ export const QualityView: React.FC = () => {
   const [fresh, setFresh] = useState<'checking' | 'fresh' | 'stale' | null>(null);
   const latest = React.useRef({ scan: null as Scan | null, fresh: null as typeof fresh });
   latest.current = { scan: rawScan, fresh };
-  const [level, setLevel] = useState(0.85);
+  const [level, setLevel] = useState(MIN_PAIR);
   const [code, setCode] = useState<AnyIssue | 'all'>('all');
   const [pairKind, setPairKind] = useState<'dups' | 'answers' | 'approved'>('dups');
   // Одобренные пары («не дубль»), ключ — id двух вопросов по возрастанию; хранятся в duplicate_dismissals
   const [approved, setApproved] = useState<Set<string>>(new Set());
 
-  const { data: subjects = [] } = useQuery({
+  const { canManage } = useAuth(); // админ по предметам видит только свои предметы
+  const { data: allSubjects = [] } = useQuery({
     queryKey: ['subjects'],
     queryFn: async () => {
       const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
       return (data || []) as Subject[];
     },
   });
+  const subjects = allSubjects.filter((s) => canManage(s.id));
   React.useEffect(() => { if (!subjectId && subjects.length) setSubjectId(subjects[0].id); }, [subjects, subjectId]);
   const loadApproved = async () => {
     const dis = await supabase.from('duplicate_dismissals').select('a, b').limit(10000);
@@ -137,7 +142,7 @@ export const QualityView: React.FC = () => {
       // Дать браузеру перерисоваться перед тяжёлым расчётом
       await new Promise((r) => setTimeout(r, 30));
       const issues = qs.map((q) => ({ q, codes: bankIssues(q) })).filter((x) => x.codes.length > 0);
-      const pairs = findPairs(qs.map(bankDupDoc), { threshold: 0.75 });
+      const pairs = findPairs(qs.map(bankDupDoc), { threshold: MIN_PAIR });
       await loadApproved();
       const need = new Set<string>([...issues.map((x) => x.q.id), ...pairs.flatMap((p) => [p.a, p.b])]);
       const byId = new Map(qs.filter((q) => need.has(q.id)).map((q) => [q.id, compactQuestion(q)]));
@@ -217,8 +222,8 @@ export const QualityView: React.FC = () => {
     return !!x && !!y && linked(x, y);
   };
   const isApproved = (p: { a: string; b: string }) => approved.has(keyOf(p.a, p.b)) || isLinkedPair(p);
-  const shownPairs = scan ? scan.pairs.filter((p) => p.score >= level && (pairKind === 'approved' ? isApproved(p) : !isApproved(p) && p.answerDiffers === (pairKind === 'answers'))) : [];
-  const approvedCount = scan ? scan.pairs.filter((p) => p.score >= level && isApproved(p)).length : 0;
+  const shownPairs = scan ? scan.pairs.filter((p) => pairVisible(p, level) && (pairKind === 'approved' ? isApproved(p) : !isApproved(p) && p.answerDiffers === (pairKind === 'answers'))) : [];
+  const approvedCount = scan ? scan.pairs.filter((p) => pairVisible(p, level) && isApproved(p)).length : 0;
 
   return (
     <div className="space-y-4">
@@ -254,7 +259,7 @@ export const QualityView: React.FC = () => {
       {scan && (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {([['Проверено вопросов', scan.total], ['С замечаниями', scan.issues.length], ['Пар-дублей', scan.pairs.filter((p) => p.score >= 0.85 && !p.answerDiffers && !isApproved(p)).length], ['Ответы расходятся', scan.pairs.filter((p) => p.score >= 0.85 && p.answerDiffers && !isApproved(p)).length]] as const).map(([l, v]) => (
+            {([['Проверено вопросов', scan.total], ['С замечаниями', scan.issues.length], ['Пар-дублей', scan.pairs.filter((p) => pairVisible(p, MIN_PAIR) && !p.answerDiffers && !isApproved(p)).length], ['Ответы расходятся', scan.pairs.filter((p) => pairVisible(p, MIN_PAIR) && p.answerDiffers && !isApproved(p)).length]] as const).map(([l, v]) => (
               <Card key={l} padding="none" className="p-3.5">
                 <div className="text-sm font-semibold text-slate-600 leading-tight">{l}</div>
                 <div className="text-3xl font-bold text-slate-900 mt-1 tabular-nums">{v}</div>

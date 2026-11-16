@@ -15,6 +15,7 @@ import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/
 import { Layers, Loader2, Download, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { CustomSelect } from './CustomSelect';
 import { Button, Card, Field, Hint, PageHeader } from './ui';
+import { ClusterFromTickets } from './ClusterFromTickets';
 
 // Экзамен-кластер: книжка сразу из 4 предметов по образцу (только главный админ).
 // Параметры экзамена (код кластера, название, дата) вносятся заранее и запоминаются в браузере.
@@ -219,6 +220,14 @@ export const ClusterExam: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ blob: Blob; fileName: string; saved: boolean } | null>(null);
   const busyRef = React.useRef(false);
+  // «bank» — подбор вопросов из банка, «tickets» — книжка из готовых билетов (архив или файлы Word)
+  const [mode, setMode] = useState<'bank' | 'tickets'>(() => {
+    try { return localStorage.getItem('examiner_cluster_mode') === 'tickets' ? 'tickets' : 'bank'; } catch { return 'bank'; }
+  });
+  const chooseMode = (m: 'bank' | 'tickets') => {
+    setMode(m);
+    try { localStorage.setItem('examiner_cluster_mode', m); } catch { /* ignore */ }
+  };
 
   React.useEffect(() => {
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* ignore */ }
@@ -395,6 +404,19 @@ export const ClusterExam: React.FC = () => {
         <p className="text-sm text-slate-600 mt-2">
           Тестовая книжка из 4 предметов по образцу: обложка, инструкция, субтесты, справочные материалы. Русский и таджикский языки и ключи ответов — одним архивом.
         </p>
+        <div className="flex flex-wrap gap-2 mt-4" role="tablist">
+          {([['bank', 'Подбор из банка'], ['tickets', 'Из готовых билетов']] as const).map(([m, label]) => (
+            <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => chooseMode(m)}
+              className={`px-4 min-h-[40px] rounded-xl text-sm font-semibold border ${mode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500 mt-2">
+          {mode === 'bank'
+            ? 'Сайт сам подбирает вопросы по темам и сохраняет экзамен в «Архиве билетов».'
+            : 'Вы даёте по одному билету на предмет — из «Архива билетов» или файлами Word (подходят и сборники не из системы), — сайт собирает из них книжку на русском и таджикском, без ключей. Можно взять только химию и биологию.'}
+        </p>
       </Card>
 
       <Card padding="none" className="p-5 space-y-4">
@@ -416,26 +438,31 @@ export const ClusterExam: React.FC = () => {
               }}
             />
           </Field>
-          <Field label={`Вариантов (1–${MAX_VARIANTS})`}>
+          {mode === 'bank' && <Field label={`Вариантов (1–${MAX_VARIANTS})`}>
             <input
               type="number" min={1} max={MAX_VARIANTS} className={input} value={state.variants}
               onChange={(e) => setState((st) => ({ ...st, variants: Math.max(1, Math.min(MAX_VARIANTS, Number(e.target.value) || 1)) }))}
             />
-          </Field>
+          </Field>}
         </div>
-        <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer select-none">
+        {mode === 'bank' && <label className="flex items-center space-x-2 text-xs text-slate-700 cursor-pointer select-none">
           <input
             type="checkbox" className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
             checked={state.avoidRepeats !== false}
             onChange={(e) => setState((st) => ({ ...st, avoidRepeats: e.target.checked }))}
           />
           <span>Не брать вопросы, которые уже были в сохранённых экзаменах-кластерах (если не хватает новых — берутся и старые, с предупреждением)</span>
-        </label>
+        </label>}
         <p className="text-xs text-slate-500">
           Пример: «Компонент {state.settings.code || 'А.5'}-{state.settings.exam || 'Авг'}» на обложке и «Компонент {state.settings.code || 'А.5'}-1» в колонтитулах первого варианта.
         </p>
       </Card>
 
+      {mode === 'tickets' && (
+        <ClusterFromTickets settings={state.settings} subjects={subjects} subjectIds={state.subjectIds} onSubject={setSubject} />
+      )}
+
+      {mode === 'bank' && <>
       <Card padding="none" className="p-5 space-y-4">
         <h3 className="font-bold text-slate-900 text-sm">2. Субтесты</h3>
         <p className="text-xs text-slate-500">Снимите галочку у предмета, чтобы не включать его в экзамен.</p>
@@ -500,6 +527,7 @@ export const ClusterExam: React.FC = () => {
           </Button>
         </div>
       )}
+      </>}
     </div>
   );
 };

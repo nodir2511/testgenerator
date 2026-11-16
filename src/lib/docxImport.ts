@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { DocxParsedQuestion, parseDocumentXml } from './docxParse';
+import { DocxParsedQuestion, parseDocumentXml, type DocxParseOptions } from './docxParse';
 
 export type { DocxParsedQuestion } from './docxParse';
 export { cleanXmlRunsToFormattedText } from './docxParse';
@@ -16,7 +16,8 @@ export interface ParsedDocx {
  */
 export async function parseDocxFile(
   file: File,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  opts: DocxParseOptions = {}
 ): Promise<ParsedDocx> {
   onProgress?.('Чтение файла Word...');
   const arrayBuffer = await file.arrayBuffer();
@@ -83,7 +84,7 @@ export async function parseDocxFile(
   const docXml = await docEntry.async('text');
   onProgress?.('Распознавание структуры вопросов...');
 
-  const questions = parseDocumentXml(docXml, rIdToPublicUrl);
+  const questions = parseDocumentXml(docXml, rIdToPublicUrl, opts);
 
   onProgress?.(`Успешно распознано вопросов: ${questions.length}`);
   return { questions, images };

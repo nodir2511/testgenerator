@@ -190,6 +190,8 @@ export function pairBilingual(ru: DocxParsedQuestion[], tg: DocxParsedQuestion[]
             const mate = bySide(m.side)[counters[m.side]++];
             return { side: m.side, text: m.text, textTg: mate?.text || '', imageUrl: m.imageUrl || mate?.imageUrl || null, orderIndex: m.orderIndex };
           });
+          // Ключ соответствия может быть только в одном из файлов
+          if (!base.correctAnswer && t.correctAnswer) base.correctAnswer = t.correctAnswer;
         }
       } else {
         const a = (r.correctAnswer || '').trim();

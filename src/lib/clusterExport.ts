@@ -435,8 +435,10 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
 
 export interface ClusterFile { blob: Blob; fileName: string; missingAnswers: number; keyOverflow: number; keyUniversal: number }
 
-/** ZIP: Русский/Вариант N.docx, Тоҷикӣ/Варианти N.docx и Ключи/Ключи – <предмет>.docx (все варианты) */
-export async function buildClusterZip(settings: ClusterSettings, variants: ClusterVariant[]): Promise<ClusterFile> {
+/** ZIP: Русский/Вариант N.docx, Тоҷикӣ/Варианти N.docx и Ключи/Ключи – <предмет>.docx (все варианты).
+ *  keys: false — только книжки, без ключей (книжка из готовых билетов) */
+export async function buildClusterZip(settings: ClusterSettings, variants: ClusterVariant[], opts: { keys?: boolean } = {}): Promise<ClusterFile> {
+  const withKeys = opts.keys !== false;
   const zip = new JSZip();
   // Варианты (RU и TJ) и ключи собираются одновременно: пока один файл ждёт картинки и шаблоны, идёт другой.
   // В архив кладутся в прежнем порядке
@@ -447,7 +449,7 @@ export async function buildClusterZip(settings: ClusterSettings, variants: Clust
 
   // Ключи по каждому предмету: все варианты на отдельных страницах (шаблоны ключей)
   const keys = Promise.all(CLUSTER_SLOTS.map((slot, s) => {
-    if (variants.some((v) => v.subjects[s] == null)) return null;
+    if (!withKeys || variants.some((v) => v.subjects[s] == null)) return null;
     const tickets = variants.map((v) => ({
       ticket_number: v.number,
       questions: (v.subjects[s] || []).map((q) => ({ question_snapshot: q })),
