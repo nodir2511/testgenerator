@@ -1,5 +1,5 @@
 // Распознавание бланка по снимку одной полоски. Без зависимостей: работает над серым изображением.
-// Порядок: строгая бинаризация → четыре угловые метки → выравнивание (гомография) →
+// Порядок: строгая бинаризация (при неудаче мягче) → четыре угловые метки → выравнивание (гомография) →
 // код бланка (он же определяет поворот снимка) → вариант, тесты, соответствия, клетки открытых.
 // Распознавание самих цифр здесь нет: для открытых вопросов отдаётся, есть ли в клетке цифра, и её рисунок.
 import type { GrayImage, OmrCircle, OmrLayout, OmrResult, OpenBox, Picked } from './types';
@@ -220,49 +220,66 @@ function openBox(at: At, b: { x: number; y: number; w: number; h: number }): Ope
   return { ink, hasDigit: ink > 0.02 && heightMm >= 2.4, heightMm, widthMm, cols, rows, bitmap };
 }
 
+/** Пороги поиска меток: сначала строгий (метки почти чёрные), потом мягче — у тёмного стола или в тени краевая метка не всегда темнее 0,4 от среднего окна */
+const MARKER_K = [0.4, 0.55, 0.7];
+
 export interface OmrOptions {
   /** Допустимые коды бланка (у химии и физики одинаковая раскладка, а коды разные). По умолчанию — код раскладки. */
   codes?: number[];
 }
 
-/** Считывает одну полоску бланка. Если codeOk = false, снимок лучше не использовать. */
-export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}): OmrResult {
+interface Located { best: { score: number; mism: number; rot: number; at: At; ring: Blob[] } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number }
+
+/** Ищет метки и поворот бланка: порог меток ослабляем, пока не сойдётся код бланка */
+function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
   const { w, h } = img;
-  // Метки почти чёрные: ищем их по строгому порогу, тогда стол и тень у края бумаги к ним не прилипают
   const win = Math.max(31, Math.round(w / 8) | 1);
   const lm = layout.markers; // TL, TR, BL, BR
   const want = Math.hypot(lm[1].x - lm[0].x, lm[1].y - lm[0].y) / Math.hypot(lm[2].x - lm[0].x, lm[2].y - lm[0].y);
-  const cands = findMarkers(adaptiveBinary(img, win, 0.4), w, h, Math.max(want, 1 / want));
-  if (!cands.length) return { ok: false, reason: 'markers' };
-
   const bin = adaptiveBinary(img, win, 0.8);
   const dstRing: number[][] = [[lm[0].x, lm[0].y], [lm[1].x, lm[1].y], [lm[3].x, lm[3].y], [lm[2].x, lm[2].y]]; // по часовой
   const codes = opts.codes ?? [layout.code];
   const popcount = (n: number) => { let c = 0; for (; n; n >>= 1) c += n & 1; return c; };
-  let best: { score: number; mism: number; rot: number; at: At; ring: Blob[] } | null = null;
+  let best: Located['best'] = null;
   let shapeBad = false;
-  // Кандидатов несколько (в кадр может попасть соседняя полоска листа): выбираем того, у кого сходится код бланка
-  for (const mk of cands) {
-    const d = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
-    const got = (d(mk.TL, mk.TR) + d(mk.BL, mk.BR)) / (d(mk.TL, mk.BL) + d(mk.TR, mk.BR));
-    // форма должна быть как у бланка, в любом из поворотов на 90°
-    if (Math.min(got / want, want / got) < 0.6 && Math.min(got * want, 1 / (got * want)) < 0.6) { shapeBad = true; continue; }
-    const ring = [mk.TL, mk.TR, mk.BR, mk.BL];
-    for (let rot = 0; rot < 4; rot++) {
-      const src = dstRing.map((_, i) => [ring[(i + rot) % 4].cx, ring[(i + rot) % 4].cy]);
-      const H = solveHomography(dstRing, src);
-      if (!H) continue;
-      const at = sampler(bin, w, h, H);
-      const bits = layout.codeCells.map((c) => squareFill(at, c.x, c.y, c.size));
-      const first = bits[0];
-      const value = bits.slice(1).reduce((a, f) => (a << 1) | (f > 0.5 ? 1 : 0), 0);
-      let mism = Math.min(...codes.map((c) => popcount(c ^ value)));
-      if (first < 0.5) mism += 2;
-      const score = mism * 10 - first;
-      if (!best || score < best.score) best = { score, mism, rot, at, ring };
+  let anyMarkers = false;
+  let kUsed = MARKER_K[0];
+  for (const k of MARKER_K) {
+    const cands = findMarkers(adaptiveBinary(img, win, k), w, h, Math.max(want, 1 / want));
+    if (!cands.length) continue;
+    anyMarkers = true;
+    // Кандидатов несколько (в кадр может попасть соседняя полоска листа): выбираем того, у кого сходится код бланка
+    for (const mk of cands) {
+      const d = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
+      const got = (d(mk.TL, mk.TR) + d(mk.BL, mk.BR)) / (d(mk.TL, mk.BL) + d(mk.TR, mk.BR));
+      // форма должна быть как у бланка, в любом из поворотов на 90°
+      if (Math.min(got / want, want / got) < 0.6 && Math.min(got * want, 1 / (got * want)) < 0.6) { shapeBad = true; continue; }
+      const ring = [mk.TL, mk.TR, mk.BR, mk.BL];
+      for (let rot = 0; rot < 4; rot++) {
+        const src = dstRing.map((_, i) => [ring[(i + rot) % 4].cx, ring[(i + rot) % 4].cy]);
+        const H = solveHomography(dstRing, src);
+        if (!H) continue;
+        const at = sampler(bin, w, h, H);
+        const bits = layout.codeCells.map((c) => squareFill(at, c.x, c.y, c.size));
+        const first = bits[0];
+        const value = bits.slice(1).reduce((a, f) => (a << 1) | (f > 0.5 ? 1 : 0), 0);
+        let mism = Math.min(...codes.map((c) => popcount(c ^ value)));
+        if (first < 0.5) mism += 2;
+        const score = mism * 10 - first;
+        if (!best || score < best.score) { best = { score, mism, rot, at, ring }; kUsed = k; }
+      }
+      if (best && best.mism === 0) break;
     }
     if (best && best.mism === 0) break;
   }
+  return { best, shapeBad, anyMarkers, dstRing, k: kUsed };
+}
+
+/** Считывает одну полоску бланка. Если codeOk = false, снимок лучше не использовать. */
+export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}): OmrResult {
+  const { w, h } = img;
+  const { best, shapeBad, anyMarkers, dstRing } = locate(img, layout, opts);
+  if (!anyMarkers) return { ok: false, reason: 'markers' };
   if (!best) return { ok: false, reason: shapeBad ? 'shape' : 'homography' };
   const { at, ring } = best;
 
@@ -285,13 +302,11 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
   };
 }
 
-/** Что «видит» распознавание: строгая чёрно-белая картинка (по ней ищутся метки) и найденные метки — для подсказки пользователю, если снимок не прочитался */
+/** Что «видит» распознавание: чёрно-белая картинка (по ней ищутся метки) и найденные метки — для подсказки пользователю, если снимок не прочитался */
 export function omrDebug(img: GrayImage, layout: OmrLayout): { bin: Uint8Array; markers: Array<{ x: number; y: number }> } {
-  const { w, h } = img;
+  const { w } = img;
   const win = Math.max(31, Math.round(w / 8) | 1);
-  const bin = adaptiveBinary(img, win, 0.4);
-  const lm = layout.markers;
-  const want = Math.hypot(lm[1].x - lm[0].x, lm[1].y - lm[0].y) / Math.hypot(lm[2].x - lm[0].x, lm[2].y - lm[0].y);
-  const c = findMarkers(bin, w, h, Math.max(want, 1 / want))[0];
-  return { bin, markers: c ? [c.TL, c.TR, c.BR, c.BL].map((b) => ({ x: b.cx, y: b.cy })) : [] };
+  const { best, k } = locate(img, layout, {});
+  const bin = adaptiveBinary(img, win, best ? k : MARKER_K[0]);
+  return { bin, markers: best ? best.ring.map((m) => ({ x: m.cx, y: m.cy })) : [] };
 }

@@ -40,6 +40,23 @@ describe('распознавание бланка по снимку', () => {
     expect(both.ok && both.codeOk).toBe(true);
   });
 
+  it('бланк на тёмном столе вплотную к краю: метки светлее обычного, но находятся', () => {
+    const layout = OMR_LAYOUTS.bio;
+    const { img, truth } = render(layout, 77, 3);
+    // Лист лежит на тёмной клавиатуре, а чёрные метки на снимке выходят серыми (экспозиция)
+    const pad = 40, W = img.w + 2 * pad, H = img.h + 2 * pad;
+    const data = new Uint8Array(W * H).fill(45);
+    for (let y = 0; y < img.h; y++) for (let x = 0; x < img.w; x++) {
+      const v = img.data[y * img.w + x];
+      data[(y + pad) * W + x + pad] = v < 60 ? Math.round(v * 0.4 + 100) : v;
+    }
+    const res = omrRead({ w: W, h: H, data }, layout);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.codeOk).toBe(true);
+    expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+  });
+
   it('пустой стол без меток — отказ, а не случайные ответы', () => {
     const img: GrayImage = { w: 800, h: 500, data: new Uint8Array(800 * 500).fill(180) };
     expect(omrRead(img, OMR_LAYOUTS.chem)).toEqual({ ok: false, reason: 'markers' });
