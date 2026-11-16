@@ -62,7 +62,7 @@ export const ClinicScreen: React.FC<{ code: string }> = ({ code }) => {
         {board.isSuccess && !b ? (
           <div className="cl-box cl-empty"><b>Занятие не найдено</b>Проверьте код в ссылке.</div>
         ) : (
-          <PlacesBox b={b} loading={board.isLoading} failed={board.isError} titleOf={titleOf} big />
+          <PlacesBox b={b} loading={board.isLoading} failed={board.isError} titleOf={titleOf} big hideTitles />
         )}
       </div>
     </div>

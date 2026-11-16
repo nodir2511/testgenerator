@@ -33,7 +33,7 @@ const Top: React.FC<{ title: React.ReactNode; sub?: string; children?: React.Rea
 );
 
 /** Таблица мест: общая для экрана учителя и экрана проектора */
-export const PlacesBox: React.FC<{ b?: Board; loading: boolean; failed: boolean; titleOf: (key: string) => string; big?: boolean }> = ({ b, loading, failed, titleOf, big }) => (
+export const PlacesBox: React.FC<{ b?: Board; loading: boolean; failed: boolean; titleOf: (key: string) => string; big?: boolean; hideTitles?: boolean }> = ({ b, loading, failed, titleOf, big, hideTitles }) => (
   <>
     <div className={`cl-box ${big ? 'big' : ''}`}>
         <h4>Участники: {b?.players.length ?? 0} · случаев в занятии: {b?.keys.length ?? 0} · обновляется само</h4>
@@ -49,7 +49,7 @@ export const PlacesBox: React.FC<{ b?: Board; loading: boolean; failed: boolean;
               <thead>
                 <tr>
                   <th>Место</th><th>Имя</th><th>Пройдено</th>
-                  {b.keys.map((k, i) => <th key={k} className="cl-c" title={titleOf(k)}>№{i + 1}</th>)}
+                  {b.keys.map((k, i) => <th key={k} className="cl-c" title={hideTitles ? undefined : titleOf(k)}>№{i + 1}</th>)}
                   <th style={{ textAlign: 'right' }}>Баллы</th>
                 </tr>
               </thead>
@@ -77,7 +77,7 @@ export const PlacesBox: React.FC<{ b?: Board; loading: boolean; failed: boolean;
           </div>
         )}
     </div>
-    {b && <div className="cl-key">{b.keys.map((k, i) => `№${i + 1} — ${titleOf(k)}`).join(' · ')}</div>}
+    {b && !hideTitles && <div className="cl-key">{b.keys.map((k, i) => `№${i + 1} — ${titleOf(k)}`).join(' · ')}</div>}
   </>
 );
 

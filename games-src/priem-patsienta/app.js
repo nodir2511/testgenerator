@@ -2004,7 +2004,7 @@ const TOPICS = [["ulcer", "ped", "Язвенная болезнь", "H. pylori, 
 const TOPOF = { hp: "ulcer", nsaid: "ulcer", bleed: "ulcer", perf: "ulcer", twin: "ulcer", graves: "thyro", subac: "thyro", ait: "thyro", afib: "thyro", relapse: "thyro", storm: "thyro", hypo1: "hypo", hypo2: "hypo", hypo3: "hypo" };
 let sec = "ped", tpc = "ulcer", home = true;
 const topName = () => TOPICS.find((t) => t[0] === tpc)[2];
-const secIdx = () => BASE.map((b, i) => window.CLASS ? CLASS.keys.includes(b.key) ? i : -1 : TOPOF[b.key] === tpc ? i : -1).filter((i) => i >= 0);
+const secIdx = () => window.CLASS ? CLASS.keys.map((k) => BASE.findIndex((b) => b.key === k)).filter((i) => i >= 0) : BASE.map((b, i) => TOPOF[b.key] === tpc ? i : -1).filter((i) => i >= 0);
 let CS, ST, cur = 0, revealed = false, finished = false;
 function reset() {
   var _a;

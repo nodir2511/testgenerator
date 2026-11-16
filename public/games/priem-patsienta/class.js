@@ -160,8 +160,17 @@
   }
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
+  // У каждого участника свой порядок случаев (по его секрету): соседи не списывают, а при перезагрузке порядок не меняется
+  function shuffled(keys) {
+    var a = keys.slice(), h = 2166136261, str = String((auth && auth.secret) || code);
+    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    var rnd = function () { h = (Math.imul(h, 1664525) + 1013904223) >>> 0; return h / 4294967296; };
+    for (var j = a.length - 1; j > 0; j--) { var k = Math.floor(rnd() * (j + 1)); var t = a[j]; a[j] = a[k]; a[k] = t; }
+    return a;
+  }
+
   function enter(d) {
-    C.keys = d.keys || [];
+    C.keys = shuffled(d.keys || []);
     C.modes = d.modes && d.modes.length ? d.modes : ['norm', 'hard'];
     C.title = d.title || '';
     C.name = d.name || '';
