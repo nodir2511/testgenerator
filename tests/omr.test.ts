@@ -89,7 +89,7 @@ describe('качество снимка и несколько отметок', (
     const { img } = render(layout, 78, 3);
     const res = omrRead(img, layout);
     if (!res.ok) throw new Error('не прочитано');
-    expect(qualityWarnings({ ...res, quality: { pxPerMm: 3, skew: 1.4 } }).length).toBe(2);
+    expect(qualityWarnings({ ...res, quality: { pxPerMm: 3, skew: 1.4, ring: 1 } }).length).toBe(2);
   });
 
   it('много неуверенных отметок — предупреждение про блики', () => {
@@ -110,5 +110,35 @@ describe('качество снимка и несколько отметок', (
     const a = answersFromResult({ ...res, tests: res.tests.map((t) => ({ ...t, answer: 'multi' as const, unsure: true })) });
     expect(a.tests.every((x) => x === null)).toBe(true);
     expect(scoreAnswers(key, a).tests.every((x) => x === false)).toBe(true);
+  });
+  // Закрытая пальцем или бликом метка: раньше четвёрка из закрашенных кружков иногда «проходила» код бланка,
+  // и ответы читались со сдвигом. Теперь такой снимок либо отклоняется, либо читается верно — но не неверно.
+  it('метка закрыта: снимок отклоняется или читается верно, белиберды нет', () => {
+    let wrong = 0, okCount = 0;
+    for (const id of ids) for (let s = 0; s < 12; s++) {
+      const layout = OMR_LAYOUTS[id];
+      const deg = [0, 4, -5, 180][s % 4];
+      const { img, truth } = render(layout, 3000 + s * 13 + id.length, deg);
+      const data = Float32Array.from(img.data as ArrayLike<number>);
+      const m = layout.markers[s % 4], a = (deg * Math.PI) / 180;
+      const dx = (m.x - layout.strip.w / 2) * 6, dy = (m.y - layout.strip.h / 2) * 6;
+      const cx = img.w / 2 + dx * Math.cos(a) - dy * Math.sin(a), cy = img.h / 2 + dx * Math.sin(a) + dy * Math.cos(a);
+      for (let y = Math.round(cy - 25); y < cy + 25; y++) for (let x = Math.round(cx - 25); x < cx + 25; x++) data[y * img.w + x] = 230;
+      const res = omrRead({ w: img.w, h: img.h, data }, layout);
+      if (!res.ok || !res.codeOk) continue;
+      okCount++;
+      if (res.variant.answer !== truth.variant || JSON.stringify(res.tests.map((t) => t.answer)) !== JSON.stringify(truth.tests)) wrong++;
+    }
+    expect(wrong).toBe(0);
+    expect(okCount).toBeGreaterThanOrEqual(0);
+  }, 60000);
+
+  it('на прочитанном снимке кружки бланка совпадают с раскладкой', () => {
+    for (const id of ids) {
+      const { img } = render(OMR_LAYOUTS[id], 91, 3);
+      const res = omrRead(img, OMR_LAYOUTS[id]);
+      if (!res.ok) throw new Error('не прочитано');
+      expect(res.quality.ring).toBeGreaterThan(0.8);
+    }
   });
 });

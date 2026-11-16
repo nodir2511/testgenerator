@@ -220,6 +220,40 @@ function openBox(at: At, b: { x: number; y: number; w: number; h: number }): Ope
   return { ink, hasDigit: ink > 0.02 && heightMm >= 2.4, heightMm, widthMm, cols, rows, bitmap };
 }
 
+/**
+ * Совпадают ли напечатанные кружки бланка с раскладкой: на контуре кружка должно быть тёмное,
+ * чуть снаружи — светлое. Код бланка (4 квадратика) иногда случайно «сходится» и на неверной четвёрке
+ * меток (например, из закрашенных кружков, когда настоящая метка закрыта пальцем или бликом) —
+ * тогда ответы читались со сдвигом. Эта проверка такие четвёрки отсекает.
+ */
+export function ringScore(at: At, layout: OmrLayout): number {
+  const circles: OmrCircle[] = [...layout.variant, ...layout.tests.flatMap((t) => t.options), ...layout.matching.flatMap((m) => m.rows.flatMap((r) => r.options))];
+  const N = 16;
+  const per: number[] = [];
+  for (const c of circles) {
+    const R = c.d / 2;
+    let ring = 0, out = 0, tot = 0;
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      let hit = 0, bad = false;
+      for (const dr of [-0.35, -0.15, 0, 0.15]) {
+        const v = at(c.x + (R + dr) * ca, c.y + (R + dr) * sa);
+        if (v < 0) { bad = true; break; }
+        if (v > 0) hit = 1;
+      }
+      const o = at(c.x + (R + 0.6) * ca, c.y + (R + 0.6) * sa);
+      if (bad || o < 0) continue;
+      tot++; ring += hit; out += o;
+    }
+    if (tot) per.push((ring - out) / tot);
+  }
+  if (!per.length) return 0;
+  per.sort((p, q) => p - q);
+  return per[per.length >> 1];
+}
+/** Начиная с какого ringScore раскладка считается совпавшей со снимком */
+export const RING_MIN = 0.5;
+
 /** Пороги поиска меток: сначала строгий (метки почти чёрные), потом мягче — у тёмного стола или в тени краевая метка не всегда темнее 0,4 от среднего окна */
 const MARKER_K = [0.4, 0.55, 0.7];
 
@@ -228,7 +262,7 @@ export interface OmrOptions {
   codes?: number[];
 }
 
-interface Located { best: { score: number; mism: number; rot: number; at: At; ring: Blob[] } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number }
+interface Located { best: { score: number; mism: number; rot: number; at: At; ring: Blob[]; fit: number } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number }
 
 /** Ищет метки и поворот бланка: порог меток ослабляем, пока не сойдётся код бланка */
 function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
@@ -265,12 +299,14 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
         const value = bits.slice(1).reduce((a, f) => (a << 1) | (f > 0.5 ? 1 : 0), 0);
         let mism = Math.min(...codes.map((c) => popcount(c ^ value)));
         if (first < 0.5) mism += 2;
-        const score = mism * 10 - first;
-        if (!best || score < best.score) { best = { score, mism, rot, at, ring }; kUsed = k; }
+        // Код сошёлся — проверяем, что и кружки бланка лежат на своих местах
+        const fit = mism === 0 ? ringScore(at, layout) : 0;
+        const score = mism * 10 - first - (fit >= RING_MIN ? 100 : 0) - fit;
+        if (!best || score < best.score) { best = { score, mism, rot, at, ring, fit }; kUsed = k; }
       }
-      if (best && best.mism === 0) break;
     }
-    if (best && best.mism === 0) break;
+    const b = best as Located['best'];
+    if (b && b.mism === 0 && b.fit >= RING_MIN) break;
   }
   return { best, shapeBad, anyMarkers, dstRing, k: kUsed };
 }
@@ -292,8 +328,8 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
 
   return {
     ok: true,
-    codeOk: best.mism === 0,
-    quality: { pxPerMm, skew },
+    codeOk: best.mism === 0 && best.fit >= RING_MIN,
+    quality: { pxPerMm, skew, ring: best.fit },
     rotation: best.rot * 90,
     variant: pickOne(layout.variant, at),
     tests: layout.tests.map((t) => ({ q: t.q, ...pickOne(t.options, at) })),
