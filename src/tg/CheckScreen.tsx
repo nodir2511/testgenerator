@@ -4,8 +4,8 @@ import {
   type Answers, type Composition, type TicketKey,
 } from '../../supabase/functions/_shared/omrScore';
 import { OMR_LAYOUTS } from '../lib/omr/layouts.generated';
-import { omrRead } from '../lib/omr/recognize';
-import { loadGrayImage } from '../lib/omr/image';
+import { omrDebug, omrRead } from '../lib/omr/recognize';
+import { debugPicture, loadGrayImage } from '../lib/omr/image';
 import { answersFromResult, doubts, keyFromAnswers, qualityWarnings, variantFromResult, type Doubt } from '../lib/omr/answers';
 import type { OmrResult } from '../lib/omr/types';
 import { PIX, pixFromBase64 } from '../lib/omr/digits';
@@ -30,7 +30,7 @@ interface KeySource {
 }
 interface CustomKey { id: string; name: string; comp: Composition; layouts: string[]; keys: Record<number, TicketKey> }
 /** Снимок в стопке на проверку: прочитан (res) или не удалось прочитать (error) */
-interface QItem { id: number; name: string; res?: Ok; error?: string }
+interface QItem { id: number; name: string; res?: Ok; error?: string; debug?: string }
 interface SavedCheck { id: string; created_at: string; student: string; ticket_number: number | null; score: number; max_score: number }
 
 const CUSTOM_KEY = 'omr_custom_keys_v1';
@@ -63,6 +63,7 @@ type View =
 export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit: () => void; haptic: (kind: 'light' | 'ok' | 'err') => void }) {
   const [view, setView] = useState<View>({ name: 'home' });
   const [error, setError] = useState('');
+  const [debug, setDebug] = useState('');
   const [busy, setBusy] = useState(false);
   const [custom, setCustom] = useState<CustomKey[]>(() => loadCustom());
   const [sets, setSets] = useState<SetRow[] | null>(null);
@@ -74,7 +75,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
   useEffect(() => { void api<{ owner: boolean }>('digits_admin').then((r) => setOwner(!!r.owner)).catch(() => {}); }, [api]);
 
   const upCustom = (fn: (l: CustomKey[]) => CustomKey[]) => setCustom((l) => { const n = fn(l); saveCustom(n); return n; });
-  const go = (v: View) => { setError(''); setView(v); };
+  const go = (v: View) => { setError(''); setDebug(''); setView(v); };
   const addToQueue = (items: Array<Omit<QItem, 'id'>>) => setQueue((q) => [...q, ...items.map((i) => ({ ...i, id: nextId.current++ }))]);
   const dropFromQueue = (id: number) => setQueue((q) => q.filter((i) => i.id !== id));
   const leaveScan = (to: View) => {
@@ -125,6 +126,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
         <button className="tg-link" onClick={back}>← Назад</button>
       </div>
       {error && <div className="tg-error" role="alert">{error}</div>}
+      {error && debug && <DebugPicture src={debug} />}
       {busy && <p className="tg-hint">Загрузка…</p>}
 
       {view.name === 'home' && (
@@ -202,7 +204,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
                 <h2>Стопка: {queue.length}</h2>
                 {queue.map((i) => (
                   <div key={i.id} className="tg-row" style={{ cursor: 'default' }}>
-                    <span className="tg-grow"><b>{i.name}</b><br /><span className="tg-hint">{i.res ? 'прочитан, ждёт проверки' : i.error}</span></span>
+                    <span className="tg-grow"><b>{i.name}</b><br /><span className="tg-hint">{i.res ? 'прочитан, ждёт проверки' : i.error}</span>{i.debug && <DebugPicture src={i.debug} />}</span>
                     {i.res && <button className="tg-link" onClick={() => go({ name: 'review', src, itemId: i.id })}>Открыть</button>}
                     <button className="tg-link" aria-label={`Убрать ${i.name}`} onClick={() => dropFromQueue(i.id)}>✕</button>
                   </div>
@@ -253,7 +255,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
           <>
             <h1>Эталонный бланк</h1>
             <p className="tg-hint">Заполните бланк правильными ответами, отметьте номер варианта, впишите цифры открытых вопросов и сфотографируйте: ключ этого варианта запишется по снимку.</p>
-            <Capture label="📷 Сфотографировать эталон" layouts={c.layouts} onResult={(res) => go({ name: 'refReview', custom: c.id, res })} onError={(m) => { haptic('err'); setError(m); }} />
+            <Capture label="📷 Сфотографировать эталон" layouts={c.layouts} onResult={(res) => go({ name: 'refReview', custom: c.id, res })} onError={(m, d) => { haptic('err'); setError(m); setDebug(d ?? ''); }} />
           </>
         );
       })()}
@@ -281,13 +283,30 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
   );
 }
 
+/** Подсказка при неудачном снимке: как программа «увидела» фото */
+function DebugPicture({ src }: { src: string }) {
+  return (
+    <details className="tg-hint" style={{ marginTop: 6 }}>
+      <summary>Что видит программа</summary>
+      <img src={src} alt="Снимок в чёрно-белом виде с найденными метками" style={{ width: '100%', borderRadius: 6, marginTop: 4 }} />
+      <p>Чёрное — то, что программа сочла тёмным; красные кружки — найденные угловые метки. Если кружков нет или они не на четырёх углах бланка, переснимите: ровнее, при хорошем свете, чтобы все четыре чёрных квадрата попали в кадр.</p>
+    </details>
+  );
+}
+
 // ---------- съёмка и чтение ----------
-const readFile = async (f: File, layouts: string[]): Promise<{ res?: Ok; error?: string }> => {
+/** Что видит программа на снимке, который не прочитался (чёрно-белая картинка и найденные метки) */
+const debugOf = (img: Awaited<ReturnType<typeof loadGrayImage>>, layout: (typeof OMR_LAYOUTS)[string]): string => {
+  try { const d = omrDebug(img, layout); return debugPicture(img, d.bin, d.markers); } catch { return ''; }
+};
+
+const readFile = async (f: File, layouts: string[]): Promise<{ res?: Ok; error?: string; debug?: string }> => {
   try {
     const img = await loadGrayImage(f);
-    const res = omrRead(img, OMR_LAYOUTS[layouts[0]], { codes: layouts.map((id) => OMR_LAYOUTS[id].code) });
-    if (!res.ok) return { error: FAIL_TEXT };
-    if (!res.codeOk) return { error: CODE_TEXT };
+    const layout = OMR_LAYOUTS[layouts[0]];
+    const res = omrRead(img, layout, { codes: layouts.map((id) => OMR_LAYOUTS[id].code) });
+    if (!res.ok) return { error: FAIL_TEXT, debug: debugOf(img, layout) };
+    if (!res.codeOk) return { error: CODE_TEXT, debug: debugOf(img, layout) };
     return { res };
   } catch {
     return { error: 'Не удалось обработать фото. Попробуйте ещё раз.' };
@@ -328,7 +347,7 @@ function QueueCapture({ layouts, hasItems, onAdd, onFirstError }: { layouts: str
   );
 }
 
-function Capture({ label, layouts, onResult, onError }: { label: string; layouts: string[]; onResult: (r: Ok) => void; onError: (m: string) => void }) {
+function Capture({ label, layouts, onResult, onError }: { label: string; layouts: string[]; onResult: (r: Ok) => void; onError: (m: string, debug?: string) => void }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -340,8 +359,8 @@ function Capture({ label, layouts, onResult, onError }: { label: string; layouts
       const img = await loadGrayImage(f);
       const layout = OMR_LAYOUTS[layouts[0]];
       const res = omrRead(img, layout, { codes: layouts.map((id) => OMR_LAYOUTS[id].code) });
-      if (!res.ok) return onError(FAIL_TEXT);
-      if (!res.codeOk) return onError(CODE_TEXT);
+      if (!res.ok) return onError(FAIL_TEXT, debugOf(img, layout));
+      if (!res.codeOk) return onError(CODE_TEXT, debugOf(img, layout));
       onResult(res);
     } catch {
       onError('Не удалось обработать фото. Попробуйте ещё раз.');

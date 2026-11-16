@@ -20,3 +20,27 @@ export async function loadGrayImage(file: Blob): Promise<GrayImage> {
   for (let i = 0; i < w * h; i++) data[i] = (px[i * 4] * 299 + px[i * 4 + 1] * 587 + px[i * 4 + 2] * 114) / 1000;
   return { w, h, data };
 }
+
+/** Картинка для подсказки: чёрное — то, что распознавание сочло тёмным; красные кружки — найденные угловые метки */
+export function debugPicture(img: GrayImage, bin: Uint8Array, markers: Array<{ x: number; y: number }>): string {
+  const k = Math.min(1, 640 / img.w);
+  const c = document.createElement('canvas');
+  c.width = Math.round(img.w * k);
+  c.height = Math.round(img.h * k);
+  const full = document.createElement('canvas');
+  full.width = img.w;
+  full.height = img.h;
+  const fctx = full.getContext('2d');
+  const ctx = c.getContext('2d');
+  if (!fctx || !ctx) return '';
+  const id = fctx.createImageData(img.w, img.h);
+  for (let i = 0; i < img.w * img.h; i++) {
+    const v = bin[i] ? 0 : 255;
+    id.data[i * 4] = v; id.data[i * 4 + 1] = v; id.data[i * 4 + 2] = v; id.data[i * 4 + 3] = 255;
+  }
+  fctx.putImageData(id, 0, 0);
+  ctx.drawImage(full, 0, 0, c.width, c.height);
+  ctx.strokeStyle = '#e11'; ctx.lineWidth = 3;
+  for (const m of markers) { ctx.beginPath(); ctx.arc(m.x * k, m.y * k, 12, 0, Math.PI * 2); ctx.stroke(); }
+  return c.toDataURL('image/jpeg', 0.7);
+}

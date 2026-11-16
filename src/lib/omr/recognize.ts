@@ -284,3 +284,14 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
     open: layout.open.map((o) => ({ q: o.q, boxes: o.boxes.map((b) => openBox(at, b)) })),
   };
 }
+
+/** Что «видит» распознавание: строгая чёрно-белая картинка (по ней ищутся метки) и найденные метки — для подсказки пользователю, если снимок не прочитался */
+export function omrDebug(img: GrayImage, layout: OmrLayout): { bin: Uint8Array; markers: Array<{ x: number; y: number }> } {
+  const { w, h } = img;
+  const win = Math.max(31, Math.round(w / 8) | 1);
+  const bin = adaptiveBinary(img, win, 0.4);
+  const lm = layout.markers;
+  const want = Math.hypot(lm[1].x - lm[0].x, lm[1].y - lm[0].y) / Math.hypot(lm[2].x - lm[0].x, lm[2].y - lm[0].y);
+  const c = findMarkers(bin, w, h, Math.max(want, 1 / want))[0];
+  return { bin, markers: c ? [c.TL, c.TR, c.BR, c.BL].map((b) => ({ x: b.cx, y: b.cy })) : [] };
+}
