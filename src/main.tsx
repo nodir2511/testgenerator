@@ -37,6 +37,10 @@ installGlobalErrorReporting();
 
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 
+// Занятие «Приём пациента» на проекторе: /clinic/КОД, без входа
+const clinicMatch = window.location.pathname.match(/^[/]clinic[/]([A-Za-z0-9]+)/);
+const ClinicScreenPage = React.lazy(() => import('./components/ClinicScreen'));
+
 // Своя игра: /game — ведущий, /game/screen/КОД — проектор, /play/КОД — команда
 const path = window.location.pathname;
 const screenMatch = path.match(/^[/]game[/]screen[/]([A-Za-z0-9]+)/);
@@ -56,6 +60,8 @@ if (screenMatch || playMatch || path === '/play' || path === '/play/' || path ==
       </AuthProvider>
     </React.StrictMode>
   );
+} else if (clinicMatch) {
+  root.render(<React.StrictMode><QueryClientProvider client={queryClient}><React.Suspense fallback={null}><ClinicScreenPage code={clinicMatch[1].toUpperCase()} /></React.Suspense></QueryClientProvider></React.StrictMode>);
 } else // /tg — Telegram Mini App: лёгкая страница без входа через Supabase Auth
 if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/tg/')) {
   const TgApp = React.lazy(() => import('./tg/TgApp'));

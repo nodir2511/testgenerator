@@ -27,7 +27,7 @@
 ```
 index.html              <head>: favicon.svg, preconnect к Google Fonts, /font-loader.js (defer), noscript-шрифт; точка входа /src/main.tsx
 vite.config.ts          alias @ → src; manualChunks: vendor (react), supabase, query; define `__BUILD_ID__`, `__APP_VERSION__`; при сборке кладёт `version.json` (идентификатор сборки)
-vercel.json             rewrites /tg /game /play → index.html; заголовки безопасности (CSP, HSTS, X-Frame-Options; для /tg — frame-ancestors web.telegram.org); Cache-Control для /assets, /key-templates, /cluster-assets; `/version.json` без кэша
+vercel.json             rewrites /tg /game /play /clinic → index.html; заголовки безопасности (CSP, HSTS, X-Frame-Options; для /tg — frame-ancestors web.telegram.org); Cache-Control для /assets, /key-templates, /cluster-assets; `/version.json` без кэша
 public/                 favicon (svg, ico, png разных размеров), site.webmanifest, font-loader.js, theme-init.js (тема до загрузки React), key-templates/{bio,chem,phys,taj,taj-cluster,hist,law,math}.docx, blanks/*.pdf (бланки ответов для печати, раздел «Взять шаблоны»), cluster-assets/{ru,tj}_*.png, games/<имя>/{index.html,app.js,class.js,config.js,cases.json} (автономные игры раздела «Игры»; скрипт обязан лежать отдельным файлом — CSP запрещает встроенные; `app.js` минифицирован — правьте исходник `games-src/<имя>/app.js` и запускайте `npm run games:build`; список игр — `GAMES` в `src/components/GamesView.tsx`)
 src/main.tsx            QueryClient; маршрутизация по пути (раздел 6.1); prefetchOnStartup
 src/App.tsx             Боковая навигация (SideNav) и меню «Ещё» на телефоне, вкладки, форма вопроса, окно «Что нового», ChangePasswordScreen; раздел виден в адресе (`#archive`), кнопка «Назад» работает по шагам
@@ -118,7 +118,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 
 **Обновления сайта**:
 - `site_releases(id, version, title, released_at, notified_at)` — `notified_at`: когда версия разослана в Telegram
-- `site_release_items(release_id, kind new|fixed|improved, scope site|bot|app, text, min_rank 1–4, order_index, subject_id)`
+- `site_release_items(release_id, kind new|fixed|improved, scope site|bot|app|game (game — пункты видны только на странице «Игры» (`GamesView`), в окно «Что нового», бота и рассылку не попадают), text, min_rank 1–4, order_index, subject_id)`
 - `site_release_reads(user_id, release_id, read_at)`
 
 **Пользователи**:
@@ -136,7 +136,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `omr_digit_samples(id, created_at, user_id → auth.users (set null), digit 0–9, px text (14×14 байт в base64, 264 символа), layout)` — картинки цифр без имён для подсказок; доступа с сайта и из приложения нет, читает/пишет `tg-app` (`digits_get` — по 60 последних каждой цифры, `digits_save` — до 40 за раз, не больше 500 в сутки на пользователя; после записи на каждую цифру остаётся 2000 свежих примеров, старые удаляются).
 - `omr_checks(id, created_at, user_id, batch_id → ticket_batches (set null), ticket_number, student, layout, score, max_score, details jsonb {answers, key, ok})` — пользователь читает и удаляет только свои; пишет `tg-app` сервисным ключом, баллы считает по ключу из базы.
 
-**Занятия «Приём пациента»** (`supabase/sql/clinic_class.sql`): `clinic_sessions(code, host_id, title, case_keys, status)`, `clinic_players(code, n, name, secret, results, score)`. Прямого доступа к таблицам нет; всё через RPC: `clinic_create`, `clinic_board`, `clinic_close`, `clinic_my_sessions` (учитель) и `clinic_info`, `clinic_join`, `clinic_state`, `clinic_report` (ординатор без входа, по секрету из `localStorage`). Засчитывается первое прохождение случая, баллы присылает игра (учитель видит их как есть). Экран учителя — `ClinicClass.tsx`, опрос `clinic_board` раз в 3 с. В игре режим включается ссылкой `?c=КОД` (`public/games/priem-patsienta/class.js`, `config.js` — публичный URL и anon-ключ); список случаев для выбора — `cases.json`, при добавлении случая в `app.js` обновите его.
+**Занятия «Приём пациента»** (`supabase/sql/clinic_class.sql`): `clinic_sessions(code, host_id, title, case_keys, modes, status)` (modes — доступные режимы игры: norm, hard; если один, игра выбирает его сама), `clinic_players(code, n, name, secret, results, score)`. Прямого доступа к таблицам нет; всё через RPC: `clinic_create`, `clinic_board`, `clinic_close`, `clinic_delete` (каскадом убирает участников), `clinic_my_sessions` (учитель) и `clinic_info`, `clinic_join`, `clinic_state`, `clinic_report`, `clinic_standing` (место и число участников, `clinic_class_v2.sql`, `clinic_class_v3.sql`: `clinic_lock` закрывает вход, `entry_closed`) (ординатор без входа, по секрету из `localStorage`). Засчитывается первое прохождение случая, баллы присылает игра (учитель видит их как есть). Экран учителя — `ClinicClass.tsx` + `clinic.css` (своя тёмная тема и шрифты как в игре, от темы сайта не зависит), опрос `clinic_board` раз в 3 с; кнопка «Проектор» открывает `/clinic/КОД` (`ClinicScreen.tsx`, таблица мест общая — `PlacesBox`). В игре режим включается ссылкой `?c=КОД` или кнопкой «Ввести код» в шапке (`public/games/priem-patsienta/class.js`, `config.js` — публичный URL и anon-ключ); список случаев для выбора — `cases.json`, при добавлении случая в `app.js` обновите его.
 
 **Своя игра**:
 - `game_sessions(code, host_id, teams, board, buzz, input)` — живое состояние, Realtime.
@@ -254,6 +254,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 |---|---|---|
 | `/game` | `GameHost` (ведущий) | AuthProvider, lazy |
 | `/game/screen/КОД` | `GameScreen` (проектор, без входа) | lazy |
+| `/clinic/КОД` | `ClinicScreen` (проектор занятия «Приём пациента», без входа; RPC `clinic_screen`, опрос раз в 3 с) | QueryClientProvider, lazy |
 | `/play`, `/play/КОД` | `GamePlay` (команда; без кода — ввод кода) | lazy |
 | `/tg`, `/tg/*` | `TgApp` (Mini App, без Supabase Auth) | lazy |
 | остальное | `App` + `ErrorToaster` | QueryClientProvider, AuthProvider |

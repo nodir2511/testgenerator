@@ -1,24 +1,26 @@
 // Режим занятия: ординатор заходит по коду (?c=КОД), проходит назначенные случаи, баллы уходят учителю.
 // Подключается ДО app.js (задаёт window.CLASS), стартует после него. Без ?c= игра работает как обычно.
 (function () {
-  var m = /[?&]c=([A-Za-z0-9]{4,8})/.exec(location.search);
-  if (!m) return;
-  var code = m[1].toUpperCase();
   var cfg = window.GAME_CFG || {};
-  var AUTH_KEY = 'priem-classauth-' + code;
-  var QUEUE_KEY = 'priem-classq-' + code;
-  var C = (window.CLASS = { code: code, keys: [], ready: false, title: '', name: '', score: 0 });
-
+  var m = /[?&]c=([A-Za-z0-9]{4,8})/.exec(location.search);
   var st = document.createElement('style');
-  // Подсказки с ответами и «начать заново» в занятии не нужны
-  st.textContent = '#btnAns,#btnReset,#secs{display:none!important}' +
-    '.cl-back{position:fixed;inset:0;z-index:80;background:rgba(5,9,16,.86);display:flex;align-items:center;justify-content:center;padding:16px}' +
+  st.textContent = '.cl-back{position:fixed;inset:0;z-index:80;background:rgba(5,9,16,.86);display:flex;align-items:center;justify-content:center;padding:16px}' +
     '.cl-box{width:100%;max-width:460px;background:var(--paper);border:2px solid var(--line);border-radius:22px;padding:24px}' +
     '.cl-box h2{margin:0 0 6px;font:700 24px var(--f-display)}.cl-box p{margin:6px 0 14px;color:var(--muted);line-height:1.45}' +
     '.cl-box input{width:100%;height:54px;border-radius:14px;border:2px solid var(--line);background:#111a2b;color:var(--ink);font:600 18px var(--f-body);padding:0 16px;margin-bottom:12px}' +
     '.cl-err{color:var(--bad);margin:0 0 10px;min-height:20px}' +
     '.cl-chip{display:inline-block;margin-left:8px;font:700 13px var(--f-body);padding:4px 10px;border-radius:10px;background:var(--accent-soft);color:var(--ink)}';
   document.head.appendChild(st);
+  addCodeBtn(!!m);
+  if (!m) return;
+  var code = m[1].toUpperCase();
+  var AUTH_KEY = 'priem-classauth-' + code;
+  var QUEUE_KEY = 'priem-classq-' + code;
+  var C = (window.CLASS = { code: code, keys: [], ready: false, title: '', name: '', score: 0, place: 0, total: 0, modes: ['norm', 'hard'] });
+  // Подсказки с ответами и «начать заново» в занятии не нужны
+  var hide = document.createElement('style');
+  hide.textContent = '#btnAns,#btnReset,#secs{display:none!important}';
+  document.head.appendChild(hide);
 
   function rpc(name, args) {
     return fetch(cfg.url + '/rest/v1/rpc/' + name, {
@@ -36,6 +38,42 @@
       });
     });
   }
+  // Кнопка в шапке: вне занятия — «Ввести код», в занятии — «Выйти»
+  function addCodeBtn(inClass) {
+    var rb = document.getElementById('btnReset');
+    if (!rb || !rb.parentNode) return;
+    var b = document.createElement('button');
+    b.id = 'clCode';
+    b.type = 'button';
+    b.className = 'btn';
+    b.textContent = inClass ? '⎋ Выйти из занятия' : '🔑 Ввести код';
+    b.onclick = inClass ? function () { location.href = location.pathname; } : askCode;
+    rb.parentNode.insertBefore(b, rb);
+  }
+  function askCode() {
+    overlay('<h2>Код занятия</h2><p>Код называет учитель, он написан на его экране.</p>' +
+      '<input id="clCodeIn" maxlength="8" placeholder="Например: K7M2P" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">' +
+      '<div class="cl-err" id="clErr"></div>' +
+      '<button class="btn primary" id="clCodeGo" type="button" style="width:100%;height:54px">Войти в занятие</button>' +
+      '<button class="btn" id="clCodeX" type="button" style="width:100%;height:46px;margin-top:10px">Отмена</button>');
+    var inp = document.getElementById('clCodeIn'), go = document.getElementById('clCodeGo'), err = document.getElementById('clErr');
+    document.getElementById('clCodeX').onclick = function () { document.getElementById('clOv').remove(); };
+    var run = function () {
+      var c = inp.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (c.length < 4) { err.textContent = 'Введите код занятия'; return; }
+      go.disabled = true;
+      err.textContent = '';
+      rpc('clinic_info', { p_code: c }).then(function (info) {
+        if (!info) { go.disabled = false; err.textContent = 'Занятие с таким кодом не найдено'; return; }
+        if (info.status !== 'open') { go.disabled = false; err.textContent = 'Это занятие уже закончилось'; return; }
+        location.href = location.pathname + '?c=' + c;
+      }).catch(function (e) { go.disabled = false; err.textContent = e.message; });
+    };
+    go.onclick = run;
+    inp.onkeydown = function (e) { if (e.key === 'Enter') run(); };
+    inp.focus();
+  }
+
   function readJ(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }
   function writeJ(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
   var auth = readJ(AUTH_KEY);
@@ -54,6 +92,7 @@
         writeJ(QUEUE_KEY, cur);
         if (r && typeof r.score === 'number') C.score = r.score;
         chip();
+        standing();
         sending = false;
         flush();
       })
@@ -78,6 +117,21 @@
   };
   setInterval(flush, 8000);
 
+  // Своё место среди всех участников занятия (чужие имена и баллы не передаются)
+  var closed = false;
+  function standing() {
+    if (!auth) return;
+    rpc('clinic_standing', { p_code: code, p_n: auth.n, p_secret: auth.secret }).then(function (r) {
+      if (!r) return;
+      C.place = r.place;
+      C.total = r.total;
+      if (typeof r.score === 'number') C.score = r.score;
+      closed = r.status === 'closed';
+      chip();
+    }).catch(function () { /* связи нет — покажем прошлое значение */ });
+  }
+  setInterval(standing, 10000);
+
   function chip(err) {
     var el = document.getElementById('clChip');
     if (!el) {
@@ -89,7 +143,8 @@
       h.appendChild(el);
     }
     var q = readJ(QUEUE_KEY) || [];
-    el.textContent = err ? err : (C.name || '') + (q.length ? ' · отправка…' : ' · результаты у учителя');
+    var place = C.place ? ' · место ' + C.place + ' из ' + C.total : '';
+    el.textContent = err ? err : closed ? 'Занятие завершено' + place : (C.name || '') + place + (q.length ? ' · отправка…' : '');
   }
 
   C.homeView = function () {
@@ -107,6 +162,7 @@
 
   function enter(d) {
     C.keys = d.keys || [];
+    C.modes = d.modes && d.modes.length ? d.modes : ['norm', 'hard'];
     C.title = d.title || '';
     C.name = d.name || '';
     C.score = d.score || 0;
@@ -121,6 +177,7 @@
     render();
     chip();
     flush();
+    standing();
   }
 
   function join(info) {
@@ -136,7 +193,7 @@
       rpc('clinic_join', { p_code: code, p_name: nm }).then(function (r) {
         auth = { n: r.n, secret: r.secret };
         writeJ(AUTH_KEY, auth);
-        enter({ keys: r.keys, title: r.title, name: r.name, score: 0 });
+        enter({ keys: r.keys, title: r.title, name: r.name, score: 0, modes: r.modes });
       }).catch(function (e) {
         go.disabled = false;
         document.getElementById('clErr').textContent = e.message;

@@ -196,8 +196,8 @@ export interface AuditLog {
 /** Уровень роли для видимости обновлений: 4 главный админ, 3 админ, 2 админ по предметам, 1 преподаватель */
 export type ReleaseRank = 1 | 2 | 3 | 4;
 export type ReleaseItemKind = 'new' | 'fixed' | 'improved';
-/** Где произошло изменение: сайт, чат-бот Telegram или мини-приложение */
-export type ReleaseItemScope = 'site' | 'bot' | 'app';
+/** Где произошло изменение: сайт, чат-бот Telegram, мини-приложение или раздел «Игры» (показывается только там) */
+export type ReleaseItemScope = 'site' | 'bot' | 'app' | 'game';
 
 export interface SiteReleaseItem {
   id: string;

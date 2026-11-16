@@ -2526,7 +2526,16 @@ function render() {
     return;
   }
   if (s.hard == null) {
+    const only = window.CLASS && CLASS.modes && CLASS.modes.length === 1 ? CLASS.modes[0] : null;
+    if (only) {
+      s.hard = only === "hard";
+      render();
+      return;
+    }
     M.innerHTML = modeView(C, t);
+    if (window.CLASS && CLASS.modes) M.querySelectorAll("[data-mode]").forEach((b) => {
+      if (!CLASS.modes.includes(b.dataset.mode)) b.remove();
+    });
     M.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
       s.hard = b.dataset.mode === "hard";
       render();

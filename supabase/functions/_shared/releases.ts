@@ -1,7 +1,7 @@
 // Обновления («Что нового») в Telegram: видимость пунктов по роли и оформление сообщений.
 // Используется ботом (кнопка «Что нового») и функцией release-notify (рассылка о новой версии).
 
-export type ReleaseScope = 'site' | 'bot' | 'app';
+export type ReleaseScope = 'site' | 'bot' | 'app' | 'game';
 export interface ReleaseItem { kind: string; scope: ReleaseScope; text: string; min_rank: number; subject_id: string | null }
 export interface ReleaseRow { version: string; title: string; items: ReleaseItem[] }
 
@@ -18,7 +18,7 @@ export function itemVisible(it: Pick<ReleaseItem, 'min_rank' | 'subject_id'>, ra
   return it.min_rank <= rank && (!it.subject_id || allowed === null || allowed.includes(it.subject_id));
 }
 
-const SCOPE_TITLES: Record<ReleaseScope, string> = { site: '🌐 Сайт', bot: '🤖 Чат-бот', app: '📱 Мини-приложение' };
+const SCOPE_TITLES: Record<ReleaseScope, string> = { site: '🌐 Сайт', bot: '🤖 Чат-бот', app: '📱 Мини-приложение', game: '🎮 Игры' };
 const SCOPE_ORDER: ReleaseScope[] = ['site', 'bot', 'app'];
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

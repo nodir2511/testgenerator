@@ -42,6 +42,7 @@ Deno.serve(async () => {
   const { data: itemRows } = await sb.from('site_release_items')
     .select('release_id, kind, scope, text, min_rank, subject_id, order_index')
     .in('release_id', releases.map((r) => r.id))
+    .neq('scope', 'game') // пункты раздела «Игры» видны только на странице игр
     .order('order_index');
   const items = itemRows ?? [];
 

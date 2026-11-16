@@ -23,6 +23,10 @@
     {
       "source": "/play",
       "destination": "/index.html"
+    },
+    {
+      "source": "/clinic/(.*)",
+      "destination": "/index.html"
     }
   ],
   "headers": [

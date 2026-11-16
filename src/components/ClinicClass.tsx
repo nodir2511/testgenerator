@@ -1,28 +1,88 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'qrcode';
-import { ArrowLeft, Check, Copy, Loader2, Plus, Users } from 'lucide-react';
+import './clinic.css';
 import { supabase } from '../lib/supabase';
-import { Button, Card, EmptyState } from './ui';
+import { confirmAction } from '../lib/confirm';
 
 interface CaseInfo { key: string; title: string; topic: string; emer: boolean }
 interface TopicInfo { id: string; sec: string; name: string }
 interface Catalog { topics: TopicInfo[]; cases: CaseInfo[] }
 interface SessionRow { code: string; title: string; status: 'open' | 'closed'; created_at: string; cases: number; players: number }
 interface Player { n: number; name: string; score: number; done: number; results: Record<string, number> }
-interface Board { title: string; status: 'open' | 'closed'; keys: string[]; players: Player[] }
+export interface Board { title: string; status: 'open' | 'closed'; entry_closed?: boolean; keys: string[]; players: Player[] }
 
-const GAME_PATH = '/games/priem-patsienta/index.html';
-const joinUrl = (code: string) => `${window.location.origin}${GAME_PATH}?c=${code}`;
+export const GAME_PATH = '/games/priem-patsienta/index.html';
+export const joinUrl = (code: string) => `${window.location.origin}${GAME_PATH}?c=${code}`;
+const MODES = [
+  { id: 'norm', name: '🩺 Обычный', hint: 'Подсказки сразу: полезный шаг светится зелёным, ошибка — красным, баллы видны.', hc: false },
+  { id: 'hard', name: '💀 Хардкор', hint: 'Как в настоящей больнице: никаких подсказок до конца приёма. Баллы ×2.', hc: true },
+];
 
-const useCatalog = () => useQuery({
+export const useCatalog = () => useQuery({
   queryKey: ['clinic-catalog'],
   queryFn: async (): Promise<Catalog> => (await fetch('/games/priem-patsienta/cases.json')).json(),
   staleTime: 60 * 60 * 1000,
 });
 
-/** Экран занятия: код, QR, таблица мест в реальном времени */
-const LiveBoard: React.FC<{ code: string; onBack: () => void }> = ({ code, onBack }) => {
+const Top: React.FC<{ title: React.ReactNode; sub?: string; children?: React.ReactNode }> = ({ title, sub, children }) => (
+  <div className="cl-top">
+    <h3>{title}{sub && <small>{sub}</small>}</h3>
+    {children}
+  </div>
+);
+
+/** Таблица мест: общая для экрана учителя и экрана проектора */
+export const PlacesBox: React.FC<{ b?: Board; loading: boolean; failed: boolean; titleOf: (key: string) => string; big?: boolean }> = ({ b, loading, failed, titleOf, big }) => (
+  <>
+    <div className={`cl-box ${big ? 'big' : ''}`}>
+        <h4>Участники: {b?.players.length ?? 0} · случаев в занятии: {b?.keys.length ?? 0} · обновляется само</h4>
+        {loading ? (
+          <div className="cl-empty">Загрузка…</div>
+        ) : failed ? (
+          <div className="cl-empty cl-err">Не удалось загрузить табло. Проверьте связь и обновите страницу.</div>
+        ) : !b || b.players.length === 0 ? (
+          <div className="cl-empty"><b>Пока никого нет</b>Ординаторы открывают ссылку или QR-код, вводят имя и сразу появляются здесь.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="cl-table">
+              <thead>
+                <tr>
+                  <th>Место</th><th>Имя</th><th>Пройдено</th>
+                  {b.keys.map((k, i) => <th key={k} className="cl-c" title={titleOf(k)}>№{i + 1}</th>)}
+                  <th style={{ textAlign: 'right' }}>Баллы</th>
+                </tr>
+              </thead>
+              <tbody>
+                {b.players.map((p, i) => {
+                  const place = b.players.findIndex((x) => x.score === p.score) + 1 || i + 1;
+                  return (
+                    <tr key={p.n}>
+                      <td className="cl-pl">{place <= 3 ? ['🥇', '🥈', '🥉'][place - 1] : place}</td>
+                      <td className="cl-nm">{p.name}</td>
+                      <td style={{ minWidth: 110 }}>
+                        <div className="cl-bar"><i style={{ width: `${b.keys.length ? (p.done / b.keys.length) * 100 : 0}%` }} /></div>
+                        <small className="cl-hint">{p.done} из {b.keys.length}</small>
+                      </td>
+                      {b.keys.map((k) => {
+                        const v = p.results[k];
+                        return <td key={k} className={`cl-c ${v === undefined ? '' : v < 0 ? 'neg' : 'ok'}`}>{v === undefined ? '·' : v}</td>;
+                      })}
+                      <td className="cl-sc">{p.score}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+    </div>
+    {b && <div className="cl-key">{b.keys.map((k, i) => `№${i + 1} — ${titleOf(k)}`).join(' · ')}</div>}
+  </>
+);
+
+/** Экран занятия: код, QR, места участников в реальном времени */
+const LiveBoard: React.FC<{ code: string; onBack: () => void; onDeleted: () => void }> = ({ code, onBack, onDeleted }) => {
   const qc = useQueryClient();
   const catalog = useCatalog();
   const [qr, setQr] = useState('');
@@ -53,6 +113,34 @@ const LiveBoard: React.FC<{ code: string; onBack: () => void }> = ({ code, onBac
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['clinic-board', code] }); qc.invalidateQueries({ queryKey: ['clinic-sessions'] }); },
   });
 
+  const lock = useMutation({
+    mutationFn: async (closed: boolean) => {
+      const { error } = await supabase.rpc('clinic_lock', { p_code: code, p_closed: closed });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['clinic-board', code] }),
+  });
+
+  const remove = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc('clinic_delete', { p_code: code });
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['clinic-sessions'] }); onDeleted(); },
+  });
+  const askDelete = async () => {
+    const n = board.data?.players.length ?? 0;
+    const ok = await confirmAction({
+      title: 'Удалить занятие?',
+      message: 'Занятие, участники и их баллы исчезнут без возможности вернуть. Ссылка и код перестанут работать.',
+      details: [`Код: ${code}`, `Участников: ${n}`],
+      confirmLabel: 'Удалить занятие',
+      cancelLabel: 'Оставить',
+      tone: 'danger',
+    });
+    if (ok) remove.mutate();
+  };
+
   const copy = async () => {
     try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* буфер недоступен */ }
   };
@@ -60,94 +148,53 @@ const LiveBoard: React.FC<{ code: string; onBack: () => void }> = ({ code, onBac
   const b = board.data;
   const titleOf = (key: string) => catalog.data?.cases.find((c) => c.key === key)?.title ?? key;
   const open = b?.status === 'open';
+  const locked = !!b?.entry_closed;
 
   return (
-    <div className="space-y-4">
-      <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-slate-900 min-h-[40px]">
-        <ArrowLeft className="w-4 h-4" /> К занятиям
-      </button>
-
-      <Card>
-        <div className="flex flex-col sm:flex-row gap-5 sm:items-center">
-          {qr && <img src={qr} alt="QR-код для входа" className="w-40 h-40 rounded-xl border border-slate-200 self-center sm:self-auto" />}
-          <div className="min-w-0 flex-1 space-y-2">
-            <div className="text-sm text-slate-500">{b?.title || 'Занятие'}</div>
-            <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Код занятия</div>
-            <div className="text-5xl sm:text-6xl font-extrabold tracking-[0.2em] text-indigo-700 tabular-nums">{code}</div>
-            <div className="text-sm text-slate-600 break-all">{url}</div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button variant="secondary" onClick={copy}>{copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {copied ? 'Скопировано' : 'Скопировать ссылку'}</Button>
-              <Button variant={open ? 'secondary' : 'primary'} onClick={() => toggle.mutate(!open)} disabled={!b || toggle.isPending}>
-                {open ? 'Завершить занятие' : 'Открыть снова'}
-              </Button>
+    <>
+      <Top title="🩺 Занятие" sub={b?.title || 'Приём пациента'}>
+        <button className="cl-btn" type="button" onClick={onBack}>← К занятиям</button>
+      </Top>
+      <div className="cl-gap">
+        <div className="cl-box">
+          <div className="cl-head">
+            {qr && <img src={qr} alt="QR-код для входа" className="cl-qr" />}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <span className="cl-lbl">Код занятия</span>
+              <div className="cl-code">{code}</div>
+              <div className="cl-link-url">{url}</div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <a className="cl-btn sm" href={`/clinic/${code}`} target="_blank" rel="noopener">📽 Проектор</a>
+                <button className="cl-btn sm" type="button" onClick={copy}>{copied ? '✓ Скопировано' : '📋 Скопировать ссылку'}</button>
+                {open && <button className={`cl-btn sm ${locked ? '' : 'primary'}`} type="button" onClick={() => lock.mutate(!locked)} disabled={!b || lock.isPending}>{locked ? '🔓 Открыть вход' : '🔒 Вход закрыт — все зашли'}</button>}
+                <button className={`cl-btn sm ${open ? '' : 'primary'}`} type="button" onClick={() => toggle.mutate(!open)} disabled={!b || toggle.isPending}>
+                  {open ? '■ Завершить занятие' : '▶ Открыть снова'}
+                </button>
+                <button className="cl-btn sm danger" type="button" onClick={askDelete} disabled={!b || remove.isPending}>🗑 Удалить занятие</button>
+              </div>
+              {open && locked && <div className="cl-end">Вход закрыт: новые участники не заходят, уже вошедшие играют. На проекторе остаётся только таблица лидеров.</div>}
+              {!open && b && <div className="cl-end">Занятие завершено: новые участники не входят, баллы не принимаются.</div>}
             </div>
-            {!open && b && <div className="text-sm font-semibold text-amber-700">Занятие завершено: новые участники не входят, баллы не принимаются.</div>}
           </div>
         </div>
-      </Card>
 
-      <Card padding="none" className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-          <h3 className="font-bold text-slate-900 flex items-center gap-2"><Users className="w-4 h-4" /> Участники: {b?.players.length ?? 0}</h3>
-          <span className="text-xs text-slate-500">Случаев в занятии: {b?.keys.length ?? 0} · обновляется само</span>
-        </div>
-        {board.isLoading ? (
-          <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 text-indigo-600 animate-spin" /></div>
-        ) : board.isError ? (
-          <div className="p-6 text-sm text-red-700">Не удалось загрузить табло. Проверьте связь и обновите страницу.</div>
-        ) : !b || b.players.length === 0 ? (
-          <div className="p-6"><EmptyState title="Пока никого нет" description="Ординаторы открывают ссылку или QR-код, вводят имя и сразу появляются здесь." /></div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-200">
-                  <th className="px-4 py-2 w-16">Место</th>
-                  <th className="px-4 py-2">Имя</th>
-                  <th className="px-4 py-2 w-28">Пройдено</th>
-                  {b.keys.map((k, i) => <th key={k} className="px-2 py-2 text-center w-16" title={titleOf(k)}>№{i + 1}</th>)}
-                  <th className="px-4 py-2 text-right w-24">Баллы</th>
-                </tr>
-              </thead>
-              <tbody>
-                {b.players.map((p, i) => {
-                  const place = i > 0 && b.players[i - 1].score === p.score ? b.players.findIndex((x) => x.score === p.score) + 1 : i + 1;
-                  return (
-                    <tr key={p.n} className="border-b border-slate-100 last:border-0 text-lg">
-                      <td className="px-4 py-2.5 font-extrabold text-slate-900">{place <= 3 ? ['🥇', '🥈', '🥉'][place - 1] : place}</td>
-                      <td className="px-4 py-2.5 font-semibold text-slate-900">{p.name}</td>
-                      <td className="px-4 py-2.5 text-slate-600 tabular-nums">{p.done} из {b.keys.length}</td>
-                      {b.keys.map((k) => (
-                        <td key={k} className="px-2 py-2.5 text-center text-base tabular-nums text-slate-600">{k in p.results ? p.results[k] : '·'}</td>
-                      ))}
-                      <td className="px-4 py-2.5 text-right text-2xl font-extrabold text-indigo-700 tabular-nums">{p.score}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-      {b && (
-        <div className="text-xs text-slate-500 px-1">
-          Номера в таблице: {b.keys.map((k, i) => `№${i + 1} — ${titleOf(k)}`).join('; ')}
-        </div>
-      )}
-    </div>
+        <PlacesBox b={b} loading={board.isLoading} failed={board.isError} titleOf={titleOf} />
+      </div>
+    </>
   );
 };
 
-/** Выбор случаев и создание занятия */
+/** Выбор случаев и режимов, создание занятия */
 const NewSession: React.FC<{ onCreated: (code: string) => void; onBack: () => void }> = ({ onCreated, onBack }) => {
   const catalog = useCatalog();
   const [title, setTitle] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
+  const [modes, setModes] = useState<string[]>(['norm', 'hard']);
   const [error, setError] = useState('');
 
   const create = useMutation({
     mutationFn: async () => {
-      const { data, error: err } = await supabase.rpc('clinic_create', { p_title: title.trim(), p_keys: picked });
+      const { data, error: err } = await supabase.rpc('clinic_create', { p_title: title.trim(), p_keys: picked, p_modes: modes });
       if (err) throw err;
       return data as string;
     },
@@ -155,6 +202,7 @@ const NewSession: React.FC<{ onCreated: (code: string) => void; onBack: () => vo
     onError: (e: Error) => setError(e.message),
   });
 
+  const flipMode = (m: string) => setModes((p) => (p.includes(m) ? p.filter((x) => x !== m) : [...p, m]));
   const flip = (key: string) => setPicked((p) => (p.includes(key) ? p.filter((k) => k !== key) : [...p, key]));
   const cat = catalog.data;
   const topicKeys = (id: string) => (cat?.cases ?? []).filter((c) => c.topic === id).map((c) => c.key);
@@ -164,49 +212,59 @@ const NewSession: React.FC<{ onCreated: (code: string) => void; onBack: () => vo
   };
 
   return (
-    <div className="space-y-4">
-      <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-slate-900 min-h-[40px]">
-        <ArrowLeft className="w-4 h-4" /> К занятиям
-      </button>
-      <Card className="space-y-4">
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1.5" htmlFor="clTitle">Название занятия</label>
-          <input
-            id="clTitle" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80} placeholder="Например: Эндокринология, 2 курс"
-            className="w-full min-h-[44px] px-3 rounded-xl border border-slate-300 bg-white text-sm"
-          />
+    <>
+      <Top title="🩺 Новое занятие" sub="Выберите режимы и случаи — ординаторы войдут по коду">
+        <button className="cl-btn" type="button" onClick={onBack}>← К занятиям</button>
+      </Top>
+      <div className="cl-gap">
+        <div className="cl-box">
+          <label className="cl-lbl" htmlFor="clTitle">Название занятия</label>
+          <input id="clTitle" className="cl-input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80} placeholder="Например: Эндокринология, 2 курс" />
         </div>
-        <div className="space-y-4">
-          <div className="text-sm font-semibold text-slate-700">Какие случаи пройдут ординаторы ({picked.length})</div>
-          {!cat ? <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" /> : cat.topics.map((t) => {
-            const ks = topicKeys(t.id);
-            const all = ks.length > 0 && ks.every((k) => picked.includes(k));
-            return (
-              <div key={t.id} className="rounded-xl border border-slate-200 p-3">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="font-bold text-slate-900">{t.name} <span className="text-xs font-medium text-slate-500">· {t.sec}</span></div>
-                  <button type="button" onClick={() => flipTopic(t.id)} className="text-sm font-semibold text-indigo-700 min-h-[36px]">{all ? 'Снять все' : 'Выбрать все'}</button>
-                </div>
-                <div className="grid gap-1.5 sm:grid-cols-2">
+
+        <div>
+          <div className="cl-hint" style={{ margin: '0 4px 8px' }}>Режимы игры, из которых выберет участник. Если выбран один — играют сразу в нём.</div>
+          <div className="cl-modes">
+            {MODES.map((m) => (
+              <button key={m.id} type="button" className={`cl-mode ${m.hc ? 'hc' : ''} ${modes.includes(m.id) ? 'on' : ''}`} onClick={() => flipMode(m.id)}>
+                <b>{m.name}{modes.includes(m.id) ? ' ✓' : ''}</b><span>{m.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="cl-hint" style={{ margin: '0 4px 8px' }}>Какие случаи пройдут ординаторы: выбрано {picked.length}</div>
+          <div className="cl-dirs">
+            {!cat ? <div className="cl-empty">Загрузка…</div> : cat.topics.map((t) => {
+              const ks = topicKeys(t.id);
+              const all = ks.length > 0 && ks.every((k) => picked.includes(k));
+              return (
+                <div key={t.id} className="cl-dir">
+                  <div className="cl-dir-h">
+                    <div><b>{t.name}</b><small>{t.sec}</small></div>
+                    <button type="button" className="cl-link" onClick={() => flipTopic(t.id)}>{all ? 'Снять все' : 'Выбрать все'}</button>
+                  </div>
                   {cat.cases.filter((c) => c.topic === t.id).map((c) => (
-                    <label key={c.key} className="flex items-start gap-2.5 rounded-lg px-2 py-2 hover:bg-slate-50 cursor-pointer text-sm text-slate-800">
-                      <input type="checkbox" className="mt-0.5 w-4 h-4" checked={picked.includes(c.key)} onChange={() => flip(c.key)} />
-                      <span>{c.title}{c.emer ? ' ⚡' : ''}</span>
-                    </label>
+                    <button key={c.key} type="button" className={`cl-pick ${picked.includes(c.key) ? 'on' : ''}`} onClick={() => flip(c.key)}>
+                      {c.title}{c.emer ? ' ⚡' : ''}
+                    </button>
                   ))}
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-        {error && <div className="text-sm text-red-700">{error}</div>}
-        <div className="flex justify-end">
-          <Button onClick={() => { setError(''); create.mutate(); }} disabled={picked.length === 0 || create.isPending}>
-            {create.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Начать занятие
-          </Button>
+
+        {error && <div className="cl-err">{error}</div>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="cl-btn primary" type="button" disabled={picked.length === 0 || modes.length === 0 || create.isPending}
+            onClick={() => { setError(''); create.mutate(); }}>
+            ▶ Начать занятие
+          </button>
         </div>
-      </Card>
-    </div>
+      </div>
+    </>
   );
 };
 
@@ -222,39 +280,39 @@ export const ClinicClass: React.FC = () => {
     },
   });
 
-  if (view.t === 'new') return <NewSession onBack={() => setView({ t: 'list' })} onCreated={(code) => setView({ t: 'board', code })} />;
-  if (view.t === 'board') return <LiveBoard code={view.code} onBack={() => { sessions.refetch(); setView({ t: 'list' }); }} />;
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-lg font-bold text-slate-900">Занятия «Приём пациента»</h3>
-        <Button onClick={() => setView({ t: 'new' })}><Plus className="w-4 h-4" /> Новое занятие</Button>
-      </div>
-      {sessions.isLoading ? (
-        <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 text-indigo-600 animate-spin" /></div>
-      ) : sessions.isError ? (
-        <Card tone="warning" className="text-sm text-slate-800">Занятия пока недоступны: не применены настройки базы (файл clinic_class.sql).</Card>
-      ) : (sessions.data ?? []).length === 0 ? (
-        <Card><EmptyState title="Занятий пока нет" description="Нажмите «Новое занятие», выберите случаи — ординаторы войдут по коду со своих телефонов." /></Card>
-      ) : (
-        <div className="grid gap-2">
-          {(sessions.data ?? []).map((s) => (
-            <button key={s.code} onClick={() => setView({ t: 'board', code: s.code })} className="text-left">
-              <Card interactive padding="sm" className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-bold text-slate-900 truncate">{s.title || 'Без названия'}</div>
-                  <div className="text-xs text-slate-500">{new Date(s.created_at).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })} · случаев: {s.cases} · участников: {s.players}</div>
+  let body: React.ReactNode;
+  if (view.t === 'new') {
+    body = <NewSession onBack={() => setView({ t: 'list' })} onCreated={(code) => setView({ t: 'board', code })} />;
+  } else if (view.t === 'board') {
+    body = <LiveBoard code={view.code} onBack={() => { sessions.refetch(); setView({ t: 'list' }); }} onDeleted={() => setView({ t: 'list' })} />;
+  } else {
+    body = (
+      <>
+        <Top title="🩺 Занятия" sub="Приём пациента: ординаторы проходят случаи на своих телефонах">
+          <button className="cl-btn primary" type="button" onClick={() => setView({ t: 'new' })}>＋ Новое занятие</button>
+        </Top>
+        <div className="cl-gap">
+          {sessions.isLoading ? (
+            <div className="cl-empty">Загрузка…</div>
+          ) : sessions.isError ? (
+            <div className="cl-box cl-err">Занятия пока недоступны: не применены настройки базы (файл clinic_class.sql).</div>
+          ) : (sessions.data ?? []).length === 0 ? (
+            <div className="cl-box cl-empty"><b>Занятий пока нет</b>Нажмите «Новое занятие», выберите режимы и случаи — ординаторы войдут по коду со своих телефонов.</div>
+          ) : (
+            (sessions.data ?? []).map((s) => (
+              <button key={s.code} type="button" className="cl-ses" onClick={() => setView({ t: 'board', code: s.code })}>
+                <div style={{ minWidth: 0 }}>
+                  <b>{s.title || 'Без названия'}</b>
+                  <small>{new Date(s.created_at).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })} · случаев: {s.cases} · участников: {s.players}</small>
                 </div>
-                <div className="text-right shrink-0">
-                  <div className="font-extrabold tracking-widest text-indigo-700">{s.code}</div>
-                  <div className={`text-xs font-semibold ${s.status === 'open' ? 'text-green-700' : 'text-slate-500'}`}>{s.status === 'open' ? 'идёт' : 'закончено'}</div>
-                </div>
-              </Card>
-            </button>
-          ))}
+                <div className="code">{s.code}<em className={s.status === 'open' ? '' : 'off'}>{s.status === 'open' ? 'идёт' : 'закончено'}</em></div>
+              </button>
+            ))
+          )}
         </div>
-      )}
-    </div>
-  );
+      </>
+    );
+  }
+
+  return <div className="cl-app">{body}</div>;
 };

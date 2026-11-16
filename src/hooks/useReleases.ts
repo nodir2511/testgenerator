@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './useAuth';
-import { rankOf, unreadReleases, visibleReleases } from '../lib/releases';
+import { gameReleases, rankOf, unreadReleases, visibleReleases, withoutGameItems } from '../lib/releases';
 import { SiteRelease } from '../types/database';
 
 /** Обновления сайта, доступные роли пользователя, и отметки «прочитано» */
@@ -36,9 +36,12 @@ export function useReleases() {
   });
 
   const releases = useMemo(() => visibleReleases(releasesQ.data ?? [], rank), [releasesQ.data, rank]);
+  // Пункты раздела «Игры» не попадают в окно «Что нового»; главный админ видит их в списке, чтобы править
+  const siteReleases = useMemo(() => withoutGameItems(releases), [releases]);
+  const gameNotes = useMemo(() => gameReleases(releases), [releases]);
   const unread = useMemo(
-    () => (readsQ.data ? unreadReleases(releases, new Set(readsQ.data)) : []),
-    [releases, readsQ.data],
+    () => (readsQ.data ? unreadReleases(siteReleases, new Set(readsQ.data)) : []),
+    [siteReleases, readsQ.data],
   );
 
   const markRead = useMutation({
@@ -53,5 +56,5 @@ export function useReleases() {
     meta: { action: 'Не удалось отметить обновления прочитанными' },
   });
 
-  return { releases, unread, rank, isLoading: releasesQ.isLoading, markRead: markRead.mutate };
+  return { releases: isOwner ? releases : siteReleases, gameNotes, unread, rank, isLoading: releasesQ.isLoading, markRead: markRead.mutate };
 }

@@ -7,7 +7,7 @@ export const RANK_LABELS: Record<ReleaseRank, string> = {
   4: 'Только главный админ',
 };
 
-export const SCOPE_LABELS = { site: 'Сайт', bot: 'Чат-бот', app: 'Мини-приложение' } as const;
+export const SCOPE_LABELS = { site: 'Сайт', bot: 'Чат-бот', app: 'Мини-приложение', game: 'Игры' } as const;
 export const KIND_LABELS = { new: 'Новое', fixed: 'Исправлено', improved: 'Улучшено' } as const;
 
 /** Уровень пользователя; совпадает с public.my_rank() в БД (преподаватели — одинаковый уровень) */
@@ -67,4 +67,18 @@ export function visibleReleases(releases: SiteRelease[], rank: ReleaseRank): Sit
 
 export function unreadReleases(releases: SiteRelease[], readIds: Set<string>): SiteRelease[] {
   return releases.filter((r) => !readIds.has(r.id));
+}
+
+/** Версии только с пунктами раздела «Игры»: для страницы игр; в общее «Что нового» они не попадают */
+export function gameReleases(releases: SiteRelease[]): SiteRelease[] {
+  return releases
+    .map((r) => ({ ...r, site_release_items: (r.site_release_items ?? []).filter((i) => i.scope === 'game') }))
+    .filter((r) => r.site_release_items.length > 0);
+}
+
+/** Версии без пунктов раздела «Игры» */
+export function withoutGameItems(releases: SiteRelease[]): SiteRelease[] {
+  return releases
+    .map((r) => ({ ...r, site_release_items: (r.site_release_items ?? []).filter((i) => i.scope !== 'game') }))
+    .filter((r) => r.site_release_items.length > 0);
 }
