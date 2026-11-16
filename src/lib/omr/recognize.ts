@@ -105,21 +105,22 @@ function components(bin: Uint8Array, w: number, h: number): Blob[] {
 interface Corners { TL: Blob; TR: Blob; BL: Blob; BR: Blob }
 
 /** Четыре угловые метки: самый большой согласованный четырёхугольник из квадратных пятен */
-function findMarkers(bin: Uint8Array, w: number, h: number): Corners | null {
+function findMarkers(bin: Uint8Array, w: number, h: number, want: number): Corners[] {
   const minArea = w * h * 0.00007;
   // Квадрат при любом повороте: равные главные оси и площадь ≈ 12·σ² (кольца и линии отсеиваются)
   const sq = components(bin, w, h).filter((c) => {
     const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
     return c.area >= minArea && c.iso > 0.45 && c.solid > 0.8 && c.solid < 1.35 && Math.max(bw, bh) < w * 0.12;
   });
-  if (sq.length < 4) return null;
+  if (sq.length < 4) return [];
   // Закрашенные кружки и квадратики кода по размеру близки к меткам: берём для каждого угла
   // несколько самых крайних кандидатов и ищем четырёхугольник наибольшей площади, остальное лежит внутри него
-  const K = 4;
+  const K = 6;
   const best = (f: (c: Blob) => number) => sq.slice().sort((p, q) => f(q) - f(p)).slice(0, K);
   const TLs = best((c) => -(c.cx + c.cy)), BRs = best((c) => c.cx + c.cy);
   const TRs = best((c) => c.cx - c.cy), BLs = best((c) => -(c.cx - c.cy));
-  let top: (Corners & { area2: number }) | null = null;
+  const found: Array<Corners & { area2: number; fit: number }> = [];
+  const seen = new Set<string>();
   for (const TL of TLs) for (const TR of TRs) for (const BL of BLs) for (const BR of BRs) {
     if (new Set([TL, TR, BL, BR]).size < 4) continue;
     const areas = [TL.area, TR.area, BL.area, BR.area];
@@ -131,9 +132,19 @@ function findMarkers(bin: Uint8Array, w: number, h: number): Corners | null {
     const d1 = Math.hypot(TL.cx - BR.cx, TL.cy - BR.cy), d2 = Math.hypot(TR.cx - BL.cx, TR.cy - BL.cy);
     const mid = Math.hypot((TL.cx + BR.cx - TR.cx - BL.cx) / 2, (TL.cy + BR.cy - TR.cy - BL.cy) / 2);
     if (mid > 0.15 * Math.min(d1, d2)) continue;
-    if (!top || area2 > top.area2) top = { area2, TL, TR, BL, BR };
+    // Форма: длинная сторона к короткой должна быть как у бланка (на листе три полоски — в кадр может попасть соседняя)
+    const dd = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
+    const long = (dd(TL, TR) + dd(BL, BR)) / 2, short = (dd(TL, BL) + dd(TR, BR)) / 2;
+    const ratio = Math.max(long, short) / Math.min(long, short);
+    const fit = Math.abs(Math.log(ratio / want));
+    const key = [TL, TR, BL, BR].map((b) => `${b.cx | 0},${b.cy | 0}`).join(';');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push({ area2, fit, TL, TR, BL, BR });
   }
-  return top ? { TL: top.TL, TR: top.TR, BL: top.BL, BR: top.BR } : null;
+  // Сначала те, чья форма ближе к бланку, при равной форме — больше по площади
+  found.sort((a, b) => (Math.abs(a.fit - b.fit) > 0.04 ? a.fit - b.fit : b.area2 - a.area2));
+  return found.slice(0, 8).map(({ TL, TR, BL, BR }) => ({ TL, TR, BL, BR }));
 }
 
 // ---------- чтение отметок ----------
@@ -219,39 +230,41 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
   const { w, h } = img;
   // Метки почти чёрные: ищем их по строгому порогу, тогда стол и тень у края бумаги к ним не прилипают
   const win = Math.max(31, Math.round(w / 8) | 1);
-  const mk = findMarkers(adaptiveBinary(img, win, 0.4), w, h);
-  if (!mk) return { ok: false, reason: 'markers' };
-
   const lm = layout.markers; // TL, TR, BL, BR
-  {
-    const d = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
-    const got = (d(mk.TL, mk.TR) + d(mk.BL, mk.BR)) / (d(mk.TL, mk.BL) + d(mk.TR, mk.BR));
-    const want = Math.hypot(lm[1].x - lm[0].x, lm[1].y - lm[0].y) / Math.hypot(lm[2].x - lm[0].x, lm[2].y - lm[0].y);
-    // форма должна быть как у бланка, в любом из поворотов на 90°
-    if (Math.min(got / want, want / got) < 0.6 && Math.min(got * want, 1 / (got * want)) < 0.6) return { ok: false, reason: 'shape' };
-  }
+  const want = Math.hypot(lm[1].x - lm[0].x, lm[1].y - lm[0].y) / Math.hypot(lm[2].x - lm[0].x, lm[2].y - lm[0].y);
+  const cands = findMarkers(adaptiveBinary(img, win, 0.4), w, h, Math.max(want, 1 / want));
+  if (!cands.length) return { ok: false, reason: 'markers' };
 
   const bin = adaptiveBinary(img, win, 0.8);
   const dstRing: number[][] = [[lm[0].x, lm[0].y], [lm[1].x, lm[1].y], [lm[3].x, lm[3].y], [lm[2].x, lm[2].y]]; // по часовой
-  const ring = [mk.TL, mk.TR, mk.BR, mk.BL];
   const codes = opts.codes ?? [layout.code];
-  let best: { score: number; mism: number; rot: number; at: At } | null = null;
-  for (let rot = 0; rot < 4; rot++) {
-    const src = dstRing.map((_, i) => [ring[(i + rot) % 4].cx, ring[(i + rot) % 4].cy]);
-    const H = solveHomography(dstRing, src);
-    if (!H) continue;
-    const at = sampler(bin, w, h, H);
-    const bits = layout.codeCells.map((c) => squareFill(at, c.x, c.y, c.size));
-    const first = bits[0];
-    const value = bits.slice(1).reduce((a, f) => (a << 1) | (f > 0.5 ? 1 : 0), 0);
-    const popcount = (n: number) => { let c = 0; for (; n; n >>= 1) c += n & 1; return c; };
-    let mism = Math.min(...codes.map((c) => popcount(c ^ value)));
-    if (first < 0.5) mism += 2;
-    const score = mism * 10 - first;
-    if (!best || score < best.score) best = { score, mism, rot, at };
+  const popcount = (n: number) => { let c = 0; for (; n; n >>= 1) c += n & 1; return c; };
+  let best: { score: number; mism: number; rot: number; at: At; ring: Blob[] } | null = null;
+  let shapeBad = false;
+  // Кандидатов несколько (в кадр может попасть соседняя полоска листа): выбираем того, у кого сходится код бланка
+  for (const mk of cands) {
+    const d = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
+    const got = (d(mk.TL, mk.TR) + d(mk.BL, mk.BR)) / (d(mk.TL, mk.BL) + d(mk.TR, mk.BR));
+    // форма должна быть как у бланка, в любом из поворотов на 90°
+    if (Math.min(got / want, want / got) < 0.6 && Math.min(got * want, 1 / (got * want)) < 0.6) { shapeBad = true; continue; }
+    const ring = [mk.TL, mk.TR, mk.BR, mk.BL];
+    for (let rot = 0; rot < 4; rot++) {
+      const src = dstRing.map((_, i) => [ring[(i + rot) % 4].cx, ring[(i + rot) % 4].cy]);
+      const H = solveHomography(dstRing, src);
+      if (!H) continue;
+      const at = sampler(bin, w, h, H);
+      const bits = layout.codeCells.map((c) => squareFill(at, c.x, c.y, c.size));
+      const first = bits[0];
+      const value = bits.slice(1).reduce((a, f) => (a << 1) | (f > 0.5 ? 1 : 0), 0);
+      let mism = Math.min(...codes.map((c) => popcount(c ^ value)));
+      if (first < 0.5) mism += 2;
+      const score = mism * 10 - first;
+      if (!best || score < best.score) best = { score, mism, rot, at, ring };
+    }
+    if (best && best.mism === 0) break;
   }
-  if (!best) return { ok: false, reason: 'homography' };
-  const { at } = best;
+  if (!best) return { ok: false, reason: shapeBad ? 'shape' : 'homography' };
+  const { at, ring } = best;
 
   // Качество снимка: сколько пикселей приходится на мм бланка и насколько сильно он снят под углом
   const edge = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
