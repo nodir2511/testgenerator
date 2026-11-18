@@ -4,6 +4,7 @@
 // друг с другом (тест и открытый вопрос из него), в один билет не попадают.
 
 import { toSnapshot, usageOf, type Settings } from '../../supabase/functions/_shared/ticketing';
+import { NCT_BANNED, sectionOfTopicNumber, topicNumber, type NctSection } from '../../supabase/functions/_shared/nct';
 
 export type QType = 'test' | 'matching' | 'open';
 export const TYPE_ORDER: QType[] = ['test', 'matching', 'open'];
@@ -20,6 +21,12 @@ export interface PoolQ {
   created_at?: string;
   linked_ids?: string[] | null;
   usage?: unknown;
+  /** Метка типа НЦТ и источник (поля лёгкого пула); isNct — вопрос из сборника НЦТ (проставляет вызывающий) */
+  nct_type?: string | null;
+  source_id?: string | null;
+  isNct?: boolean;
+  chapter?: { order_index?: number | null } | null;
+  topic?: { order_index?: number | null } | null;
 }
 
 /** Место вопроса в билете */
@@ -33,6 +40,9 @@ export interface Slot {
   topicId: string | null;
   chapterId?: string | null;
   linked?: string[];
+  /** Метка типа НЦТ и источник вопроса, стоящего на месте */
+  nctType?: string | null;
+  sourceId?: string | null;
 }
 
 // ---------- Пустое место ----------
@@ -87,6 +97,39 @@ export function candidatesFor(
 ): PoolQ[] {
   const others = [...ticketOthers];
   return rankFresh(pool.filter((q) => q.type === type && !used.has(q.id) && !clashes(q.id, others, links)));
+}
+
+// ---------- Замена в билете по формату НЦТ ----------
+
+/** Что за место в билете НЦТ: раздел, метка типа и из сборника ли НЦТ стоит вопрос */
+export interface NctSlotInfo { section: NctSection | null; nctType: string | null; isNct: boolean }
+
+/** Раздел НЦТ вопроса по порядку главы и темы (уровни 1–3); null — тема вне режима НЦТ */
+export function sectionOfPoolQ(q: Pick<PoolQ, 'chapter' | 'topic'>): NctSection | null {
+  const n = topicNumber(Number(q.chapter?.order_index), Number(q.topic?.order_index));
+  return n === null ? null : sectionOfTopicNumber(n);
+}
+
+/**
+ * Кандидаты на замену в билете по формату НЦТ: из пула всего раздела (не одной темы), того же вида и типа.
+ * - у вопроса на месте есть метка — берутся вопросы с той же меткой (клоны по типу);
+ * - метки нет — берутся вопросы без метки или с ещё не стоящим в билете разрешённым типом;
+ * - вопрос из сборника НЦТ меняется на вопрос из сборника НЦТ, обычный — на обычный (anySource снимает ограничение).
+ * Остальное — как у candidatesFor: нет в наборе, не связан с вопросами билета.
+ */
+export function nctCandidatesFor(
+  pool: PoolQ[], type: QType, used: Set<string>, ticketOthers: Iterable<string>, links: Map<string, Set<string>>,
+  info: NctSlotInfo, typesInTicket: Set<string>, anySource = false,
+): PoolQ[] {
+  if (!info.section) return [];
+  const fits = pool.filter((q) => {
+    if (sectionOfPoolQ(q) !== info.section) return false;
+    if (info.nctType) { if (q.nct_type !== info.nctType) return false; }
+    else if (q.nct_type && (NCT_BANNED.has(q.nct_type) || typesInTicket.has(q.nct_type))) return false;
+    if (!anySource && Boolean(q.isNct) !== info.isNct) return false;
+    return true;
+  });
+  return candidatesFor(fits, type, used, ticketOthers, links);
 }
 
 // ---------- Убрать тему из набора ----------
@@ -228,14 +271,14 @@ export function paramsAfterEdit(params: any, before: Slot[], after: Slot[]): any
 }
 
 /** Применяет изменения к списку мест (локально, без базы) */
-export function applyToSlots(slots: Slot[], rows: RowChange[], meta: Map<string, { topicId: string | null; chapterId?: string | null; linked?: string[] }>): Slot[] {
+export function applyToSlots(slots: Slot[], rows: RowChange[], meta: Map<string, { topicId: string | null; chapterId?: string | null; linked?: string[]; nctType?: string | null; sourceId?: string | null }>): Slot[] {
   const byId = new Map(rows.map((r) => [r.ticket_question_id, r]));
   return slots.map((s) => {
     const r = byId.get(s.tqId);
     if (!r) return s;
     const m = r.question_id ? meta.get(r.question_id) : undefined;
     // Пустое место ни к какой теме не относится
-    if (!r.question_id) return { ...s, questionId: null, topicId: null, chapterId: null, linked: undefined };
-    return { ...s, questionId: r.question_id, topicId: m?.topicId ?? s.topicId, chapterId: m?.chapterId ?? s.chapterId, linked: m?.linked };
+    if (!r.question_id) return { ...s, questionId: null, topicId: null, chapterId: null, linked: undefined, nctType: null, sourceId: null };
+    return { ...s, questionId: r.question_id, topicId: m?.topicId ?? s.topicId, chapterId: m?.chapterId ?? s.chapterId, linked: m?.linked, nctType: m?.nctType ?? null, sourceId: m?.sourceId ?? null };
   });
 }

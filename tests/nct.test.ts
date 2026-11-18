@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { nctCandidatesFor, buildLinks } from '../src/lib/questionSwap';
 import { pickNct, planNct, sectionOfTopicNumber, sectionPoints, topicNumber } from '../supabase/functions/_shared/nct';
 
 function rng(seed: number) {
@@ -104,5 +105,37 @@ describe('режим НЦТ', () => {
     p.forEach((q, i) => { q.nct_type = i % 2 ? 'REACT_WITH' : null; });
     const picked = pickNct(p, 1, rng(5));
     expect(picked.kinds[0][0].every((q: any) => q.nct_type !== 'REACT_WITH')).toBe(true);
+  });
+
+  it('замена в билете НЦТ: раздел, вид и тип места, источник', () => {
+    const mk = (id: string, ch: number, topic: number, nct: string | null, isNct = false, type = 'test') => ({
+      id, type, topic_id: `${ch}-${topic}`, chapter: { order_index: ch }, topic: { order_index: topic }, nct_type: nct, isNct,
+    }) as any;
+    const pool = [
+      mk('a1', 1, 3, 'MOL'), mk('a2', 1, 4, 'MOL'),         // основные понятия, тип MOL
+      mk('a3', 1, 3, 'MOL', true),                                      // из сборника НЦТ
+      mk('a4', 1, 3, 'RTYPE'),                                          // другой тип
+      mk('a5', 1, 3, null),                                             // без метки
+      mk('b1', 3, 2, 'MOL'),                                            // раздел «атом» (тема 35)
+      mk('a6', 1, 4, 'MOL', false, 'open'),                             // другой вид
+      mk('a7', 1, 5, 'REACT_WITH'),                                     // запрещённый тип
+      mk('x1', 4, 1, 'MOL'),                                            // тема вне уровней 1–3
+    ];
+    const links = buildLinks([]);
+    const ids = (r: any[]) => r.map((q) => q.id).sort();
+    // место с меткой MOL, обычный источник: только вопросы MOL раздела «основные понятия», не из сборника НЦТ
+    const info = { section: 'basic' as const, nctType: 'MOL', isNct: false };
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(), [], links, info, new Set()))).toEqual(['a1', 'a2']);
+    // «любой источник» добавляет вопрос из сборника НЦТ
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(), [], links, info, new Set(), true))).toEqual(['a1', 'a2', 'a3']);
+    // уже стоящий в наборе не берётся
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(['a1']), [], links, info, new Set()))).toEqual(['a2']);
+    // место без метки: неразмеченные и разрешённые типы, которых нет в билете; запрещённые и стоящие в билете — нет
+    const loose = { section: 'basic' as const, nctType: null, isNct: false };
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(), [], links, loose, new Set(['MOL'])))).toEqual(['a4', 'a5']);
+    // место из сборника НЦТ меняется на вопрос из сборника НЦТ
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(), [], links, { section: 'basic', nctType: 'MOL', isNct: true }, new Set()))).toEqual(['a3']);
+    // раздел не определён — кандидатов нет
+    expect(nctCandidatesFor(pool, 'test', new Set(), [], links, { section: null, nctType: 'MOL', isNct: false }, new Set())).toEqual([]);
   });
 });
