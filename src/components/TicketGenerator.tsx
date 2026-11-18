@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo } from '../lib/errors';
+import { pickNct, NCT_COMPOSITION } from '../../supabase/functions/_shared/nct';
 import { fitSettings, pickTickets, snapshotTickets, chapterTotalsFromCounts, poolStats as calcPoolStats, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
 import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Subject, Chapter, Topic, Question } from '../types/database';
@@ -102,6 +103,8 @@ interface GenCfg {
   shuffleOptions: boolean;
   shuffleMatching: boolean;
   title: string | null;
+  /** режим «по формату НЦТ» (химия): 18 + 2 + 7, разделы по номерам */
+  nct?: boolean;
 }
 
 const getStorageJSON = <T,>(key: string, fallback: T): T => {
@@ -166,7 +169,7 @@ const Stepper: React.FC<{ label: string; hint?: string; value: number; min: numb
 
 export const TicketGenerator: React.FC = () => {
   const queryClient = useQueryClient();
-  const { user, isAdmin, isStaff } = useAuth();
+  const { user, isAdmin, isStaff, isOwner } = useAuth();
   const userLimits = useUserLimits();
   const limits = isStaff ? ADMIN_SITE_LIMITS : userLimits;
   const generatingRef = React.useRef(false);
@@ -295,6 +298,9 @@ export const TicketGenerator: React.FC = () => {
 
   const subjectName = subjects.find((s) => s.id === subjectId)?.name || '';
   const standard = standardFor(subjectName);
+  const isChem = isOwner && subjectName.toLowerCase().includes('хим'); // режим НЦТ пока только для главного админа
+  const [nctPref, setNctPref] = useState<boolean>(() => getStorageBool('examiner_nct_mode', false));
+  const nctMode = isChem && nctPref;
   const isStandard = !!standard && testCount === standard.test && matchingCount === standard.matching && openCount === standard.open;
 
   // Смена предмета: выбор глав сбрасывается, состав билета — стандартный для предмета
@@ -492,7 +498,7 @@ export const TicketGenerator: React.FC = () => {
   const currentCfg = (): GenCfg => ({
     subjectId, chapterIds: effChapterIds, topicIds: effTopicIds,
     test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount,
-    shuffleOptions, shuffleMatching, title: customTitle.trim() || null,
+    shuffleOptions, shuffleMatching, title: customTitle.trim() || null, nct: nctMode,
   });
 
   // Алгоритм параллельной генерации билетов
@@ -501,7 +507,10 @@ export const TicketGenerator: React.FC = () => {
     generatingRef.current = true;
     setIsGenerating(true);
     setGenProgress({ percent: 15, stage: 'Загрузка вопросов...' });
-    const { test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount, shuffleOptions, shuffleMatching } = cfg;
+    const nct = !!cfg.nct;
+    const { test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount, shuffleOptions, shuffleMatching } = nct
+      ? { ...cfg, test: NCT_COMPOSITION.test, matching: NCT_COMPOSITION.matching, open: NCT_COMPOSITION.open }
+      : cfg;
     const subjectId = cfg.subjectId;
     const effTopicIds = cfg.topicIds;
     const effChapterIds = cfg.chapterIds;
@@ -538,7 +547,13 @@ export const TicketGenerator: React.FC = () => {
       // Охват глав: сколько вопросов главы выбрано от всех её вопросов (неполный выбор уменьшает долю главы)
       const chapterIds = Array.from(new Set(allQuestionsRaw.map(q => q.chapter_id).filter(Boolean)));
       const totals = chapterTotalsFromCounts(countRows, chapterIds);
-      const picked = pickTickets(allQuestionsRaw, fit.settings, Math.random, totals);
+      let picked = pickTickets(allQuestionsRaw, fit.settings, Math.random, totals);
+      if (nct) {
+        const np = pickNct(allQuestionsRaw, ticketCount, Math.random, totals);
+        if (np.notes.length) notifyInfo(`Формат НЦТ: ${np.notes.join('; ')}`);
+        if (np.kinds[0][0]?.length + np.kinds[1][0]?.length + np.kinds[2][0]?.length === 0) throw new Error('В выбранных темах нет вопросов для формата НЦТ');
+        picked = np;
+      }
 
       setGenProgress({ percent: 60, stage: 'Загрузка выбранных вопросов...' });
       await hydrateTickets(supabase, picked.kinds);
@@ -569,15 +584,16 @@ export const TicketGenerator: React.FC = () => {
           generation_params: {
             chapter_ids: effChapterIds,
             topic_ids: effTopicIds,
-            test_count: useTest,
-            matching_count: useMatching,
-            open_count: useOpen,
+            test_count: nct ? picked.kinds[0][0]?.length ?? 0 : useTest,
+            matching_count: nct ? picked.kinds[1][0]?.length ?? 0 : useMatching,
+            open_count: nct ? picked.kinds[2][0]?.length ?? 0 : useOpen,
             ticket_count: ticketCount,
             shuffle_options: shuffleOptions,
             shuffle_matching: shuffleMatching,
             requested: { test: testCount, matching: matchingCount, open: openCount },
             auto_title: !cfg.title?.trim(),
             source: 'site',
+            ...(nct ? { nct: true } : {}),
           },
         },
         p_tickets: ticketsPayload,
@@ -1054,6 +1070,23 @@ export const TicketGenerator: React.FC = () => {
                 {editComposition ? 'Готово' : 'Изменить'}
               </button>
             </div>
+
+            {isChem && (
+              <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4"
+                  checked={nctPref}
+                  onChange={(e) => { setNctPref(e.target.checked); try { localStorage.setItem('examiner_nct_mode', String(e.target.checked)); } catch { /* память недоступна */ } }}
+                />
+                <span className="text-sm text-slate-700">
+                  <b className="text-slate-900">Билет по формату НЦТ</b>
+                  <span className="block text-slate-500 mt-0.5">
+                    27 заданий (18 тест. + 2 соотв. + 7 откр.), 40 баллов. Задания идут блоками разделов, как в НЦТ: основные понятия → атом и ПЗ → растворы; баллы делятся между пройденными разделами. Темы уровней 4 и выше пока не берутся.
+                  </span>
+                </span>
+              </label>
+            )}
 
             {editComposition && (
               <div className="divide-y divide-slate-100 -mt-1">
