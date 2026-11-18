@@ -227,18 +227,22 @@ export function parseFormattedTextRuns(
   for (const node of splitFractions(text)) {
     if (typeof node === 'string') {
       for (const t of tokenizeFormatted(node, state)) {
-        out.push(
-          new TextRun({
-            text: t.text,
-            font: 'Times New Roman',
-            size: fontSize,
-            bold: isBold || t.b,
-            italics: isItalic || t.i,
-            underline: t.u ? {} : undefined,
-            subScript: t.sub || undefined,
-            superScript: t.sup || undefined,
-          })
-        );
+        // В Times New Roman нет стрелок равновесия ⇄ ⇌ (в Word вместо них пустой квадрат): их набираем шрифтом, где они есть
+        for (const piece of t.text.split(/([⇄⇌])/)) {
+          if (!piece) continue;
+          out.push(
+            new TextRun({
+              text: piece,
+              font: /^[⇄⇌]$/.test(piece) ? 'Cambria Math' : 'Times New Roman',
+              size: fontSize,
+              bold: isBold || t.b,
+              italics: isItalic || t.i,
+              underline: t.u ? {} : undefined,
+              subScript: t.sub || undefined,
+              superScript: t.sup || undefined,
+            })
+          );
+        }
       }
     } else {
       out.push(new DocxMath({ children: [buildMathFraction(node)] }));
@@ -404,6 +408,24 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
 async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: QuestionOpts = {}): Promise<Table> {
   const cm = opts.compact ? COMPACT_MARGINS : CELL_MARGINS;
+  // Пустое место (замена не нашлась): красная пометка вместо вопроса
+  if (q?.empty) {
+    const note = isTg ? 'ЧОЙ ХОЛӢ — саволро ҷойгир кунед' : 'ПУСТОЕ МЕСТО — вставьте вопрос';
+    return new Table({
+      width: { size: 9348, type: WidthType.DXA },
+      columnWidths: [500, 8848],
+      borders: NO_TABLE_BORDERS,
+      rows: [new TableRow({ cantSplit: true, children: [
+        createNumberCell(qNumber, cm.top / 20),
+        new TableCell({
+          width: { size: 8848, type: WidthType.DXA },
+          margins: { ...cm, top: 0 },
+          borders: QUESTION_TOP_BORDERS,
+          children: [new Paragraph({ spacing: { before: cm.top }, children: [new TextRun({ text: note, bold: true, color: 'FF0000', font: 'Times New Roman', size: FONT_SIZE })] })],
+        }),
+      ] })],
+    });
+  }
   const qText = isTg ? (q.content_tg || q.content) : (q.content_ru || q.content) || '';
   const imgBuffer = q.image_url ? await fetchImageBuffer(q.image_url) : null;
 

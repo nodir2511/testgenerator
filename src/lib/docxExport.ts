@@ -227,18 +227,22 @@ export function parseFormattedTextRuns(
   for (const node of splitFractions(text)) {
     if (typeof node === 'string') {
       for (const t of tokenizeFormatted(node, state)) {
-        out.push(
-          new TextRun({
-            text: t.text,
-            font: 'Times New Roman',
-            size: fontSize,
-            bold: isBold || t.b,
-            italics: isItalic || t.i,
-            underline: t.u ? {} : undefined,
-            subScript: t.sub || undefined,
-            superScript: t.sup || undefined,
-          })
-        );
+        // В Times New Roman нет стрелок равновесия ⇄ ⇌ (в Word вместо них пустой квадрат): их набираем шрифтом, где они есть
+        for (const piece of t.text.split(/([⇄⇌])/)) {
+          if (!piece) continue;
+          out.push(
+            new TextRun({
+              text: piece,
+              font: /^[⇄⇌]$/.test(piece) ? 'Cambria Math' : 'Times New Roman',
+              size: fontSize,
+              bold: isBold || t.b,
+              italics: isItalic || t.i,
+              underline: t.u ? {} : undefined,
+              subScript: t.sub || undefined,
+              superScript: t.sup || undefined,
+            })
+          );
+        }
       }
     } else {
       out.push(new DocxMath({ children: [buildMathFraction(node)] }));

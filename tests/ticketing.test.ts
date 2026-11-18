@@ -499,3 +499,16 @@ describe('ленивые обёртки экспорта (exportLazy)', () => {
     expect(t[0].selection_info).toEqual({ ru: null, tg: null });
   });
 });
+
+describe('стрелки равновесия в Word', () => {
+  it('⇄ и ⇌ набираются шрифтом, где они есть (в Times New Roman их нет)', async () => {
+    const q = { question_id: 'q1', order_index: 1, question_snapshot: { id: 'q1', type: 'open', content: 'HNO₂ ⇄ H⁺ + NO₂⁻ и A ⇌ B', content_ru: 'HNO₂ ⇄ H⁺ + NO₂⁻ и A ⇌ B', options: [] } };
+    const blob = await buildSingleTicketBlob('Экзамен', { ticket_number: 1, questions: [q] } as any, 'Химия', false);
+    const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
+    const runs = xml.match(/<w:r>.*?<\/w:r>/g) || [];
+    const arrows = runs.filter((r) => /<w:t[^>]*>[⇄⇌]<\/w:t>/.test(r));
+    expect(arrows.length).toBe(2);
+    for (const r of arrows) expect(r).toContain('Cambria Math');
+    expect(runs.some((r) => /<w:t[^>]*>[^<]*⇄/.test(r) && r.length > 0 && !/<w:t[^>]*>⇄<\/w:t>/.test(r))).toBe(false);
+  });
+});
