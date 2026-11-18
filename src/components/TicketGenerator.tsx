@@ -549,6 +549,10 @@ export const TicketGenerator: React.FC = () => {
       const totals = chapterTotalsFromCounts(countRows, chapterIds);
       let picked = pickTickets(allQuestionsRaw, fit.settings, Math.random, totals);
       if (nct) {
+        // сборник НЦТ в банке — источники «ЦВЭ …»: их вопросы идут на ~40 % баллов
+        const { data: srcRows } = await supabase.from('sources').select('id, name').eq('is_deleted', false);
+        const nctSources = new Set((srcRows || []).filter((r: any) => /ЦВЭ/i.test(r.name || '')).map((r: any) => r.id));
+        allQuestionsRaw.forEach((q: any) => { q.isNct = !!q.source_id && nctSources.has(q.source_id); });
         const np = pickNct(allQuestionsRaw, ticketCount, Math.random, totals);
         if (np.notes.length) notifyInfo(`Формат НЦТ: ${np.notes.join('; ')}`);
         if (np.kinds[0][0]?.length + np.kinds[1][0]?.length + np.kinds[2][0]?.length === 0) throw new Error('В выбранных темах нет вопросов для формата НЦТ');
@@ -1082,7 +1086,7 @@ export const TicketGenerator: React.FC = () => {
                 <span className="text-sm text-slate-700">
                   <b className="text-slate-900">Билет по формату НЦТ</b>
                   <span className="block text-slate-500 mt-0.5">
-                    27 заданий (18 тест. + 2 соотв. + 7 откр.), 40 баллов. Задания идут блоками разделов, как в НЦТ: основные понятия → атом и ПЗ → растворы; баллы делятся между пройденными разделами. Темы уровней 4 и выше пока не берутся.
+                    27 заданий (18 тест. + 2 соотв. + 7 откр.), 40 баллов. Задания идут блоками разделов, как в НЦТ: основные понятия → атом и ПЗ → растворы; баллы делятся между пройденными разделами. На каждое место берётся тип задания по меткам (в билете типы не повторяются), около 16 баллов — из сборника НЦТ (источник «ЦВЭ»). Темы уровней 4 и выше пока не берутся.
                   </span>
                 </span>
               </label>

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { notifyError, describeError, must } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
+import { NCT_TYPES } from '../lib/nctTypes';
 import { FormulaEditor } from './FormulaEditor';
 import { QuestionPreview } from './QuestionPreview';
 import { QuestionProgress, type ProgressStep } from './QuestionProgress';
@@ -83,7 +84,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   onDirtyChange,
 }) => {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, isOwner } = useAuth();
 
   // Режим редактора: 'both' (двойной RU + TG), 'ru' (только русский), 'tg' (только таджикский)
   const [formMode, setFormMode] = useState<'both' | 'ru' | 'tg'>('both');
@@ -101,6 +102,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   const [sourceId, setSourceId] = useState(
     initialData?.source_id || localStorage.getItem('examiner_last_new_source_id') || ''
   );
+  const [nctType, setNctType] = useState<string>(initialData?.nct_type || '');
   const [type, setType] = useState<QuestionType>(
     initialData?.type || (localStorage.getItem('examiner_last_new_type') as QuestionType) || 'test'
   );
@@ -417,6 +419,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         chapter_id: chapterId,
         topic_id: topicId,
         source_id: sourceId || null,
+        // метку типа НЦТ меняет только главный админ; у остальных поле не трогаем
+        ...(isOwner ? { nct_type: nctType || null } : {}),
         type,
         content: primaryContent,
         content_ru: contentRu.trim() || null,
@@ -659,6 +663,19 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               {sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </CustomSelect>
 </Field>
+
+          {isOwner && (
+            <Field label="Тип задания НЦТ (метка)">
+              <CustomSelect
+                value={nctType}
+                onChange={(val) => setNctType(val)}
+                className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+              >
+                <option value="">-- Без метки --</option>
+                {NCT_TYPES.map(t => <option key={t.code} value={t.code}>{t.name} ({t.code})</option>)}
+              </CustomSelect>
+            </Field>
+          )}
         </div>
 
         <div className="hidden xl:block"><QuestionProgress steps={progressSteps} /></div>

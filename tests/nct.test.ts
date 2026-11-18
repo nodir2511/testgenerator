@@ -58,7 +58,7 @@ describe('режим НЦТ', () => {
   it('билеты: 27 заданий, блоки разделов по порядку, без повторов между билетами', () => {
     const picked = pickNct(pool(all49, { test: 12, matching: 6, open: 8 }), 3, rng(7));
     const [tests, matching, open] = picked.kinds;
-    expect(picked.notes).toEqual([]);
+    expect(picked.notes.some((n) => n.includes('не хватило'))).toBe(false);
     for (let t = 0; t < 3; t++) {
       expect([tests[t].length, matching[t].length, open[t].length]).toEqual([18, 2, 7]);
       const rank = (q: any) => ['basic', 'atom', 'solutions'].indexOf(q.chapter.order_index === 1 ? 'basic' : q.chapter.order_index === 2 ? 'basic' : (q.topic.order_index <= 8 ? 'atom' : q.topic.order_index <= 10 ? 'basic' : 'solutions'));
@@ -80,5 +80,29 @@ describe('режим НЦТ', () => {
     p.push({ id: 'x', type: 'test', topic_id: 'tx', chapter_id: 'c4', num: 1, chapter: { order_index: 4 }, topic: { order_index: 1 } });
     const picked = pickNct(p, 1, rng(1));
     expect(picked.notes.some((n) => n.includes('уровни 4'))).toBe(true);
+  });
+
+  it('метки: типы не повторяются в билете, во всех вариантах тип обычно один, есть задания из сборника НЦТ', () => {
+    const types = ['MOL', 'RTYPE', 'MIX', 'VAL', 'EQ', 'MASSRATIO', 'RATE', 'DENS', 'GASMASS', 'OXCLASS', 'NPART', 'SO', 'BOND', 'LATTICE', 'CONFIG', 'PERIODIC', 'UNPAIRED', 'ELECTROLYTE', 'IONEQ', 'HYDRO_TYPE', 'HYDRO_MEDIUM', 'DISS', 'PH_ROW', 'IONEX'];
+    const p = pool(all49, { test: 24, matching: 6, open: 12 });
+    p.forEach((q, i) => { q.nct_type = types[Math.floor(i / 6) % types.length]; q.isNct = i % 5 === 0; });
+    const picked = pickNct(p, 2, rng(11));
+    const [tests] = picked.kinds;
+    for (let t = 0; t < 2; t++) {
+      const codes = tests[t].map((q: any) => q.nct_type);
+      expect(new Set(codes).size).toBe(codes.length);
+    }
+    // во всех вариантах место, как правило, имеет один тип (метки соседних вопросов на стыке групп могут отличаться)
+    const same = tests[0].filter((q: any, i: number) => tests[1][i].nct_type === q.nct_type).length;
+    expect(same).toBeGreaterThanOrEqual(14);
+    const nct = picked.kinds.flat(2).filter((q: any) => q.isNct).length;
+    expect(nct).toBeGreaterThan(0);
+  });
+
+  it('запрещённые типы 1-го круга не берутся, пока есть другие', () => {
+    const p = pool(all49, { test: 10, matching: 2, open: 4 });
+    p.forEach((q, i) => { q.nct_type = i % 2 ? 'REACT_WITH' : null; });
+    const picked = pickNct(p, 1, rng(5));
+    expect(picked.kinds[0][0].every((q: any) => q.nct_type !== 'REACT_WITH')).toBe(true);
   });
 });

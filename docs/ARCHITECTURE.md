@@ -90,7 +90,8 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
   - удаление: `is_deleted`, `deleted_at`, `deleted_by`;
   - автор и даты: `created_by`, `updated_by`, `created_at`, `updated_at`;
   - порядок: `seq` (порядок вставки), `num` (номер в теме, ставит триггер `questions_assign_num`);
-  - `linked_ids uuid[]` — тесты, из которых сделан этот вопрос.
+  - `linked_ids uuid[]` — тесты, из которых сделан этот вопрос;
+  - `nct_type text` — метка типа задания НЦТ (необязательная; коды и названия — `src/lib/nctTypes.ts`, 142 типа из анализа НЦТ 2022–2026; миграция `question_nct_type.sql`). Ставит и фильтрует только главный админ (поле в `QuestionForm`, фильтр и бейдж в `QuestionList`); режим НЦТ по меткам подбирает типы заданий. Первичную разметку (≈40 % вопросов химии) сделали правила по тексту (`scratch/nct/classify.mjs`, в git не идёт); все метки сбрасываются запросом `update questions set nct_type = null`.
 - `question_options(id, question_id, text, text_ru, text_tg, image_url, is_correct, order_index)`
 - `matching_items(id, question_id, side left|right, text, text_ru, text_tg, image_url, order_index, correct_match_id)` — ответ хранится у левого элемента.
 
@@ -392,7 +393,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 
 Модули без импортов (`ticketing.ts`, `pool.ts`) сайт подключает напрямую: `import … from '../../supabase/functions/_shared/ticketing'`. В остальных модулях `_shared` импорты пишутся для Deno, с `.ts` и `npm:`.
 
-- `nct.ts` — режим «по формату НЦТ» (химия, только сайт; импортирует `./ticketing` без `.ts`, поэтому в Deno-бот пока не подключён): `sectionOfTopicNumber` / `topicNumber` (сквозной номер темы 1–49 по порядку главы и параграфа, размеры уровней 21/12/16; темы 50+ не распределены и пропускаются), `sectionPoints` (баллы по долям 20/12/12/20/36 между пройденными разделами), `planNct` (раскладка 18 тестов + 2 соотв. + 7 откр. по разделам, ±1 балл), `pickNct` (подбор блоками разделов через `pickParallel`). Метки типов заданий в банке не ведутся — тип внутри раздела не контролируется. Включается галочкой в «Составе билета», только главному админу (LS `examiner_nct_mode`, только если в названии предмета есть «хим»); в `generation_params` пишется `nct: true`. Тест `tests/nct.test.ts`.
+- `nct.ts` + `nctSlots.ts` — режим «по формату НЦТ» (химия, только сайт; импортирует `./ticketing` без `.ts`, поэтому в Deno-бот пока не подключён): `sectionOfTopicNumber` / `topicNumber` (сквозной номер темы 1–49 по порядку главы и параграфа, размеры уровней 21/12/16; темы 50+ не распределены и пропускаются), `sectionPoints` (баллы по долям 20/12/12/20/36 между пройденными разделами), `planNct` (раскладка 18 тестов + 2 соотв. + 7 откр. по разделам, ±1 балл), `pickNct` (на каждое место выбирается тип по метке `nct_type` с весом из `NCT_SLOT_TYPES` — частота типа на номерах раздела за 17 сессий НЦТ, генерируется `scratch/nct/gen_slots.py` из анализа; в билете типы не повторяются, во всех вариантах место — один тип; запрещённые в 1-м круге типы — `NCT_BANNED`; `NCT_QUOTA` = 8 тестов + 1 соотв. + 2 открытых ≈ 16 баллов (40 %) берутся из сборника НЦТ — вопросы источника с «ЦВЭ» в названии (`q.isNct` ставит сайт по `source_id`); нет вопросов нужного типа — берутся неразмеченные вопросы раздела). Включается галочкой в «Составе билета», только главному админу (LS `examiner_nct_mode`, только если в названии предмета есть «хим»); в `generation_params` пишется `nct: true`. Тест `tests/nct.test.ts`.
 - `ticketing.ts` — чистая логика подбора, без зависимостей:
   - типы и лимиты: `Settings`, `DEFAULT_SETTINGS`, `LIMITS {perType 100, tickets 20}`, `TG_LIMITS {perType 50, tickets 4, total 50, perDay 5}`;
   - проверки: `checkSettings`, `fitSettings` (урезает состав до наличия), `poolStats`;
@@ -402,7 +403,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
   - для кластера: `preferUnused`;
   - использование: `usageOf(q)` (`question_usage.times_used`), `pickParallel` предпочитает реже использованные вопросы;
   - экраны бота: `kb*`, `*Text`, `parseCount`, `parseNumbers`, `toggle`, `safeFileName`.
-- `pool.ts`: `loadLightPool(sb, {subjectId, chapterIds, topicIds})` (поля `POOL_SELECT`, включая `usage:question_usage(times_used)`; если таблицы в базе ещё нет, запрос повторяется без неё; фильтр — темы, иначе главы, иначе весь предмет), `hydrateTickets(sb, kinds)` (полные строки `QUESTION_FULL_SELECT` только выбранных, по 100 id, параллельно).
+- `pool.ts`: `loadLightPool(sb, {subjectId, chapterIds, topicIds})` (поля `POOL_SELECT`, включая `source_id`, `nct_type` и `usage:question_usage(times_used)`; если таблицы в базе ещё нет, запрос повторяется без неё; фильтр — темы, иначе главы, иначе весь предмет), `hydrateTickets(sb, kinds)` (полные строки `QUESTION_FULL_SELECT` только выбранных, по 100 id, параллельно).
 - `generate.ts` (бот и Mini App):
   - пользователь и лимиты: `linkedUser`, `allowedSubjectIds`, `limitsFor`, `userMessage`;
   - пул: `loadPool` (без выбора — пусто), `loadQuestionCounts`, `loadChapterTotals`;

@@ -2,7 +2,8 @@
 // Раздел на номере билета постоянен (основные понятия → атом и ПЗ → растворы → …), баллы делятся
 // между пройденными разделами как в таблице НЦТ. Тип задания внутри раздела не контролируется
 // (в банке нет меток типов). Чистая логика; импорт без «.ts», поэтому пока только для сайта (для Deno-бота нужно «.ts»).
-import { pickParallel, separateLinked, totalsOf, type ChapterTotals, type PickedTickets, type Rnd } from './ticketing';
+import { pickParallel, separateLinked, type ChapterTotals, type PickedTickets, type Rnd } from './ticketing';
+import { NCT_SLOT_TYPES } from './nctSlots';
 
 export type NctSection = 'basic' | 'atom' | 'solutions' | 'elements' | 'organic';
 
@@ -144,11 +145,57 @@ export interface NctPicked extends PickedTickets {
   notes: string[];
 }
 
+type Kind = 'test' | 'matching' | 'open';
+
+/** Типы, которые в 1-м круге не даём (правила 1-го круга): «с чем реагирует», получение, электролиз, термохимия, избыток, выход, смеси с реакциями, многостадийные расчёты и цепочки */
+export const NCT_BANNED = new Set([
+  'REACT_WITH', 'OBTAIN', 'ELECTROLYSIS', 'THERMO', 'EXCESS', 'EXCESS_SALT', 'EXCESS_PIC', 'YIELD', 'ORG_YIELD',
+  'MIX_ACID', 'MIX_SALT', 'MIX_METAL', 'EL_MULTISTEP', 'CHAIN', 'STOICH2', 'DISPLACE', 'EL_DECOMP_PCT', 'EL_IDENT_CALC', 'GASMIX_REACT',
+]);
+
+/** Сколько заданий каждого вида берём из сборника НЦТ (источник «ЦВЭ …»): 8 + 4 + 2×2 = 16 баллов из 40, то есть 40 % */
+export const NCT_QUOTA: Record<Kind, number> = { test: 8, matching: 1, open: 2 };
+export const NCT_QUOTA_POINTS = 16;
+
+/** Типы по частоте на номерах раздела; «основные понятия» берут и типы химии элементов (степень окисления, ОВР — темы 42–43) */
+export function typeWeights(section: NctSection, kind: Kind): Record<string, number> {
+  const keys = section === 'basic' ? ['basic', 'elements'] : [section];
+  let w: Record<string, number> = {};
+  for (const k of keys) for (const [c, n] of Object.entries(NCT_SLOT_TYPES[`${k}:${kind}`] ?? {})) w[c] = (w[c] ?? 0) + n;
+  if (Object.keys(w).length === 0) {
+    // у раздела нет своего типа на этом виде (например, соответствие по растворам): типы всех разделов, кроме органики
+    for (const key of Object.keys(NCT_SLOT_TYPES)) {
+      if (!key.endsWith(`:${kind}`) || key.startsWith('organic')) continue;
+      for (const [c, n] of Object.entries(NCT_SLOT_TYPES[key])) w[c] = (w[c] ?? 0) + n;
+    }
+  }
+  return Object.fromEntries(Object.entries(w).filter(([c]) => !NCT_BANNED.has(c)));
+}
+
+/** Делит quota по разделам пропорционально числу заданий (метод наибольших остатков), не больше cap и want раздела */
+function splitQuota(quota: number, counts: Array<{ k: NctSection; want: number; cap: number }>): Record<string, number> {
+  const out: Record<string, number> = {};
+  const total = counts.reduce((a, c) => a + c.want, 0);
+  if (total === 0 || quota <= 0) return out;
+  const raw = counts.map((c) => ({ ...c, v: Math.min(c.cap, c.want, (quota * c.want) / total) }));
+  let given = 0;
+  for (const r of raw) { out[r.k] = Math.floor(r.v); given += out[r.k]; }
+  for (const r of [...raw].sort((a, b) => (b.v - Math.floor(b.v)) - (a.v - Math.floor(a.v)))) {
+    if (given >= quota) break;
+    if (out[r.k] < r.cap && out[r.k] < r.want) { out[r.k]++; given++; }
+  }
+  return out;
+}
+
 /**
- * Подбор билетов по формату НЦТ. Пул — «лёгкие» вопросы выбранных тем. Вопросы тем вне уровней 1–3
- * в режим не попадают. Задания каждого вида идут блоками разделов в порядке НЦТ.
+ * Подбор билетов по формату НЦТ. Пул — «лёгкие» вопросы выбранных тем (у вопроса могут быть поля
+ * nct_type — метка типа — и isNct — вопрос из сборника НЦТ). Вопросы тем вне уровней 1–3 в режим не попадают.
+ * Задания каждого вида идут блоками разделов в порядке НЦТ. На каждое место выбирается тип по частоте
+ * на номерах раздела и подбираются вопросы с этой меткой (во всех вариантах — один тип, как клоны); один тип
+ * в билете не повторяется. Часть мест (NCT_QUOTA) берётся из сборника НЦТ. Нет вопросов с нужной меткой —
+ * берутся неразмеченные вопросы раздела.
  */
-export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random, totals?: ChapterTotals): NctPicked {
+export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random, _totals?: ChapterTotals): NctPicked {
   const notes: string[] = [];
   const bySection = new Map<NctSection, any[]>();
   let skipped = 0;
@@ -177,19 +224,75 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   const tests = empty(), matching = empty(), open = empty();
   if (!plan) return { kinds: [tests, matching, open], ticketCount: T, plan: {}, sections: present, notes: [...notes, 'В выбранных темах нет тестов из разделов НЦТ'] };
 
-  const fill = (dst: any[][], type: 'test' | 'matching' | 'open', key: 'test' | 'matching' | 'open') => {
-    for (const k of NCT_SECTIONS) {
-      const want = plan[k]?.[key] ?? 0;
-      if (!want) continue;
-      const part = pickParallel((bySection.get(k) ?? []).filter((q) => q.type === type), want, T, rnd, totalsOf(totals, type));
-      if (part[0] && part[0].length < want) notes.push(`${NCT_SECTION_NAMES[k]}: заданий вида «${type}» ${part[0].length} из ${want} — не хватило вопросов`);
-      for (let t = 0; t < T; t++) dst[t].push(...part[t]);
+  const usedIds = new Set<string>();
+  const usedTypes = new Set<string>();
+  const nctPicked: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
+  const typePicked: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
+
+  const attempt = (pool: any[], section: NctSection, kind: Kind): { rows: any[]; code: string | null } | null => {
+    const w = typeWeights(section, kind);
+    const cands = Object.keys(w).filter((c) => !usedTypes.has(c) && pool.filter((q) => q.nct_type === c).length >= T);
+    if (cands.length) {
+      let r = rnd() * cands.reduce((a, c) => a + w[c], 0);
+      let code = cands[cands.length - 1];
+      for (const c of cands) { r -= w[c]; if (r < 0) { code = c; break; } }
+      const col = pickParallel(pool.filter((q) => q.nct_type === code), 1, T, rnd);
+      if (col.every((t) => t.length === 1)) return { rows: col.map((t) => t[0]), code };
+    }
+    // нет подходящей метки: неразмеченные вопросы и вопросы ещё не использованных разрешённых типов
+    const loose = pool.filter((q) => !q.nct_type || (!NCT_BANNED.has(q.nct_type) && !usedTypes.has(q.nct_type)));
+    const col = pickParallel(loose, 1, T, rnd);
+    if (col.every((t) => t.length === 1)) {
+      const code = col[0][0].nct_type ?? null;
+      return { rows: col.map((t) => t[0]), code: code && col.every((t) => t[0].nct_type === code) ? code : null };
+    }
+    return null;
+  };
+
+  const pickOne = (list: any[], section: NctSection, kind: Kind, wantNct: boolean): any[] | null => {
+    const free = list.filter((q) => q.type === kind && !usedIds.has(q.id));
+    const nctFree = free.filter((q) => q.isNct);
+    const own = free.filter((q) => !q.isNct);
+    for (const pool of wantNct ? [nctFree, own] : [own, nctFree]) {
+      const got = attempt(pool, section, kind);
+      if (!got) continue;
+      got.rows.forEach((q) => usedIds.add(q.id));
+      if (got.code) typePicked[kind]++;
+      for (const q of got.rows) if (q.nct_type) usedTypes.add(q.nct_type);
+      if (got.rows[0].isNct) nctPicked[kind]++;
+      return got.rows;
+    }
+    return null;
+  };
+
+  const fill = (dst: any[][], kind: Kind) => {
+    const counts = NCT_SECTIONS
+      .map((k) => ({ k, want: plan[k]?.[kind] ?? 0, cap: (bySection.get(k) ?? []).filter((q) => q.isNct && q.type === kind).length }))
+      .filter((c) => c.want > 0);
+    const quota = splitQuota(NCT_QUOTA[kind], counts);
+    for (const { k, want } of counts) {
+      // места раздела, на которых берём задание из сборника НЦТ: случайные
+      const flags = Array.from({ length: want }, (_, i) => i < (quota[k] ?? 0));
+      for (let i = flags.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [flags[i], flags[j]] = [flags[j], flags[i]]; }
+      let got = 0;
+      for (let i = 0; i < want; i++) {
+        const rows = pickOne(bySection.get(k) ?? [], k, kind, flags[i]);
+        if (!rows) continue;
+        got++;
+        for (let t = 0; t < T; t++) dst[t].push(rows[t]);
+      }
+      if (got < want) notes.push(`${NCT_SECTION_NAMES[k]}: заданий вида «${kind}» ${got} из ${want} — не хватило вопросов`);
     }
   };
-  fill(tests, 'test', 'test');
-  fill(matching, 'matching', 'matching');
-  fill(open, 'open', 'open');
+  fill(tests, 'test');
+  fill(matching, 'matching');
+  fill(open, 'open');
   separateLinked([tests, matching, open], pool, rnd);
+
+  const nctPoints = nctPicked.test + 4 * nctPicked.matching + 2 * nctPicked.open;
+  if (nctPoints < NCT_QUOTA_POINTS) notes.push(`Из сборника НЦТ набрано ${nctPoints} баллов из ${NCT_QUOTA_POINTS} (в выбранных темах мало таких вопросов)`);
+  const total = tests[0].length + matching[0].length + open[0].length;
+  if (total > 0 && typePicked.test + typePicked.matching + typePicked.open < total / 2) notes.push('Меток типа НЦТ у вопросов этих тем мало: типы заданий выдерживаются лишь частично');
   return { kinds: [tests, matching, open], ticketCount: T, plan, sections: present, notes };
 }
 

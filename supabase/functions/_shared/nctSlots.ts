@@ -1,0 +1,16 @@
+// Типы заданий НЦТ по разделам и видам: код → число сессий (из 17), в которых тип стоял на номерах этого раздела и вида.
+// Номера: тесты 1–18, соответствия 19–20, открытые 21–27. АВТОГЕНЕРАЦИЯ из анализа НЦТ 2022–2026 (scratch/nct/gen_slots.py).
+export const NCT_SLOT_TYPES: Record<string, Record<string, number>> = {
+  'atom:open': { ATOM_EP: 5, ATOM_POS: 3, ATOM_CONF_Z: 3, ATOM_D: 3, ATOM_UNPAIRED: 2, CRYST: 1 },
+  'atom:test': { BOND: 10, PERIODIC: 6, SIGMAPI: 3, UNPAIRED: 2, OUTER_E: 2, HIGHOX: 2, ION_CONFIG: 2, CONFIG: 1, IONS_E: 1, ANALOG: 1, BOND_ORB: 1, LATTICE: 1, EPN: 1, ORBITALS: 1 },
+  'basic:open': { THERMO: 6, MOL: 5, STOICH1: 5, GASMIX_REACT: 3, DENS_CALC: 2, EXCESS: 2, VANTHOFF: 2, GASMIX_DENS: 2, RATE_CALC: 1, EQ_CALC: 1, MASSFRAC_EL: 1, STOICH2: 1, FORMULA_CALC: 1, STOICH_REDOX: 1, EXCESS_PIC: 1 },
+  'basic:test': { EQ: 6, RTYPE: 5, MASSRATIO: 4, MIX: 3, MIXSEP: 2, VAL: 1, RATE: 1, DENS: 1, RTYPE_POSS: 1, OXCLASS: 1, REDOX_ID: 1, VAL_SO: 1, GASMASS: 1, SO: 1, VAL_VOL: 1, SALT_RATIO: 1, NPART: 1, RATE_GRAPH: 1, RATE_FACT: 1 },
+  'elements:matching': { M_PRODUCT: 5, M_COEF: 4, M_SIGN: 3, M_REACT: 3, M_REAGSET: 1, M_ELEMENT: 1 },
+  'elements:open': { EL_MULTISTEP: 5, MIX_ACID: 2, EL_DECOMP_PCT: 1, YIELD: 1, EL_PROD: 1, EQUIV_AR: 1, CRYST: 1, EL_IDENT_CALC: 1, EXCESS_SALT: 1, MIX_SALT: 1, MIX_METAL: 1, DISPLACE: 1 },
+  'elements:test': { REACT_WITH: 9, PRODUCT: 5, FERT: 5, DECOMP: 5, SCHEME_XY: 5, CHAIN: 5, SO: 4, SALT_FORM: 4, AMPHO: 4, SCHEME_X: 3, EL_IDENT: 3, REDOX_ROLE: 3, ACTIVITY: 3, ELECTROLYSIS: 3, CALC1: 3, FORMULA_XY: 3, OBTAIN: 3, NEUTR_SUM: 2, HYDROXOCOMPLEX: 2, REDOX_SUM: 2, COMPOSITION: 1, QUAL: 1, REDOX_COEF: 1, REDOX_E: 1, ACIDBASE: 1, OX_PROP: 1, APPLIED: 1 },
+  'organic:matching': { OM_PRODUCT: 6, OM_REAGENT: 4, OM_COUNT: 2, OM_PAIR: 2, OM_OBTAIN: 2, OM_CLASS: 1 },
+  'organic:open': { ORG_FORMULA: 14, ORG_STOICH1: 7, ORG_YIELD: 7, ORG_MIX: 2 },
+  'organic:test': { ORG_CHAIN: 16, ORG_REACT: 16, ORG_CALC: 13, ORG_ISOMER: 13, ORG_PRODUCT: 8, ORG_OBTAIN: 8, ORG_STRUCT: 6, ORG_IDENT: 5, ORG_RTYPE: 4, ORG_CLASS: 4, ORG_NOMEN: 3, ORG_QUAL: 2 },
+  'solutions:open': { SOL_DILUTE: 4, SOL_EVAP: 3, SOL_ADD: 2, SOL_SOLUB: 2, SOL_REACTWATER: 2, SOL_REACT: 2, SOL_MOLAR_CRYST: 1, SOL_MOLAR: 1 },
+  'solutions:test': { ELECTROLYTE: 4, IONEQ: 4, IONEX: 4, HYDRO_MEDIUM: 4, DISS: 3, HYDRO_TYPE: 3, PH_ROW: 2, DISS_STEP: 2, QUAL: 1, IONEQ_SUM: 1, MOLAR_PPT: 1, WATER_HARD: 1, COEXIST: 1, NEUTR_IND: 1, ION_GRAPH: 1, HYDRO_SHIFT: 1 },
+};

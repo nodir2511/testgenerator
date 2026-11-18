@@ -25,6 +25,7 @@ import {
   SlidersHorizontal,
   Check
 } from 'lucide-react';
+import { NCT_TYPES, nctTypeName } from '../lib/nctTypes';
 import { Badge, Button, Card, EmptyState, Field, IconButton, Skeleton } from './ui';
 
 interface QuestionListProps {
@@ -39,7 +40,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   onEditQuestion,
 }) => {
   const queryClient = useQueryClient();
-  const { isStaff, canManage } = useAuth();
+  const { isStaff, canManage, isOwner } = useAuth();
+  const [filterNct, setFilterNct] = useState<string>('all');
 
   // Фильтры (с сохранением в localStorage)
   const [filterSubjectId, setFilterSubjectId] = useState(() => localStorage.getItem('examiner_ql_subject_id') || '');
@@ -126,6 +128,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
     if (filterChapterId) query = query.eq('chapter_id', filterChapterId);
     if (filterTopicId) query = query.eq('topic_id', filterTopicId);
     if (filterType !== 'all') query = query.eq('type', filterType);
+    if (isOwner && filterNct === 'none') query = query.is('nct_type', null);
+    else if (isOwner && filterNct !== 'all') query = query.eq('nct_type', filterNct);
     if (searchQuery.trim()) {
       // Значение берём в кавычки и экранируем: запятые, скобки, % и _ в запросе не ломают фильтр
       const like = '%' + searchQuery.trim().replace(/[\\%_]/g, '\\$&') + '%';
@@ -173,7 +177,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
   const fetchIssuePage = async (pageNo: number) => {
     const ids = await queryClient.fetchQuery({
-      queryKey: ['questions', 'issue-ids', filterSubjectId, filterChapterId, filterTopicId, filterType, searchQuery, filterIssue],
+      queryKey: ['questions', 'issue-ids', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, searchQuery, filterIssue],
       staleTime: 15000,
       queryFn: loadIssueIds,
     });
@@ -223,7 +227,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const shownPages = Array.from({ length: extra + 1 }, (_, i) => page + i);
   const pageResults = useQueries({
     queries: shownPages.map((p) => ({
-      queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, searchQuery, filterIssue, p],
+      queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, searchQuery, filterIssue, p],
       queryFn: () => fetchPage(p),
     })),
   });
@@ -639,6 +643,18 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             <option value="open">Открытые</option>
           </CustomSelect>
 
+          {isOwner && (
+            <CustomSelect
+              value={filterNct}
+              onChange={(val) => { setFilterNct(val); setPage(0); setExtra(0); }}
+              className="text-sm px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="all">Любая метка НЦТ</option>
+              <option value="none">Без метки</option>
+              {NCT_TYPES.map(t => <option key={t.code} value={t.code}>{t.name}</option>)}
+            </CustomSelect>
+          )}
+
           {/* Проблемные вопросы */}
           <CustomSelect
             value={filterIssue}
@@ -750,6 +766,12 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   <Badge tone={q.type === 'test' ? 'primary' : q.type === 'matching' ? 'purple' : 'success'} className="font-bold uppercase tracking-wider px-2.5 py-1">
                     {q.type === 'test' ? 'Тест' : q.type === 'matching' ? 'Соответствие' : 'Открытый'}
                   </Badge>
+
+                  {isOwner && q.nct_type && (
+                    <Badge tone="neutral" className="font-normal" title={`Тип НЦТ: ${nctTypeName(q.nct_type)}`}>
+                      НЦТ: {q.nct_type}
+                    </Badge>
+                  )}
 
                   {q.num != null && (
                     <Badge tone="neutral" className="font-bold text-slate-800" title="Номер вопроса в теме">

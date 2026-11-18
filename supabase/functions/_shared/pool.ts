@@ -14,7 +14,7 @@ export interface PoolSelection {
 }
 
 /** Поля, которые читают pickParallel и separateLinked */
-export const POOL_SELECT = 'id, type, topic_id, chapter_id, num, seq, created_at, linked_ids, chapter:chapters(order_index), topic:topics(order_index), usage:question_usage(times_used)';
+export const POOL_SELECT = 'id, type, topic_id, chapter_id, num, seq, created_at, linked_ids, source_id, nct_type, chapter:chapters(order_index), topic:topics(order_index), usage:question_usage(times_used)';
 
 /** Полный вопрос для снимка билета */
 export const QUESTION_FULL_SELECT = '*, chapter:chapters(name, order_index), topic:topics(name, order_index), options:question_options(*), matching_items:matching_items(*)';

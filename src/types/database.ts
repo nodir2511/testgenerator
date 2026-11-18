@@ -100,6 +100,8 @@ export interface Question {
   num?: number | null;
   /** Тесты, из которых сделан этот вопрос: с ними он не попадает в один билет */
   linked_ids?: string[] | null;
+  /** Метка типа задания НЦТ (код из src/lib/nctTypes.ts) */
+  nct_type?: string | null;
   version: number;
   is_deleted: boolean;
   deleted_at?: string | null;
