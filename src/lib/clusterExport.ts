@@ -11,15 +11,20 @@ import { buildAnswerKeyFile } from './answerKeyExport';
 // Статичные части (шапка, инструкция, справочные страницы) вырезаны из PDF образца и лежат в
 // public/cluster-assets/{ru|tj}_*.png. Дата, номер варианта и код компонента подставляются здесь.
 
-import { CLUSTER_SLOTS, type ClusterKind, type ClusterLang, type ClusterSettings } from './clusterSlots';
-export { CLUSTER_SLOTS };
+import { CLUSTER_SLOTS, CLUSTER_SUBJECTS, LEGACY_KINDS, type ClusterKind, type ClusterLang, type ClusterSettings } from './clusterSlots';
+export { CLUSTER_SLOTS, CLUSTER_SUBJECTS };
 export type { ClusterKind, ClusterLang, ClusterSettings };
 
 export interface ClusterVariant {
   number: number;
-  /** Снимки вопросов по предметам, в порядке CLUSTER_SLOTS; внутри — по порядку в книжке; null — предмет не входит в экзамен */
+  /** Предметы книжки в порядке следования; без поля — прежний состав (таджикский, биология, химия, физика) */
+  kinds?: ClusterKind[];
+  /** Снимки вопросов по предметам, по порядку `kinds`; внутри — по порядку в книжке; null — предмет не входит в экзамен */
   subjects: Array<any[] | null>;
 }
+
+/** Предметы книжки по порядку (для старых партий без списка — прежние четыре) */
+export const variantKinds = (v: ClusterVariant): ClusterKind[] => v.kinds ?? LEGACY_KINDS;
 
 const FONT = 'Times New Roman';
 const CONTENT_TWIPS = 9638; // A4 минус поля по 20 мм
@@ -41,15 +46,11 @@ const NO_CELL_BORDERS = { top: NONE, bottom: NONE, left: NONE, right: NONE };
 const L = {
   ru: {
     component: 'Компонент', variant: 'Вариант', instruction: 'Инструкция',
-    subjects: { taj: 'Таджикский язык', bio: 'Биология', chem: 'Химия', phys: 'Физика' },
-    bands: { taj: 'ТАДЖИКСКИЙ ЯЗЫК', bio: 'БИОЛОГИЯ', chem: 'ХИМИЯ', phys: 'ФИЗИКА' },
     aux: { chem: 'Вспомогательный материал по химии', phys: 'Вспомогательный материал по физике' },
     draft: 'Место для черновика',
   },
   tj: {
     component: 'Қисми', variant: 'Варианти', instruction: 'Дастур',
-    subjects: { taj: 'Забони тоҷикӣ', bio: 'Биология', chem: 'Химия', phys: 'Физика' },
-    bands: { taj: 'ЗАБОНИ ТОҶИКӢ', bio: 'БИОЛОГИЯ', chem: 'ХИМИЯ', phys: 'ФИЗИКА' },
     aux: { chem: 'Маводи ёрирасон аз фанни химия', phys: 'Маводи ёрирасон аз фанни физика' },
     draft: 'Ҷой барои сиёҳнавис',
   },
@@ -60,6 +61,10 @@ const PILL = {
   ru: { x: 1062, y: 25, w: 330, h: 93 },
   tj: { x: 1062, y: 10, w: 333, h: 92 },
 };
+
+// Название предмета в колонтитуле и на полосе субтеста
+const subjectName = (lang: ClusterLang, kind: ClusterKind) => (lang === 'ru' ? CLUSTER_SUBJECTS[kind].name : CLUSTER_SUBJECTS[kind].nameTj);
+const bandName = (lang: ClusterLang, kind: ClusterKind) => subjectName(lang, kind).toLocaleUpperCase();
 
 const assetCache = new Map<string, Promise<Uint8Array>>();
 const assetNeutral = (name: string) => loadAsset(`/cluster-assets/${name}.png`);
@@ -138,6 +143,28 @@ async function titleWithDate(lang: ClusterLang, date: string): Promise<Uint8Arra
   g.shadowOffsetY = 3;
   g.fillStyle = '#ffffff';
   g.fillText(date, p.x + p.w / 2, p.y + p.h / 2 + 4, p.w - 40);
+  return canvasToPng(c);
+}
+
+// Строка предмета на обложке: галочка из готовой картинки и название тем же шрифтом.
+// Для четырёх прежних предметов есть готовые картинки образца, для остальных строка рисуется так же
+async function subjectImage(lang: ClusterLang, kind: ClusterKind): Promise<Uint8Array> {
+  if (LEGACY_KINDS.includes(kind)) return asset(lang, `subj_${kind}`);
+  const base = await asset(lang, 'subj_bio');
+  const bmp = await createImageBitmap(new Blob([base as BlobPart], { type: 'image/png' }));
+  const c = document.createElement('canvas');
+  c.width = bmp.width;
+  c.height = bmp.height;
+  const g = c.getContext('2d')!;
+  g.drawImage(bmp, 0, 0);
+  // стираем название, оставляем галочку слева
+  g.fillStyle = '#ffffff';
+  g.fillRect(140, 0, c.width - 140, c.height);
+  g.fillStyle = '#000000';
+  g.font = `56px "${FONT}", serif`;
+  g.textAlign = 'left';
+  g.textBaseline = 'alphabetic';
+  g.fillText(subjectName(lang, kind), 160, 66, c.width - 180);
   return canvasToPng(c);
 }
 
@@ -231,7 +258,6 @@ const NUM_WORDS = {
   ru: ['', 'одного', 'двух', 'трёх', 'четырёх'],
   tj: ['', 'як', 'ду', 'се', 'чор'],
 };
-const NAMES_RU: Record<ClusterKind, string> = { taj: 'таджикскому языку', bio: 'биологии', chem: 'химии', phys: 'физике' };
 
 function tasksWord(n: number): string {
   const d = n % 10, dd = n % 100;
@@ -257,7 +283,7 @@ export function instructionIntro(lang: ClusterLang, subjects: Array<{ kind: Clus
     const g = groups.find((x) => x.count === s.count);
     if (g) g.kinds.push(s.kind); else groups.push({ count: s.count, kinds: [s.kind] });
   }
-  const tj = L.tj.subjects;
+  const tj = (k: ClusterKind) => CLUSTER_SUBJECTS[k].nameTj;
   if (lang === 'ru') {
     const out: Array<{ text: string; bold?: boolean }> = [
       { text: `Тестовая книжка состоит из ${NUM_WORDS.ru[n]} субтест${n === 1 ? 'а' : 'ов'}. В субтест${n === 1 ? '' : 'ы'} включены задания закрытого типа (с выбором ответа и на соответствие) и открытого типа: ` },
@@ -265,20 +291,20 @@ export function instructionIntro(lang: ClusterLang, subjects: Array<{ kind: Clus
     groups.forEach((g, i) => {
       if (i > 0) out.push({ text: ', по ' });
       else out.push({ text: g.kinds.length > 1 ? 'в субтестах по ' : 'в субтесте по ' });
-      out.push(...joinNames(g.kinds.map((k) => NAMES_RU[k]), 'и'));
+      out.push(...joinNames(g.kinds.map((k) => CLUSTER_SUBJECTS[k].dative), 'и'));
       out.push({ text: ` – ${g.count} ${tasksWord(g.count)}` });
     });
     out.push({ text: '.' });
     return out;
   }
   const out: Array<{ text: string; bold?: boolean }> = [{ text: `Саволнома аз ${NUM_WORDS.tj[n]} субтест иборат аст: ` }];
-  out.push(...joinNames(subjects.map((s) => tj[s.kind].toLowerCase()), 'ва'));
+  out.push(...joinNames(subjects.map((s) => tj(s.kind).toLowerCase()), 'ва'));
   out.push({ text: '. ' });
   groups.forEach((g, i) => {
     if (i > 0) out.push({ text: ' ва ' });
     const head = g.kinds.length > 1 ? 'субтестҳои ' : 'субтести ';
     out.push({ text: i > 0 ? head : head[0].toUpperCase() + head.slice(1) });
-    out.push(...joinNames(g.kinds.map((k) => tj[k].toLowerCase()), 'ва'));
+    out.push(...joinNames(g.kinds.map((k) => tj(k).toLowerCase()), 'ва'));
     out.push({ text: ` ${g.count} саволу масъала` });
   });
   out.push({ text: n === 1 ? 'ро дар бар мегирад.' : 'ро дар бар мегиранд.' });
@@ -295,10 +321,11 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
   const footLabel = (part: string) => `${t.component} ${comp} – ${part}`;
   const page = { margin: MARGIN };
 
-  const included = CLUSTER_SLOTS.map((_, s) => variant.subjects[s] != null);
+  const kinds = variantKinds(variant);
+  const included = kinds.map((_, s) => variant.subjects[s] != null);
   const grid = await assetNeutral('grid');
   const [header, subjectImgs, attention, instr1Top, instr1Rest, instr2, plaque, auxPhys, auxChem, title, digit] = await Promise.all([
-    asset(lang, 'header'), Promise.all(CLUSTER_SLOTS.map((s, i) => (included[i] ? asset(lang, `subj_${s.kind}`) : Promise.resolve(new Uint8Array())))), asset(lang, 'attention'), asset(lang, 'instr1_top'), asset(lang, 'instr1_rest'), asset(lang, 'instr2'),
+    asset(lang, 'header'), Promise.all(kinds.map((k, i) => (included[i] ? subjectImage(lang, k) : Promise.resolve(new Uint8Array())))), asset(lang, 'attention'), asset(lang, 'instr1_top'), asset(lang, 'instr1_rest'), asset(lang, 'instr2'),
     asset(lang, 'plaque'), Promise.all([asset(lang, 'aux_phys1'), asset(lang, 'aux_phys2')]), Promise.all([asset(lang, 'aux_chem1'), asset(lang, 'aux_chem2')]), titleWithDate(lang, settings.date), bigNumber(variant.number),
   ]);
 
@@ -321,7 +348,7 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
           new TableCell({
             width: { size: 4300, type: WidthType.DXA }, borders: NO_CELL_BORDERS, verticalAlign: VerticalAlign.CENTER,
             margins: { top: 200, bottom: 100, left: 300, right: 0 },
-            children: CLUSTER_SLOTS.flatMap((_, s) => (included[s] ? [new Paragraph({ spacing: { after: 20 }, children: [imgRun(subjectImgs[s], 270)] })] : [])),
+            children: kinds.flatMap((_, s) => (included[s] ? [new Paragraph({ spacing: { after: 20 }, children: [imgRun(subjectImgs[s], 270)] })] : [])),
           }),
           new TableCell({ width: { size: 400, type: WidthType.DXA }, borders: NO_CELL_BORDERS, children: [new Paragraph({ children: [] })] }),
           new TableCell({
@@ -349,7 +376,7 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
       alignment: AlignmentType.JUSTIFIED,
       indent: { firstLine: 560 },
       spacing: { after: 0 },
-      children: instructionIntro(lang, CLUSTER_SLOTS.flatMap((s, i) => (included[i] ? [{ kind: s.kind, count: variant.subjects[i]!.length }] : [])))
+      children: instructionIntro(lang, kinds.flatMap((k, i) => (included[i] ? [{ kind: k, count: variant.subjects[i]!.length }] : [])))
         .map((r) => run(r.text, { bold: r.bold, size: 26 })),
     }),
     imgPara(instr1Rest, 640, { after: 0 }),
@@ -362,13 +389,14 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
   ];
 
   // Субтесты
-  for (let s = 0; s < CLUSTER_SLOTS.length; s++) {
-    const kind = CLUSTER_SLOTS[s].kind;
+  for (let s = 0; s < kinds.length; s++) {
+    const kind = kinds[s];
+    const def = CLUSTER_SUBJECTS[kind];
     const qs = variant.subjects[s];
     if (!qs) continue;
-    const children: any[] = [band(t.bands[kind]), gap(160)];
-    const withDraft = kind === 'chem' || kind === 'phys';
-    const opts: QuestionOpts = { openBoxes: kind === 'taj' ? 5 : 4, matchingGrid: grid, matchingGridLabel: isTg ? 'Ҷавоб:' : 'Ответ:', compact: true };
+    const children: any[] = [band(bandName(lang, kind)), gap(160)];
+    const withDraft = def.draft;
+    const opts: QuestionOpts = { openBoxes: def.openBoxes, matchingGrid: grid, matchingGridLabel: isTg ? 'Ҷавоб:' : 'Ответ:', compact: true };
     const question = async (i: number) => keepTogether(await createQuestionTable(qs[i], i + 1, isTg, opts));
 
     if (!withDraft) {
@@ -406,20 +434,20 @@ export async function buildClusterVariantBlob(settings: ClusterSettings, variant
         if (g === groups.length - 1) children.push(imgPara(plaque, 600, { before: 160, after: 0 }));
       }
     }
-    const subjectPage = kind === 'chem' || kind === 'phys' ? { margin: { ...MARGIN, bottom: DRAFT_BOTTOM } } : page;
-    sections.push({ properties: { page: subjectPage, type: SectionType.NEXT_PAGE }, footers: { default: footer(footLabel(t.subjects[kind])) }, children });
+    const subjectPage = def.draft ? { margin: { ...MARGIN, bottom: DRAFT_BOTTOM } } : page;
+    sections.push({ properties: { page: subjectPage, type: SectionType.NEXT_PAGE }, footers: { default: footer(footLabel(subjectName(lang, kind))) }, children });
   }
 
   // Справочные материалы (как в образце: физика, затем химия) — только для включённых предметов
-  const physIdx = CLUSTER_SLOTS.findIndex((s) => s.kind === 'phys');
-  const chemIdx = CLUSTER_SLOTS.findIndex((s) => s.kind === 'chem');
-  if (included[physIdx]) {
+  const physIdx = kinds.indexOf('phys');
+  const chemIdx = kinds.indexOf('chem');
+  if (physIdx >= 0 && included[physIdx]) {
     sections.push({
       properties: { page, type: SectionType.NEXT_PAGE }, footers: { default: footer(footLabel(t.aux.phys)) },
       children: [band(t.aux.phys.toLocaleUpperCase()), gap(160), imgPara(auxPhys[0], 600, { after: 160 }), imgPara(auxPhys[1], 600, { after: 0 })],
     });
   }
-  if (included[chemIdx]) {
+  if (chemIdx >= 0 && included[chemIdx]) {
     sections.push({
       properties: { page, type: SectionType.NEXT_PAGE }, footers: { default: footer(footLabel(t.aux.chem)) },
       children: [band(t.aux.chem.toLocaleUpperCase()), gap(160), imgPara(auxChem[0], 620, { after: 160 }), imgPara(auxChem[1], 620, { after: 0 })],
@@ -448,14 +476,19 @@ export async function buildClusterZip(settings: ClusterSettings, variants: Clust
   ])));
 
   // Ключи по каждому предмету: все варианты на отдельных страницах (шаблоны ключей)
-  const keys = Promise.all(CLUSTER_SLOTS.map((slot, s) => {
+  // Состав берётся по первому варианту: у всех вариантов книжки предметы одни и те же
+  const kinds = variantKinds(variants[0]);
+  const keys = Promise.all(kinds.map((kind, s) => {
+    const slot = CLUSTER_SUBJECTS[kind];
     if (!withKeys || variants.some((v) => v.subjects[s] == null)) return null;
     const tickets = variants.map((v) => ({
       ticket_number: v.number,
       questions: (v.subjects[s] || []).map((q) => ({ question_snapshot: q })),
     }));
-    // У таджикского в кластере 20 + 4 + 2: обычный шаблон ключей рассчитан на 5 соответствий, поэтому свой
-    return buildAnswerKeyFile(`${settings.code}-${settings.exam} – ${slot.name}`, tickets, slot.name, undefined, slot.kind === 'taj' ? 'taj-cluster' : undefined);
+    // Шаблон ключей зависит от состава субтеста (20+4+2 или 18+2+7), а не от предмета: у таджикского в кластере 20+4+2
+    // (обычный шаблон рассчитан на 5 соответствий), у истории, права и английского — шаблон биологии.
+    // Строка «к субтесту по …» в шаблоне зашита под один предмет, поэтому подставляется своя
+    return buildAnswerKeyFile(`${settings.code}-${settings.exam} – ${slot.name}`, tickets, slot.name, undefined, slot.keyTemplate, `к субтесту по ${slot.dative} – ${settings.code}`);
   }));
 
   const [docBlobs, keyFiles] = await Promise.all([docs, keys]);

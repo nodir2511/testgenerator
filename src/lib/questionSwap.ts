@@ -4,7 +4,7 @@
 // друг с другом (тест и открытый вопрос из него), в один билет не попадают.
 
 import { toSnapshot, usageOf, type Settings } from '../../supabase/functions/_shared/ticketing';
-import { NCT_BANNED, sectionOfTopicNumber, topicNumber, type NctSection } from '../../supabase/functions/_shared/nct';
+import { NCT_BANNED, sectionOfTopic, sectionOfTopicNumber, topicNumber, type NctSection } from '../../supabase/functions/_shared/nct';
 
 export type QType = 'test' | 'matching' | 'open';
 export const TYPE_ORDER: QType[] = ['test', 'matching', 'open'];
@@ -23,6 +23,8 @@ export interface PoolQ {
   usage?: unknown;
   /** Метка типа НЦТ и источник (поля лёгкого пула); isNct — вопрос из сборника НЦТ (проставляет вызывающий) */
   nct_type?: string | null;
+  /** Сложность для НЦТ: 1 лёгкий, 2 средний, 3 сложный */
+  nct_difficulty?: number | null;
   source_id?: string | null;
   isNct?: boolean;
   chapter?: { order_index?: number | null } | null;
@@ -40,8 +42,9 @@ export interface Slot {
   topicId: string | null;
   chapterId?: string | null;
   linked?: string[];
-  /** Метка типа НЦТ и источник вопроса, стоящего на месте */
+  /** Метка типа НЦТ, сложность и источник вопроса, стоящего на месте */
   nctType?: string | null;
+  nctDifficulty?: number | null;
   sourceId?: string | null;
 }
 
@@ -102,18 +105,19 @@ export function candidatesFor(
 // ---------- Замена в билете по формату НЦТ ----------
 
 /** Что за место в билете НЦТ: раздел, метка типа и из сборника ли НЦТ стоит вопрос */
-export interface NctSlotInfo { section: NctSection | null; nctType: string | null; isNct: boolean }
+export interface NctSlotInfo { section: NctSection | null; nctType: string | null; isNct: boolean; difficulty?: number | null }
 
 /** Раздел НЦТ вопроса по порядку главы и темы (уровни 1–3); null — тема вне режима НЦТ */
-export function sectionOfPoolQ(q: Pick<PoolQ, 'chapter' | 'topic'>): NctSection | null {
+export function sectionOfPoolQ(q: Pick<PoolQ, 'chapter' | 'topic'> & { nct_type?: string | null }): NctSection | null {
   const n = topicNumber(Number(q.chapter?.order_index), Number(q.topic?.order_index));
-  return n === null ? null : sectionOfTopicNumber(n);
+  return sectionOfTopic(n === null ? null : sectionOfTopicNumber(n), q.nct_type);
 }
 
 /**
  * Кандидаты на замену в билете по формату НЦТ: из пула всего раздела (не одной темы), того же вида и типа.
  * - у вопроса на месте есть метка — берутся вопросы с той же меткой (клоны по типу);
  * - метки нет — берутся вопросы без метки или с ещё не стоящим в билете разрешённым типом;
+ * - у вопроса на месте есть сложность — сначала берутся вопросы той же сложности, нет таких — любой сложности;
  * - вопрос из сборника НЦТ меняется на вопрос из сборника НЦТ, обычный — на обычный (anySource снимает ограничение).
  * Остальное — как у candidatesFor: нет в наборе, не связан с вопросами билета.
  */
@@ -129,6 +133,10 @@ export function nctCandidatesFor(
     if (!anySource && Boolean(q.isNct) !== info.isNct) return false;
     return true;
   });
+  if (info.difficulty) {
+    const same = candidatesFor(fits.filter((q) => q.nct_difficulty === info.difficulty), type, used, ticketOthers, links);
+    if (same.length) return same;
+  }
   return candidatesFor(fits, type, used, ticketOthers, links);
 }
 
@@ -266,7 +274,7 @@ export function planNctTopicRemoval(
   const ord = (t: string) => { const i = topicOrder.indexOf(t); return i < 0 ? 1e9 : i; };
 
   for (const slot of [...targets].sort((a, b) => a.ticketNumber - b.ticketNumber || a.orderIndex - b.orderIndex)) {
-    const info: NctSlotInfo = { section: slot.topicId ? sectionOf(slot.topicId) : null, nctType: slot.nctType ?? null, isNct: isNctSource(slot.sourceId) };
+    const info: NctSlotInfo = { section: slot.topicId ? sectionOfTopic(sectionOf(slot.topicId), slot.nctType) : null, nctType: slot.nctType ?? null, isNct: isNctSource(slot.sourceId), difficulty: slot.nctDifficulty ?? null };
     const others = inTicket.get(slot.ticketId) ?? new Set<string>();
     const types = typesIn.get(slot.ticketId) ?? new Set<string>();
     let cands = nctCandidatesFor(usable, slot.type, used, others, links, info, types);
@@ -332,14 +340,14 @@ export function paramsAfterEdit(params: any, before: Slot[], after: Slot[]): any
 }
 
 /** Применяет изменения к списку мест (локально, без базы) */
-export function applyToSlots(slots: Slot[], rows: RowChange[], meta: Map<string, { topicId: string | null; chapterId?: string | null; linked?: string[]; nctType?: string | null; sourceId?: string | null }>): Slot[] {
+export function applyToSlots(slots: Slot[], rows: RowChange[], meta: Map<string, { topicId: string | null; chapterId?: string | null; linked?: string[]; nctType?: string | null; nctDifficulty?: number | null; sourceId?: string | null }>): Slot[] {
   const byId = new Map(rows.map((r) => [r.ticket_question_id, r]));
   return slots.map((s) => {
     const r = byId.get(s.tqId);
     if (!r) return s;
     const m = r.question_id ? meta.get(r.question_id) : undefined;
     // Пустое место ни к какой теме не относится
-    if (!r.question_id) return { ...s, questionId: null, topicId: null, chapterId: null, linked: undefined, nctType: null, sourceId: null };
-    return { ...s, questionId: r.question_id, topicId: m?.topicId ?? s.topicId, chapterId: m?.chapterId ?? s.chapterId, linked: m?.linked, nctType: m?.nctType ?? null, sourceId: m?.sourceId ?? null };
+    if (!r.question_id) return { ...s, questionId: null, topicId: null, chapterId: null, linked: undefined, nctType: null, nctDifficulty: null, sourceId: null };
+    return { ...s, questionId: r.question_id, topicId: m?.topicId ?? s.topicId, chapterId: m?.chapterId ?? s.chapterId, linked: m?.linked, nctType: m?.nctType ?? null, nctDifficulty: m?.nctDifficulty ?? null, sourceId: m?.sourceId ?? null };
   });
 }

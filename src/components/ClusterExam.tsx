@@ -7,36 +7,49 @@ import { supabase } from '../lib/supabase';
 import { Subject } from '../types/database';
 import { describeError, notifyError, notifyInfo } from '../lib/errors';
 import { keyKindOf } from '../lib/answerKey';
-import { CLUSTER_SLOTS, buildClusterZip, type ClusterSettings, type ClusterVariant } from '../lib/clusterExport';
+import { buildClusterZip, type ClusterSettings, type ClusterVariant } from '../lib/clusterExport';
+import {
+  CLUSTER_SUBJECTS, CLUSTER_KINDS, CLUSTER_MIN_SUBJECTS, CLUSTER_MAX_SUBJECTS, LEGACY_KINDS, type ClusterKind, type ClusterCounts,
+} from '../lib/clusterSlots';
 import {
   fitSettings, pickParallel, separateLinked, chapterTotalsFromCounts, totalsOf, poolStats as calcPoolStats, toSnapshot, preferUnused,
 } from '../../supabase/functions/_shared/ticketing';
 import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
-import { Layers, Loader2, Download, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
+import { Layers, Loader2, Download, ChevronDown, ChevronRight, CheckCircle2, ArrowUp, ArrowDown, X, Plus } from 'lucide-react';
 import { CustomSelect } from './CustomSelect';
 import { Button, Card, Field, Hint, PageHeader } from './ui';
 import { ClusterFromTickets } from './ClusterFromTickets';
 
-// Экзамен-кластер: книжка сразу из 4 предметов по образцу (только главный админ).
+// Экзамен-кластер: книжка из 2–4 предметов по образцу; предметы и их порядок выбирает пользователь (только главный админ).
 // Параметры экзамена (код кластера, название, дата) вносятся заранее и запоминаются в браузере.
 
 const KEY = 'examiner_cluster_v1';
 const MAX_VARIANTS = 20;
 
-type Counts = { test: number; matching: number; open: number };
+type Counts = ClusterCounts;
+type ByKind<T> = Partial<Record<ClusterKind, T>>;
 interface Saved {
   settings: ClusterSettings;
   /** Дата экзамена в виде ГГГГ-ММ-ДД (выбор в календаре); на обложке печатается как ДД.ММ */
   dateIso?: string;
   variants: number;
-  subjectIds: string[];
-  counts: Counts[];
-  enabled: boolean[];
-  /** Выбранные темы и главы без тем по каждому предмету; пусто — весь предмет */
-  topicIds: string[][];
-  chapterIds: string[][];
+  /** Предметы книжки в порядке следования (от 2 до 4) */
+  picks: ClusterKind[];
+  /** Предмет базы, количества заданий и выбор глав и тем — отдельно для каждого предмета книжки, чтобы при смене порядка они не терялись */
+  subjectByKind: ByKind<string>;
+  countsByKind: ByKind<Counts>;
+  /** Выбранные темы и главы без тем; пусто — весь предмет */
+  topicsByKind: ByKind<string[]>;
+  chaptersByKind: ByKind<string[]>;
   /** Не брать вопросы, уже вошедшие в сохранённые экзамены-кластеры (если неповторяющихся хватает) */
   avoidRepeats?: boolean;
+}
+
+/** Какому предмету книжки соответствует предмет базы (по названию) */
+export function clusterKindOf(subjectName: string): ClusterKind | null {
+  // Английский раньше остальных: «Забони англисӣ» иначе приняли бы за таджикский
+  if (/англ|инглис|english/i.test(subjectName || '')) return 'eng';
+  return keyKindOf(subjectName);
 }
 
 // 2026-09-27 → «27.09»
@@ -50,25 +63,42 @@ const defaults = (): Saved => {
     settings: { code: 'А.5', exam: 'Авг', date: coverDate(iso) },
     dateIso: iso,
     variants: 4,
-    subjectIds: CLUSTER_SLOTS.map(() => ''),
-    counts: CLUSTER_SLOTS.map((s) => ({ ...s.counts })),
-    enabled: CLUSTER_SLOTS.map(() => true),
-    topicIds: CLUSTER_SLOTS.map(() => []),
-    chapterIds: CLUSTER_SLOTS.map(() => []),
+    picks: [...LEGACY_KINDS],
+    subjectByKind: {}, countsByKind: {}, topicsByKind: {}, chaptersByKind: {},
     avoidRepeats: true,
   };
 };
 
+// Сохранённые параметры (в браузере и в базе) приводятся к текущему виду; прежний формат — четыре предмета по местам
+function normalize(raw: any): Saved | null {
+  if (!raw || !raw.settings) return null;
+  const base = defaults();
+  const merged: Saved = { ...base, settings: { ...base.settings, ...raw.settings }, dateIso: raw.dateIso ?? base.dateIso, variants: raw.variants ?? base.variants, avoidRepeats: raw.avoidRepeats ?? base.avoidRepeats };
+  if (Array.isArray(raw.picks)) {
+    const picks = (raw.picks as ClusterKind[]).filter((k, i, a) => CLUSTER_SUBJECTS[k] && a.indexOf(k) === i).slice(0, CLUSTER_MAX_SUBJECTS);
+    merged.picks = picks.length >= CLUSTER_MIN_SUBJECTS ? picks : base.picks;
+    merged.subjectByKind = raw.subjectByKind ?? {};
+    merged.countsByKind = raw.countsByKind ?? {};
+    merged.topicsByKind = raw.topicsByKind ?? {};
+    merged.chaptersByKind = raw.chaptersByKind ?? {};
+  } else if (Array.isArray(raw.subjectIds) && Array.isArray(raw.counts)) {
+    const on = LEGACY_KINDS.filter((_, i) => raw.enabled?.[i] !== false);
+    merged.picks = on.length >= CLUSTER_MIN_SUBJECTS ? on : base.picks;
+    LEGACY_KINDS.forEach((k, i) => {
+      if (raw.subjectIds[i]) merged.subjectByKind[k] = raw.subjectIds[i];
+      if (raw.counts[i]) merged.countsByKind[k] = raw.counts[i];
+      if (raw.topicIds?.[i]) merged.topicsByKind[k] = raw.topicIds[i];
+      if (raw.chapterIds?.[i]) merged.chaptersByKind[k] = raw.chapterIds[i];
+    });
+  } else return null;
+  if (!merged.settings.date && merged.dateIso) merged.settings.date = coverDate(merged.dateIso);
+  return merged;
+}
+
 function load(): Saved {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) || 'null');
-    if (raw && raw.settings && Array.isArray(raw.subjectIds) && Array.isArray(raw.counts)) {
-      const merged: Saved = { ...defaults(), ...raw };
-      if (!merged.settings.date && merged.dateIso) {
-        merged.settings.date = coverDate(merged.dateIso);
-      }
-      return merged;
-    }
+    const n = normalize(JSON.parse(localStorage.getItem(KEY) || 'null'));
+    if (n) return n;
   } catch { /* ignore */ }
   return defaults();
 }
@@ -239,14 +269,8 @@ export const ClusterExam: React.FC = () => {
     let cancelled = false;
     supabase.from('user_prefs').select('value').eq('user_id', user.id).eq('key', PREFS_KEY).maybeSingle().then(({ data, error }) => {
       if (cancelled || error) return;
-      const v = data?.value as Saved | undefined;
-      if (v && v.settings && Array.isArray(v.subjectIds) && Array.isArray(v.counts)) {
-        const merged: Saved = { ...defaults(), ...v };
-        if (!merged.settings.date && merged.dateIso) {
-          merged.settings.date = coverDate(merged.dateIso);
-        }
-        setState(merged);
-      }
+      const merged = normalize(data?.value);
+      if (merged) setState(merged);
       prefsReady.current = true;
     });
     return () => { cancelled = true; };
@@ -269,52 +293,67 @@ export const ClusterExam: React.FC = () => {
     },
   });
 
-  // Предметы подбираются по названию, пока не выбраны вручную
+  // Предмет базы подбирается по названию, пока не выбран вручную
   React.useEffect(() => {
     if (subjects.length === 0) return;
     setState((st) => {
       let changed = false;
-      const ids = st.subjectIds.map((id, i) => {
-        if (id && subjects.some((s) => s.id === id)) return id;
-        const found = subjects.find((s) => keyKindOf(s.name) === CLUSTER_SLOTS[i].kind);
-        if (found) { changed = true; return found.id; }
-        if (id) changed = true;
-        return '';
-      });
-      return changed ? { ...st, subjectIds: ids } : st;
+      const subjectByKind = { ...st.subjectByKind };
+      for (const kind of CLUSTER_KINDS) {
+        const id = subjectByKind[kind];
+        if (id && subjects.some((s) => s.id === id)) continue;
+        const found = subjects.find((s) => clusterKindOf(s.name) === kind);
+        if (found) { subjectByKind[kind] = found.id; changed = true; }
+        else if (id) { delete subjectByKind[kind]; changed = true; }
+      }
+      return changed ? { ...st, subjectByKind } : st;
     });
   }, [subjects]);
 
-  // Предзагрузка: пока настраиваются параметры, вопросы и счётчики включённых предметов уже качаются
+  // Предзагрузка: пока настраиваются параметры, вопросы и счётчики выбранных предметов уже качаются
   // (как только выбор не меняется полсекунды). При создании экзамена они берутся из кэша
   React.useEffect(() => {
     const timer = setTimeout(() => {
-      CLUSTER_SLOTS.forEach((_, i) => {
-        const id = state.subjectIds[i];
-        if (!id || state.enabled?.[i] === false) return;
-        const t = state.topicIds?.[i] ?? [], c = state.chapterIds?.[i] ?? [];
+      state.picks.forEach((kind) => {
+        const id = state.subjectByKind[kind];
+        if (!id) return;
+        const t = state.topicsByKind[kind] ?? [], c = state.chaptersByKind[kind] ?? [];
         queryClient.prefetchQuery({ queryKey: slotPoolKey(id, t, c), queryFn: () => loadSlotPool(id, t, c), staleTime: 60_000 }).catch(() => {});
         queryClient.prefetchQuery({ queryKey: ['question_counts', id], queryFn: () => fetchQuestionCounts(id), staleTime: 60_000 }).catch(() => {});
       });
     }, 500);
     return () => clearTimeout(timer);
-  }, [state.subjectIds, state.enabled, state.topicIds, state.chapterIds, queryClient]);
+  }, [state.picks, state.subjectByKind, state.topicsByKind, state.chaptersByKind, queryClient]);
 
   const setSetting = (k: keyof ClusterSettings, v: string) => setState((st) => ({ ...st, settings: { ...st.settings, [k]: v } }));
-  const setCount = (i: number, k: keyof Counts, v: number) =>
-    setState((st) => ({ ...st, counts: st.counts.map((c, j) => (j === i ? { ...c, [k]: Math.max(0, Math.min(100, v || 0)) } : c)) }));
-  const setEnabled = (i: number, on: boolean) => setState((st) => ({ ...st, enabled: CLUSTER_SLOTS.map((_, j) => (j === i ? on : st.enabled?.[j] !== false)) }));
-  const setSubject = (i: number, id: string) => setState((st) => ({
+  const countsOf = (st: Saved, kind: ClusterKind): Counts => st.countsByKind[kind] ?? CLUSTER_SUBJECTS[kind].counts;
+  const setCount = (kind: ClusterKind, k: keyof Counts, v: number) =>
+    setState((st) => ({ ...st, countsByKind: { ...st.countsByKind, [kind]: { ...countsOf(st, kind), [k]: Math.max(0, Math.min(100, v || 0)) } } }));
+  const setSubject = (kind: ClusterKind, id: string) => setState((st) => ({
     ...st,
-    subjectIds: st.subjectIds.map((x, j) => (j === i ? id : x)),
-    topicIds: CLUSTER_SLOTS.map((_, j) => (j === i ? [] : st.topicIds?.[j] ?? [])),
-    chapterIds: CLUSTER_SLOTS.map((_, j) => (j === i ? [] : st.chapterIds?.[j] ?? [])),
+    subjectByKind: { ...st.subjectByKind, [kind]: id },
+    topicsByKind: { ...st.topicsByKind, [kind]: [] },
+    chaptersByKind: { ...st.chaptersByKind, [kind]: [] },
   }));
-  const setSelection = (i: number, chapterIds: string[], topicIds: string[]) => setState((st) => ({
+  const setSelection = (kind: ClusterKind, chapterIds: string[], topicIds: string[]) => setState((st) => ({
     ...st,
-    topicIds: CLUSTER_SLOTS.map((_, j) => (j === i ? topicIds : st.topicIds?.[j] ?? [])),
-    chapterIds: CLUSTER_SLOTS.map((_, j) => (j === i ? chapterIds : st.chapterIds?.[j] ?? [])),
+    topicsByKind: { ...st.topicsByKind, [kind]: topicIds },
+    chaptersByKind: { ...st.chaptersByKind, [kind]: chapterIds },
   }));
+  // Состав и порядок книжки
+  const changeKind = (i: number, kind: ClusterKind) => setState((st) => ({ ...st, picks: st.picks.map((k, j) => (j === i ? kind : k)) }));
+  const moveKind = (i: number, d: -1 | 1) => setState((st) => {
+    const j = i + d;
+    if (j < 0 || j >= st.picks.length) return st;
+    const picks = [...st.picks];
+    [picks[i], picks[j]] = [picks[j], picks[i]];
+    return { ...st, picks };
+  });
+  const removeKind = (i: number) => setState((st) => (st.picks.length <= CLUSTER_MIN_SUBJECTS ? st : { ...st, picks: st.picks.filter((_, j) => j !== i) }));
+  const addKind = () => setState((st) => {
+    const free = CLUSTER_KINDS.find((k) => !st.picks.includes(k));
+    return free && st.picks.length < CLUSTER_MAX_SUBJECTS ? { ...st, picks: [...st.picks, free] } : st;
+  });
 
   const total = (c: Counts) => c.test + c.matching + c.open;
 
@@ -325,17 +364,17 @@ export const ClusterExam: React.FC = () => {
     setResult(null);
     setBusy(true);
     try {
-      const { settings, variants: V, subjectIds, counts } = state;
-      const enabled = CLUSTER_SLOTS.map((_, i) => state.enabled?.[i] !== false);
-      if (!enabled.some(Boolean)) throw new Error('Включите хотя бы один предмет');
+      const { settings, variants: V, picks } = state;
+      const subjectIds = picks.map((k) => state.subjectByKind[k] ?? '');
+      if (picks.length < CLUSTER_MIN_SUBJECTS || picks.length > CLUSTER_MAX_SUBJECTS) throw new Error(`В книжке должно быть от ${CLUSTER_MIN_SUBJECTS} до ${CLUSTER_MAX_SUBJECTS} предметов`);
       if (!settings.code.trim()) throw new Error('Укажите код кластера (например, А.5)');
       if (!settings.exam.trim()) throw new Error('Укажите название экзамена (например, Авг)');
       if (!settings.date.trim()) throw new Error('Выберите дату экзамена в календаре');
       if (V < 1 || V > MAX_VARIANTS) throw new Error(`Вариантов может быть от 1 до ${MAX_VARIANTS}`);
-      const missingSlot = CLUSTER_SLOTS.find((_, i) => enabled[i] && !subjectIds[i]);
-      if (missingSlot) throw new Error(`Выберите предмет из базы для субтеста «${missingSlot.name}» или снимите с него галочку`);
+      const missingSlot = picks.find((_, i) => !subjectIds[i]);
+      if (missingSlot) throw new Error(`Выберите предмет из базы для субтеста «${CLUSTER_SUBJECTS[missingSlot].name}» или уберите его из книжки`);
 
-      const variants: ClusterVariant[] = Array.from({ length: V }, (_, k) => ({ number: k + 1, subjects: [] }));
+      const variants: ClusterVariant[] = Array.from({ length: V }, (_, k) => ({ number: k + 1, kinds: [...picks], subjects: [] }));
       const notes: string[] = [];
       const repeatNotes: string[] = [];
 
@@ -348,10 +387,10 @@ export const ClusterExam: React.FC = () => {
           notifyError(e, 'Не удалось проверить прошлые экзамены — повторы вопросов не исключены');
           return new Set<string>();
         });
-      const perSlot = await Promise.all(CLUSTER_SLOTS.map(async (slot, s) => {
-        if (!enabled[s]) return null;
+      const perSlot = await Promise.all(picks.map(async (kind, s) => {
+        const slot = CLUSTER_SUBJECTS[kind];
         try {
-          const r = await pickForSlot(queryClient, subjectIds[s], state.topicIds?.[s] ?? [], state.chapterIds?.[s] ?? [], counts[s], V, usedP);
+          const r = await pickForSlot(queryClient, subjectIds[s], state.topicsByKind[kind] ?? [], state.chaptersByKind[kind] ?? [], countsOf(state, kind), V, usedP);
           r.notes.forEach((n) => notes.push(`${slot.name} — ${n}`));
           if (r.repeats > 0) repeatNotes.push(`${slot.name}: ${r.repeats} из ${r.picked}`);
           return r.perVariant;
@@ -402,7 +441,7 @@ export const ClusterExam: React.FC = () => {
       <Card padding="none" className="p-5">
         <PageHeader icon={Layers} title="Экзамен-кластер" className="px-0" />
         <p className="text-sm text-slate-600 mt-2">
-          Тестовая книжка из 4 предметов по образцу: обложка, инструкция, субтесты, справочные материалы. Русский и таджикский языки и ключи ответов — одним архивом.
+          Тестовая книжка из 2–4 предметов по образцу (предметы и порядок выбираете вы): обложка, инструкция, субтесты, справочные материалы. Русский и таджикский языки и ключи ответов — одним архивом.
         </p>
         <div className="flex flex-wrap gap-2 mt-4" role="tablist">
           {([['bank', 'Подбор из банка'], ['tickets', 'Из готовых билетов']] as const).map(([m, label]) => (
@@ -459,53 +498,68 @@ export const ClusterExam: React.FC = () => {
       </Card>
 
       {mode === 'tickets' && (
-        <ClusterFromTickets settings={state.settings} subjects={subjects} subjectIds={state.subjectIds} onSubject={setSubject} />
+        <ClusterFromTickets settings={state.settings} subjects={subjects} subjectIds={LEGACY_KINDS.map((k) => state.subjectByKind[k] ?? '')} onSubject={(i, id) => setSubject(LEGACY_KINDS[i], id)} />
       )}
 
       {mode === 'bank' && <>
       <Card padding="none" className="p-5 space-y-4">
         <h3 className="font-bold text-slate-900 text-sm">2. Субтесты</h3>
-        <p className="text-xs text-slate-500">Снимите галочку у предмета, чтобы не включать его в экзамен.</p>
+        <p className="text-xs text-slate-500">
+          Выберите от {CLUSTER_MIN_SUBJECTS} до {CLUSTER_MAX_SUBJECTS} предметов и поставьте их в нужном порядке: так они пойдут на обложке, в инструкции и в книжке.
+        </p>
         <div className="space-y-3">
-          {CLUSTER_SLOTS.map((slot, i) => {
-            const on = state.enabled?.[i] !== false;
+          {state.picks.map((kind, i) => {
+            const slot = CLUSTER_SUBJECTS[kind];
+            const subjectId = state.subjectByKind[kind] ?? '';
+            const counts = countsOf(state, kind);
+            const iconBtn = 'p-2 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white min-h-[40px] min-w-[40px] inline-flex items-center justify-center';
             return (
-            <div key={slot.kind} className={`grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end p-3 rounded-xl bg-slate-50 border border-slate-200 ${on ? '' : 'opacity-60'}`}>
-              <div className="space-y-1">
-                <label className="flex items-center space-x-2 text-xs font-semibold text-slate-700 cursor-pointer">
-                  <input type="checkbox" checked={on} onChange={(e) => setEnabled(i, e.target.checked)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500" />
-                  <span>{i + 1}. {slot.name}</span>
-                </label>
+            <div key={kind} className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end p-3 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-slate-700 w-5 shrink-0">{i + 1}.</span>
+                  <CustomSelect className={input} value={kind} onChange={(val) => changeKind(i, val as ClusterKind)}>
+                    {CLUSTER_KINDS.filter((k) => k === kind || !state.picks.includes(k)).map((k) => <option key={k} value={k}>{CLUSTER_SUBJECTS[k].name}</option>)}
+                  </CustomSelect>
+                  <button type="button" className={iconBtn} disabled={i === 0} onClick={() => moveKind(i, -1)} aria-label={`Поднять «${slot.name}» выше`}><ArrowUp className="w-4 h-4" /></button>
+                  <button type="button" className={iconBtn} disabled={i === state.picks.length - 1} onClick={() => moveKind(i, 1)} aria-label={`Опустить «${slot.name}» ниже`}><ArrowDown className="w-4 h-4" /></button>
+                  <button type="button" className={iconBtn} disabled={state.picks.length <= CLUSTER_MIN_SUBJECTS} onClick={() => removeKind(i)} aria-label={`Убрать «${slot.name}» из книжки`}><X className="w-4 h-4" /></button>
+                </div>
                 <CustomSelect
-                  disabled={!on}
-                  className={`${input} ${on && !state.subjectIds[i] ? 'border-amber-400 bg-amber-50/40 focus:ring-amber-500' : ''}`}
-                  value={state.subjectIds[i]}
-                  onChange={(val) => setSubject(i, val)}
+                  className={`${input} ${!subjectId ? 'border-amber-400 bg-amber-50/40 focus:ring-amber-500' : ''}`}
+                  value={subjectId}
+                  onChange={(val) => setSubject(kind, val)}
                 >
-                  <option value="">— выберите предмет —</option>
+                  <option value="">— выберите предмет из базы —</option>
                   {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </CustomSelect>
-                {on && !state.subjectIds[i] && (
-                  <p className="text-xs text-amber-700 font-medium">Предмет не выбран. Выберите предмет из списка или снимите галочку.</p>
+                {!subjectId && (
+                  <p className="text-xs text-amber-700 font-medium">Предмет из базы не выбран. Выберите его из списка или уберите субтест из книжки.</p>
                 )}
               </div>
               <div className="flex items-end gap-2 flex-wrap">
                 {([['test', 'Тестов'], ['matching', 'Соответствий'], ['open', 'Открытых']] as const).map(([k, label]) => (
                   <Field key={k} label={label}>
-                    <input type="number" min={0} disabled={!on} className={num} value={state.counts[i][k]} onChange={(e) => setCount(i, k, Number(e.target.value))} />
+                    <input type="number" min={0} className={num} value={counts[k]} onChange={(e) => setCount(kind, k, Number(e.target.value))} />
                   </Field>
                 ))}
-                <span className="text-xs text-slate-500 pb-2">= {total(state.counts[i])}</span>
+                <span className="text-xs text-slate-500 pb-2">= {total(counts)}</span>
               </div>
               <TopicPicker
-                subjectId={state.subjectIds[i]} disabled={!on}
-                chapterIds={state.chapterIds?.[i] ?? []} topicIds={state.topicIds?.[i] ?? []}
-                onChange={(c, t) => setSelection(i, c, t)}
+                subjectId={subjectId}
+                chapterIds={state.chaptersByKind[kind] ?? []} topicIds={state.topicsByKind[kind] ?? []}
+                onChange={(c, t) => setSelection(kind, c, t)}
               />
             </div>
             );
           })}
         </div>
+        {state.picks.length < CLUSTER_MAX_SUBJECTS && (
+          <Button variant="secondary" type="button" onClick={addKind}>
+            <Plus className="w-4 h-4" />
+            <span>Добавить предмет</span>
+          </Button>
+        )}
       </Card>
 
       {error && <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>}

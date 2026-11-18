@@ -1,6 +1,7 @@
-// Классификатор цифр для экрана проверки: запасная синтетика + собранные примеры, подсказки и сбор клеток.
+// Классификатор цифр для экрана проверки: микро-нейросеть + запасная синтетика + собранные примеры.
 import { boxToPix, pixFromBase64, pixToBase64 } from './digits';
 import { DigitKnn, bootstrapKnn, type DigitSample } from './knn';
+import { predictDigitNnBox } from './digitNn';
 import type { OmrResult } from './types';
 
 type Open = Extract<OmrResult, { ok: true }>['open'][number];
@@ -28,14 +29,32 @@ export function loadDigitModel(fetchSamples: () => Promise<Array<{ d: number; px
   return cached;
 }
 
-/** Подсказка по одному открытому вопросу: цифры из клеток с рисунком; null, если рисунков нет */
-export function guessOpen(knn: DigitKnn, o: Open): OpenHint | null {
+/** Подсказка по одному открытому вопросу: микро-нейросеть + валидация через kNN */
+export function guessOpen(knn: DigitKnn | null, o: Open): OpenHint | null {
   const digits: OpenHint['digits'] = [];
   for (const b of o.boxes) {
     if (!b.hasDigit) continue;
-    const g = knn.predictBox(b);
-    if (!g) return null;
-    digits.push({ digit: g.digit, unsure: g.unsure });
+    const nnPred = predictDigitNnBox(b);
+    let digit = nnPred.digit;
+    let unsure = nnPred.unsure;
+
+    if (knn) {
+      const g = knn.predictBox(b);
+      if (g) {
+        if (!g.unsure && !nnPred.unsure && g.digit === nnPred.digit) {
+          digit = g.digit;
+          unsure = false;
+        } else if (!nnPred.unsure && nnPred.prob > 0.82) {
+          digit = nnPred.digit;
+          unsure = false;
+        } else if (!g.unsure && knn.real > 40) {
+          digit = g.digit;
+          unsure = g.digit !== nnPred.digit;
+        }
+      }
+    }
+
+    digits.push({ digit, unsure });
   }
   if (!digits.length) return null;
   return { text: digits.map((d) => d.digit).join(''), unsure: digits.some((d) => d.unsure), digits };

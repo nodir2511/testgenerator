@@ -67,6 +67,26 @@ describe('распознавание бланка по снимку', () => {
     const res = omrRead(img, OMR_LAYOUTS.chemphys, { codes: [6] });
     expect(res.ok && res.codeOk).toBe(false);
   });
+
+  it('при закрытии одного угла даёт подсказку, какой именно угол не виден', () => {
+    const layout = OMR_LAYOUTS.chem;
+    const { img } = render(layout, 123, 0);
+    const data = Float32Array.from(img.data as ArrayLike<number>);
+    // Стираем нижний правый маркер (BR, индекс 3)
+    const m = layout.markers[3];
+    const dx = (m.x - layout.strip.w / 2) * 6, dy = (m.y - layout.strip.h / 2) * 6;
+    const cx = img.w / 2 + dx, cy = img.h / 2 + dy;
+    for (let y = Math.round(cy - 25); y < cy + 25; y++) {
+      for (let x = Math.round(cx - 25); x < cx + 25; x++) {
+        data[y * img.w + x] = 230;
+      }
+    }
+    const res = omrRead({ w: img.w, h: img.h, data }, layout);
+    const failed = !res.ok || !res.codeOk;
+    expect(failed).toBe(true);
+    expect(res.missingHint).toBeDefined();
+    expect(res.missingHint).toMatch(/нижний правый|правый нижний/i);
+  });
 });
 
 import { qualityWarnings, answersFromResult } from '../src/lib/omr/answers';

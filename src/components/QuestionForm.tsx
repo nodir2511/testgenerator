@@ -5,7 +5,7 @@ import { notifyError, describeError, must } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { NCT_TYPES } from '../lib/nctTypes';
-import { NCT_DIFFICULTIES, isChemistrySubject } from '../lib/nctDifficulty';
+import { NCT_DIFFICULTIES } from '../lib/nctDifficulty';
 import { FormulaEditor } from './FormulaEditor';
 import { QuestionPreview } from './QuestionPreview';
 import { QuestionProgress, type ProgressStep } from './QuestionProgress';
@@ -423,7 +423,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         source_id: sourceId || null,
         // метку типа НЦТ меняет только главный админ; у остальных поле не трогаем
         ...(isOwner ? { nct_type: nctType || null } : {}),
-        ...(isOwner && isChemistrySubject(subjects.find(s => s.id === subjectId)?.name) ? { nct_difficulty: nctDifficulty ? Number(nctDifficulty) : null } : {}),
+        ...(isOwner ? { nct_difficulty: nctDifficulty ? Number(nctDifficulty) : null } : {}),
         type,
         content: primaryContent,
         content_ru: contentRu.trim() || null,
@@ -680,7 +680,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             </Field>
           )}
 
-          {isOwner && isChemistrySubject(subjects.find(s => s.id === subjectId)?.name) && (
+          {isOwner && (
             <Field label="Сложность для НЦТ">
               <CustomSelect
                 value={nctDifficulty}

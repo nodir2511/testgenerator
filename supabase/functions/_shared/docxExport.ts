@@ -303,6 +303,13 @@ export interface QuestionOpts {
   compact?: boolean;
 }
 
+/** Сколько клеток под ответ открытого вопроса: у таджикского языка 5, у остальных предметов 4 */
+export function openBoxesFor(subjectName: string): number {
+  const n = (subjectName || '').toLowerCase();
+  if (/англ|инглис|english/.test(n)) return 4;
+  return /тоҷик|таджик|забони/.test(n) ? 5 : 4;
+}
+
 const COMPACT_MARGINS = { top: 20, bottom: 20, left: 100, right: 100 };
 
 // «Ответ: □□□□» — подпись и ряд клеток по числу цифр
@@ -1024,7 +1031,7 @@ export async function buildSingleTicketBlob(
   // Таблицы каждого вопроса
   for (let qIdx = 0; qIdx < ticket.questions.length; qIdx++) {
     const q = ticket.questions[qIdx].question_snapshot;
-    const table = await createQuestionTable(q, qIdx + 1, isTg);
+    const table = await createQuestionTable(q, qIdx + 1, isTg, { openBoxes: openBoxesFor(subjectName) });
     docChildren.push(table);
     // Отступ между вопросами: пустой абзац фиксированной высоты 10 pt (раньше строка 14 pt + 9 pt — слишком много)
     docChildren.push(

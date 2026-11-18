@@ -3,6 +3,8 @@ import { OMR_LAYOUTS } from '../src/lib/omr/layouts.generated';
 import { omrRead } from '../src/lib/omr/recognize';
 import { PIX, boxToPix, digitTo28, drawGlyph, pixFromBase64, pixToBase64, syntheticSamples } from '../src/lib/omr/digits';
 import { DigitKnn, bootstrapKnn } from '../src/lib/omr/knn';
+import { predictDigitNnPix } from '../src/lib/omr/digitNn';
+import { guessOpen } from '../src/lib/omr/model';
 import { render } from './omrRender';
 
 describe('цифры из клеток', () => {
@@ -44,6 +46,27 @@ describe('цифры из клеток', () => {
     expect(k.predictPix(new Uint8Array(PIX * PIX))).toBeNull();
     k.add([{ d: 12, px: new Uint8Array(PIX * PIX) }, { d: 3, px: new Uint8Array(5) }]);
     expect(k.size).toBe(0);
+  });
+
+  it('микро-нейросеть узнаёт цифры на синтетических примерах с высокой точностью', () => {
+    const test = syntheticSamples(30, 888);
+    let ok = 0;
+    for (const s of test) {
+      const pred = predictDigitNnPix(s.px);
+      if (pred.digit === s.d) ok++;
+    }
+    expect(ok / test.length).toBeGreaterThan(0.96);
+  });
+
+  it('guessOpen выдаёт подсказки даже без kNN (на базе нейросети)', () => {
+    const box = drawGlyph('5', () => 0.5);
+    const openMock = {
+      q: 1,
+      boxes: [{ ink: 0.1, hasDigit: true, heightMm: 3.2, widthMm: 2.1, cols: 28, rows: 34, bitmap: box.bitmap }],
+    };
+    const hint = guessOpen(null, openMock);
+    expect(hint).not.toBeNull();
+    expect(hint?.text).toBe('5');
   });
 
   it('собранные примеры перевешивают: цифра в непривычном стиле узнаётся после добавления', () => {

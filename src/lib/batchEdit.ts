@@ -29,9 +29,9 @@ export async function fetchBatchSlots(batchId: string): Promise<BatchSlots> {
   }));
 
   const ids = [...new Set(tickets.flatMap((t) => t.questions.map((q) => q.question_id)).filter((x): x is string => !!x))];
-  const meta = new Map<string, { topic_id: string | null; chapter_id: string | null; linked_ids: string[] | null; nct_type: string | null; source_id: string | null }>();
+  const meta = new Map<string, { topic_id: string | null; chapter_id: string | null; linked_ids: string[] | null; nct_type: string | null; nct_difficulty: number | null; source_id: string | null }>();
   for (const part of chunk(ids, 100)) {
-    const { data: rows, error: e } = await supabase.from('questions').select('id, topic_id, chapter_id, linked_ids, nct_type, source_id').in('id', part);
+    const { data: rows, error: e } = await supabase.from('questions').select('id, topic_id, chapter_id, linked_ids, nct_type, nct_difficulty, source_id').in('id', part);
     if (e) throw e;
     for (const r of rows ?? []) meta.set(r.id, r as any);
   }
@@ -50,6 +50,7 @@ export async function fetchBatchSlots(batchId: string): Promise<BatchSlots> {
         chapterId: m?.chapter_id ?? null,
         linked: m?.linked_ids ?? [],
         nctType: m?.nct_type ?? null,
+        nctDifficulty: m?.nct_difficulty ?? null,
         sourceId: m?.source_id ?? null,
       };
     }),

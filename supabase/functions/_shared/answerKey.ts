@@ -378,6 +378,8 @@ export async function buildAnswerKeyDocx(
   tickets: KeyTicket[],
   /** Название экзамена (набора); если задано, встаёт в шапку под «ҶАВОБИ ДУРУСТИ» вместо строки шаблона */
   info?: string | null,
+  /** Строка под «КЛЮЧИ» вместо «к субтесту по биологии – А.5» из шаблона (когда шаблон один на несколько предметов) */
+  subjectLine?: string | null,
 ): Promise<{ bytes: Uint8Array; stats: KeyStats }> {
   const zip = await JSZip.loadAsync(templateBytes);
   if (info) {
@@ -409,6 +411,7 @@ export async function buildAnswerKeyDocx(
   const stats: KeyStats = { missing: 0, overflow: 0 };
   const blocks = tickets.map((t, idx) => {
     let b = proto;
+    if (subjectLine) b = setParagraphText(b, 'субтесту', subjectLine);
     // «Вариант(и) N»
     const vAt = b.indexOf('Вариант(и)');
     if (vAt >= 0) {

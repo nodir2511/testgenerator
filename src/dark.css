@@ -59,6 +59,7 @@
 .dark .disabled\:bg-slate-100:disabled{background-color:#1e293b}
 .dark .disabled\:bg-slate-300:disabled{background-color:#475569}
 .dark .disabled\:bg-slate-50:disabled{background-color:#0b1324}
+.dark .disabled\:hover\:bg-white:disabled:hover{background-color:#0f172a}
 .dark .disabled\:text-slate-400:disabled{color:#64748b}
 .dark .disabled\:text-slate-500:disabled{color:#94a3b8}
 .dark .disabled\:text-slate-600:disabled{color:#aab7c9}

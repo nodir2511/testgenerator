@@ -60,14 +60,14 @@ describe('кластер', () => {
 describe('шаблоны ключей и рамка', () => {
   it('в шаблонах ключей хватает мест под состав кластера', async () => {
     const { buildAnswerKeyFile } = await import('../src/lib/answerKeyExport');
-    const { CLUSTER_SLOTS } = await import('../src/lib/clusterExport');
-    for (const s of CLUSTER_SLOTS) {
+    const { CLUSTER_SUBJECTS } = await import('../src/lib/clusterExport');
+    for (const s of Object.values(CLUSTER_SUBJECTS)) {
       const qs = [
         ...Array.from({ length: s.counts.test }, (_, i) => test(i)),
         ...Array.from({ length: s.counts.matching }, (_, i) => matching(i)),
         ...Array.from({ length: s.counts.open }, (_, i) => open(i)),
       ].map((q) => ({ question_snapshot: q }));
-      const f = await buildAnswerKeyFile('x', [{ ticket_number: 1, questions: qs }], s.name, undefined, s.kind === 'taj' ? 'taj-cluster' : undefined);
+      const f = await buildAnswerKeyFile('x', [{ ticket_number: 1, questions: qs }], s.name, undefined, s.keyTemplate);
       console.log(s.name, f.stats);
       expect(f.stats.overflow, s.name).toBe(0);
     }
@@ -99,6 +99,81 @@ describe('меньше 4 предметов', () => {
     const keys = Object.keys(zip.files).filter((n) => n.startsWith('Ключи/') && !zip.files[n].dir);
     expect(keys.length).toBe(2);
     expect(file.keyOverflow).toBe(0);
+  });
+});
+
+describe('предметы и порядок по выбору', () => {
+  const fill = (c: { test: number; matching: number; open: number }) => [
+    ...Array.from({ length: c.test }, (_, i) => test(i)),
+    ...Array.from({ length: c.matching }, (_, i) => matching(i)),
+    ...Array.from({ length: c.open }, (_, i) => open(i)),
+  ];
+
+  it('собирает книжку из новых предметов в выбранном порядке, ключи по каждому', async () => {
+    const { buildClusterZip, CLUSTER_SUBJECTS } = await import('../src/lib/clusterExport');
+    const kinds = ['eng', 'math', 'hist', 'law'] as const;
+    const variants = [1, 2].map((n) => ({ number: n, kinds: [...kinds], subjects: kinds.map((k) => fill(CLUSTER_SUBJECTS[k].counts)) }));
+    const file = await buildClusterZip({ code: 'Б.2', exam: 'Дек', date: '12.12' }, variants);
+    const zip = await JSZip.loadAsync(await file.blob.arrayBuffer());
+    const keys = Object.keys(zip.files).filter((n) => n.startsWith('Ключи/') && !zip.files[n].dir);
+    expect(keys.length).toBe(4);
+    expect(file.keyOverflow).toBe(0);
+    expect(file.keyUniversal).toBe(0);
+    // в ключе английского — своя строка, а не «по биологии» из общего шаблона
+    const eng = keys.find((n) => n.includes('Английский'))!;
+    const xml = await (await JSZip.loadAsync(await zip.file(eng)!.async('arraybuffer'))).file('word/document.xml')!.async('string');
+    expect(xml).toContain('английскому языку');
+    expect(xml).toContain('Б.2');
+    expect(xml).not.toContain('биологии');
+  });
+
+  it('два предмета в любом порядке', async () => {
+    const { buildClusterZip, CLUSTER_SUBJECTS } = await import('../src/lib/clusterExport');
+    const kinds = ['phys', 'taj'] as const;
+    const file = await buildClusterZip({ code: 'А.5', exam: 'Авг', date: '27.09' },
+      [{ number: 1, kinds: [...kinds], subjects: kinds.map((k) => fill(CLUSTER_SUBJECTS[k].counts)) }]);
+    const zip = await JSZip.loadAsync(await file.blob.arrayBuffer());
+    expect(Object.keys(zip.files).filter((n) => n.startsWith('Ключи/') && !zip.files[n].dir).length).toBe(2);
+  });
+
+  it('вид предмета базы по названию, английский не путается с таджикским', async () => {
+    const { clusterKindOf } = await import('../src/components/ClusterExam');
+    expect(clusterKindOf('Английский язык')).toBe('eng');
+    expect(clusterKindOf('Забони англисӣ')).toBe('eng');
+    expect(clusterKindOf('Таджикский язык')).toBe('taj');
+    expect(clusterKindOf('Математика')).toBe('math');
+    expect(clusterKindOf('История')).toBe('hist');
+    expect(clusterKindOf('Право')).toBe('law');
+    expect(clusterKindOf('Литература')).toBeNull();
+  });
+
+  it('сохранённая партия с новыми предметами восстанавливает их порядок', async () => {
+    const { clusterVariantsFromBatch } = await import('../src/lib/clusterStore');
+    const snap = (id: string, slot: number) => ({ id, type: 'test', cluster_slot: slot });
+    const params = { cluster: { subjects: [{ slot: 0, kind: 'eng' }, { slot: 1, kind: 'math' }] } };
+    const v = clusterVariantsFromBatch([{ ticket_number: 1, questions: [
+      { order_index: 1, question_snapshot: snap('a', 0) }, { order_index: 2, question_snapshot: snap('b', 1) },
+    ] }], params);
+    expect(v[0].kinds!.slice(0, 2)).toEqual(['eng', 'math']);
+    expect(v[0].subjects[0]!.map((q) => q.id)).toEqual(['a']);
+    expect(v[0].subjects[1]!.map((q) => q.id)).toEqual(['b']);
+  });
+});
+
+describe('клетки под открытый ответ в обычных билетах', () => {
+  it('таджикский — 5 клеток, остальные предметы — 4', async () => {
+    const { openBoxesFor, buildSingleTicketBlob } = await import('../src/lib/docxExport');
+    expect(openBoxesFor('Таджикский язык')).toBe(5);
+    expect(openBoxesFor('Забони тоҷикӣ')).toBe(5);
+    for (const n of ['Химия', 'Физика', 'Математика', 'История', 'Английский язык', 'Забони англисӣ']) expect(openBoxesFor(n), n).toBe(4);
+    const cells = async (subject: string) => {
+      const blob = await buildSingleTicketBlob('x', { ticket_number: 1, questions: [{ question_snapshot: open(1) }] }, subject, false);
+      const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');
+      expect(xml).not.toContain('________');
+      return (xml.match(/<w:tcW[^>]*w:w="480"/g) || []).length;
+    };
+    expect(await cells('Химия')).toBe(4);
+    expect(await cells('Таджикский язык')).toBe(5);
   });
 });
 

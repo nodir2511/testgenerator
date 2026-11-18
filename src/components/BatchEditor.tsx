@@ -183,7 +183,7 @@ const RemoveTopicModal: React.FC<{ batch: EditBatch; ed: Ed; topicId: string; on
       const picked = plan.changes.map((c) => c.question?.id).filter((x): x is string => !!x);
       const full = await fetchFullQuestions(picked);
       const rows = buildRowChanges(plan.changes, full, shuffleOf(batch.generation_params), (id) => (id ? ed.topicById.get(id)?.name : undefined));
-      const meta = new Map(poolQ.data.map((q) => [q.id, { topicId: q.topic_id, chapterId: q.chapter_id, linked: q.linked_ids ?? [], nctType: q.nct_type ?? null, sourceId: q.source_id ?? null }]));
+      const meta = new Map(poolQ.data.map((q) => [q.id, { topicId: q.topic_id, chapterId: q.chapter_id, linked: q.linked_ids ?? [], nctType: q.nct_type ?? null, nctDifficulty: q.nct_difficulty ?? null, sourceId: q.source_id ?? null }]));
       await ed.commit(rows, applyToSlots(data.slots, rows, meta));
       const parts = Object.entries(plan.fromTopic).map(([t, n]) => `${ed.label(ed.topicById.get(t))}: ${n}`).join('; ');
       notifyInfo(`${name} убрана: заменено ${total - missing} из ${total}${parts ? ` (${parts})` : ''}.${missing ? ` Пустых мест: ${missing} — они выделены красным в билетах и ключах.` : ''}`);
@@ -315,8 +315,8 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   const sourcesQ = useQuery({ queryKey: ['nct_sources'], queryFn: fetchNctSourceIds, enabled: nctBatch, staleTime: 5 * 60_000 });
   const slotTopic = slot.topicId ? ed.topicById.get(slot.topicId) : undefined;
   const section = useMemo(
-    () => (nctBatch && slotTopic ? sectionOfPoolQ({ chapter: { order_index: slotTopic.chapterOrder }, topic: { order_index: slotTopic.order } }) : null),
-    [nctBatch, slotTopic],
+    () => (nctBatch && slotTopic ? sectionOfPoolQ({ chapter: { order_index: slotTopic.chapterOrder }, topic: { order_index: slotTopic.order }, nct_type: slot.nctType }) : null),
+    [nctBatch, slotTopic, slot.nctType],
   );
   const nctMode = nctBatch && section !== null;
   const [anySource, setAnySource] = useState(false);
@@ -345,7 +345,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
     if (nctMode) {
       const src = sourcesQ.data ?? new Set<string>();
       const pool = poolQ.data.map((q) => ({ ...q, isNct: !!q.source_id && src.has(q.source_id) }));
-      const info = { section, nctType: slot.nctType ?? null, isNct: !!slot.sourceId && src.has(slot.sourceId) };
+      const info = { section, nctType: slot.nctType ?? null, difficulty: slot.nctDifficulty ?? null, isNct: !!slot.sourceId && src.has(slot.sourceId) };
       const types = new Set(ticketSlots.map((s) => s.nctType).filter((x): x is string => !!x));
       return nctCandidatesFor(pool, slot.type, used, others, links, info, types, anySource).slice(0, 10);
     }
@@ -358,7 +358,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
     try {
       const full = fullQ.data ?? (await fetchFullQuestions([q.id]));
       const rows = buildRowChanges([{ slot, question: q }], full, shuffleOf(batch.generation_params), (id) => (id ? ed.topicById.get(id)?.name : undefined));
-      const meta = new Map([[q.id, { topicId: q.topic_id, chapterId: q.chapter_id, linked: q.linked_ids ?? [], nctType: q.nct_type ?? null, sourceId: q.source_id ?? null }]]);
+      const meta = new Map([[q.id, { topicId: q.topic_id, chapterId: q.chapter_id, linked: q.linked_ids ?? [], nctType: q.nct_type ?? null, nctDifficulty: q.nct_difficulty ?? null, sourceId: q.source_id ?? null }]]);
       await ed.commit(rows, applyToSlots(data.slots, rows, meta));
       onClose();
     } catch (e) {

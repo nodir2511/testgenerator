@@ -73,9 +73,18 @@ export function topicNumber(chapterOrder: number, topicOrder: number): number | 
   return offset + topicOrder;
 }
 
+/**
+ * Раздел задания: по теме, но задание с органической меткой (ORG_…, OM_…) всегда «Органика» — даже если лежит
+ * в общей теме (например, вывод формулы углеводорода в теме 2.10). Тема вне режима даёт null при любой метке.
+ */
+export function sectionOfTopic(topicSection: NctSection | null, nctType?: string | null): NctSection | null {
+  if (topicSection && nctType && (nctType.startsWith('ORG_') || nctType.startsWith('OM_'))) return 'organic';
+  return topicSection;
+}
+
 export function sectionOfQuestion(q: any): NctSection | null {
   const n = topicNumber(q?.chapter?.order_index, q?.topic?.order_index);
-  return n === null ? null : sectionOfTopicNumber(n);
+  return sectionOfTopic(n === null ? null : sectionOfTopicNumber(n), q?.nct_type);
 }
 
 /** Баллы по разделам: 40 × доля / сумма долей пройденных; целые, в сумме 40 (метод наибольших остатков) */
@@ -182,6 +191,23 @@ export const NCT_BANNED = new Set([
   'MIX_ACID', 'MIX_SALT', 'MIX_METAL', 'EL_MULTISTEP', 'CHAIN', 'STOICH2', 'DISPLACE', 'EL_DECOMP_PCT', 'EL_IDENT_CALC', 'GASMIX_REACT',
 ]);
 
+/** Доли сложности (в процентах, сумма 100) для тестов и соответствий билета НЦТ */
+export interface NctDifficultyShares { easy: number; medium: number; hard: number }
+export const NCT_DEFAULT_DIFFICULTY: NctDifficultyShares = { easy: 50, medium: 40, hard: 10 };
+/** Открытые задачи — всегда столько лёгких, средних и сложных (из 7) */
+export const NCT_OPEN_DIFFICULTY: [number, number, number] = [2, 3, 2];
+
+/** Раскладывает count мест по сложности 1/2/3 по долям (метод наибольших остатков) и перемешивает */
+export function difficultyTargets(count: number, shares: NctDifficultyShares, rnd: Rnd = Math.random): number[] {
+  const raw = [shares.easy, shares.medium, shares.hard].map((p) => (Math.max(0, p) * count) / 100);
+  const n = raw.map((v) => Math.floor(v));
+  let left = Math.min(count, Math.round(raw.reduce((a, v) => a + v, 0))) - n.reduce((a, v) => a + v, 0);
+  for (const i of [0, 1, 2].sort((a, b) => (raw[b] - n[b]) - (raw[a] - n[a]))) { if (left <= 0) break; n[i]++; left--; }
+  const out = [1, 2, 3].flatMap((d, i) => Array<number>(n[i]).fill(d));
+  for (let i = out.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [out[i], out[j]] = [out[j], out[i]]; }
+  return out;
+}
+
 /** Сколько заданий каждого вида берём из сборника НЦТ (источник «ЦВЭ …»): 8 + 4 + 2×2 = 16 баллов из 40, то есть 40 % */
 export const NCT_QUOTA: Record<Kind, number> = { test: 8, matching: 1, open: 2 };
 export const NCT_QUOTA_POINTS = 16;
@@ -225,7 +251,7 @@ function splitQuota(quota: number, counts: Array<{ k: NctSection; want: number; 
  * берутся неразмеченные вопросы раздела. Темы стараются не повторяться в билете: на каждое место предпочтительны
  * вопросы тем, из которых в билете ещё ничего не взято (а при нехватке — наименее использованных).
  */
-export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random, _totals?: ChapterTotals): NctPicked {
+export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random, _totals?: ChapterTotals, difficulty: NctDifficultyShares = NCT_DEFAULT_DIFFICULTY): NctPicked {
   const notes: string[] = [];
   const bySection = new Map<NctSection, any[]>();
   let skipped = 0;
@@ -299,11 +325,26 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
     return null;
   };
 
-  const pickOne = (list: any[], section: NctSection, kind: Kind, wantNct: boolean): any[] | null => {
+  const diffHit: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
+  const diffMiss: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
+  const pickOne = (list: any[], section: NctSection, kind: Kind, wantNct: boolean, diff: number): any[] | null => {
     const free = list.filter((q) => q.type === kind && !usedIds.has(q.id));
-    const nctFree = free.filter((q) => q.isNct);
-    const own = free.filter((q) => !q.isNct);
-    for (const pool of wantNct ? [nctFree, own] : [own, nctFree]) {
+    // сначала нужная сложность, затем ближайшие; вопросы без оценки сложности — в последнюю очередь
+    const levels: Array<number | null> = [diff, ...[1, 2, 3].filter((d) => d !== diff).sort((a, b) => Math.abs(a - diff) - Math.abs(b - diff)), null];
+    for (const lvl of levels) {
+      const byLvl = lvl === null ? free.filter((q) => !q.nct_difficulty) : free.filter((q) => q.nct_difficulty === lvl);
+      if (byLvl.length < T) continue;
+      const nctFree = byLvl.filter((q) => q.isNct);
+      const own = byLvl.filter((q) => !q.isNct);
+      const got = tryPools(wantNct ? [nctFree, own] : [own, nctFree], section, kind);
+      if (!got) continue;
+      if (lvl === diff) diffHit[kind]++; else if (lvl !== null) diffMiss[kind]++;
+      return got;
+    }
+    return null;
+  };
+  const tryPools = (pools: any[][], section: NctSection, kind: Kind): any[] | null => {
+    for (const pool of pools) {
       const got = attempt(pool, section, kind);
       if (!got) continue;
       got.rows.forEach((q) => usedIds.add(q.id));
@@ -321,13 +362,18 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
       .map((k) => ({ k, want: plan[k]?.[kind] ?? 0, cap: (bySection.get(k) ?? []).filter((q) => q.isNct && q.type === kind).length }))
       .filter((c) => c.want > 0);
     const quota = splitQuota(NCT_QUOTA[kind], counts);
+    const nPlaces = counts.reduce((a, c) => a + c.want, 0);
+    const targets = kind === 'open'
+      ? difficultyTargets(nPlaces, { easy: (100 * NCT_OPEN_DIFFICULTY[0]) / NCT_COMPOSITION.open, medium: (100 * NCT_OPEN_DIFFICULTY[1]) / NCT_COMPOSITION.open, hard: (100 * NCT_OPEN_DIFFICULTY[2]) / NCT_COMPOSITION.open }, rnd)
+      : difficultyTargets(nPlaces, difficulty, rnd);
+    let place = 0;
     for (const { k, want } of counts) {
       // места раздела, на которых берём задание из сборника НЦТ: случайные
       const flags = Array.from({ length: want }, (_, i) => i < (quota[k] ?? 0));
       for (let i = flags.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [flags[i], flags[j]] = [flags[j], flags[i]]; }
       let got = 0;
       for (let i = 0; i < want; i++) {
-        const rows = pickOne(bySection.get(k) ?? [], k, kind, flags[i]);
+        const rows = pickOne(bySection.get(k) ?? [], k, kind, flags[i], targets[place++] ?? 2);
         if (!rows) continue;
         got++;
         for (let t = 0; t < T; t++) dst[t].push(rows[t]);
@@ -340,6 +386,8 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   fill(open, 'open');
   separateLinked([tests, matching, open], pool, rnd);
 
+  const missTotal = diffMiss.test + diffMiss.matching + diffMiss.open;
+  if (missTotal > 0) notes.push(`Нужной сложности не хватило для ${missTotal} заданий — взята ближайшая`);
   const nctPoints = nctPicked.test + 4 * nctPicked.matching + 2 * nctPicked.open;
   if (nctPoints < NCT_QUOTA_POINTS) notes.push(`Из сборника НЦТ набрано ${nctPoints} баллов из ${NCT_QUOTA_POINTS} (в выбранных темах мало таких вопросов)`);
   const total = tests[0].length + matching[0].length + open[0].length;

@@ -174,7 +174,7 @@ export const SavedTicketsView: React.FC = () => {
       const { buildClusterZip } = await import('../lib/clusterExport');
       const settings = batch.generation_params?.cluster?.settings;
       if (!settings) throw new Error('В партии нет параметров экзамена');
-      const file = await buildClusterZip(settings, clusterVariantsFromBatch(await ticketsOf(batch)));
+      const file = await buildClusterZip(settings, clusterVariantsFromBatch(await ticketsOf(batch), batch.generation_params));
       saveAs(file.blob, file.fileName);
       if (file.keyUniversal) notifyInfo(`Ключей в универсальной таблице (состав не поместился в шаблон): ${file.keyUniversal}.`);
       if (file.missingAnswers) notifyError(new Error(`В базе нет верного ответа у вопросов: ${file.missingAnswers} — клетки в ключах отмечены красным.`), 'Кластер готов, но ключи не полные');

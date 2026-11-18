@@ -149,7 +149,7 @@ function findMarkers(bin: Uint8Array, w: number, h: number, want: number): Corne
 
 // ---------- чтение отметок ----------
 /** Доля закрашенной площади кружка, начиная с которой он считается отмеченным */
-export const FILL_ON = 0.38;
+export const FILL_ON = 0.40;
 const UNSURE_LO = 0.18;
 
 type At = (x: number, y: number) => number;
@@ -186,8 +186,45 @@ function squareFill(at: At, cx: number, cy: number, size: number): number {
   return tot ? on / tot : 0;
 }
 
+/** Оценка совпадения контура кружка с напечатанным кольцом при небольшом смещении (dx, dy) */
+function circleRingMatch(at: At, c: OmrCircle, dx: number, dy: number): number {
+  const R = c.d / 2;
+  const N = 8;
+  let ring = 0, out = 0, tot = 0;
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+    let hit = 0, bad = false;
+    for (const dr of [-0.2, 0, 0.2]) {
+      const v = at(c.x + dx + (R + dr) * ca, c.y + dy + (R + dr) * sa);
+      if (v < 0) { bad = true; break; }
+      if (v > 0) hit = 1;
+    }
+    const o = at(c.x + dx + (R + 0.6) * ca, c.y + dy + (R + 0.6) * sa);
+    if (bad || o < 0) continue;
+    tot++; ring += hit; out += o;
+  }
+  return tot ? (ring - out) / tot : 0;
+}
+
+/** Локальная адаптивная автоподстройка ряда: компенсирует небольшой изгиб бумаги в центре полоски */
+function refineRowOffset(options: OmrCircle[], at: At): { dx: number; dy: number } {
+  const shifts = [-0.3, 0, 0.3];
+  let bestDx = 0, bestDy = 0, bestScore = -999;
+  for (const dy of shifts) for (const dx of shifts) {
+    let sum = 0;
+    for (const o of options) sum += circleRingMatch(at, o, dx, dy);
+    if (sum > bestScore) {
+      bestScore = sum;
+      bestDx = dx;
+      bestDy = dy;
+    }
+  }
+  return bestScore > 0 ? { dx: bestDx, dy: bestDy } : { dx: 0, dy: 0 };
+}
+
 function pickOne(options: OmrCircle[], at: At): Picked {
-  const fills = options.map((o) => discFill(at, o.x, o.y, o.d / 2 * 0.62));
+  const { dx, dy } = refineRowOffset(options, at);
+  const fills = options.map((o) => discFill(at, o.x + dx, o.y + dy, o.d / 2 * 0.62));
   const on: number[] = [];
   fills.forEach((f, i) => { if (f >= FILL_ON) on.push(i); });
   const unsure = fills.some((f) => f >= UNSURE_LO && f < FILL_ON + 0.1);
@@ -213,6 +250,39 @@ function openBox(at: At, b: { x: number; y: number; w: number; h: number }): Ope
       if (c > right) right = c;
     }
   }
+
+  // Очистка типографской рамки клетки (Border Clearing):
+  // Если вдоль наружного края клетки идёт сплошная тёмная полоска (>40% пикселей края), это край рамки клетки
+  const clearEdge = (r0: number, r1: number, c0: number, c1: number, isRow: boolean) => {
+    let count = 0;
+    const total = isRow ? (c1 - c0) : (r1 - r0);
+    for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) {
+      if (bitmap[r * cols + c]) count++;
+    }
+    if (total > 0 && count / total > 0.4) {
+      for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) {
+        if (bitmap[r * cols + c]) { bitmap[r * cols + c] = 0; on--; }
+      }
+      return true;
+    }
+    return false;
+  };
+  clearEdge(0, 1, 0, cols, true);
+  clearEdge(rows - 1, rows, 0, cols, true);
+  clearEdge(0, rows, 0, 1, false);
+  clearEdge(0, rows, cols - 1, cols, false);
+
+  // Пересчитываем габариты чернил после очистки рамки
+  top = rows; bottom = -1; left = cols; right = -1;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (bitmap[r * cols + c]) {
+      if (r < top) top = r;
+      if (r > bottom) bottom = r;
+      if (c < left) left = c;
+      if (c > right) right = c;
+    }
+  }
+
   // Цифра — рисунок высотой не меньше ~45 % клетки; точки и короткие чёрточки — случайные пятна
   const heightMm = bottom >= 0 ? (bottom - top + 1) * step : 0;
   const widthMm = right >= 0 ? (right - left + 1) * step : 0;
@@ -262,7 +332,36 @@ export interface OmrOptions {
   codes?: number[];
 }
 
-interface Located { best: { score: number; mism: number; rot: number; at: At; ring: Blob[]; fit: number } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number }
+interface Located { best: { score: number; mism: number; rot: number; at: At; ring: Blob[]; fit: number } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number; missingHint?: string }
+
+function findMissingHint(sq: Blob[], w: number, h: number, want: number): string | undefined {
+  if (sq.length < 3) return undefined;
+  for (let i = 0; i < sq.length; i++) {
+    for (let j = 0; j < sq.length; j++) {
+      if (j === i) continue;
+      for (let k = 0; k < sq.length; k++) {
+        if (k === i || k === j) continue;
+        const P = sq[i], Q = sq[j], R = sq[k];
+        const u = [Q.cx - P.cx, Q.cy - P.cy], v = [R.cx - P.cx, R.cy - P.cy];
+        const d1 = Math.hypot(u[0], u[1]), d2 = Math.hypot(v[0], v[1]);
+        if (d1 < w * 0.12 || d2 < w * 0.12) continue;
+        const dot = Math.abs(u[0] * v[0] + u[1] * v[1]) / (d1 * d2);
+        if (dot > 0.25) continue;
+        const ratio = Math.max(d1, d2) / Math.min(d1, d2);
+        if (Math.abs(Math.log(ratio / want)) > 0.38) continue;
+        const sx = Q.cx + R.cx - P.cx, sy = Q.cy + R.cy - P.cy;
+        const cornerName = sy < h / 2
+          ? (sx < w / 2 ? 'верхний левый' : 'верхний правый')
+          : (sx < w / 2 ? 'нижний левый' : 'нижний правый');
+        const outOfFrame = sx < 20 || sx > w - 20 || sy < 20 || sy > h - 20;
+        return outOfFrame
+          ? `Не виден ${cornerName} угол бланка: метка вышла за пределы кадра. Отодвиньте камеру чуть назад.`
+          : `Не виден ${cornerName} угол бланка: метка перекрыта пальцем, бликом или тенью.`;
+      }
+    }
+  }
+  return undefined;
+}
 
 /** Ищет метки и поворот бланка: порог меток ослабляем, пока не сойдётся код бланка */
 function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
@@ -278,9 +377,18 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
   let shapeBad = false;
   let anyMarkers = false;
   let kUsed = MARKER_K[0];
+  let missingHint: string | undefined;
   for (const k of MARKER_K) {
+    const sqCandidates = components(adaptiveBinary(img, win, k), w, h).filter((c) => {
+      const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
+      const minArea = w * h * 0.00007;
+      return c.area >= minArea && c.iso > 0.45 && c.solid > 0.8 && c.solid < 1.35 && Math.max(bw, bh) < w * 0.12;
+    });
     const cands = findMarkers(adaptiveBinary(img, win, k), w, h, Math.max(want, 1 / want));
-    if (!cands.length) continue;
+    if (!cands.length) {
+      if (!missingHint) missingHint = findMissingHint(sqCandidates, w, h, Math.max(want, 1 / want));
+      continue;
+    }
     anyMarkers = true;
     // Кандидатов несколько (в кадр может попасть соседняя полоска листа): выбираем того, у кого сходится код бланка
     for (const mk of cands) {
@@ -308,15 +416,26 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
     const b = best as Located['best'];
     if (b && b.mism === 0 && b.fit >= RING_MIN) break;
   }
-  return { best, shapeBad, anyMarkers, dstRing, k: kUsed };
+  if ((!best || best.mism !== 0 || best.fit < RING_MIN) && !missingHint) {
+    for (const k of MARKER_K) {
+      const minArea = w * h * 0.00007;
+      const sqCandidates = components(adaptiveBinary(img, win, k), w, h).filter((c) => {
+        const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
+        return c.area >= minArea && c.iso > 0.45 && c.solid > 0.8 && c.solid < 1.35 && Math.max(bw, bh) < w * 0.12;
+      });
+      missingHint = findMissingHint(sqCandidates, w, h, Math.max(want, 1 / want));
+      if (missingHint) break;
+    }
+  }
+  return { best, shapeBad, anyMarkers, dstRing, k: kUsed, missingHint };
 }
 
 /** Считывает одну полоску бланка. Если codeOk = false, снимок лучше не использовать. */
 export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}): OmrResult {
   const { w, h } = img;
-  const { best, shapeBad, anyMarkers, dstRing } = locate(img, layout, opts);
-  if (!anyMarkers) return { ok: false, reason: 'markers' };
-  if (!best) return { ok: false, reason: shapeBad ? 'shape' : 'homography' };
+  const { best, shapeBad, anyMarkers, dstRing, missingHint } = locate(img, layout, opts);
+  if (!anyMarkers) return missingHint ? { ok: false, reason: 'markers', missingHint } : { ok: false, reason: 'markers' };
+  if (!best) return missingHint ? { ok: false, reason: shapeBad ? 'shape' : 'homography', missingHint } : { ok: false, reason: shapeBad ? 'shape' : 'homography' };
   const { at, ring } = best;
 
   // Качество снимка: сколько пикселей приходится на мм бланка и насколько сильно он снят под углом
@@ -326,9 +445,11 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
   const pxPerMm = e.reduce((a, v) => a + v, 0) / mmE.reduce((a, v) => a + v, 0);
   const skew = Math.max(Math.max(e[0], e[2]) / Math.min(e[0], e[2]), Math.max(e[1], e[3]) / Math.min(e[1], e[3]));
 
+  const codeOk = best.mism === 0 && best.fit >= RING_MIN;
   return {
     ok: true,
-    codeOk: best.mism === 0 && best.fit >= RING_MIN,
+    codeOk,
+    ...(missingHint && !codeOk ? { missingHint } : {}),
     quality: { pxPerMm, skew, ring: best.fit },
     rotation: best.rot * 90,
     variant: pickOne(layout.variant, at),

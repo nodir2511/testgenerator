@@ -9,7 +9,3 @@ export function nctDifficultyName(v: number | null | undefined): string {
   return NCT_DIFFICULTIES.find((d) => d.value === v)?.name ?? '';
 }
 
-/** Сложность ставится пока только у химии */
-export function isChemistrySubject(name: string | null | undefined): boolean {
-  return (name ?? '').toLowerCase().includes('хим');
-}

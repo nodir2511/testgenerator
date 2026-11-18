@@ -114,6 +114,8 @@ export async function buildAnswerKeyFile(
   title: string, tickets: KeyTicket[], subjectName: string, selection?: KeySelection,
   /** Файл шаблона в public/key-templates (без .docx), если нужен не стандартный для предмета */
   templateName?: string,
+  /** Строка «к субтесту по … – код» в теле ключа (если шаблон общий для нескольких предметов) */
+  subjectLine?: string,
 ): Promise<KeyFile> {
   const kind = keyKindOf(subjectName);
   const file = templateName ?? (kind && keyTemplateName(kind, tickets));
@@ -123,7 +125,7 @@ export async function buildAnswerKeyFile(
   const template = await res.arrayBuffer();
   const sorted = [...tickets].sort((a, b) => a.ticket_number - b.ticket_number);
   // В шапке ключей — название экзамена, которое пользователь дал набору
-  const { bytes, stats } = await buildAnswerKeyDocx(template, await enrich(sorted), title.trim() || null);
+  const { bytes, stats } = await buildAnswerKeyDocx(template, await enrich(sorted), title.trim() || null, subjectLine);
   const safe = title.replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 80) || 'Билеты';
   return {
     blob: new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),

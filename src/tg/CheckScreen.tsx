@@ -10,6 +10,7 @@ import { answersFromResult, doubts, keyFromAnswers, qualityWarnings, variantFrom
 import type { OmrResult } from '../lib/omr/types';
 import { PIX, pixFromBase64 } from '../lib/omr/digits';
 import { collectEnabled, collectSamples, guessOpen, loadDigitModel, setCollectEnabled, type OpenHint } from '../lib/omr/model';
+import { exportOmrChecksToExcel } from '../lib/omr/exportExcel';
 
 // Раздел «Проверка» мини-приложения: фото бланка → ответы → баллы.
 // Ключ берётся из набора билетов, вводится вручную или снимается с эталонного бланка (один билет — одно фото).
@@ -68,7 +69,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
   const [custom, setCustom] = useState<CustomKey[]>(() => loadCustom());
   const [sets, setSets] = useState<SetRow[] | null>(null);
   const [search, setSearch] = useState('');
-  const [done, setDone] = useState<Array<{ student: string; score: number; max: number }>>([]);
+  const [done, setDone] = useState<Array<{ student: string; score: number; max: number; ticket?: number; createdAt?: string }>>([]);
   const [owner, setOwner] = useState(false);
   const [queue, setQueue] = useState<QItem[]>([]);
   const nextId = useRef(1);
@@ -214,8 +215,11 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
             )}
             {done.length > 0 && (
               <>
-                <h2>Проверено за сеанс: {done.length}</h2>
-                {done.slice(-30).map((d, k) => <p key={k} className="tg-hint">{d.student || 'без имени'} — {d.score} из {d.max}</p>)}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '16px 4px 6px' }}>
+                  <h2 style={{ margin: 0 }}>Проверено за сеанс: {done.length}</h2>
+                  <button className="tg-link" onClick={() => void exportOmrChecksToExcel(done.map((d) => ({ student: d.student, score: d.score, max_score: d.max, ticket_number: d.ticket, created_at: d.createdAt })), src.title)}>📥 Скачать в Excel</button>
+                </div>
+                {done.slice(-30).map((d, k) => <p key={k} className="tg-hint">{d.student || 'без имени'} — {d.score} из {d.max}{d.ticket ? ` (вар. ${d.ticket})` : ''}</p>)}
               </>
             )}
           </>
@@ -305,13 +309,105 @@ const readFile = async (f: File, layouts: string[]): Promise<{ res?: Ok; error?:
     const img = await loadGrayImage(f);
     const layout = OMR_LAYOUTS[layouts[0]];
     const res = omrRead(img, layout, { codes: layouts.map((id) => OMR_LAYOUTS[id].code) });
-    if (!res.ok) return { error: FAIL_TEXT, debug: debugOf(img, layout) };
-    if (!res.codeOk) return { error: CODE_TEXT, debug: debugOf(img, layout) };
+    if (!res.ok) return { error: res.missingHint || FAIL_TEXT, debug: debugOf(img, layout) };
+    if (!res.codeOk) return { error: res.missingHint || CODE_TEXT, debug: debugOf(img, layout) };
     return { res };
   } catch {
     return { error: 'Не удалось обработать фото. Попробуйте ещё раз.' };
   }
 };
+
+// ---------- живой видоискатель камеры ----------
+function LiveCameraModal({ onSnap, onClose, onFallback }: {
+  onSnap: (file: File) => void;
+  onClose: () => void;
+  onFallback: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [ready, setReady] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    if (typeof navigator.mediaDevices?.getUserMedia !== 'function') {
+      onFallback();
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    }).then((stream) => {
+      if (!active) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+        setReady(true);
+      }
+    }).catch((e) => {
+      if (!active) return;
+      setErr((e as Error).message || 'Не удалось запустить камеру');
+      onFallback();
+    });
+
+    return () => {
+      active = false;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    };
+  }, [onFallback]);
+
+  const snap = () => {
+    const video = videoRef.current;
+    if (!video || !ready) return;
+    const w = video.videoWidth || 1280;
+    const h = video.videoHeight || 720;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, w, h);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], `blank_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      onSnap(file);
+    }, 'image/jpeg', 0.92);
+  };
+
+  return (
+    <div className="tg-viewfinder" role="dialog" aria-modal="true">
+      <div className="tg-viewfinder-video-wrap">
+        <video ref={videoRef} className="tg-viewfinder-video" playsInline muted autoPlay />
+        <div className="tg-viewfinder-overlay">
+          <div className="tg-viewfinder-hint">Поместите полоску бланка в рамку, чтобы все 4 угловые метки были в кадре</div>
+          <div className="tg-viewfinder-frame">
+            <div className="tg-viewfinder-corner tl" />
+            <div className="tg-viewfinder-corner tr" />
+            <div className="tg-viewfinder-corner bl" />
+            <div className="tg-viewfinder-corner br" />
+          </div>
+        </div>
+      </div>
+      <div className="tg-viewfinder-controls">
+        <button className="tg-link" style={{ color: '#fff' }} onClick={onClose}>✕ Закрыть</button>
+        <button className="tg-viewfinder-shutter" onClick={snap} aria-label="Сделать снимок">📷</button>
+        <button className="tg-link" style={{ color: '#fff' }} onClick={onFallback}>Обычная камера</button>
+      </div>
+      {err && <div className="tg-error" style={{ margin: 8 }}>{err}</div>}
+    </div>
+  );
+}
 
 /** Съёмка в стопку: камера (снимок за снимком) и галерея (много фото сразу); каждое фото читается сразу */
 function QueueCapture({ layouts, hasItems, onAdd, onFirstError }: { layouts: string[]; hasItems: boolean; onAdd: (items: Array<Omit<QItem, 'id'>>) => void; onFirstError: () => void }) {
@@ -319,6 +415,18 @@ function QueueCapture({ layouts, hasItems, onAdd, onFirstError }: { layouts: str
   const gal = useRef<HTMLInputElement>(null);
   const counter = useRef(1);
   const [progress, setProgress] = useState<{ i: number; n: number } | null>(null);
+  const [showLive, setShowLive] = useState(false);
+
+  const processFile = async (f: File, fromCamera: boolean) => {
+    setProgress({ i: 1, n: 1 });
+    const r = await readFile(f, layouts);
+    const name = fromCamera ? `Бланк ${counter.current}` : (f.name || `Бланк ${counter.current}`).slice(0, 60);
+    counter.current++;
+    onAdd([{ name, ...r }]);
+    setProgress(null);
+    if (r.error) onFirstError();
+  };
+
   async function onFiles(e: React.ChangeEvent<HTMLInputElement>, fromCamera: boolean) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
@@ -335,14 +443,38 @@ function QueueCapture({ layouts, hasItems, onAdd, onFirstError }: { layouts: str
     setProgress(null);
     if (failed) onFirstError();
   }
+
+  const openLive = () => {
+    if (typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function') {
+      setShowLive(true);
+    } else {
+      cam.current?.click();
+    }
+  };
+
   return (
     <>
       <input ref={cam} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => void onFiles(e, true)} />
       <input ref={gal} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => void onFiles(e, false)} />
-      <button className="tg-btn-primary" disabled={!!progress} onClick={() => cam.current?.click()}>
-        {progress ? `Распознаю ${progress.i} из ${progress.n}…` : hasItems ? '📷 Снять ещё бланк' : '📷 Сфотографировать бланк'}
+      {showLive && (
+        <LiveCameraModal
+          onSnap={(file) => {
+            void processFile(file, true);
+          }}
+          onClose={() => setShowLive(false)}
+          onFallback={() => {
+            setShowLive(false);
+            cam.current?.click();
+          }}
+        />
+      )}
+      <button className="tg-btn-primary" disabled={!!progress} onClick={openLive}>
+        {progress ? `Распознаю ${progress.i} из ${progress.n}…` : hasItems ? '📷 Навести камеру ещё' : '📷 Навести камеру на бланк'}
       </button>
-      <button className="tg-btn-secondary" disabled={!!progress} onClick={() => gal.current?.click()}>🖼 Выбрать фото из галереи (несколько)</button>
+      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+        <button className="tg-btn-secondary" style={{ flex: 1 }} disabled={!!progress} onClick={() => cam.current?.click()}>Обычная камера</button>
+        <button className="tg-btn-secondary" style={{ flex: 1 }} disabled={!!progress} onClick={() => gal.current?.click()}>Из галереи</button>
+      </div>
     </>
   );
 }
@@ -359,8 +491,8 @@ function Capture({ label, layouts, onResult, onError }: { label: string; layouts
       const img = await loadGrayImage(f);
       const layout = OMR_LAYOUTS[layouts[0]];
       const res = omrRead(img, layout, { codes: layouts.map((id) => OMR_LAYOUTS[id].code) });
-      if (!res.ok) return onError(FAIL_TEXT, debugOf(img, layout));
-      if (!res.codeOk) return onError(CODE_TEXT, debugOf(img, layout));
+      if (!res.ok) return onError(res.missingHint || FAIL_TEXT, debugOf(img, layout));
+      if (!res.codeOk) return onError(res.missingHint || CODE_TEXT, debugOf(img, layout));
       onResult(res);
     } catch {
       onError('Не удалось обработать фото. Попробуйте ещё раз.');
@@ -468,7 +600,7 @@ function AnswerEditor({ res, answers, setAnswers, onlyDoubts, withEmpty, hints }
   );
 }
 
-function Review({ api, src, res, title, left, onDone, onError, onRetake }: { api: Api; src: KeySource; res: Ok; title: string; left: number; onDone: (r: { student: string; score: number; max: number }) => void; onError: (e: unknown) => void; onRetake: () => void }) {
+function Review({ api, src, res, title, left, onDone, onError, onRetake }: { api: Api; src: KeySource; res: Ok; title: string; left: number; onDone: (r: { student: string; score: number; max: number; ticket?: number; createdAt?: string }) => void; onError: (e: unknown) => void; onRetake: () => void }) {
   const warnings = useMemo(() => qualityWarnings(res), [res]);
   const [answers, setAnswers] = useState<Answers>(() => answersFromResult(res));
   const [variant, setVariant] = useState<string>(() => String(variantFromResult(res) ?? ''));
@@ -494,7 +626,7 @@ function Review({ api, src, res, title, left, onDone, onError, onRetake }: { api
         const samples = collectSamples(res.open, answers.open, hints);
         if (samples.length) void api('digits_save', { samples, layout: src.layouts[0] }).catch(() => { /* сбор не мешает работе */ });
       }
-      onDone({ student, score: score.score, max: score.max });
+      onDone({ student, score: score.score, max: score.max, ticket: Number(variant), createdAt: new Date().toISOString() });
     } catch (e) { onError(e); } finally { setSaving(false); }
   }
 
@@ -615,7 +747,12 @@ function Results({ api, onError }: { api: Api; onError: (e: unknown) => void }) 
   useEffect(() => { api<{ checks: SavedCheck[] }>('check_list').then((r) => setRows(r.checks)).catch(onError); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   return (
     <>
-      <h1>Результаты</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1>Результаты</h1>
+        {rows && rows.length > 0 && (
+          <button className="tg-link" onClick={() => void exportOmrChecksToExcel(rows, 'Все_результаты')}>📥 В Excel</button>
+        )}
+      </div>
       {!rows && <p className="tg-hint">Загрузка…</p>}
       {rows?.length === 0 && <p className="tg-hint">Проверенных работ пока нет.</p>}
       {rows?.map((r) => (

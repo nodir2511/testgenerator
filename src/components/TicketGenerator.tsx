@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo } from '../lib/errors';
-import { pickNct, expandPermuted, NCT_COMPOSITION } from '../../supabase/functions/_shared/nct';
+import { examProfileFor } from '../../supabase/functions/_shared/examProfiles';
+import { pickNct, expandPermuted, NCT_COMPOSITION, NCT_DEFAULT_DIFFICULTY, NCT_OPEN_DIFFICULTY, type NctDifficultyShares } from '../../supabase/functions/_shared/nct';
 import { fitSettings, pickTickets, snapshotTickets, chapterTotalsFromCounts, poolStats as calcPoolStats, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
 import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Subject, Chapter, Topic, Question } from '../types/database';
@@ -106,6 +107,8 @@ interface GenCfg {
   /** режим «по формату НЦТ» (химия): 18 + 2 + 7, разделы по номерам */
   nct?: boolean;
   nctPerm?: boolean;
+  /** доли сложности тестов и соответствий, % (режим НЦТ) */
+  nctDiff?: NctDifficultyShares;
 }
 
 const getStorageJSON = <T,>(key: string, fallback: T): T => {
@@ -299,10 +302,24 @@ export const TicketGenerator: React.FC = () => {
 
   const subjectName = subjects.find((s) => s.id === subjectId)?.name || '';
   const standard = standardFor(subjectName);
-  const isChem = isOwner && subjectName.toLowerCase().includes('хим'); // режим НЦТ пока только для главного админа
+  const isChem = isOwner && !!examProfileFor(subjectName); // режим НЦТ пока только для главного админа
   const [nctPref, setNctPref] = useState<boolean>(() => getStorageBool('examiner_nct_mode', false));
   const nctMode = isChem && nctPref;
   const [permPref, setPermPref] = useState<boolean>(() => getStorageBool('examiner_nct_perm', false));
+  const [diffShares, setDiffShares] = useState<NctDifficultyShares>(() => {
+    const v = getStorageJSON<Partial<NctDifficultyShares>>('examiner_nct_diff', NCT_DEFAULT_DIFFICULTY);
+    const ok = [v.easy, v.medium, v.hard].every((x) => typeof x === 'number' && x >= 0 && x <= 100) && (v.easy! + v.medium! + v.hard!) === 100;
+    return ok ? (v as NctDifficultyShares) : NCT_DEFAULT_DIFFICULTY;
+  });
+  const diffSum = diffShares.easy + diffShares.medium + diffShares.hard;
+  const setDiffShare = (key: keyof NctDifficultyShares, raw: string) => {
+    const n = Math.max(0, Math.min(100, Math.round(Number(raw) || 0)));
+    setDiffShares((prev) => {
+      const next = { ...prev, [key]: n };
+      try { localStorage.setItem('examiner_nct_diff', JSON.stringify(next)); } catch { /* память недоступна */ }
+      return next;
+    });
+  };
   const permAvailable = ticketCount >= 4 && ticketCount % 2 === 0;
   const nctPerm = nctMode && permPref && permAvailable;
   const isStandard = !!standard && testCount === standard.test && matchingCount === standard.matching && openCount === standard.open;
@@ -503,11 +520,13 @@ export const TicketGenerator: React.FC = () => {
     subjectId, chapterIds: effChapterIds, topicIds: effTopicIds,
     test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount,
     shuffleOptions, shuffleMatching, title: customTitle.trim() || null, nct: nctMode, nctPerm,
+    ...(nctMode ? { nctDiff: diffShares } : {}),
   });
 
   // Алгоритм параллельной генерации билетов
   const handleGenerate = async (cfg: GenCfg = currentCfg()) => {
     if (generatingRef.current) return; // защита от двойного нажатия
+    if (cfg.nct && cfg.nctDiff && cfg.nctDiff.easy + cfg.nctDiff.medium + cfg.nctDiff.hard !== 100) { notifyInfo('Доли сложности должны давать в сумме 100 %'); return; }
     generatingRef.current = true;
     setIsGenerating(true);
     setGenProgress({ percent: 15, stage: 'Загрузка вопросов...' });
@@ -558,7 +577,7 @@ export const TicketGenerator: React.FC = () => {
         const nctSources = new Set((srcRows || []).filter((r: any) => /ЦВЭ/i.test(r.name || '')).map((r: any) => r.id));
         allQuestionsRaw.forEach((q: any) => { q.isNct = !!q.source_id && nctSources.has(q.source_id); });
         const permuted = !!cfg.nctPerm && ticketCount >= 4 && ticketCount % 2 === 0;
-        let np = pickNct(allQuestionsRaw, permuted ? 2 : ticketCount, Math.random, totals);
+        let np = pickNct(allQuestionsRaw, permuted ? 2 : ticketCount, Math.random, totals, cfg.nctDiff ?? NCT_DEFAULT_DIFFICULTY);
         if (np.notes.length) notifyInfo(`Формат НЦТ: ${np.notes.join('; ')}`);
         if (np.kinds[0][0]?.length + np.kinds[1][0]?.length + np.kinds[2][0]?.length === 0) throw new Error('В выбранных темах нет вопросов для формата НЦТ');
         if (permuted) np = expandPermuted(np, ticketCount, Math.random);
@@ -603,7 +622,7 @@ export const TicketGenerator: React.FC = () => {
             requested: { test: testCount, matching: matchingCount, open: openCount },
             auto_title: !cfg.title?.trim(),
             source: 'site',
-            ...(nct ? { nct: true } : {}),
+            ...(nct ? { nct: true, nct_difficulty: cfg.nctDiff ?? NCT_DEFAULT_DIFFICULTY } : {}),
             ...(nct && cfg.nctPerm && ticketCount >= 4 && ticketCount % 2 === 0 ? { nct_perm: true } : {}),
           },
         },
@@ -764,6 +783,8 @@ export const TicketGenerator: React.FC = () => {
     ? 'Лимит на сегодня исчерпан'
     : cooldownLeft > 0
     ? `Можно через ${formatWait(cooldownLeft)}`
+    : nctMode && diffSum !== 100
+    ? 'Доли сложности: сумма не 100 %'
     : null;
   const healthDot = !health ? 'bg-slate-300' : health.status === 'green' ? 'bg-emerald-500' : health.status === 'amber' ? 'bg-amber-500' : 'bg-rose-500';
 
@@ -1097,6 +1118,31 @@ export const TicketGenerator: React.FC = () => {
                   </span>
                 </span>
               </label>
+            )}
+
+            {nctMode && (
+              <div className="rounded-xl border border-slate-200 p-3 space-y-2.5">
+                <div className="text-sm">
+                  <b className="text-slate-900">Сложность тестов и соответствий</b>
+                  <span className="block text-slate-500 mt-0.5">Сколько процентов лёгких, средних и сложных заданий в билете. Сумма — 100 %.</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {([['easy', 'Лёгкие'], ['medium', 'Средние'], ['hard', 'Сложные']] as const).map(([key, label]) => (
+                    <label key={key} className="block text-xs font-semibold text-slate-600">
+                      {label}, %
+                      <input
+                        type="number" inputMode="numeric" min={0} max={100}
+                        value={diffShares[key]}
+                        onChange={(e) => setDiffShare(key, e.target.value)}
+                        className="mt-1 w-full min-h-[40px] rounded-lg border border-slate-300 px-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className={`text-xs ${diffSum === 100 ? 'text-slate-500' : 'text-rose-600 font-semibold'}`}>
+                  Сумма: {diffSum} %. Открытые задачи всегда: {NCT_OPEN_DIFFICULTY[0]} лёгких, {NCT_OPEN_DIFFICULTY[1]} средних, {NCT_OPEN_DIFFICULTY[2]} сложных.
+                </div>
+              </div>
             )}
 
             {nctMode && (

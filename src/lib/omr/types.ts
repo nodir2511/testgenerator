@@ -33,11 +33,12 @@ export interface OpenBox { ink: number; hasDigit: boolean; heightMm: number; wid
 export type OmrFail = 'markers' | 'shape' | 'homography';
 
 export type OmrResult =
-  | { ok: false; reason: OmrFail }
+  | { ok: false; reason: OmrFail; missingHint?: string }
   | {
       ok: true;
       /** Код бланка совпал с раскладкой; иначе снимок нужно переснять */
       codeOk: boolean;
+      missingHint?: string;
       /** Пикселей на мм бланка (чем больше, тем чётче), перекос: отношение противоположных сторон (1 — снято прямо), ring — насколько кружки бланка совпали с раскладкой (0…1) */
       quality: { pxPerMm: number; skew: number; ring: number };
       /** Во сколько градусов повёрнут снимок относительно бланка (0, 90, 180, 270) */

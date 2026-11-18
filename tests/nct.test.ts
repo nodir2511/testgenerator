@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { nctCandidatesFor, buildLinks, planNctTopicRemoval } from '../src/lib/questionSwap';
-import { expandPermuted, pickNct, planNct, sectionOfTopicNumber, sectionPoints, topicNumber } from '../supabase/functions/_shared/nct';
+import { difficultyTargets, expandPermuted, pickNct, planNct, sectionOfQuestion, sectionOfTopic, sectionOfTopicNumber, sectionPoints, topicNumber } from '../supabase/functions/_shared/nct';
 
 function rng(seed: number) {
   return () => {
@@ -48,6 +48,18 @@ describe('режим НЦТ', () => {
     expect([8, 9, 10, 11, 13, 16, 18].map((t) => sectionOfTopicNumber(topicNumber(6, t)!))).toEqual(['elements', 'basic', 'elements', 'basic', 'elements', 'basic', 'elements']);
     expect([4, 5, 6, 10, 15].map((t) => sectionOfTopicNumber(topicNumber(4, t)!))).toEqual(['elements', 'basic', 'elements', 'basic', 'basic']);
     expect(topicNumber(6, 19)).toBeNull();
+  });
+
+  it('задание с органической меткой — всегда раздел «Органика», даже в общей теме; вне режима остаётся вне', () => {
+    expect(sectionOfTopic('basic', 'ORG_FORMULA')).toBe('organic');
+    expect(sectionOfTopic('elements', 'OM_CLASS')).toBe('organic');
+    expect(sectionOfTopic('basic', 'DENS_CALC')).toBe('basic');
+    expect(sectionOfTopic('basic', null)).toBe('basic');
+    expect(sectionOfTopic(null, 'ORG_FORMULA')).toBeNull();
+    // вопрос из темы 2.10 (сквозной номер 31, «Основные понятия») с меткой ORG_FORMULA попадает в раздел органики
+    const q = { chapter: { order_index: 2 }, topic: { order_index: 10 }, nct_type: 'ORG_FORMULA' };
+    expect(sectionOfQuestion(q)).toBe('organic');
+    expect(sectionOfQuestion({ ...q, nct_type: 'DENS_CALC' })).toBe('basic');
   });
 
   it('баллы для тем 1–49: 18 + 11 + 11', () => {
@@ -174,6 +186,19 @@ describe('режим НЦТ', () => {
     expect(nctCandidatesFor(pool, 'test', new Set(), [], links, { section: null, nctType: 'MOL', isNct: false }, new Set())).toEqual([]);
   });
 
+  it('замена в билете НЦТ: сначала та же сложность, нет таких — любая', () => {
+    const mk = (id: string, d: number | null) => ({
+      id, type: 'test', topic_id: `1-${id}`, chapter: { order_index: 1 }, topic: { order_index: 3 }, nct_type: 'MOL', isNct: false, nct_difficulty: d,
+    }) as any;
+    const pool = [mk('e1', 1), mk('m1', 2), mk('m2', 2), mk('h1', 3)];
+    const links = buildLinks([]);
+    const ids = (r: any[]) => r.map((q) => q.id).sort();
+    const base = { section: 'basic' as const, nctType: 'MOL', isNct: false };
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(), [], links, { ...base, difficulty: 2 }, new Set()))).toEqual(['m1', 'm2']);
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(['m1', 'm2']), [], links, { ...base, difficulty: 2 }, new Set()))).toEqual(['e1', 'h1']);
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(), [], links, base, new Set()))).toEqual(['e1', 'h1', 'm1', 'm2']);
+  });
+
   it('убрать тему в билете НЦТ: замены по месту, тип не повторяется, нет подходящего — пустое место', () => {
     const q = (id: string, topic: string, ch: number, ord: number, nct: string | null, type = 'test') => ({
       id, type, topic_id: topic, chapter: { order_index: ch }, topic: { order_index: ord }, nct_type: nct,
@@ -197,6 +222,31 @@ describe('режим НЦТ', () => {
     expect(bySlot.get('t4')).toBeNull(); // открытого MOL в пуле нет
     expect(plan.missing.open).toBe(1);
     expect(plan.fromTopic).toEqual({ B: 1 });
+  });
+});
+
+describe('сложность в режиме НЦТ', () => {
+  it('доли раскладываются на места: 18 → 9/7/2, 2 → по одному', () => {
+    const cnt = (a: number[]) => [1, 2, 3].map((d) => a.filter((x) => x === d).length);
+    expect(cnt(difficultyTargets(18, { easy: 50, medium: 40, hard: 10 }, rng(1)))).toEqual([9, 7, 2]);
+    expect(difficultyTargets(7, { easy: 0, medium: 0, hard: 100 }, rng(1)).length).toBe(7);
+    expect(cnt(difficultyTargets(18, { easy: 34, medium: 33, hard: 33 }, rng(1))).reduce((a, b) => a + b, 0)).toBe(18);
+  });
+
+  it('билет: открытые 2/3/2, тесты по долям, когда вопросов каждой сложности хватает', () => {
+    const p = pool(all49, { test: 6, matching: 6, open: 6 }).map((q, i) => ({ ...q, nct_difficulty: (i % 3) + 1 }));
+    for (let seed = 1; seed <= 5; seed++) {
+      const r = pickNct(p, 1, rng(seed), undefined, { easy: 50, medium: 30, hard: 20 });
+      const cnt = (rows: any[]) => [1, 2, 3].map((d) => rows.filter((q) => q.nct_difficulty === d).length);
+      expect(cnt(r.kinds[2][0])).toEqual([2, 3, 2]);
+      expect(cnt(r.kinds[0][0])).toEqual([9, 5, 4]);
+    }
+  });
+
+  it('нужной сложности нет — берутся ближайшие, билет всё равно полный', () => {
+    const p = pool(all49, { test: 4, matching: 4, open: 4 }).map((q) => ({ ...q, nct_difficulty: 1 }));
+    const r = pickNct(p, 1, rng(3), undefined, { easy: 50, medium: 40, hard: 10 });
+    expect(r.kinds[0][0].length + r.kinds[1][0].length + r.kinds[2][0].length).toBe(27);
   });
 });
 
