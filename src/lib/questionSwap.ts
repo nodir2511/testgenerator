@@ -228,6 +228,67 @@ export function planTopicRemoval(slots: Slot[], removedTopicId: string, pool: Po
   return plan;
 }
 
+/**
+ * Убрать тему из билетов по формату НЦТ. Каждое место убираемой темы заменяется вопросом, подходящим именно
+ * этому месту (nctCandidatesFor: тот же раздел, вид и тип задания, тот же источник — сборник НЦТ или банк),
+ * из остальных тем набора; предпочитается тема, из которой в билетах стоит меньше вопросов. Если с тем же
+ * источником нет — пробуется любой; нет подходящего вообще — пустое место.
+ *
+ * slots — все вопросы набора; pool — вопросы остальных тем набора (поле isNct проставляет вызывающий);
+ * sectionOf — раздел НЦТ темы по её id (для мест убираемой темы).
+ */
+export function planNctTopicRemoval(
+  slots: Slot[], removedTopicId: string, pool: PoolQ[], sectionOf: (topicId: string) => NctSection | null,
+  isNctSource: (sourceId: string | null | undefined) => boolean, topicOrder: string[] = [],
+): RemovalPlan {
+  const plan: RemovalPlan = { changes: [], fromTopic: {}, missing: { test: 0, matching: 0, open: 0 } };
+  const targets = slots.filter((s) => s.topicId === removedTopicId);
+  if (targets.length === 0) return plan;
+
+  const topicIds = [...new Set(slots.map((s) => s.topicId).filter((t): t is string => !!t && t !== removedTopicId))];
+  const count = new Map<string, number>(topicIds.map((t) => [t, 0]));
+  for (const s of slots) if (s.topicId && count.has(s.topicId)) count.set(s.topicId, count.get(s.topicId)! + 1);
+
+  const used = new Set<string>(slots.map((s) => s.questionId).filter((x): x is string => !!x));
+  const links = buildLinks([...pool, ...slots.filter((s) => s.questionId).map((s) => ({ id: s.questionId!, linked_ids: s.linked }))]);
+  const inTicket = new Map<string, Set<string>>();
+  const typesIn = new Map<string, Set<string>>();
+  for (const s of slots) {
+    if (!s.questionId || s.topicId === removedTopicId) continue;
+    if (!inTicket.has(s.ticketId)) inTicket.set(s.ticketId, new Set());
+    inTicket.get(s.ticketId)!.add(s.questionId);
+    if (s.nctType) {
+      if (!typesIn.has(s.ticketId)) typesIn.set(s.ticketId, new Set());
+      typesIn.get(s.ticketId)!.add(s.nctType);
+    }
+  }
+  const usable = pool.filter((q) => q.topic_id !== removedTopicId && count.has(q.topic_id));
+  const ord = (t: string) => { const i = topicOrder.indexOf(t); return i < 0 ? 1e9 : i; };
+
+  for (const slot of [...targets].sort((a, b) => a.ticketNumber - b.ticketNumber || a.orderIndex - b.orderIndex)) {
+    const info: NctSlotInfo = { section: slot.topicId ? sectionOf(slot.topicId) : null, nctType: slot.nctType ?? null, isNct: isNctSource(slot.sourceId) };
+    const others = inTicket.get(slot.ticketId) ?? new Set<string>();
+    const types = typesIn.get(slot.ticketId) ?? new Set<string>();
+    let cands = nctCandidatesFor(usable, slot.type, used, others, links, info, types);
+    if (cands.length === 0) cands = nctCandidatesFor(usable, slot.type, used, others, links, info, types, true);
+    if (cands.length === 0) {
+      plan.changes.push({ slot, question: null });
+      plan.missing[slot.type]++;
+      continue;
+    }
+    // из кандидатов — тема, где в билетах меньше вопросов; при равенстве — порядок тем, затем «свежесть»
+    const best = [...cands].sort((a, b) => (count.get(a.topic_id)! - count.get(b.topic_id)!) || (ord(a.topic_id) - ord(b.topic_id)))[0];
+    used.add(best.id);
+    others.add(best.id);
+    inTicket.set(slot.ticketId, others);
+    if (best.nct_type) { types.add(best.nct_type); typesIn.set(slot.ticketId, types); }
+    count.set(best.topic_id, count.get(best.topic_id)! + 1);
+    plan.fromTopic[best.topic_id] = (plan.fromTopic[best.topic_id] ?? 0) + 1;
+    plan.changes.push({ slot, question: best });
+  }
+  return plan;
+}
+
 // ---------- Сборка изменений для базы ----------
 
 export interface RowChange { ticket_question_id: string; question_id: string | null; question_snapshot: any }

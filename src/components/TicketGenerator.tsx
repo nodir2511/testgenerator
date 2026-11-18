@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo } from '../lib/errors';
-import { pickNct, NCT_COMPOSITION } from '../../supabase/functions/_shared/nct';
+import { pickNct, expandPermuted, NCT_COMPOSITION } from '../../supabase/functions/_shared/nct';
 import { fitSettings, pickTickets, snapshotTickets, chapterTotalsFromCounts, poolStats as calcPoolStats, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
 import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Subject, Chapter, Topic, Question } from '../types/database';
@@ -105,6 +105,7 @@ interface GenCfg {
   title: string | null;
   /** режим «по формату НЦТ» (химия): 18 + 2 + 7, разделы по номерам */
   nct?: boolean;
+  nctPerm?: boolean;
 }
 
 const getStorageJSON = <T,>(key: string, fallback: T): T => {
@@ -301,6 +302,9 @@ export const TicketGenerator: React.FC = () => {
   const isChem = isOwner && subjectName.toLowerCase().includes('хим'); // режим НЦТ пока только для главного админа
   const [nctPref, setNctPref] = useState<boolean>(() => getStorageBool('examiner_nct_mode', false));
   const nctMode = isChem && nctPref;
+  const [permPref, setPermPref] = useState<boolean>(() => getStorageBool('examiner_nct_perm', false));
+  const permAvailable = ticketCount >= 4 && ticketCount % 2 === 0;
+  const nctPerm = nctMode && permPref && permAvailable;
   const isStandard = !!standard && testCount === standard.test && matchingCount === standard.matching && openCount === standard.open;
 
   // Смена предмета: выбор глав сбрасывается, состав билета — стандартный для предмета
@@ -498,7 +502,7 @@ export const TicketGenerator: React.FC = () => {
   const currentCfg = (): GenCfg => ({
     subjectId, chapterIds: effChapterIds, topicIds: effTopicIds,
     test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount,
-    shuffleOptions, shuffleMatching, title: customTitle.trim() || null, nct: nctMode,
+    shuffleOptions, shuffleMatching, title: customTitle.trim() || null, nct: nctMode, nctPerm,
   });
 
   // Алгоритм параллельной генерации билетов
@@ -553,9 +557,11 @@ export const TicketGenerator: React.FC = () => {
         const { data: srcRows } = await supabase.from('sources').select('id, name').eq('is_deleted', false);
         const nctSources = new Set((srcRows || []).filter((r: any) => /ЦВЭ/i.test(r.name || '')).map((r: any) => r.id));
         allQuestionsRaw.forEach((q: any) => { q.isNct = !!q.source_id && nctSources.has(q.source_id); });
-        const np = pickNct(allQuestionsRaw, ticketCount, Math.random, totals);
+        const permuted = !!cfg.nctPerm && ticketCount >= 4 && ticketCount % 2 === 0;
+        let np = pickNct(allQuestionsRaw, permuted ? 2 : ticketCount, Math.random, totals);
         if (np.notes.length) notifyInfo(`Формат НЦТ: ${np.notes.join('; ')}`);
         if (np.kinds[0][0]?.length + np.kinds[1][0]?.length + np.kinds[2][0]?.length === 0) throw new Error('В выбранных темах нет вопросов для формата НЦТ');
+        if (permuted) np = expandPermuted(np, ticketCount, Math.random);
         picked = np;
       }
 
@@ -598,6 +604,7 @@ export const TicketGenerator: React.FC = () => {
             auto_title: !cfg.title?.trim(),
             source: 'site',
             ...(nct ? { nct: true } : {}),
+            ...(nct && cfg.nctPerm && ticketCount >= 4 && ticketCount % 2 === 0 ? { nct_perm: true } : {}),
           },
         },
         p_tickets: ticketsPayload,
@@ -1086,7 +1093,25 @@ export const TicketGenerator: React.FC = () => {
                 <span className="text-sm text-slate-700">
                   <b className="text-slate-900">Билет по формату НЦТ</b>
                   <span className="block text-slate-500 mt-0.5">
-                    27 заданий (18 тест. + 2 соотв. + 7 откр.), 40 баллов. Задания идут блоками разделов, как в НЦТ: основные понятия → атом и ПЗ → растворы; баллы делятся между пройденными разделами. На каждое место берётся тип задания по меткам (в билете типы не повторяются), около 16 баллов — из сборника НЦТ (источник «ЦВЭ»). Темы уровней 4 и выше пока не берутся.
+                    27 заданий (18 тест. + 2 соотв. + 7 откр.), 40 баллов. Задания идут блоками разделов, как в НЦТ: основные понятия → атом и ПЗ → растворы; баллы делятся между пройденными разделами. На каждое место берётся тип задания по меткам (в билете типы не повторяются), около 16 баллов — из сборника НЦТ (источник «ЦВЭ»). Берутся главы 1–6 и темы 7.4–7.12 (растворы); остальные темы пока не берутся.
+                  </span>
+                </span>
+              </label>
+            )}
+
+            {nctMode && (
+              <label className={`flex items-start gap-2.5 rounded-xl border border-slate-200 p-3 ${permAvailable ? 'cursor-pointer' : 'opacity-60'}`}>
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4"
+                  checked={permPref && permAvailable}
+                  disabled={!permAvailable}
+                  onChange={(e) => { setPermPref(e.target.checked); try { localStorage.setItem('examiner_nct_perm', String(e.target.checked)); } catch { /* память недоступна */ } }}
+                />
+                <span className="text-sm text-slate-700">
+                  <b className="text-slate-900">Переставленные варианты</b>
+                  <span className="block text-slate-500 mt-0.5">
+                    Разных вариантов только 2: вариант 3 — это вариант 1, а вариант 4 — вариант 2 с переставленными заданиями (тесты среди тестов, соответствия среди соответствий, открытые среди открытых). {permAvailable ? '' : 'Доступно при чётном числе вариантов от 4.'}
                   </span>
                 </span>
               </label>

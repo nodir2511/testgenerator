@@ -5,6 +5,7 @@ import { notifyError, describeError, must } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { NCT_TYPES } from '../lib/nctTypes';
+import { NCT_DIFFICULTIES, isChemistrySubject } from '../lib/nctDifficulty';
 import { FormulaEditor } from './FormulaEditor';
 import { QuestionPreview } from './QuestionPreview';
 import { QuestionProgress, type ProgressStep } from './QuestionProgress';
@@ -103,6 +104,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     initialData?.source_id || localStorage.getItem('examiner_last_new_source_id') || ''
   );
   const [nctType, setNctType] = useState<string>(initialData?.nct_type || '');
+  const [nctDifficulty, setNctDifficulty] = useState<string>(initialData?.nct_difficulty ? String(initialData.nct_difficulty) : '');
   const [type, setType] = useState<QuestionType>(
     initialData?.type || (localStorage.getItem('examiner_last_new_type') as QuestionType) || 'test'
   );
@@ -421,6 +423,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         source_id: sourceId || null,
         // метку типа НЦТ меняет только главный админ; у остальных поле не трогаем
         ...(isOwner ? { nct_type: nctType || null } : {}),
+        ...(isOwner && isChemistrySubject(subjects.find(s => s.id === subjectId)?.name) ? { nct_difficulty: nctDifficulty ? Number(nctDifficulty) : null } : {}),
         type,
         content: primaryContent,
         content_ru: contentRu.trim() || null,
@@ -673,6 +676,19 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               >
                 <option value="">-- Без метки --</option>
                 {NCT_TYPES.map(t => <option key={t.code} value={t.code}>{t.name} ({t.code})</option>)}
+              </CustomSelect>
+            </Field>
+          )}
+
+          {isOwner && isChemistrySubject(subjects.find(s => s.id === subjectId)?.name) && (
+            <Field label="Сложность для НЦТ">
+              <CustomSelect
+                value={nctDifficulty}
+                onChange={(val) => setNctDifficulty(val)}
+                className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+              >
+                <option value="">-- Не указана --</option>
+                {NCT_DIFFICULTIES.map(d => <option key={d.value} value={String(d.value)}>{d.name}</option>)}
               </CustomSelect>
             </Field>
           )}

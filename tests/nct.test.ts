@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { nctCandidatesFor, buildLinks } from '../src/lib/questionSwap';
-import { pickNct, planNct, sectionOfTopicNumber, sectionPoints, topicNumber } from '../supabase/functions/_shared/nct';
+import { nctCandidatesFor, buildLinks, planNctTopicRemoval } from '../src/lib/questionSwap';
+import { expandPermuted, pickNct, planNct, sectionOfTopicNumber, sectionPoints, topicNumber } from '../supabase/functions/_shared/nct';
 
 function rng(seed: number) {
   return () => {
@@ -32,11 +32,22 @@ describe('режим НЦТ', () => {
     expect(topicNumber(1, 21)).toBe(21);
     expect(topicNumber(2, 1)).toBe(22);
     expect(topicNumber(3, 16)).toBe(49);
-    expect(topicNumber(4, 1)).toBeNull();
+    expect(topicNumber(8, 1)).toBeNull();
     expect([1, 33, 42, 43].map(sectionOfTopicNumber)).toEqual(['basic', 'basic', 'basic', 'basic']);
     expect([34, 41].map(sectionOfTopicNumber)).toEqual(['atom', 'atom']);
     expect([44, 49].map(sectionOfTopicNumber)).toEqual(['solutions', 'solutions']);
     expect(sectionOfTopicNumber(50)).toBeNull();
+    // глава 7: темы 7.4–7.12 — в раздел «Растворы», остальные темы главы 7 не берутся
+    expect(topicNumber(7, 4)).toBe(204);
+    expect(sectionOfTopicNumber(topicNumber(7, 12)!)).toBe('solutions');
+    expect(topicNumber(7, 3)).toBeNull();
+    expect(topicNumber(7, 13)).toBeNull();
+    // главы 4–6: химия элементов, органика, расчёты
+    expect(sectionOfTopicNumber(topicNumber(4, 1)!)).toBe('elements');
+    expect(sectionOfTopicNumber(topicNumber(5, 17)!)).toBe('organic');
+    expect([8, 9, 10, 11, 13, 16, 18].map((t) => sectionOfTopicNumber(topicNumber(6, t)!))).toEqual(['elements', 'basic', 'elements', 'basic', 'elements', 'basic', 'elements']);
+    expect([4, 5, 6, 10, 15].map((t) => sectionOfTopicNumber(topicNumber(4, t)!))).toEqual(['elements', 'basic', 'elements', 'basic', 'basic']);
+    expect(topicNumber(6, 19)).toBeNull();
   });
 
   it('баллы для тем 1–49: 18 + 11 + 11', () => {
@@ -70,17 +81,41 @@ describe('режим НЦТ', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it('темы в билете максимально разнообразны: тема повторяется лишь когда тем в разделе не хватает', () => {
+    for (let seed = 1; seed <= 15; seed++) {
+      const picked = pickNct(pool(all49, { test: 12, matching: 6, open: 8 }), 3, rng(seed));
+      for (let t = 0; t < 3; t++) {
+        const rows = picked.kinds.flatMap((k) => k[t]);
+        const slots: Record<string, number> = {};
+        const topics: Record<string, Record<string, number>> = {};
+        for (const q of rows) {
+          const n = +q.topic_id.slice(1);
+          const sec = sectionOfTopicNumber(n)!;
+          slots[sec] = (slots[sec] ?? 0) + 1;
+          topics[sec] = topics[sec] ?? {};
+          topics[sec][q.topic_id] = (topics[sec][q.topic_id] ?? 0) + 1;
+        }
+        const size: Record<string, number> = { basic: 33 + 2, atom: 8, solutions: 6 };
+        for (const sec of Object.keys(slots)) {
+          // тема может встретиться дважды только если мест в разделе больше, чем тем
+          const maxRepeat = Math.max(...Object.values(topics[sec]));
+          expect(maxRepeat).toBeLessThanOrEqual(Math.ceil(slots[sec] / size[sec]));
+        }
+      }
+    }
+  });
+
   it('если раздел не пройден, его баллы делятся между остальными', () => {
     const picked = pickNct(pool(all49.filter((n) => n <= 33), { test: 12, matching: 6, open: 8 }), 1, rng(3));
     expect(picked.sections).toEqual(['basic']);
     expect([picked.kinds[0][0].length, picked.kinds[1][0].length, picked.kinds[2][0].length]).toEqual([18, 2, 7]);
   });
 
-  it('темы уровней 4+ пропускаются с пояснением', () => {
+  it('темы вне режима (глава 8 и выше) пропускаются с пояснением', () => {
     const p = pool([1, 2, 3], { test: 12, matching: 2, open: 4 });
-    p.push({ id: 'x', type: 'test', topic_id: 'tx', chapter_id: 'c4', num: 1, chapter: { order_index: 4 }, topic: { order_index: 1 } });
+    p.push({ id: 'x', type: 'test', topic_id: 'tx', chapter_id: 'c8', num: 1, chapter: { order_index: 8 }, topic: { order_index: 1 } });
     const picked = pickNct(p, 1, rng(1));
-    expect(picked.notes.some((n) => n.includes('уровни 4'))).toBe(true);
+    expect(picked.notes.some((n) => n.includes('главы 7–10'))).toBe(true);
   });
 
   it('метки: типы не повторяются в билете, во всех вариантах тип обычно один, есть задания из сборника НЦТ', () => {
@@ -137,5 +172,71 @@ describe('режим НЦТ', () => {
     expect(ids(nctCandidatesFor(pool, 'test', new Set(), [], links, { section: 'basic', nctType: 'MOL', isNct: true }, new Set()))).toEqual(['a3']);
     // раздел не определён — кандидатов нет
     expect(nctCandidatesFor(pool, 'test', new Set(), [], links, { section: null, nctType: 'MOL', isNct: false }, new Set())).toEqual([]);
+  });
+
+  it('убрать тему в билете НЦТ: замены по месту, тип не повторяется, нет подходящего — пустое место', () => {
+    const q = (id: string, topic: string, ch: number, ord: number, nct: string | null, type = 'test') => ({
+      id, type, topic_id: topic, chapter: { order_index: ch }, topic: { order_index: ord }, nct_type: nct,
+    }) as any;
+    // билет 1: вопрос MOL из темы A (убираем), вопрос RTYPE из темы B, вопрос BOND из темы C (раздел «атом»)
+    const slots = [
+      { tqId: 't1', ticketId: 'T1', ticketNumber: 1, orderIndex: 1, questionId: 'sA', type: 'test', topicId: 'A', nctType: 'MOL', sourceId: null },
+      { tqId: 't2', ticketId: 'T1', ticketNumber: 1, orderIndex: 2, questionId: 'sB', type: 'test', topicId: 'B', nctType: 'RTYPE', sourceId: null },
+      { tqId: 't3', ticketId: 'T1', ticketNumber: 1, orderIndex: 3, questionId: 'sC', type: 'test', topicId: 'C', nctType: 'BOND', sourceId: null },
+      { tqId: 't4', ticketId: 'T1', ticketNumber: 1, orderIndex: 4, questionId: 'sA2', type: 'open', topicId: 'A', nctType: 'MOL', sourceId: null },
+    ] as any[];
+    const pool = [
+      q('b1', 'B', 1, 2, 'MOL'),    // подходит месту 1 (тот же тип MOL, раздел «основные понятия»)
+      q('b2', 'B', 1, 2, 'RTYPE'),  // другой тип
+      q('c1', 'C', 3, 2, 'MOL'),    // раздел «атом» — не подходит
+    ];
+    const sectionOf = (t: string) => (t === 'C' ? 'atom' : 'basic') as any;
+    const plan = planNctTopicRemoval(slots, 'A', pool, sectionOf, () => false, ['A', 'B', 'C']);
+    const bySlot = new Map(plan.changes.map((c) => [c.slot.tqId, c.question?.id ?? null]));
+    expect(bySlot.get('t1')).toBe('b1');
+    expect(bySlot.get('t4')).toBeNull(); // открытого MOL в пуле нет
+    expect(plan.missing.open).toBe(1);
+    expect(plan.fromTopic).toEqual({ B: 1 });
+  });
+});
+
+describe('expandPermuted', () => {
+  const mk = (n: number, p: string) => Array.from({ length: n }, (_, i) => ({ id: `${p}${i}` }));
+  const base = (): any => ({
+    kinds: [[mk(6, 'a'), mk(6, 'b')], [mk(2, 'c'), mk(2, 'd')], [mk(1, 'e'), mk(1, 'f')]],
+    ticketCount: 2,
+  });
+  it('вариант 3 — перестановка 1, вариант 4 — перестановка 2, внутри вида', () => {
+    const r = expandPermuted(base(), 4, rng(5));
+    expect(r.ticketCount).toBe(4);
+    r.kinds.forEach((byTicket: any[][], k: number) => {
+      expect(byTicket.length).toBe(4);
+      for (const [t, b] of [[2, 0], [3, 1]]) {
+        const ids = byTicket[t].map((q) => q.id);
+        expect([...ids].sort()).toEqual(byTicket[b].map((q) => q.id).sort());
+        if (byTicket[b].length > 1) byTicket[t].forEach((q, i) => expect(q.id).not.toBe(byTicket[b][i].id));
+      }
+    });
+    expect(r.kinds[2][2][0].id).toBe('e0');
+  });
+  it('6 вариантов: перестановки одного исходного различаются', () => {
+    const r = expandPermuted(base(), 6, rng(9));
+    expect(r.kinds[0][2].map((q: any) => q.id).join()).not.toBe(r.kinds[0][4].map((q: any) => q.id).join());
+  });
+  it('пять разделов: главы 1–6 дают 27 заданий и все разделы в плане', () => {
+    const q: any[] = [];
+    const add = (ch: number, topics: number, per: number) => {
+      for (let o = 1; o <= topics; o++) {
+        for (const type of ['test', 'matching', 'open'] as const) {
+          for (let i = 1; i <= per; i++) q.push({ id: `${type}-${ch}-${o}-${i}`, type, topic_id: `t${ch}-${o}`, chapter_id: `c${ch}`, num: i, chapter: { order_index: ch }, topic: { order_index: o } });
+        }
+      }
+    };
+    add(1, 21, 3); add(2, 12, 3); add(3, 16, 3); add(4, 15, 3); add(5, 17, 3); add(6, 18, 3);
+    const picked = pickNct(q, 2, rng(11));
+    expect(picked.sections.sort()).toEqual(['atom', 'basic', 'elements', 'organic', 'solutions']);
+    expect(picked.kinds[0][0].length).toBe(18);
+    expect(picked.kinds[1][0].length).toBe(2);
+    expect(picked.kinds[2][0].length).toBe(7);
   });
 });

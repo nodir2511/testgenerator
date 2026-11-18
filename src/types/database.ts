@@ -102,6 +102,8 @@ export interface Question {
   linked_ids?: string[] | null;
   /** Метка типа задания НЦТ (код из src/lib/nctTypes.ts) */
   nct_type?: string | null;
+  /** Сложность для НЦТ: 1 лёгкий, 2 средний, 3 сложный (пока у химии) */
+  nct_difficulty?: number | null;
   version: number;
   is_deleted: boolean;
   deleted_at?: string | null;

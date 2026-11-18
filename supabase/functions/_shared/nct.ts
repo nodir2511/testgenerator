@@ -24,19 +24,48 @@ export const NCT_COMPOSITION = { test: 18, matching: 2, open: 7, points: 40 };
 const CHEM_LEVEL_SIZES = [21, 12, 16];
 
 /**
+ * Темы выше уровня 3 получают номер «база + номер темы» и раздел НЦТ:
+ * глава 4 (химия элементов) → «Химия элементов», кроме расчётных тем 4.5, 4.10, 4.15 → «Основные понятия»; глава 5 (органика) → «Органика»;
+ * глава 6: темы 1–8 (свойства классов) → «Химия элементов»; расчёты: 6.9, 6.11, 6.12, 6.16 → «Основные понятия»,
+ * 6.10, 6.13–6.15, 6.17, 6.18 → «Химия элементов» (раздел темы выбран по типам заданий, которые в ней размечены);
+ * глава 7: темы 4–12 (растворимость, кристаллогидраты, реакции и расчёты в растворах) → «Растворы».
+ * Остальные темы глав 7 и выше в режим не берутся.
+ */
+const EXTRA_RANGES: Array<{ chapter: number; from: number; to: number; base: number; section: NctSection }> = [
+  { chapter: 4, from: 1, to: 4, base: 300, section: 'elements' },
+  { chapter: 4, from: 5, to: 5, base: 300, section: 'basic' }, // «Расчётные задачи по неорганической химии»
+  { chapter: 4, from: 6, to: 9, base: 300, section: 'elements' },
+  { chapter: 4, from: 10, to: 10, base: 300, section: 'basic' },
+  { chapter: 4, from: 11, to: 14, base: 300, section: 'elements' },
+  { chapter: 4, from: 15, to: 15, base: 300, section: 'basic' },
+  { chapter: 5, from: 1, to: 17, base: 400, section: 'organic' },
+  { chapter: 6, from: 1, to: 8, base: 500, section: 'elements' },
+  { chapter: 6, from: 9, to: 9, base: 500, section: 'basic' }, // количество вещества
+  { chapter: 6, from: 10, to: 10, base: 500, section: 'elements' }, // стехиометрия: цепочки, получение, ОВР
+  { chapter: 6, from: 11, to: 12, base: 500, section: 'basic' }, // термохимия, избыток
+  { chapter: 6, from: 13, to: 15, base: 500, section: 'elements' }, // кислые соли, выход, смеси
+  { chapter: 6, from: 16, to: 16, base: 500, section: 'basic' }, // смеси газов
+  { chapter: 6, from: 17, to: 18, base: 500, section: 'elements' }, // примеси, формулы
+  { chapter: 7, from: 4, to: 12, base: 200, section: 'solutions' },
+];
+
+/**
  * Раздел НЦТ по теме центра (сквозной номер). Основные понятия — 1–33, 42, 43; атом и ПЗ — 34–41;
- * растворы — 44–49. Темы 50+ (уровни 4–6) ещё не распределены: null — в режиме НЦТ не берутся.
+ * растворы — 44–49; номера 200+ — темы глав 4–7 (см. EXTRA_RANGES); остальное — null, в режиме НЦТ не берётся.
  */
 export function sectionOfTopicNumber(n: number): NctSection | null {
   if (n >= 1 && n <= 33) return 'basic';
   if (n >= 34 && n <= 41) return 'atom';
   if (n === 42 || n === 43) return 'basic';
   if (n >= 44 && n <= 49) return 'solutions';
-  return null;
+  const r = EXTRA_RANGES.find((x) => n >= x.base + x.from && n <= x.base + x.to);
+  return r ? r.section : null;
 }
 
-/** Сквозной номер темы по порядку главы (уровня) и параграфа; null, если уровень за пределами 1–3 */
+/** Сквозной номер темы по порядку главы (уровня) и параграфа; null, если тема не входит в режим */
 export function topicNumber(chapterOrder: number, topicOrder: number): number | null {
+  const r = EXTRA_RANGES.find((x) => x.chapter === chapterOrder && topicOrder >= x.from && topicOrder <= x.to);
+  if (r) return r.base + topicOrder;
   if (!Number.isFinite(chapterOrder) || !Number.isFinite(topicOrder) || chapterOrder < 1 || chapterOrder > CHEM_LEVEL_SIZES.length) return null;
   if (topicOrder < 1 || topicOrder > CHEM_LEVEL_SIZES[chapterOrder - 1]) return null;
   let offset = 0;
@@ -189,11 +218,12 @@ function splitQuota(quota: number, counts: Array<{ k: NctSection; want: number; 
 
 /**
  * Подбор билетов по формату НЦТ. Пул — «лёгкие» вопросы выбранных тем (у вопроса могут быть поля
- * nct_type — метка типа — и isNct — вопрос из сборника НЦТ). Вопросы тем вне уровней 1–3 в режим не попадают.
+ * nct_type — метка типа — и isNct — вопрос из сборника НЦТ). Вопросы тем, не распределённых по разделам (EXTRA_RANGES), в режим не попадают.
  * Задания каждого вида идут блоками разделов в порядке НЦТ. На каждое место выбирается тип по частоте
  * на номерах раздела и подбираются вопросы с этой меткой (во всех вариантах — один тип, как клоны); один тип
  * в билете не повторяется. Часть мест (NCT_QUOTA) берётся из сборника НЦТ. Нет вопросов с нужной меткой —
- * берутся неразмеченные вопросы раздела.
+ * берутся неразмеченные вопросы раздела. Темы стараются не повторяться в билете: на каждое место предпочтительны
+ * вопросы тем, из которых в билете ещё ничего не взято (а при нехватке — наименее использованных).
  */
 export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random, _totals?: ChapterTotals): NctPicked {
   const notes: string[] = [];
@@ -205,7 +235,7 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
     if (!bySection.has(s)) bySection.set(s, []);
     bySection.get(s)!.push(q);
   }
-  if (skipped > 0) notes.push(`${skipped} вопросов из тем, не распределённых по разделам НЦТ (уровни 4 и выше), в билеты не взяты`);
+  if (skipped > 0) notes.push(`${skipped} вопросов из тем, не распределённых по разделам НЦТ (главы 7–10, кроме тем 7.4–7.12), в билеты не взяты`);
 
   const have: NctHave = {};
   for (const [k, list] of bySection) {
@@ -229,19 +259,39 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   const nctPicked: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
   const typePicked: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
 
+  // Разнообразие тем: сколько раз тема уже встретилась в билете (счёт по всему билету, а не по разделу)
+  const topicUse = new Map<string, number>();
+  const useOf = (q: any) => topicUse.get(q.topic_id) ?? 0;
+  /** Оставляет вопросы наименее использованных тем, где хватает вопросов для всех билетов (T штук в одной теме) */
+  const freshest = (cands: any[]): any[] => {
+    const levels = enoughTopicsUse(cands);
+    return levels.length ? cands.filter((q) => useOf(q) <= levels[0]) : cands;
+  };
+  /** Использования тем (по возрастанию), в которых хватает вопросов для всех билетов */
+  const enoughTopicsUse = (cands: any[]): number[] => {
+    const byTopic = new Map<string, any[]>();
+    for (const q of cands) { const k = q.topic_id ?? '—'; if (!byTopic.has(k)) byTopic.set(k, []); byTopic.get(k)!.push(q); }
+    return [...new Set([...byTopic.values()].filter((g) => g.length >= T).map((g) => useOf(g[0])))].sort((a, b) => a - b);
+  };
+
   const attempt = (pool: any[], section: NctSection, kind: Kind): { rows: any[]; code: string | null } | null => {
     const w = typeWeights(section, kind);
-    const cands = Object.keys(w).filter((c) => !usedTypes.has(c) && pool.filter((q) => q.nct_type === c).length >= T);
+    const byCode = (c: string) => pool.filter((q) => q.nct_type === c);
+    let cands = Object.keys(w).filter((c) => !usedTypes.has(c) && byCode(c).length >= T);
     if (cands.length) {
+      // из типов предпочитаем те, у которых есть вопросы ещё не использованной (или наименее использованной) темы
+      const lvl = new Map(cands.map((c) => [c, enoughTopicsUse(byCode(c))[0] ?? Infinity]));
+      const best = Math.min(...lvl.values());
+      cands = cands.filter((c) => lvl.get(c) === best);
       let r = rnd() * cands.reduce((a, c) => a + w[c], 0);
       let code = cands[cands.length - 1];
       for (const c of cands) { r -= w[c]; if (r < 0) { code = c; break; } }
-      const col = pickParallel(pool.filter((q) => q.nct_type === code), 1, T, rnd);
+      const col = pickParallel(freshest(byCode(code)), 1, T, rnd);
       if (col.every((t) => t.length === 1)) return { rows: col.map((t) => t[0]), code };
     }
     // нет подходящей метки: неразмеченные вопросы и вопросы ещё не использованных разрешённых типов
     const loose = pool.filter((q) => !q.nct_type || (!NCT_BANNED.has(q.nct_type) && !usedTypes.has(q.nct_type)));
-    const col = pickParallel(loose, 1, T, rnd);
+    const col = pickParallel(freshest(loose), 1, T, rnd);
     if (col.every((t) => t.length === 1)) {
       const code = col[0][0].nct_type ?? null;
       return { rows: col.map((t) => t[0]), code: code && col.every((t) => t[0].nct_type === code) ? code : null };
@@ -257,6 +307,7 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
       const got = attempt(pool, section, kind);
       if (!got) continue;
       got.rows.forEach((q) => usedIds.add(q.id));
+      for (const tid of new Set(got.rows.map((q) => q.topic_id))) topicUse.set(tid, (topicUse.get(tid) ?? 0) + 1);
       if (got.code) typePicked[kind]++;
       for (const q of got.rows) if (q.nct_type) usedTypes.add(q.nct_type);
       if (got.rows[0].isNct) nctPicked[kind]++;
@@ -303,4 +354,40 @@ export function describePlan(plan: NctPlan): string {
     const pts = p.test + 4 * p.matching + 2 * p.open;
     return `${NCT_SECTION_NAMES[k]} — ${pts} б. (${p.test} тест. + ${p.matching} соотв. + ${p.open} откр.)`;
   }).join('; ');
+}
+
+/** Случайная перестановка длины n; при n > 1 ни один элемент не остаётся на своём месте (беспорядок) */
+function derangement(n: number, rnd: Rnd): number[] {
+  const id = Array.from({ length: n }, (_, i) => i);
+  if (n < 2) return id;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const p = [...id];
+    for (let i = n - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [p[i], p[j]] = [p[j], p[i]]; }
+    if (p.every((v, i) => v !== i)) return p;
+  }
+  return id.map((_, i) => (i + 1) % n); // сдвиг — всегда беспорядок
+}
+
+/**
+ * «Переставленные варианты»: picked содержит 2 разных варианта (1 и 2). Возвращает `total` вариантов:
+ * варианты 1 и 2 — как есть, вариант 3 — вариант 1 с переставленными заданиями, вариант 4 — вариант 2 и т. д.
+ * (нечётные — от 1-го, чётные — от 2-го). Тесты переставляются только среди тестовых мест, соответствия —
+ * среди мест соответствий, открытые — среди открытых; каждое задание уходит со своего места.
+ * Перестановки одного исходного варианта различаются между собой, пока это возможно.
+ */
+export function expandPermuted<T extends PickedTickets>(picked: T, total: number, rnd: Rnd = Math.random): T {
+  if (picked.ticketCount !== 2 || total < 2) return picked;
+  const kinds = picked.kinds.map((byTicket) => byTicket.map((row) => [...row]));
+  const seen = new Map<string, true>();
+  for (let t = 2; t < total; t++) {
+    const base = t % 2;
+    kinds.forEach((byTicket, k) => {
+      const src = picked.kinds[k][base];
+      let perm = derangement(src.length, rnd);
+      for (let a = 0; a < 20 && src.length > 2 && seen.has(`${base}:${k}:${perm.join(',')}`); a++) perm = derangement(src.length, rnd);
+      seen.set(`${base}:${k}:${perm.join(',')}`, true);
+      byTicket.push(perm.map((i) => src[i]));
+    });
+  }
+  return { ...picked, kinds, ticketCount: total } as T;
 }

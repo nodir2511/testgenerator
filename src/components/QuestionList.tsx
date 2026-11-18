@@ -26,6 +26,7 @@ import {
   Check
 } from 'lucide-react';
 import { NCT_TYPES, nctTypeName } from '../lib/nctTypes';
+import { NCT_DIFFICULTIES, nctDifficultyName } from '../lib/nctDifficulty';
 import { Badge, Button, Card, EmptyState, Field, IconButton, Skeleton } from './ui';
 
 interface QuestionListProps {
@@ -42,6 +43,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const queryClient = useQueryClient();
   const { isStaff, canManage, isOwner } = useAuth();
   const [filterNct, setFilterNct] = useState<string>('all');
+  const [filterDiff, setFilterDiff] = useState<string>('all');
 
   // Фильтры (с сохранением в localStorage)
   const [filterSubjectId, setFilterSubjectId] = useState(() => localStorage.getItem('examiner_ql_subject_id') || '');
@@ -130,6 +132,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
     if (filterType !== 'all') query = query.eq('type', filterType);
     if (isOwner && filterNct === 'none') query = query.is('nct_type', null);
     else if (isOwner && filterNct !== 'all') query = query.eq('nct_type', filterNct);
+    if (isOwner && filterDiff === 'none') query = query.is('nct_difficulty', null);
+    else if (isOwner && filterDiff !== 'all') query = query.eq('nct_difficulty', Number(filterDiff));
     if (searchQuery.trim()) {
       // Значение берём в кавычки и экранируем: запятые, скобки, % и _ в запросе не ломают фильтр
       const like = '%' + searchQuery.trim().replace(/[\\%_]/g, '\\$&') + '%';
@@ -177,7 +181,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
   const fetchIssuePage = async (pageNo: number) => {
     const ids = await queryClient.fetchQuery({
-      queryKey: ['questions', 'issue-ids', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, searchQuery, filterIssue],
+      queryKey: ['questions', 'issue-ids', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, filterDiff, searchQuery, filterIssue],
       staleTime: 15000,
       queryFn: loadIssueIds,
     });
@@ -227,7 +231,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const shownPages = Array.from({ length: extra + 1 }, (_, i) => page + i);
   const pageResults = useQueries({
     queries: shownPages.map((p) => ({
-      queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, searchQuery, filterIssue, p],
+      queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, filterDiff, searchQuery, filterIssue, p],
       queryFn: () => fetchPage(p),
     })),
   });
@@ -655,6 +659,18 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             </CustomSelect>
           )}
 
+          {isOwner && (
+            <CustomSelect
+              value={filterDiff}
+              onChange={(val) => { setFilterDiff(val); setPage(0); setExtra(0); }}
+              className="text-sm px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="all">Любая сложность</option>
+              <option value="none">Без сложности</option>
+              {NCT_DIFFICULTIES.map(d => <option key={d.value} value={String(d.value)}>{d.name}</option>)}
+            </CustomSelect>
+          )}
+
           {/* Проблемные вопросы */}
           <CustomSelect
             value={filterIssue}
@@ -770,6 +786,12 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                   {isOwner && q.nct_type && (
                     <Badge tone="neutral" className="font-normal" title={`Тип НЦТ: ${nctTypeName(q.nct_type)}`}>
                       НЦТ: {q.nct_type}
+                    </Badge>
+                  )}
+
+                  {isOwner && q.nct_difficulty && (
+                    <Badge tone="neutral" className="font-normal" title="Сложность для НЦТ">
+                      {nctDifficultyName(q.nct_difficulty)}
                     </Badge>
                   )}
 

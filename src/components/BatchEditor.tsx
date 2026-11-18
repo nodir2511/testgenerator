@@ -5,7 +5,7 @@ import { notifyError, notifyInfo } from '../lib/errors';
 import { useAuth } from '../hooks/useAuth';
 import { fetchBatchSlots, fetchFullQuestions, fetchNctSourceIds, fetchTopicInfos, fetchTopicPool, saveBatchChanges, type BatchSlots, type TopicInfo } from '../lib/batchEdit';
 import {
-  applyToSlots, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, nctCandidatesFor, paramsAfterEdit, planTopicRemoval, sectionOfPoolQ,
+  applyToSlots, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, nctCandidatesFor, paramsAfterEdit, planNctTopicRemoval, planTopicRemoval, sectionOfPoolQ,
   topicCounts, TYPE_LABEL, type PoolQ, type RowChange, type Slot,
 } from '../lib/questionSwap';
 import { FormattedText } from './FormulaEditor';
@@ -157,7 +157,21 @@ const RemoveTopicModal: React.FC<{ batch: EditBatch; ed: Ed; topicId: string; on
   const poolQ = useQuery({ queryKey: ['swap_pool', batch.subject_id, otherTopics.join(',')], queryFn: () => fetchTopicPool(batch.subject_id, otherTopics), staleTime: 60_000 });
   const [busy, setBusy] = useState(false);
   const order = useMemo(() => ed.topics.map((t) => t.id), [ed.topics]);
-  const plan = useMemo(() => (poolQ.data ? planTopicRemoval(data.slots, topicId, poolQ.data, order) : null), [poolQ.data, data, topicId, order]);
+  // Билет по формату НЦТ: замены подбираются по месту (раздел, вид, тип задания, источник)
+  const nctBatch = Boolean(batch.generation_params?.nct);
+  const sourcesQ = useQuery({ queryKey: ['nct_sources'], queryFn: fetchNctSourceIds, enabled: nctBatch, staleTime: 5 * 60_000 });
+  const plan = useMemo(() => {
+    if (!poolQ.data) return null;
+    if (!nctBatch) return planTopicRemoval(data.slots, topicId, poolQ.data, order);
+    if (!sourcesQ.data) return null;
+    const src = sourcesQ.data;
+    const pool = poolQ.data.map((q) => ({ ...q, isNct: !!q.source_id && src.has(q.source_id) }));
+    const sectionOf = (t: string) => {
+      const info = ed.topicById.get(t);
+      return info ? sectionOfPoolQ({ chapter: { order_index: info.chapterOrder }, topic: { order_index: info.order } }) : null;
+    };
+    return planNctTopicRemoval(data.slots, topicId, pool, sectionOf, (id) => !!id && src.has(id), order);
+  }, [poolQ.data, data, topicId, order, nctBatch, sourcesQ.data, ed.topicById]);
   const name = ed.label(ed.topicById.get(topicId));
   const total = plan?.changes.length ?? 0;
   const missing = plan ? plan.missing.test + plan.missing.matching + plan.missing.open : 0;
@@ -192,7 +206,9 @@ const RemoveTopicModal: React.FC<{ batch: EditBatch; ed: Ed; topicId: string; on
     >
       {!plan ? <div className="py-4 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div> : (
         <>
-          <p>В билетах будет заменено вопросов: <b>{total - missing}</b> из {total}. Вопросы подбираются из остальных тем набора — из тех, где в билетах их меньше.</p>
+          <p>В билетах будет заменено вопросов: <b>{total - missing}</b> из {total}. {nctBatch
+            ? 'Билет по формату НЦТ: каждый вопрос заменяется на подходящий для его места — того же раздела, вида и типа задания, из сборника НЦТ или из банка, как прежний. Вопросы берутся из остальных тем набора.'
+            : 'Вопросы подбираются из остальных тем набора — из тех, где в билетах их меньше.'}</p>
           {Object.keys(plan.fromTopic).length > 0 && (
             <ul className="space-y-1">
               {Object.entries(plan.fromTopic).sort((a, b) => b[1] - a[1]).map(([t, n]) => (
