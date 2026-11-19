@@ -20,7 +20,7 @@ export function keyKindOf(subjectName: string): KeyKind | null {
   if (/биол/.test(n)) return 'bio';
   if (/тоҷик|таджик|забони/.test(n)) return 'taj';
   if (/матем/.test(n)) return 'math';
-  // Право: 20 тестов и 5 соответствий, без открытых
+  // Право: 20/4/2 (как у биологии); старые наборы 20/5/0 — шаблон law
   if (LAW_RE.test(n)) return 'law';
   // История: 20 тестов, 4 соответствия, 2 открытых
   if (HIST_RE.test(n)) return 'hist';
@@ -33,12 +33,13 @@ export interface KeyTicket {
 }
 
 /**
- * Файл шаблона под состав билетов. У таджикского их два: taj — пять соответствий без открытых (20/5/0),
+ * Файл шаблона под состав билетов. Право с открытыми вопросами (20/4/2) идёт в шаблон биологии: у него те же клетки. У таджикского их два: taj — пять соответствий без открытых (20/5/0),
  * taj-cluster — четыре соответствия и два открытых (20/4/2). С шаблоном без клеток для открытых вопросов
  * ключ ушёл бы в универсальную таблицу.
  */
 export function keyTemplateName(kind: KeyKind, tickets: KeyTicket[]): string {
   const hasOpen = tickets.some((t) => t.questions.some((q) => q.question_snapshot?.type === 'open'));
+  if (kind === 'law' && hasOpen) return 'bio';
   return kind === 'taj' && hasOpen ? 'taj-cluster' : kind;
 }
 

@@ -126,6 +126,17 @@ describe('ключи таджикского языка: шаблон под со
     expect(stats.overflow).toBe(0);
   });
 
+  it('право 20/4/2: шаблон биологии, все ответы на месте, у 4-значного ответа по цифре в клетке', async () => {
+    const tk = ticket(20, 4, 2);
+    tk.questions[tk.questions.length - 1].question_snapshot.correct_numeric_answer = 1246;
+    expect(keyTemplateName('law', [tk])).toBe('bio');
+    const { stats, bytes } = await buildAnswerKeyDocx(fs.readFileSync('templates/key/bio.docx'), [tk]);
+    expect(stats.universal).toBeUndefined();
+    expect(stats.overflow).toBe(0);
+    expect(stats.missing).toBe(0);
+    expect((await (await JSZip.loadAsync(bytes)).file('word/document.xml')!.async('string'))).toContain('>6<');
+  });
+
   it('история 20/4/2: свой шаблон, все ответы на месте', async () => {
     const tk = ticket(20, 4, 2);
     expect(keyTemplateName('hist', [tk])).toBe('hist');

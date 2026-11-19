@@ -47,8 +47,7 @@ type ScopeMode = 'all' | 'pick';
 // Стандартный состав билета по предмету: подставляется сам при выборе предмета
 const STANDARDS = [
   { match: ['хим', 'физ', 'матем'], test: 18, matching: 2, open: 7 },
-  { match: ['био', 'тадж', 'тоҷик', 'гос', 'истор', 'таърих'], test: 20, matching: 4, open: 2 },
-  { match: ['право', 'ҳуқуқ'], test: 20, matching: 5, open: 0 },
+  { match: ['био', 'тадж', 'тоҷик', 'гос', 'истор', 'таърих', 'право', 'ҳуқуқ'], test: 20, matching: 4, open: 2 },
 ];
 const standardFor = (name?: string) => {
   const n = (name || '').toLowerCase();

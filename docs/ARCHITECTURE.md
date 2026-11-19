@@ -322,7 +322,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 |---|---|---|
 | `supabase.ts` | `supabase`, `isSupabaseConfigured` | клиент |
 | `docxExport.ts` | `buildTicketsFile(title, tickets, subject, lang, extraFiles?)`, `buildSingleTicketBlob`, `buildSingleTicketFile`, `exportTicketsToDocx`, `exportSingleTicketDocx`, `createQuestionTable`, `parseFormattedTextRuns`, `estimateQuestionHeightPt` | Word с билетами: шрифт 14 pt, вопрос не рвётся между страницами, RU, TG или оба языка (ZIP). **Копируется в `_shared`** |
-| `answerKey.ts` | `keyKindOf` (виды: chem, phys, bio, taj, law, hist, math), `buildAnswerKeyDocx(template, tickets, info)`, `buildUniversalKeyDocx`, `testAnswer`, `matchingAnswer`, `openAnswer`, `selectionInfo`, `selectionChips`, `numberList` | Ключи по Word-шаблону; универсальная таблица, если состав не помещается. **Копируется в `_shared`** |
+| `answerKey.ts` | `keyKindOf` (виды: chem, phys, bio, taj, law, hist, math), `buildAnswerKeyDocx(template, tickets, info)`, `buildUniversalKeyDocx`, `testAnswer`, `matchingAnswer`, `openAnswer`, `selectionInfo`, `selectionChips`, `numberList` | Ключи по Word-шаблону; универсальная таблица, если состав не помещается. Состав права — 20/4/2 (как у биологии): с открытыми `keyTemplateName` отдаёт шаблон `bio`, старые наборы 20/5/0 — `law`. **Копируется в `_shared`** |
 | `answerKeyExport.ts` | `buildAnswerKeyFile`, `exportAnswerKey`, `keyArchiveExtras`, `withSelectionInfo`, `describeSelection`, `makeSelectionInfoLoader`, `hasKeyTemplate` | Скачивание ключей: шаблон из `/key-templates`, `enrich` догружает верные ответы для старых снимков |
 | `exportLazy.ts` | ленивые обёртки над двумя модулями выше, `warmKeyModule`, `hasKeyTemplate` (regex) | docx и jszip грузятся только при скачивании |
 | `clusterExport.ts` | `buildClusterVariantBlob`, `buildClusterZip`, `instructionIntro` | книжка кластера по образцу, картинки из `cluster-assets`; справочные страницы — заголовок текстом + две серые 4-битные картинки (`{lang}_aux_phys1/2`, `aux_chem1/2`, взяты из Word-образца и ужаты) |
@@ -582,5 +582,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - Путь проекта на кириллице («генератор тестов»): в командах берите его в кавычки. Git предупреждает о CRLF, это нормально.
 
 ## 16. Эталонные данные по предметам
+
+- **Право, открытые вопросы:** формат — условие «Определите…», шесть пунктов `1) … 6)` и инструкция «получится число»; `correct_numeric_answer` — цифры верных пунктов по возрастанию (1–4 цифры, четыре клетки в билете). В банке 319 таких вопросов (главы 1–5, по 5–7 на тему, партия «Право: открытые вопросы (главы 1–5, RU+TJ)», источник «Учебник права, открытые вопросы (Часть N)»). Стандарт билета по праву — 20 тестов, 4 соответствия, 2 открытых (`STANDARDS` в `TicketGenerator.tsx`, `QUICK.law` в боте). Откат партии скрывает вопросы из банка.
 
 - **Химия, расчётные задачи уровней 2 и 3:** эталонные единицы — литр (л) и грамм (г). В таких задачах не должно быть шагов перевода из одной единицы в другую (кг → г, л → мл и обратно): все величины в условии и в ответе даются сразу в л и г.

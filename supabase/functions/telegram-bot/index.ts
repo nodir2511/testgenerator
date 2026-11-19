@@ -327,7 +327,7 @@ async function screenQuick(chat: number, user: any, msgId?: number) {
   const law = userSubs.find((s: any) => LAW_RE.test((s.name || '').toLowerCase()));
   if (law) {
     kb.push([{
-      text: `⚖️ Право (20+5+0 = 25 в.) · ${T.shortName(law.name, 20)}`,
+      text: `⚖️ Право (20+4+2 = 26 в.) · ${T.shortName(law.name, 20)}`,
       callback_data: `Q:PRE:law:${law.id}`,
     }]);
   }
@@ -356,7 +356,7 @@ type QuickType = 'phys' | 'bio' | 'law';
 const QUICK: Record<QuickType, { test: number; matching: number; open: number; title: string; fallback: string }> = {
   phys: { test: 18, matching: 2, open: 7, title: '🧪 Физика / Химия (18 тестов, 2 соотв., 7 откр.)', fallback: 'Химия' },
   bio: { test: 20, matching: 4, open: 2, title: '🧬 Био / Гос / История (20 тестов, 4 соотв., 2 откр.)', fallback: 'Биология' },
-  law: { test: 20, matching: 5, open: 0, title: '⚖️ Право (20 тестов, 5 соотв., без открытых)', fallback: 'Право' },
+  law: { test: 20, matching: 4, open: 2, title: '⚖️ Право (20 тестов, 4 соотв., 2 откр.)', fallback: 'Право' },
 };
 const quickType = (v: string): QuickType => (v === 'bio' || v === 'law' ? v : 'phys');
 
