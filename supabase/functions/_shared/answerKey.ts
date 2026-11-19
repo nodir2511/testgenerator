@@ -7,7 +7,7 @@ import JSZip from 'npm:jszip@3';
 // открытые (число по одной цифре в клетку).
 // Модуль общий для сайта и Edge Functions: scripts/sync-docx-shared.mjs копирует его в supabase/functions/_shared.
 
-export type KeyKind = 'chem' | 'phys' | 'bio' | 'taj' | 'law' | 'hist' | 'math';
+export type KeyKind = 'chem' | 'phys' | 'bio' | 'taj' | 'eng' | 'law' | 'hist' | 'math';
 
 /** «Право» отдельным словом (не «правописание»), по-таджикски — «ҳуқуқ» */
 export const LAW_RE = /(^|[^а-яё])право([^а-яё]|$)|ҳуқуқ/;
@@ -20,6 +20,8 @@ export function keyKindOf(subjectName: string): KeyKind | null {
   if (/хим/.test(n)) return 'chem';
   if (/физ/.test(n)) return 'phys';
   if (/биол/.test(n)) return 'bio';
+  // Английский раньше таджикского: «Забони англисӣ» содержит «забони». Шаблон — как у таджикского (пять клеток открытого ответа)
+  if (/англ|инглис|english/.test(n)) return 'eng';
   if (/тоҷик|таджик|забони/.test(n)) return 'taj';
   if (/матем/.test(n)) return 'math';
   // Право: 20/4/2 (как у биологии); старые наборы 20/5/0 — шаблон law
@@ -42,6 +44,7 @@ export interface KeyTicket {
 export function keyTemplateName(kind: KeyKind, tickets: KeyTicket[]): string {
   const hasOpen = tickets.some((t) => t.questions.some((q) => q.question_snapshot?.type === 'open'));
   if (kind === 'law' && hasOpen) return 'bio';
+  if (kind === 'eng') return hasOpen ? 'taj-cluster' : 'taj';
   return kind === 'taj' && hasOpen ? 'taj-cluster' : kind;
 }
 

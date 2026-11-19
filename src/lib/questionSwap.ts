@@ -159,6 +159,26 @@ export function blockCandidates(pool: PoolQ[], kind: PassageKindLite, usedPassag
   return blocks.sort((a, b) => load(a) - load(b) || bookOrder(a.questions[0], b.questions[0]));
 }
 
+/**
+ * Убирает тексты, вопросы которых связаны (linked_ids) с вопросами, остающимися в том же билете
+ * (места самого заменяемого текста — members — освобождаются и в счёт не идут).
+ */
+export function blocksWithoutLinkClash(blocks: PassageBlockQ[], slots: Slot[], members: Slot[]): PassageBlockQ[] {
+  const memberIds = new Set(members.map((m) => m.tqId));
+  const ticketIds = new Set(members.map((m) => m.ticketId));
+  const staying = slots.filter((x) => ticketIds.has(x.ticketId) && x.questionId && !memberIds.has(x.tqId));
+  const links = buildLinks([
+    ...blocks.flatMap((b) => b.questions),
+    ...staying.map((x) => ({ id: x.questionId!, linked_ids: x.linked })),
+  ]);
+  const stay = new Map<string, Set<string>>();
+  for (const x of staying) {
+    if (!stay.has(x.ticketId)) stay.set(x.ticketId, new Set());
+    stay.get(x.ticketId)!.add(x.questionId!);
+  }
+  return blocks.filter((b) => [...ticketIds].every((t) => b.questions.every((q) => !clashes(q.id, stay.get(t) ?? [], links))));
+}
+
 /** Изменения для замены текста: места блока по порядку получают вопросы нового текста; block = null — пустые места */
 export function blockSwapChanges(blockSlotList: Slot[], block: PassageBlockQ | null): PlanChange[] {
   const sorted = [...blockSlotList].sort((a, b) => a.orderIndex - b.orderIndex);

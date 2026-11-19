@@ -554,6 +554,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     onSuccess: (_data, next) => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       queryClient.invalidateQueries({ queryKey: ['question_counts'] });
+      queryClient.invalidateQueries({ queryKey: ['passage_counts'] });
       clearDraft();
       if (next) resetForNext();
       else onSuccess();

@@ -255,7 +255,9 @@ function labelRun(lab: number, tokens: FmtToken[], isItalic: boolean, fontSize: 
     `<w:rubyPr><w:rubyAlign w:val="center"/><w:hps w:val="${small}"/><w:hpsRaise w:val="${fontSize + 2}"/><w:hpsBaseText w:val="${fontSize}"/><w:lid w:val="ru-RU"/></w:rubyPr>` +
     `<w:rt><w:r>${rpr(small, true, false)}<w:t>${lab}</w:t></w:r></w:rt>` +
     `<w:rubyBase>${base}</w:rubyBase></w:ruby></w:r>`;
-  return ImportedXmlComponent.fromXmlString(xml) as unknown as ParagraphChild;
+  // fromXmlString кладёт результат в безымянный корень (в документе он стал бы тегом <undefined>): берём вложенный <w:r>
+  const wrapper = ImportedXmlComponent.fromXmlString(xml) as unknown as { root: unknown[] };
+  return wrapper.root[0] as ParagraphChild;
 }
 
 // Парсер форматированного текста (sub, sup, b, i, u); дроби (a/b) становятся формулами Word

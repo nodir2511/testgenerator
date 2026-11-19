@@ -50,6 +50,7 @@ export const TrashView: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['trash'] });
       qc.invalidateQueries({ queryKey: ['questions'] });
       qc.invalidateQueries({ queryKey: ['question_counts'] });
+      qc.invalidateQueries({ queryKey: ['passage_counts'] });
     },
   });
 

@@ -41,10 +41,10 @@ export const CLUSTER_SUBJECTS: Record<ClusterKind, ClusterSubjectDef> = {
   chem: { kind: 'chem', name: 'Химия', nameTj: 'Химия', dative: 'химии', counts: B, draft: true, openBoxes: 4, keyTemplate: 'chem' },
   phys: { kind: 'phys', name: 'Физика', nameTj: 'Физика', dative: 'физике', counts: B, draft: true, openBoxes: 4, keyTemplate: 'phys' },
   math: { kind: 'math', name: 'Математика', nameTj: 'Математика', dative: 'математике', counts: B, draft: true, openBoxes: 4, keyTemplate: 'math' },
-  // История, право и английский: те же 20+4+2 и тот же шаблон ключей, что у биологии
+  // История и право: те же 20+4+2 и тот же шаблон ключей, что у биологии; английский — как у таджикского (taj-cluster, пять клеток)
   hist: { kind: 'hist', name: 'История', nameTj: 'Таърих', dative: 'истории', counts: A, draft: false, openBoxes: 4, keyTemplate: 'bio' },
   law: { kind: 'law', name: 'Право', nameTj: 'Ҳуқуқ', dative: 'праву', counts: A, draft: false, openBoxes: 4, keyTemplate: 'bio' },
-  eng: { kind: 'eng', name: 'Английский язык', nameTj: 'Забони англисӣ', dative: 'английскому языку', counts: A, draft: false, openBoxes: 5, keyTemplate: 'bio' },
+  eng: { kind: 'eng', name: 'Английский язык', nameTj: 'Забони англисӣ', dative: 'английскому языку', counts: A, draft: false, openBoxes: 5, keyTemplate: 'taj-cluster' },
 };
 
 /** Предметы в порядке списка выбора */

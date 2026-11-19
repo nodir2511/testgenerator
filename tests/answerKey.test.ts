@@ -39,7 +39,7 @@ describe('ключи ответов: пропуски', () => {
 describe('hasKeyTemplate (ленивый фасад)', () => {
   it('совпадает с keyKindOf', async () => {
     const { hasKeyTemplate } = await import('../src/lib/exportLazy');
-    for (const n of ['Химия', 'химия', 'Физика', 'Биология', 'Таджикский язык', 'Забони тоҷикӣ', 'Тоҷикӣ', 'Математика', 'История', 'English', '', 'ХИМИЯ 11', 'Право', 'Основы права', 'Ҳуқуқ', 'Правописание']) {
+    for (const n of ['Химия', 'химия', 'Физика', 'Биология', 'Таджикский язык', 'Забони тоҷикӣ', 'Тоҷикӣ', 'Математика', 'История', 'English', '', 'ХИМИЯ 11', 'Право', 'Основы права', 'Ҳуқуқ', 'Правописание', 'Английский язык', 'Забони англисӣ']) {
       expect(hasKeyTemplate(n)).toBe(keyKindOf(n) !== null);
     }
   });
@@ -164,5 +164,41 @@ describe('ключи таджикского языка: шаблон под со
       expect(KEY_TEMPLATES[name]).toBe(file.toString('base64'));
       expect(fs.readFileSync(`public/key-templates/${name}.docx`).equals(file)).toBe(true);
     }
+  });
+});
+
+describe('ключи английского: как у таджикского (taj-cluster)', () => {
+  const matching = (id: string) => ({ question_snapshot: { id, type: 'matching', matching_items: [
+    ...[1, 2, 3, 4].map((i) => ({ id: `${id}l${i}`, side: 'left', order_index: i, correct_match_id: `${id}r${i}` })),
+    ...[1, 2, 3, 4, 5].map((i) => ({ id: `${id}r${i}`, side: 'right', order_index: i })),
+  ] } });
+  const open = (id: string, a: number) => ({ question_snapshot: { id, type: 'open', correct_numeric_answer: a } });
+  const ticket = (a: number) => ({ ticket_number: 1, questions: [
+    ...Array.from({ length: 20 }, (_, i) => test(`t${i}`, 1)),
+    ...Array.from({ length: 4 }, (_, i) => matching(`m${i}`)),
+    open('o1', a), open('o2', 3142),
+  ] });
+
+  it('предмет распознаётся раньше таджикского («Забони англисӣ» содержит «забони»)', () => {
+    expect(keyKindOf('Английский язык')).toBe('eng');
+    expect(keyKindOf('Забони англисӣ')).toBe('eng');
+    expect(keyKindOf('Забони тоҷикӣ')).toBe('taj');
+  });
+
+  it('шаблон: с открытыми — taj-cluster, без открытых — taj', () => {
+    expect(keyTemplateName('eng', [ticket(2413)])).toBe('taj-cluster');
+    expect(keyTemplateName('eng', [{ ticket_number: 1, questions: [test('a', 1)] }])).toBe('taj');
+  });
+
+  it('порядок из четырёх цифр (2413) записан в ключе по цифре в клетку; шаблон не переполнен', async () => {
+    const tk = ticket(2413);
+    const { bytes, stats } = await buildAnswerKeyDocx(fs.readFileSync(`templates/key/${keyTemplateName('eng', [tk])}.docx`), [tk]);
+    expect(stats.universal).toBeUndefined();
+    expect(stats.overflow).toBe(0);
+    const xml = await (await JSZip.loadAsync(bytes)).file('word/document.xml')!.async('string');
+    const tbl = xml.slice(xml.indexOf('<w:tbl>'), xml.indexOf('</w:tbl>'));
+    const runs = (tbl.match(/<w:t xml:space="preserve">[^<]*<\/w:t>/g) || []).map((r) => r.replace(/<[^>]+>/g, ''));
+    expect(runs.length).toBe(20 + 4 * 4 + 4 + 4); // 20 букв, 16 цифр соответствий, два ответа по 4 цифры
+    expect(runs.join('')).toContain('2413'); expect(runs.join('')).toContain('3142');
   });
 });

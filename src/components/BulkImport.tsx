@@ -745,6 +745,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     onSuccess: (report) => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       queryClient.invalidateQueries({ queryKey: ['question_counts'] });
+      queryClient.invalidateQueries({ queryKey: ['passage_counts'] });
       queryClient.invalidateQueries({ queryKey: ['import_batches'] });
       queryClient.invalidateQueries({ queryKey: ['pool_stats'] });
       queryClient.invalidateQueries({ queryKey: ['all_chapters'] });
@@ -781,6 +782,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
       queryClient.invalidateQueries({ queryKey: ['passages'] });
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       queryClient.invalidateQueries({ queryKey: ['question_counts'] });
+      queryClient.invalidateQueries({ queryKey: ['passage_counts'] });
       queryClient.invalidateQueries({ queryKey: ['import_batches'] });
     },
   });

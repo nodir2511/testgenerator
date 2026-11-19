@@ -7,7 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import { exportTicketsToDocx, exportSingleTicketDocx, buildTicketsFile } from '../lib/exportLazy';
 import { exportAnswerKey, hasKeyTemplate, keyArchiveExtras, makeSelectionInfoLoader, withSelectionInfo } from '../lib/exportLazy';
 import { SendToTelegramButton } from './SendToTelegramButton';
-import { DownloadButton, useExportLang, type Lang } from './DownloadButton';
+import { DownloadButton, useExportLang, isEnglishName, type Lang } from './DownloadButton';
 import { saveAs } from 'file-saver';
 import { isClusterBatch, clusterVariantsFromBatch } from '../lib/clusterStore';
 import {
@@ -391,7 +391,7 @@ const BatchCard: React.FC<{
           </Button>
         ) : (
           <div className="sm:max-w-sm">
-            <DownloadButton size="md" lang={exportLang} busy={busyId === `${batch.id}-dl`} onDownload={onDownload} />
+            <DownloadButton size="md" lang={exportLang} busy={busyId === `${batch.id}-dl`} onDownload={onDownload} singleLang={isEnglishName(subjName)} />
           </div>
         )}
 
@@ -401,6 +401,7 @@ const BatchCard: React.FC<{
               title={batch.title}
               batchId={batch.id}
               ticketCount={batch.ticketCount}
+              singleLang={isEnglishName(subjName)}
               build={async (lang) => {
                 const ts = await loadTickets();
                 return buildTicketsFile(batch.title, ts, subjName || 'Экзамен', lang, await keyArchiveExtras(batch.title, ts, subjName, { subjectId: batch.subject_id, params: p }, lang));

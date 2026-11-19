@@ -15,6 +15,8 @@ export interface BankQ {
   content_tg?: string | null;
   image_url?: string | null;
   correct_numeric_answer?: number | null;
+  /** Вопрос к тексту (английский): пустое условие у пропусков — норма */
+  passage_id?: string | null;
   /** Связанные вопросы: с ними этот вопрос не попадает в один билет */
   linked_ids?: string[] | null;
   chapter?: { name: string } | null;
@@ -24,7 +26,7 @@ export interface BankQ {
 }
 
 const SELECT = `
-  id, type, num, content, content_ru, content_tg, image_url, correct_numeric_answer, linked_ids,
+  id, type, num, content, content_ru, content_tg, image_url, correct_numeric_answer, linked_ids, passage_id,
   chapter:chapters(name), topic:topics(name),
   options:question_options(*), matching_items:matching_items(*)`;
 

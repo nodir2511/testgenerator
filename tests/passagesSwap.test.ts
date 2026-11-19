@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  applyToSlots, blockCandidates, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, emptySnapshot, planTopicRemoval,
+  applyToSlots, blockCandidates, blocksWithoutLinkClash, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, emptySnapshot, planTopicRemoval,
   type PoolQ, type Slot,
 } from '../src/lib/questionSwap';
 
@@ -172,5 +172,25 @@ describe('убрать тему из набора с текстами', () => {
     const plan = planTopicRemoval(slots, 'A', [pq('b2', 'B'), pq('b3', 'B')], ['A', 'B']);
     expect(plan.changes.map((c) => c.question?.id).sort()).toEqual(['b2', 'b3']);
     expect(emptySnapshot('test').empty).toBe(true);
+  });
+});
+
+describe('blocksWithoutLinkClash', () => {
+  it('текст, вопрос которого связан с вопросом того же билета, не предлагается; чужие связи не мешают', () => {
+    const pool = [...textPool('P-ok', 'reading', 'tA'), ...textPool('P-bad', 'reading', 'tA')];
+    // вопрос P-bad-q3 связан с одиночным тестом s1-0, который остаётся в билете 1
+    (pool.find((q: any) => q.id === 'P-bad-q3') as any).linked_ids = ['s1-0'];
+    const slots = ticketSlots(1, 'P-old', 'tA');
+    const members = slots.slice(0, 8);
+    const blocks = blockCandidates(pool, 'reading', new Set(['P-old']));
+    expect(blocks.map((b) => b.id).sort()).toEqual(['P-bad', 'P-ok']);
+    expect(blocksWithoutLinkClash(blocks, slots, members).map((b) => b.id)).toEqual(['P-ok']);
+  });
+  it('связь с вопросом самого заменяемого текста не считается конфликтом (он уходит из билета)', () => {
+    const pool = textPool('P-new', 'reading', 'tA');
+    (pool.find((q: any) => q.id === 'P-new-q1') as any).linked_ids = ['P-old-q2'];
+    const slots = ticketSlots(1, 'P-old', 'tA');
+    const blocks = blockCandidates(pool, 'reading', new Set(['P-old']));
+    expect(blocksWithoutLinkClash(blocks, slots, slots.slice(0, 8)).map((b) => b.id)).toEqual(['P-new']);
   });
 });

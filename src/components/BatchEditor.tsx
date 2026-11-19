@@ -5,7 +5,7 @@ import { notifyError, notifyInfo } from '../lib/errors';
 import { useAuth } from '../hooks/useAuth';
 import { fetchBatchSlots, fetchFullQuestions, fetchNctSourceIds, fetchTopicInfos, fetchTopicPool, saveBatchChanges, type BatchSlots, type TopicInfo } from '../lib/batchEdit';
 import {
-  applyToSlots, blockCandidates, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, nctCandidatesFor, paramsAfterEdit,
+  applyToSlots, blockCandidates, blocksWithoutLinkClash, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, nctCandidatesFor, paramsAfterEdit,
   planNctTopicRemoval, planTopicRemoval, sectionOfPoolQ, topicCounts, TYPE_LABEL, usedPassageIds, type PassageBlockQ, type PoolQ, type RowChange, type Slot,
 } from '../lib/questionSwap';
 import { FormattedText } from './FormulaEditor';
@@ -307,8 +307,8 @@ const ReplaceTextModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose
   const [busy, setBusy] = useState<string | null>(null);
   const poolQ = useQuery({ queryKey: ['swap_pool', batch.subject_id, topicId], queryFn: () => fetchTopicPool(batch.subject_id, [topicId!]), enabled: !!topicId, staleTime: 60_000 });
   const cands: PassageBlockQ[] = useMemo(
-    () => (poolQ.data ? blockCandidates(poolQ.data, kind, usedPassageIds(data.slots)).slice(0, 5) : []),
-    [poolQ.data, data, kind],
+    () => (poolQ.data ? blocksWithoutLinkClash(blockCandidates(poolQ.data, kind, usedPassageIds(data.slots)), data.slots, members).slice(0, 5) : []),
+    [poolQ.data, data, kind, members],
   );
   // по первому вопросу каждого текста читаем сам текст для показа
   const firstIds = cands.map((c) => c.questions[0].id);

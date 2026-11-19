@@ -19,6 +19,9 @@ export function useExportLang(): [Lang, (l: Lang) => void] {
   return [lang, set];
 }
 
+/** Название предмета — английский (одноязычный) */
+export const isEnglishName = (name?: string | null) => /англ|инглис|english/i.test(name || '');
+
 // Одна главная кнопка «Скачать · язык»; стрелка открывает выбор другого языка
 export const DownloadButton: React.FC<{
   lang: Lang;

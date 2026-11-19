@@ -75,3 +75,11 @@ describe('ключ, введённый вручную', () => {
     expect(keyToText(key)).toEqual({ tests: 'ABC', matching: '1234 5432', open: '12 700' });
   });
 });
+
+describe('английский: открытый ответ на бланке с пятью клетками', () => {
+  const k: TicketKey = { tests: ['A'], matching: [], open: ['31425', '3142'] };
+  it('верные цифры (5 и 4) засчитываются, неполные — нет', () => {
+    expect(scoreAnswers(k, { tests: ['A'], matching: [], open: ['31425', '3142'] }).open).toEqual([true, true]);
+    expect(scoreAnswers(k, { tests: ['A'], matching: [], open: ['3142', '314'] }).open).toEqual([false, false]);
+  });
+});

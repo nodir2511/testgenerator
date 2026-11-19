@@ -49,6 +49,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   // Фильтр «Текст» (английский): all — любой, none — вопросы без текста, иначе id текста
   const [filterPassage, setFilterPassage] = useState<string>('all');
   const [editPassage, setEditPassage] = useState<Passage | null>(null);
+  const [newPassageOpen, setNewPassageOpen] = useState(false);
 
   // Фильтры (с сохранением в localStorage)
   const [filterSubjectId, setFilterSubjectId] = useState(() => localStorage.getItem('examiner_ql_subject_id') || '');
@@ -140,6 +141,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const activePassage = filterTopicId && topicPassages.length > 0
     && (filterPassage === 'none' || topicPassages.some((p) => p.id === filterPassage))
     ? filterPassage : 'all';
+
+  // «Добавить текст» — только английский и только когда выбрана тема
+  const canAddPassage = isStaff && Boolean(filterSubjectId && filterChapterId && filterTopicId)
+    && /англ|инглис|english/i.test((subjects as any[]).find((x: any) => x.id === filterSubjectId)?.name || '');
 
   const applyFilters = (query: any) => {
     if (filterSubjectId) query = query.eq('subject_id', filterSubjectId);
@@ -282,6 +287,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       queryClient.invalidateQueries({ queryKey: ['question_counts'] });
+      queryClient.invalidateQueries({ queryKey: ['passage_counts'] });
     },
     onError: (_e, id) => setHiddenIds((prev) => prev.filter((x) => x !== id)),
   });
@@ -370,6 +376,16 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               <Plus className="w-4 h-4" />
               <span>Добавить вопрос</span>
             </button>
+            {canAddPassage && (
+              <button
+                onClick={() => setNewPassageOpen(true)}
+                className="w-full sm:w-auto px-4 py-2.5 bg-white border border-indigo-200 hover:bg-indigo-50 text-indigo-700 rounded-xl text-sm font-bold flex items-center justify-center space-x-2 transition"
+                title="Новый текст для чтения или с пропусками в выбранной теме"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Добавить текст</span>
+              </button>
+            )}
           </div>
         )}
       </Card>
@@ -1163,6 +1179,12 @@ export const QuestionList: React.FC<QuestionListProps> = ({
       </div>
 
       {editPassage && <PassageEditor passage={editPassage} onClose={() => setEditPassage(null)} />}
+      {newPassageOpen && canAddPassage && (
+        <PassageEditor
+          topic={{ subject_id: filterSubjectId, chapter_id: filterChapterId, topic_id: filterTopicId }}
+          onClose={() => setNewPassageOpen(false)}
+        />
+      )}
 
       {/* Модальное окно увеличения изображения (Lightbox) */}
       {previewImage && (

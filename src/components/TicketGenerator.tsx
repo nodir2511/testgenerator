@@ -349,7 +349,7 @@ export const TicketGenerator: React.FC = () => {
       return next;
     });
   };
-  const permAvailable = ticketCount >= 4 && ticketCount % 2 === 0;
+  const permAvailable = !nctCfg.textSections && ticketCount >= 4 && ticketCount % 2 === 0;
   const nctPerm = nctMode && permPref && permAvailable;
   const isStandard = !!standard && testCount === standard.test && matchingCount === standard.matching && openCount === standard.open
     && readingCount === (standard.reading ?? 0) && clozeCount === (standard.cloze ?? 0);
@@ -656,7 +656,7 @@ export const TicketGenerator: React.FC = () => {
             const current = np.kinds[idx][0]?.length ?? 0;
             if (current < want) {
               const missing = want - current;
-              const freeOwn = allQuestionsRaw.filter((q: any) => q.type === kind && !usedInNct.has(q.id));
+              const freeOwn = allQuestionsRaw.filter((q: any) => q.type === kind && !usedInNct.has(q.id) && !q.passage_id);
               const fillPicked = pickParallel(freeOwn, missing, targetT, Math.random);
               if (fillPicked.length === targetT && fillPicked.every(t => t.length === missing)) {
                 for (let t = 0; t < targetT; t++) {
@@ -939,6 +939,7 @@ export const TicketGenerator: React.FC = () => {
               title={generatedBatch.title}
               batchId={generatedBatch.id}
               ticketCount={generatedBatch.tickets.length}
+              singleLang={isEnglishName(generatedSubjectName)}
               build={async (lang) => buildTicketsFile(
                 generatedBatch.title,
                 generatedBatch.tickets,
@@ -1206,7 +1207,7 @@ export const TicketGenerator: React.FC = () => {
                 <span className="text-sm text-slate-700">
                   <b className="text-slate-900">Билет по формату НЦТ</b>
                   <span className="block text-slate-500 mt-0.5">
-                    {nctCfg.composition.test + nctCfg.composition.matching + nctCfg.composition.open} заданий ({nctCfg.composition.test} тест. + {nctCfg.composition.matching} соотв. + {nctCfg.composition.open} откр.), {nctCfg.composition.points} баллов. Задания идут блоками разделов, как в НЦТ: {nctCfg.sections.map((x) => x.name.toLowerCase()).join(' → ')}; баллы делятся между пройденными разделами. На каждое место берётся тип задания по меткам (в билете типы не повторяются), около 16 баллов — из сборника НЦТ (источник «ЦВЭ»). Берутся главы 1–6 и темы 7.4–7.12 (растворы); остальные темы пока не берутся.
+                    {nctCfg.composition.test + nctCfg.composition.matching + nctCfg.composition.open} заданий ({nctCfg.composition.test} тест. + {nctCfg.composition.matching} соотв. + {nctCfg.composition.open} откр.), {nctCfg.composition.points} баллов. {nctCfg.textSections ? <>Как в НЦТ 2026: сначала текст для чтения и 8 вопросов к нему (№ 1–8), затем текст с 8 пропусками (№ 9–16), потом 4 отдельных теста, 4 соответствия и 2 задания на порядок. Тексты берутся целиком, в разных вариантах — разные. Тип отдельного задания берётся по меткам, если они есть.</> : <>Задания идут блоками разделов, как в НЦТ: {nctCfg.sections.map((x) => x.name.toLowerCase()).join(' → ')}; баллы делятся между пройденными разделами. На каждое место берётся тип задания по меткам (в билете типы не повторяются), около 16 баллов — из сборника НЦТ (источник «ЦВЭ»). Берутся главы 1–6 и темы 7.4–7.12 (растворы); остальные темы пока не берутся.</>}
                   </span>
                 </span>
               </label>

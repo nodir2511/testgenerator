@@ -44,10 +44,12 @@ interface Props {
   batchId?: string;
   ticketCount?: number;
   compact?: boolean;
+  /** Предмет на одном языке (английский): вместо выбора языка один пункт */
+  singleLang?: boolean;
 }
 
 // Кнопка «В Telegram» с выбором языка: файл тот же, что при скачивании
-export const SendToTelegramButton: React.FC<Props> = ({ build, title, batchId, ticketCount, compact }) => {
+export const SendToTelegramButton: React.FC<Props> = ({ build, title, batchId, ticketCount, compact, singleLang }) => {
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState<ExportLanguage | null>(null);
   const [sent, setSent] = useState(false);
@@ -119,7 +121,7 @@ export const SendToTelegramButton: React.FC<Props> = ({ build, title, batchId, t
           style={{ position: 'fixed', top: pos.top, right: pos.right }}
           className="z-[100] w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1"
         >
-          {LANGS.map((l) => (
+          {(singleLang ? [{ lang: 'ru' as ExportLanguage, label: 'Отправить' }] : LANGS).map((l) => (
             <button
               key={l.lang}
               onClick={() => send(l.lang)}

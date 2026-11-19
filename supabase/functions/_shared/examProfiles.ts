@@ -84,6 +84,21 @@ export const EXAM_PROFILES: ExamProfile[] = [
     collectionSharePct: 44,
     ready: true,
   },
+  {
+    key: 'english',
+    subjectMatch: ['англи', 'english'],
+    composition: { test: 20, matching: 4, open: 2, points: 40 },
+    pointsPer: { test: 1, matching: 4, open: 2 },
+    // блоки билета 2026: № 1–8 чтение, № 9–16 грамматика в тексте, № 17–26 грамматика и лексика (доли — по баллам билета)
+    sections: [
+      { key: 'read', name: 'Чтение: текст и вопросы к нему', share: 20 },
+      { key: 'text', name: 'Грамматика в тексте: пропуски', share: 20 },
+      { key: 'gl', name: 'Грамматика и лексика: тесты, соответствия, порядок', share: 60 },
+    ],
+    sourcePattern: /ЦВЭ|НЦТ/i,
+    collectionSharePct: 0,
+    ready: true,
+  },
 ];
 
 /** Профиль по названию предмета; null — режима НЦТ для предмета нет */

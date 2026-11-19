@@ -2,7 +2,7 @@
 // Раздел на номере билета постоянен (основные понятия → атом и ПЗ → растворы → …), баллы делятся
 // между пройденными разделами как в таблице НЦТ. Тип задания внутри раздела не контролируется
 // (в банке нет меток типов). Чистая логика; импорт без «.ts», поэтому пока только для сайта (для Deno-бота нужно «.ts»).
-import { pickParallel, separateLinked, type ChapterTotals, type PickedTickets, type Rnd } from './ticketing';
+import { pickParallel, separateLinked, passageBlocks, pickBlocks, PASSAGE_SIZE, type ChapterTotals, type PickedTickets, type Rnd } from './ticketing';
 import { NCT_SLOT_TYPES } from './nctSlots';
 
 /** Ключ раздела экзамена: у химии 'basic' | 'atom' | 'solutions' | 'elements' | 'organic', у права 'state' | 'rights' | 'intl' */
@@ -46,6 +46,12 @@ export interface NctConfig {
   kindRange?: Record<string, Partial<Record<Kind, [number, number]>>>;
   /** сколько раз один тип может встретиться в билете (по умолчанию 1: тип не повторяется; у истории 2 — в настоящих билетах типы повторяются) */
   maxTypeUse?: number;
+  /**
+   * Английский: билет начинается с целых текстов — один текст для чтения (его 8 вопросов — первые тесты), затем один текст
+   * с пропусками (ещё 8), остальное — обычный подбор по разделу `rest`. Значения — ключи разделов из `sections`.
+   * В composition.test входят и вопросы текстов (20 = 8 + 8 + 4 отдельных теста).
+   */
+  textSections?: { reading: string; cloze: string; rest: string };
   /** пояснение в заметках про темы вне режима */
   skipNote: string;
 }
@@ -311,6 +317,7 @@ function splitQuota(quota: number, counts: Array<{ k: NctSection; want: number; 
  * вопросы тем, из которых в билете ещё ничего не взято (а при нехватке — наименее использованных).
  */
 export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random, _totals?: ChapterTotals, difficulty: NctDifficultyShares = NCT_DEFAULT_DIFFICULTY, cfg: NctConfig = CHEM_CONFIG): NctPicked {
+  if (cfg.textSections) return pickNctText(pool, ticketCount, rnd, difficulty, cfg);
   const SECTION_KEYS = cfg.sections.map((x) => x.key);
   const NAME = (k: string) => cfg.sections.find((x) => x.key === k)?.name ?? k;
   const notes: string[] = [];
@@ -490,6 +497,55 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   const total = tests[0].length + matching[0].length + open[0].length;
   if (total > 0 && typePicked.test + typePicked.matching + typePicked.open < total / 2) notes.push('Меток типа НЦТ у вопросов этих тем мало: типы заданий выдерживаются лишь частично');
   return { kinds: [tests, matching, open], ticketCount: T, plan, sections: present, notes };
+}
+
+/**
+ * Билет НЦТ с текстами (английский): № 1–8 — текст для чтения целиком, № 9–16 — текст с пропусками целиком (у разных
+ * вариантов тексты разные; у параллельных вариантов — тексты одной темы, пока хватает), затем отдельные тесты, соответствия
+ * и открытые обычным подбором (pickNct на пуле без вопросов к текстам). Для текстов тип места не выбирается:
+ * типы заданий внутри текста задаёт сам текст. Не хватило текста — места остаются пустыми и добираются обычными тестами
+ * (TicketGenerator), в заметках об этом сказано.
+ */
+function pickNctText(pool: any[], T: number, rnd: Rnd, difficulty: NctDifficultyShares, cfg: NctConfig): NctPicked {
+  const ts = cfg.textSections!;
+  const notes: string[] = [];
+  const blocks = passageBlocks(pool.filter((q) => q.type === 'test'));
+  const takeOne = (list: ReturnType<typeof passageBlocks>['reading']) => {
+    const m = pickBlocks(list, 1, T, rnd);
+    return m.length === T && m.every((t) => t.length === 1) ? m.map((t) => t[0]) : null;
+  };
+  const rd = takeOne(blocks.reading);
+  if (!rd) notes.push('Не нашлось текста для чтения (8 вопросов) в выбранных темах');
+  // текст с пропусками предпочтительно из другой темы, чем текст для чтения
+  const usedTopics = new Set((rd ?? []).map((b) => b.topic_id));
+  const otherTopic = blocks.cloze.filter((b) => !usedTopics.has(b.topic_id));
+  const cl = takeOne(otherTopic.length >= T ? otherTopic : blocks.cloze);
+  if (!cl) notes.push('Не нашлось текста с пропусками (8 вопросов) в выбранных темах');
+  const restTest = Math.max(0, cfg.composition.test - 2 * PASSAGE_SIZE);
+  const { test: pt, matching: pm, open: po } = cfg.pointsPer;
+  const restCfg: NctConfig = {
+    ...cfg,
+    textSections: undefined,
+    sections: [{ key: ts.rest, name: cfg.sections.find((x) => x.key === ts.rest)?.name ?? ts.rest, share: 100 }],
+    composition: { test: restTest, matching: cfg.composition.matching, open: cfg.composition.open, points: pt * restTest + pm * cfg.composition.matching + po * cfg.composition.open },
+    topicSection: () => ts.rest,
+    refineSection: (s) => s,
+    quota: { test: 0, matching: 0, open: 0 },
+    quotaPoints: 0,
+    kindSections: undefined,
+    maxPerSection: undefined,
+    kindRange: undefined,
+  };
+  const rest = pickNct(pool.filter((q) => !q.passage_id), T, rnd, undefined, difficulty, restCfg);
+  notes.push(...rest.notes);
+  const tests = Array.from({ length: T }, () => [] as any[]);
+  for (let t = 0; t < T; t++) tests[t] = [...(rd?.[t].questions ?? []), ...(cl?.[t].questions ?? []), ...(rest.kinds[0][t] ?? [])];
+  const plan: NctPlan = {};
+  if (rd) plan[ts.reading] = { test: PASSAGE_SIZE, matching: 0, open: 0 };
+  if (cl) plan[ts.cloze] = { test: PASSAGE_SIZE, matching: 0, open: 0 };
+  if (rest.plan[ts.rest]) plan[ts.rest] = rest.plan[ts.rest];
+  const sections = cfg.sections.map((x) => x.key).filter((k) => plan[k]);
+  return { kinds: [tests, rest.kinds[1], rest.kinds[2]], ticketCount: T, plan, sections, notes };
 }
 
 /** Настройки химии: прежние константы файла */
