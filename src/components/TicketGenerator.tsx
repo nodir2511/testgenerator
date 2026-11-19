@@ -5,7 +5,7 @@ import { notifyError, notifyInfo } from '../lib/errors';
 import { examProfileFor } from '../../supabase/functions/_shared/examProfiles';
 import { nctConfigFor } from '../../supabase/functions/_shared/nctConfigs';
 import { pickNct, expandPermuted, CHEM_CONFIG, NCT_DEFAULT_DIFFICULTY, type NctDifficultyShares } from '../../supabase/functions/_shared/nct';
-import { fitSettings, pickTickets, snapshotTickets, chapterTotalsFromCounts, poolStats as calcPoolStats, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
+import { fitSettings, pickTickets, pickParallel, snapshotTickets, chapterTotalsFromCounts, poolStats as calcPoolStats, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
 import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Subject, Chapter, Topic, Question } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
@@ -630,12 +630,44 @@ export const TicketGenerator: React.FC = () => {
       const totals = chapterTotalsFromCounts(countRows, chapterIds);
       let picked = pickTickets(allQuestionsRaw, fit.settings, Math.random, totals);
       if (nct) {
-        // сборник НЦТ в банке — источники «ЦВЭ …»: их вопросы идут на ~40 % баллов
+        // сборник НЦТ в банке — источники «ЦВЭ …» и «НЦТ …»: их вопросы идут на ~40 % баллов
         const { data: srcRows } = await supabase.from('sources').select('id, name').eq('is_deleted', false);
-        const nctSources = new Set((srcRows || []).filter((r: any) => /ЦВЭ/i.test(r.name || '')).map((r: any) => r.id));
+        const nctSources = new Set((srcRows || []).filter((r: any) => /ЦВЭ|НЦТ/i.test(r.name || '')).map((r: any) => r.id));
         allQuestionsRaw.forEach((q: any) => { q.isNct = !!q.source_id && nctSources.has(q.source_id); });
         const permuted = !!cfg.nctPerm && ticketCount >= 4 && ticketCount % 2 === 0;
         let np = pickNct(allQuestionsRaw, permuted ? 2 : ticketCount, Math.random, totals, cfg.nctDiff ?? NCT_DEFAULT_DIFFICULTY, nctCfg);
+
+        // Добор недостающих заданий из обычного пула (наши вопросы, подходящие по типу)
+        const targetT = permuted ? 2 : ticketCount;
+        const totalPickedInNct = (np.kinds[0][0]?.length ?? 0) + (np.kinds[1][0]?.length ?? 0) + (np.kinds[2][0]?.length ?? 0);
+        if (totalPickedInNct === 0) {
+          notifyInfo('В выбранных темах недостаточно заданий формата НЦТ — билеты составлены из вопросов банка по типу');
+          np.kinds = picked.kinds;
+        } else {
+          const targets: Array<{ kind: 'test' | 'matching' | 'open'; want: number; idx: number }> = [
+            { kind: 'test', want: nctCfg.composition.test, idx: 0 },
+            { kind: 'matching', want: nctCfg.composition.matching, idx: 1 },
+            { kind: 'open', want: nctCfg.composition.open, idx: 2 },
+          ];
+          const usedInNct = new Set<string>();
+          for (const k of np.kinds) for (const ticket of k) for (const q of ticket) if (q?.id) usedInNct.add(q.id);
+
+          for (const { kind, want, idx } of targets) {
+            const current = np.kinds[idx][0]?.length ?? 0;
+            if (current < want) {
+              const missing = want - current;
+              const freeOwn = allQuestionsRaw.filter((q: any) => q.type === kind && !usedInNct.has(q.id));
+              const fillPicked = pickParallel(freeOwn, missing, targetT, Math.random);
+              if (fillPicked.length === targetT && fillPicked.every(t => t.length === missing)) {
+                for (let t = 0; t < targetT; t++) {
+                  np.kinds[idx][t].push(...fillPicked[t]);
+                  fillPicked[t].forEach(q => usedInNct.add(q.id));
+                }
+              }
+            }
+          }
+        }
+
         if (np.notes.length) notifyInfo(`Формат НЦТ: ${np.notes.join('; ')}`);
         if (np.kinds[0][0]?.length + np.kinds[1][0]?.length + np.kinds[2][0]?.length === 0) throw new Error('В выбранных темах нет вопросов для формата НЦТ');
         if (permuted) np = expandPermuted(np, ticketCount, Math.random);

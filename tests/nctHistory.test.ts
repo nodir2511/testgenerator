@@ -181,6 +181,13 @@ describe('режим НЦТ: история — подбор билета', () =
     }
   });
 
+  it('при выборе только одной главы (раздел p1) билет успешно собирается на 20 тестов, 4 соответствия, 2 открытых', () => {
+    const ch1Pool = historyPool(per).filter((q) => q.chapter.order_index === 1);
+    const r = pickNct(ch1Pool, 2, rng(42), undefined, undefined, HISTORY_CONFIG);
+    expect(r.kinds.map((k) => k[0].length)).toEqual([20, 4, 2]);
+    expect(r.kinds[0][0].length + 4 * r.kinds[1][0].length + 2 * r.kinds[2][0].length).toBe(40);
+  });
+
   it('без вопросов всеобщей истории билет целиком из таджикских разделов', () => {
     const r = pickNct(historyPool(per, true, false), 2, rng(7), undefined, undefined, HISTORY_CONFIG);
     expect(r.kinds.map((k) => k[0].length)).toEqual([20, 4, 2]);

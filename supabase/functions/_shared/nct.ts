@@ -164,8 +164,16 @@ export function planNct(present: NctSection[], have: NctHave, ticketCount: numbe
   const n = present.length;
 
   const run = (cap0: (k: NctSection, type: Kind) => number, tol: number): NctPlan | null => {
-    const rng = (k: NctSection, t: Kind): [number, number] => cfg.kindRange?.[k]?.[t] ?? [0, Infinity];
-    const cap = (k: NctSection, t: Kind) => (t !== 'test' && !allowed(k, t) ? 0 : Math.min(cap0(k, t), cfg.maxPerSection?.[t] ?? Infinity, cfg.maxByTypes?.[`${k}:${t}`] ?? Infinity, rng(k, t)[1]));
+    // Если выбрана только часть разделов экзамена (например, одна глава или несколько тем),
+    // лимиты полного экзамена (kindRange, maxPerSection, maxByTypes) не должны блокировать подбор:
+    const isSubset = present.length < cfg.sections.length;
+    const rng = (k: NctSection, t: Kind): [number, number] => (isSubset ? [0, Infinity] : (cfg.kindRange?.[k]?.[t] ?? [0, Infinity]));
+    const cap = (k: NctSection, t: Kind) => {
+      if (t !== 'test' && !allowed(k, t) && !isSubset) return 0;
+      const maxPer = isSubset ? Infinity : (cfg.maxPerSection?.[t] ?? Infinity);
+      const maxTypes = isSubset ? Infinity : (cfg.maxByTypes?.[`${k}:${t}`] ?? Infinity);
+      return Math.min(cap0(k, t), maxPer, maxTypes, rng(k, t)[1]);
+    };
     const floor = (k: NctSection, t: Kind) => Math.min(rng(k, t)[0], cap(k, t));
     let best = Infinity;
     let bestPlans: NctPlan[] = [];
@@ -222,7 +230,7 @@ export function planNct(present: NctSection[], have: NctHave, ticketCount: numbe
 
   const T = Math.max(1, ticketCount);
   // допуск по баллам раздела: сначала ±1 (как у химии), при невозможности — шире
-  for (const tol of [1, 2, 3, 5]) {
+  for (const tol of [1, 2, 3, 5, 10, 40]) {
     const got = run((k, t) => Math.floor((have[k]?.[t] ?? 0) / T), tol) ?? run((k, t) => have[k]?.[t] ?? 0, tol) ?? run(() => 1000, tol);
     if (got) return got;
   }
@@ -325,7 +333,20 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
     };
   }
   // Раздел считается пройденным, если в нём есть тесты (без них нет ни одного номера 1–18)
-  const present = SECTION_KEYS.filter((k) => (have[k]?.test ?? 0) > 0);
+  let present = SECTION_KEYS.filter((k) => (have[k]?.test ?? 0) > 0);
+  if (present.length === 0 && pool.length > 0) {
+    // Вопросы выбранных тем не попали в официальную карту разделов (или нет тестов в сопоставленных разделах) —
+    // объединяем доступные вопросы под первым разделом, чтобы билеты всё равно сгенерировались
+    const fallbackSec = SECTION_KEYS[0];
+    bySection.set(fallbackSec, [...pool]);
+    have[fallbackSec] = {
+      test: pool.filter((q) => q.type === 'test').length,
+      matching: pool.filter((q) => q.type === 'matching').length,
+      open: pool.filter((q) => q.type === 'open').length,
+    };
+    present = [fallbackSec];
+    notes.push('Темы вне разделов НЦТ: задания сформированы из доступных вопросов банка');
+  }
   const plan = present.length ? planNct(present, have, ticketCount, rnd, cfg) : null;
 
   const T = ticketCount;
@@ -372,10 +393,21 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
     }
     // нет подходящей метки: неразмеченные вопросы и вопросы ещё не использованных разрешённых типов
     const loose = pool.filter((q) => !q.nct_type || (!cfg.banned.has(q.nct_type) && typeFree(q.nct_type)));
-    const col = pickParallel(freshest(loose), 1, T, rnd);
+    let col = pickParallel(freshest(loose), 1, T, rnd);
     if (col.every((t) => t.length === 1)) {
       const code = col[0][0].nct_type ?? null;
       return { rows: col.map((t) => t[0]), code: code && col.every((t) => t[0].nct_type === code) ? code : null };
+    }
+    // если по свежести темы не вышло, пробуем без фильтра freshest:
+    col = pickParallel(loose, 1, T, rnd);
+    if (col.every((t) => t.length === 1)) {
+      const code = col[0][0].nct_type ?? null;
+      return { rows: col.map((t) => t[0]), code: code && col.every((t) => t[0].nct_type === code) ? code : null };
+    }
+    // запасной вариант: любые доступные вопросы пула нужного вида
+    col = pickParallel(pool, 1, T, rnd);
+    if (col.every((t) => t.length === 1)) {
+      return { rows: col.map((t) => t[0]), code: null };
     }
     return null;
   };
@@ -395,6 +427,16 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
       if (!got) continue;
       if (lvl === diff) diffHit[kind]++; else if (lvl !== null) diffMiss[kind]++;
       return got;
+    }
+    // Если по отдельным уровням сложности не набралось T штук, пробуем любые свободные вопросы этого вида:
+    if (free.length >= T) {
+      const nctFree = free.filter((q) => q.isNct);
+      const own = free.filter((q) => !q.isNct);
+      const got = tryPools(wantNct ? [nctFree, own] : [own, nctFree], section, kind);
+      if (got) {
+        diffMiss[kind]++;
+        return got;
+      }
     }
     return null;
   };

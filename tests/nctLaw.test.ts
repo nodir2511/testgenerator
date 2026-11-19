@@ -169,6 +169,12 @@ describe('режим НЦТ: право — подбор билета', () => {
     expect(r.kinds.map((k) => k[0].length)).toEqual([20, 4, 2]);
   });
 
+  it('при выборе только одной главы (раздел state) билет собирается на 20 тестов, 4 соответствия, 2 открытых', () => {
+    const ch1Pool = lawPool(per).filter((q) => q.chapter.order_index === 1);
+    const r = pickNct(ch1Pool, 2, rng(15), undefined, undefined, LAW_CONFIG);
+    expect(r.kinds.map((k) => k[0].length)).toEqual([20, 4, 2]);
+  });
+
   it('вопросы тем вне глав 1–10 в билет не берутся', () => {
     const pool = [...lawPool(per), { id: 'x1', type: 'test', topic_id: 'tx', chapter_id: 'c6', chapter: { order_index: 11 }, topic: { order_index: 1 }, nct_type: null }];
     const r = pickNct(pool, 1, rng(4), undefined, undefined, LAW_CONFIG);
