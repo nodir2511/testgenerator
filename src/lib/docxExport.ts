@@ -1,4 +1,5 @@
 import { 
+  ImportedXmlComponent,
   Document, 
   Packer, 
   Paragraph as DocxParagraph, 
@@ -23,7 +24,7 @@ import {
   type MathComponent,
   type ParagraphChild
 } from 'docx';
-import { splitFractions, type MathNode, newFmtState, tokenizeFormatted } from './fractions';
+import { splitFractions, type MathNode, newFmtState, tokenizeFormatted, groupByLabel, type FmtToken } from './fractions';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 
@@ -56,10 +57,10 @@ function charEm(c: string): number {
 function textWidthEm(text: string): number {
   let w = 0;
   let scale = 1;
-  for (const part of (text || '').split(/(<\/?(?:sub|sup|b|i|u)>)/)) {
+  for (const part of (text || '').split(/(<\/?(?:sub|sup|b|i|u|lab[1-9])>)/)) {
     if (part === '<sub>' || part === '<sup>') { scale = 0.6; continue; }
     if (part === '</sub>' || part === '</sup>') { scale = 1; continue; }
-    if (/^<\/?[biu]>$/.test(part)) continue;
+    if (/^<\/?(?:[biu]|lab[1-9])>$/.test(part)) continue;
     for (const c of part) w += charEm(c) * scale;
   }
   return w;
@@ -207,11 +208,56 @@ function buildMathRuns(text: string): MathComponent[] {
 }
 
 function buildMathNodes(nodes: MathNode[]): MathComponent[] {
-  return nodes.flatMap((n) => (typeof n === 'string' ? buildMathRuns(n.replace(/<\/?(b|i|u)>/g, '')) : [buildMathFraction(n)]));
+  return nodes.flatMap((n) => (typeof n === 'string' ? buildMathRuns(n.replace(/<\/?(b|i|u|lab[1-9])>/g, '')) : [buildMathFraction(n)]));
 }
 
 function buildMathFraction(node: Exclude<MathNode, string>): MathFraction {
   return new MathFraction({ numerator: buildMathNodes(node.num), denominator: buildMathNodes(node.den) });
+}
+
+const xmlEscape = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** Кусок текста с одним оформлением → прогоны Word (стрелки равновесия набираются шрифтом Cambria Math) */
+function formattedRuns(t: FmtToken, isItalic: boolean, fontSize: number, isBold: boolean): TextRun[] {
+  const out: TextRun[] = [];
+  // В Times New Roman нет стрелок равновесия ⇄ ⇌ (в Word вместо них пустой квадрат): их набираем шрифтом, где они есть
+  for (const piece of t.text.split(/([⇄⇌])/)) {
+    if (!piece) continue;
+    out.push(
+      new TextRun({
+        text: piece,
+        font: /^[⇄⇌]$/.test(piece) ? 'Cambria Math' : 'Times New Roman',
+        size: fontSize,
+        bold: isBold || t.b,
+        italics: isItalic || t.i,
+        underline: t.u ? {} : undefined,
+        subScript: t.sub || undefined,
+        superScript: t.sup || undefined,
+      })
+    );
+  }
+  return out;
+}
+
+/**
+ * Слово (группа слов) с цифрой над ним: элемент Word «ruby» (надпись над основным текстом).
+ * Библиотека docx такого элемента не создаёт, поэтому XML собирается вручную.
+ */
+function labelRun(lab: number, tokens: FmtToken[], isItalic: boolean, fontSize: number, isBold: boolean): ParagraphChild {
+  const rpr = (sz: number, bold: boolean, italic: boolean) =>
+    `<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/>${bold ? '<w:b/>' : ''}${italic ? '<w:i/>' : ''}<w:sz w:val="${sz}"/><w:szCs w:val="${sz}"/></w:rPr>`;
+  const base = tokens
+    .map((t) => `<w:r>${rpr(fontSize, isBold || t.b, isItalic || t.i)}<w:t xml:space="preserve">${xmlEscape(t.text)}</w:t></w:r>`)
+    .join('');
+  const small = Math.max(14, Math.round(fontSize * 0.7));
+  const xml =
+    `<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:ruby>` +
+    `<w:rubyPr><w:rubyAlign w:val="center"/><w:hps w:val="${small}"/><w:hpsRaise w:val="${fontSize + 2}"/><w:hpsBaseText w:val="${fontSize}"/><w:lid w:val="ru-RU"/></w:rubyPr>` +
+    `<w:rt><w:r>${rpr(small, true, false)}<w:t>${lab}</w:t></w:r></w:rt>` +
+    `<w:rubyBase>${base}</w:rubyBase></w:ruby></w:r>`;
+  // fromXmlString кладёт результат в безымянный корень (в документе он стал бы тегом <undefined>): берём вложенный <w:r>
+  const wrapper = ImportedXmlComponent.fromXmlString(xml) as unknown as { root: unknown[] };
+  return wrapper.root[0] as ParagraphChild;
 }
 
 // Парсер форматированного текста (sub, sup, b, i, u); дроби (a/b) становятся формулами Word
@@ -219,30 +265,20 @@ export function parseFormattedTextRuns(
   text: string,
   isItalic = false,
   fontSize = FONT_SIZE,
-  isBold = false
+  isBold = false,
+  /** Без дробей: «he/she», «and/or», «24/7» остаются текстом (английский язык) */
+  plain = false
 ): ParagraphChild[] {
   if (!text) return [];
   const out: ParagraphChild[] = [];
   const state = newFmtState(); // оформление переносится через дроби: <i>v = s/t</i>
-  for (const node of splitFractions(text)) {
+  for (const node of plain ? [text] : splitFractions(text)) {
     if (typeof node === 'string') {
-      for (const t of tokenizeFormatted(node, state)) {
-        // В Times New Roman нет стрелок равновесия ⇄ ⇌ (в Word вместо них пустой квадрат): их набираем шрифтом, где они есть
-        for (const piece of t.text.split(/([⇄⇌])/)) {
-          if (!piece) continue;
-          out.push(
-            new TextRun({
-              text: piece,
-              font: /^[⇄⇌]$/.test(piece) ? 'Cambria Math' : 'Times New Roman',
-              size: fontSize,
-              bold: isBold || t.b,
-              italics: isItalic || t.i,
-              underline: t.u ? {} : undefined,
-              subScript: t.sub || undefined,
-              superScript: t.sup || undefined,
-            })
-          );
-        }
+      for (const g of groupByLabel(tokenizeFormatted(node, state))) {
+        const runs = g.tokens.flatMap((t) => formattedRuns(t, isItalic, fontSize, isBold));
+        // Цифра над словом (морфологический разбор): надпись Word «ruby» — цифра стоит над группой слов
+        if (g.lab > 0) out.push(labelRun(g.lab, g.tokens, isItalic, fontSize, isBold));
+        else out.push(...runs);
       }
     } else {
       out.push(new DocxMath({ children: [buildMathFraction(node)] }));
@@ -301,13 +337,14 @@ export interface QuestionOpts {
   matchingGridLabel?: string;
   /** Меньше пустого места между вопросом и вариантами ответа и между самими вариантами */
   compact?: boolean;
+  /** Английский язык: подписи на английском, слеш в тексте — не дробь */
+  english?: boolean;
 }
 
-/** Сколько клеток под ответ открытого вопроса: у таджикского языка 5, у остальных предметов 4 */
+/** Сколько клеток под ответ открытого вопроса: у таджикского и английского языков 5, у остальных предметов 4 */
 export function openBoxesFor(subjectName: string): number {
   const n = (subjectName || '').toLowerCase();
-  if (/англ|инглис|english/.test(n)) return 4;
-  return /тоҷик|таджик|забони/.test(n) ? 5 : 4;
+  return /англ|инглис|english|тоҷик|таджик|забони/.test(n) ? 5 : 4;
 }
 
 const COMPACT_MARGINS = { top: 20, bottom: 20, left: 100, right: 100 };
@@ -415,9 +452,11 @@ export async function createQuestionTable(q: any, qNumber: number, isTg: boolean
 
 async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: QuestionOpts = {}): Promise<Table> {
   const cm = opts.compact ? COMPACT_MARGINS : CELL_MARGINS;
+  const plain = !!opts.english;
+  const fmt = (t: string, italic = false, size = FONT_SIZE, bold = false) => parseFormattedTextRuns(t, italic, size, bold, plain);
   // Пустое место (замена не нашлась): красная пометка вместо вопроса
   if (q?.empty) {
-    const note = isTg ? 'ЧОЙ ХОЛӢ — саволро ҷойгир кунед' : 'ПУСТОЕ МЕСТО — вставьте вопрос';
+    const note = opts.english ? 'EMPTY PLACE — insert a question' : isTg ? 'ЧОЙ ХОЛӢ — саволро ҷойгир кунед' : 'ПУСТОЕ МЕСТО — вставьте вопрос';
     return new Table({
       width: { size: 9348, type: WidthType.DXA },
       columnWidths: [500, 8848],
@@ -465,7 +504,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
               children: [
                 new Paragraph({
                   spacing: { before: cm.top },
-                  children: parseFormattedTextRuns(qText, false, FONT_SIZE, true), // Текст вопроса жирный
+                  children: fmt(qText, false, FONT_SIZE, true), // Текст вопроса жирный
                 }),
               ],
             }),
@@ -510,7 +549,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
               new Paragraph({
                 children: [
                   new TextRun({ text: `${letters[i]}) `, bold: true, font: 'Times New Roman', size: 28 }),
-                  ...parseFormattedTextRuns(oText || '', false, FONT_SIZE, false),
+                  ...fmt(oText || '', false, FONT_SIZE, false),
                 ],
               }),
             ],
@@ -539,7 +578,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
               children: [
                 new Paragraph({
                   spacing: { before: cm.top },
-                  children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
+                  children: fmt(qText, false, FONT_SIZE, true),
                 }),
               ],
             }),
@@ -586,7 +625,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
                 new Paragraph({
                   children: [
                     new TextRun({ text: 'A) ', bold: true, font: 'Times New Roman', size: 28 }),
-                    ...parseFormattedTextRuns(oAText || '', false, FONT_SIZE, false),
+                    ...fmt(oAText || '', false, FONT_SIZE, false),
                   ],
                 }),
                 ...(optImgBuffers[0] ? [
@@ -605,7 +644,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
                 new Paragraph({
                   children: [
                     new TextRun({ text: 'B) ', bold: true, font: 'Times New Roman', size: 28 }),
-                    ...parseFormattedTextRuns(oBText || '', false, FONT_SIZE, false),
+                    ...fmt(oBText || '', false, FONT_SIZE, false),
                   ],
                 }),
                 ...(optImgBuffers[1] ? [
@@ -637,7 +676,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
                 new Paragraph({
                   children: [
                     new TextRun({ text: 'C) ', bold: true, font: 'Times New Roman', size: 28 }),
-                    ...parseFormattedTextRuns(oCText || '', false, FONT_SIZE, false),
+                    ...fmt(oCText || '', false, FONT_SIZE, false),
                   ],
                 }),
                 ...(optImgBuffers[2] ? [
@@ -656,7 +695,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
                 new Paragraph({
                   children: [
                     new TextRun({ text: 'D) ', bold: true, font: 'Times New Roman', size: 28 }),
-                    ...parseFormattedTextRuns(oDText || '', false, FONT_SIZE, false),
+                    ...fmt(oDText || '', false, FONT_SIZE, false),
                   ],
                 }),
                 ...(optImgBuffers[3] ? [
@@ -689,7 +728,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
               children: [
                 new Paragraph({
                   spacing: { before: cm.top },
-                  children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
+                  children: fmt(qText, false, FONT_SIZE, true),
                 }),
               ],
             }),
@@ -734,7 +773,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
                   new Paragraph({
                     children: [
                       new TextRun({ text: `${letters[i] || String(i + 1)}) `, bold: true, font: 'Times New Roman', size: 28 }),
-                      ...parseFormattedTextRuns(oText || '', false, FONT_SIZE, false),
+                      ...fmt(oText || '', false, FONT_SIZE, false),
                     ],
                   }),
                   ...(optImgBuffers[i] ? [
@@ -792,7 +831,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
             children: [
               new Paragraph({
                 spacing: { before: cm.top },
-                children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
+                children: fmt(qText, false, FONT_SIZE, true),
               }),
             ],
           }),
@@ -835,7 +874,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
           new Paragraph({
             children: [
               new TextRun({ text: `${letter}) `, bold: true, font: 'Times New Roman', size: 28 }),
-              ...parseFormattedTextRuns(lText || '', false, FONT_SIZE, false),
+              ...fmt(lText || '', false, FONT_SIZE, false),
             ],
           })
         );
@@ -859,7 +898,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
           new Paragraph({
             children: [
               new TextRun({ text: `${num}) `, bold: true, font: 'Times New Roman', size: 28 }),
-              ...parseFormattedTextRuns(rText || '', false, FONT_SIZE, false),
+              ...fmt(rText || '', false, FONT_SIZE, false),
             ],
           })
         );
@@ -934,7 +973,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
           children: [
             new Paragraph({
               spacing: { before: cm.top },
-              children: parseFormattedTextRuns(qText, false, FONT_SIZE, true),
+              children: fmt(qText, false, FONT_SIZE, true),
             }),
           ],
         }),
@@ -963,7 +1002,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
     );
   }
 
-  const ansLabel = isTg ? 'Ҷавоб: ' : 'Ответ: ';
+  const ansLabel = opts.english ? 'Answer: ' : isTg ? 'Ҷавоб: ' : 'Ответ: ';
   rows.push(
     new TableRow({ cantSplit: true,
       children: [
@@ -995,6 +1034,79 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
   });
 }
 
+// ---- Тексты (английский язык): чтение и текст с пропусками ----
+
+/** Английский язык: по названию предмета (проверять раньше таджикского: «Забони англисӣ» содержит «забони») */
+export function isEnglishSubject(name: string): boolean {
+  return /англ|инглис|english/i.test(name || '');
+}
+
+export interface PassageRun { start: number; end: number; passage: { id: string; kind: 'reading' | 'cloze'; title: string; content: string } }
+
+/**
+ * Подряд идущие вопросы билета с одним текстом (номера с 1). «Пустое место» внутри блока не разрывает его:
+ * текст печатается один раз. Старые билеты без passage в снимках дают [].
+ */
+export function passageRuns(questions: Array<{ question_snapshot: any }>): PassageRun[] {
+  const runs: PassageRun[] = [];
+  let cur: PassageRun | null = null;
+  const snap = (i: number) => questions[i]?.question_snapshot;
+  for (let i = 0; i < questions.length; i++) {
+    const s = snap(i);
+    const p = s?.passage;
+    if (p?.id) {
+      if (cur && cur.passage.id === p.id) cur.end = i + 1;
+      else { cur = { start: i + 1, end: i + 1, passage: p }; runs.push(cur); }
+    } else if (s?.empty && cur) {
+      let j = i + 1;
+      while (j < questions.length && snap(j)?.empty) j++;
+      if (!(j < questions.length && snap(j)?.passage?.id === cur.passage.id)) cur = null;
+    } else {
+      cur = null;
+    }
+  }
+  return runs;
+}
+
+/** Метки пропусков {{n}} → «__№__» с номером задания в билете (n-й пропуск — задание firstNo + n − 1). Метки вне 1…size остаются как есть. */
+export function passageText(content: string, firstNo: number, size = 8): string {
+  return (content || '').replace(/\{\{(\d+)\}\}/g, (m, d) => {
+    const n = Number(d);
+    return n >= 1 && n <= size ? `__${firstNo + n - 1}__` : m;
+  });
+}
+
+// Задание и текст перед блоком вопросов. Текст набирается без разбора дробей: «he/she», «and/or» остаются словами.
+function passageParagraphs(run: PassageRun): Paragraph[] {
+  const font = 'Times New Roman';
+  const out: Paragraph[] = [
+    new Paragraph({
+      keepNext: true,
+      spacing: { before: 60, after: 100 },
+      children: [new TextRun({ text: `Read the text and choose the correct answer ${run.start} – ${run.end}.`, bold: true, font, size: FONT_SIZE })],
+    }),
+  ];
+  if (run.passage.title) {
+    out.push(new Paragraph({
+      keepNext: true,
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 80 },
+      children: [new TextRun({ text: run.passage.title, bold: true, font, size: FONT_SIZE })],
+    }));
+  }
+  const text = run.passage.kind === 'cloze' ? passageText(run.passage.content, run.start) : run.passage.content;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    out.push(new Paragraph({
+      alignment: AlignmentType.JUSTIFIED,
+      spacing: { after: 80 },
+      children: parseFormattedTextRuns(line, false, FONT_SIZE, false, true),
+    }));
+  }
+  out.push(new Paragraph({ spacing: { before: 0, after: 60 }, children: [] }));
+  return out;
+}
+
 // Построение Blob для одного отдельного варианта (билета)
 export async function buildSingleTicketBlob(
   examTitle: string,
@@ -1004,7 +1116,8 @@ export async function buildSingleTicketBlob(
 ): Promise<Blob> {
   // В шапке только номер варианта; предмет и темы указываются только в ключах
   const docChildren: any[] = [];
-  const headerVariant = isTg ? `Варианти ${ticket.ticket_number}` : `Вариант ${ticket.ticket_number}`;
+  const english = isEnglishSubject(subjectName);
+  const headerVariant = english ? `Variant ${ticket.ticket_number}` : isTg ? `Варианти ${ticket.ticket_number}` : `Вариант ${ticket.ticket_number}`;
 
   // Шапка отдельного билета (по требованию: «рус "Вариант 1", тадж "Варианти 1"»)
   docChildren.push(
@@ -1029,9 +1142,13 @@ export async function buildSingleTicketBlob(
   );
 
   // Таблицы каждого вопроса
+  const runs = passageRuns(ticket.questions);
   for (let qIdx = 0; qIdx < ticket.questions.length; qIdx++) {
     const q = ticket.questions[qIdx].question_snapshot;
-    const table = await createQuestionTable(q, qIdx + 1, isTg, { openBoxes: openBoxesFor(subjectName) });
+    const run = runs.find((r) => r.start === qIdx + 1);
+    if (run) docChildren.push(...passageParagraphs(run));
+    const inRun = runs.some((r) => qIdx + 1 >= r.start && qIdx + 1 <= r.end);
+    const table = await createQuestionTable(q, qIdx + 1, isTg, { openBoxes: openBoxesFor(subjectName), english, compact: inRun || undefined });
     docChildren.push(table);
     // Отступ между вопросами: пустой абзац фиксированной высоты 10 pt (раньше строка 14 pt + 9 pt — слишком много)
     docChildren.push(
@@ -1078,9 +1195,10 @@ export async function buildSingleTicketFile(
   subjectName: string = 'Химия',
   lang: 'ru' | 'tg' = 'ru'
 ): Promise<ExportFile> {
-  const isTg = lang === 'tg';
+  const english = isEnglishSubject(subjectName);
+  const isTg = !english && lang === 'tg';
   const blob = await buildSingleTicketBlob(examTitle, ticket, subjectName, isTg);
-  const fileName = isTg ? `Варианти ${ticket.ticket_number}.docx` : `Вариант ${ticket.ticket_number}.docx`;
+  const fileName = english ? `Variant ${ticket.ticket_number}.docx` : isTg ? `Варианти ${ticket.ticket_number}.docx` : `Вариант ${ticket.ticket_number}.docx`;
   return { blob, fileName };
 }
 
@@ -1095,6 +1213,14 @@ export async function buildTicketsFile(
   extraFiles: Array<{ name: string; blob: Blob }> = []
 ): Promise<ExportFile | null> {
   if (!tickets || tickets.length === 0) return null;
+  // Английский — один язык: без папок RU/TJ, суффикс EN
+  if (isEnglishSubject(subjectName)) {
+    if (tickets.length === 1 && extraFiles.length === 0) return buildSingleTicketFile(examTitle, tickets[0], subjectName, 'ru');
+    const enZip = new JSZip();
+    for (const t of tickets) enZip.file(`Variant ${t.ticket_number}.docx`, await buildSingleTicketBlob(examTitle, t, subjectName, false));
+    for (const e of extraFiles) enZip.file(e.name, e.blob);
+    return { blob: await enZip.generateAsync({ type: 'blob' }), fileName: `${examTitle}_EN.zip` };
+  }
   if (tickets.length === 1 && lang !== 'both' && extraFiles.length === 0) return buildSingleTicketFile(examTitle, tickets[0], subjectName, lang);
 
   const zip = new JSZip();

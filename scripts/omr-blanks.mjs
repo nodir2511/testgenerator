@@ -29,13 +29,14 @@ const SUBJECTS = [
   { id: 'chem', code: 1, title: 'ХИМИЯ', kind: 'k18', file: 'Бланк химия 27' },
   { id: 'bio', code: 2, title: 'БИОЛОГИЯ', kind: 'k20', file: 'Бланк биология 26' },
   { id: 'phys', code: 3, title: 'ФИЗИКА', kind: 'k18', file: 'Бланк физика 27' },
-  { id: 'taj', code: 4, title: 'ЗАБОНИ ТОҶИКӢ (ТАДЖИКСКИЙ ЯЗЫК)', kind: 'k20', file: 'Бланк таджикский язык 26' },
+  // open: 5 — пять клеток под открытый ответ (ответ из пяти цифр); у остальных бланков клеток четыре
+  { id: 'taj', code: 4, open: 5, title: 'ЗАБОНИ ТОҶИКӢ (ТАДЖИКСКИЙ ЯЗЫК)', kind: 'k20', file: 'Бланк таджикский язык 26' },
   { id: 'chemphys', code: 5, title: 'ХИМИЯ/ФИЗИКА', kind: 'k12', file: 'Бланк химия-физика 12' },
   // Только для печати: раскладка и код те же, что у `like`, меняется лишь название предмета.
   // Бланк читается как `like` (состав билета тот же), в layouts.generated.ts такие не попадают.
   { id: 'hist', like: 'bio', code: 2, title: 'ИСТОРИЯ', kind: 'k20', file: 'Бланк история 26' },
   { id: 'law', like: 'bio', code: 2, title: 'ПРАВО', kind: 'k20', file: 'Бланк право 26' },
-  { id: 'eng', like: 'bio', code: 2, title: 'АНГЛИЙСКИЙ ЯЗЫК', kind: 'k20', file: 'Бланк английский язык 26' },
+  { id: 'eng', like: 'taj', code: 4, open: 5, title: 'АНГЛИЙСКИЙ ЯЗЫК', kind: 'k20', file: 'Бланк английский язык 26' },
   { id: 'math', like: 'chem', code: 1, title: 'МАТЕМАТИКА', kind: 'k18', file: 'Бланк математика 27' },
 ];
 
@@ -114,14 +115,14 @@ function buildStrip(subject) {
     });
     layout.matching.push({ q, frame: { x: fx, y: fy, w: 30.5, h }, rows });
   };
-  // Открытый вопрос: номер и четыре клетки для цифр
-  const open = (x0, yc, q) => {
+  // Открытый вопрос: номер и клетки для цифр (четыре по 6 мм; пять — по 5,5 мм, чтобы уместиться до угловой метки)
+  const open = (x0, yc, q, cells = 4, w = 6) => {
     text(x0 + 6, yc + 1.25, String(q), { bold: true, anchor: 'end' });
     const boxes = [];
-    for (let i = 0; i < 4; i++) {
-      const x = x0 + 7.5 + i * 6;
-      rect(x, yc - 3.5, 6, 7);
-      boxes.push({ x, y: yc - 3.5, w: 6, h: 7 });
+    for (let i = 0; i < cells; i++) {
+      const x = x0 + 7.5 + i * w;
+      rect(x, yc - 3.5, w, 7);
+      boxes.push({ x, y: yc - 3.5, w, h: 7 });
     }
     layout.open.push({ q, boxes });
   };
@@ -136,8 +137,8 @@ function buildStrip(subject) {
   } else if (subject.kind === 'k20') {
     for (let c = 0; c < 5; c++) testCol(14 + c * 37, c * 4 + 1, 4);
     [20.5, 58, 95.5, 133].forEach((fx, i) => frame(fx, 60, 21 + i));
-    open(166, 68, 25);
-    open(166, 80, 26);
+    const five = subject.open === 5;
+    for (const [yc, q] of [[68, 25], [80, 26]]) five ? open(163.5, yc, q, 5, 5.5) : open(166, yc, q);
   } else {
     // Как в прежнем бланке: 1–4 и 5–8 слева, рамки 9 и 10 в середине, 11 и 12 справа
     [14, 44].forEach((x0, c) => testCol(x0, c * 4 + 1, 4, 22.2, 6));

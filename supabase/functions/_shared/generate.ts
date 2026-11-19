@@ -2,7 +2,7 @@
 // подбор вопросов, сохранение партии, сборка Word/ZIP и отправка файла в чат.
 
 import JSZip from 'npm:jszip@3';
-import { buildSingleTicketBlob } from './docxExport.ts';
+import { buildSingleTicketBlob, isEnglishSubject } from './docxExport.ts';
 import { buildAnswerKeyDocx, keyKindOf, keyTemplateName, selectionInfo } from './answerKey.ts';
 import { KEY_TEMPLATES } from './keyTemplates.ts';
 import * as T from './ticketing.ts';
@@ -151,7 +151,13 @@ export async function deliverBatch(opts: {
   const shaped = tickets.map((t) => ({ ticket_number: t.ticketNumber, selection_info: infos, questions: t.questions.map((q: any) => ({ question_snapshot: q.question_snapshot })) }));
   const bytes = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
   const files: Array<{ name: string; data: Uint8Array }> = [];
+  // Английский — один язык: файлы «Variant N.docx», без папок и пометок RU/TJ
+  const english = isEnglishSubject(subjectName);
   for (const t of shaped) {
+    if (english) {
+      files.push({ name: `Variant ${t.ticket_number}.docx`, data: await bytes(await buildSingleTicketBlob(title, t, subjectName, false)) });
+      continue;
+    }
     if (lang === 'ru' || lang === 'both') files.push({ name: lang === 'both' ? `Русский/Вариант ${t.ticket_number}.docx` : `Вариант ${t.ticket_number}.docx`, data: await bytes(await buildSingleTicketBlob(title, t, subjectName, false)) });
     if (lang === 'tg' || lang === 'both') files.push({ name: lang === 'both' ? `Тоҷикӣ/Варианти ${t.ticket_number}.docx` : `Варианти ${t.ticket_number}.docx`, data: await bytes(await buildSingleTicketBlob(title, t, subjectName, true)) });
   }
@@ -179,7 +185,7 @@ export async function deliverBatch(opts: {
     }
   }
 
-  const langLabel = lang === 'both' ? 'RU + TJ (Двуязычные)' : (lang === 'tg' ? 'Тоҷикӣ' : 'Русский');
+  const langLabel = english ? 'English' : lang === 'both' ? 'RU + TJ (Двуязычные)' : (lang === 'tg' ? 'Тоҷикӣ' : 'Русский');
   const qCount = tickets[0]?.questions?.length ?? 0;
   const caption = [
     `📄 <b>${escapeHtml(title)}</b>`,
@@ -201,7 +207,7 @@ export async function deliverBatch(opts: {
     files.forEach((f) => zip.file(f.name, f.data));
     if (key) zip.file(key.name, key.data);
     const zbytes = await zip.generateAsync({ type: 'uint8array' });
-    const suffix = lang === 'both' ? 'RU_TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase());
+    const suffix = english ? 'EN' : lang === 'both' ? 'RU_TJ' : (lang === 'tg' ? 'TJ' : lang.toUpperCase());
     await sendDocument(botToken, chat, zbytes, `${T.safeFileName(title)}_${suffix}.zip`, caption);
     keySent = Boolean(key);
   }
@@ -268,7 +274,17 @@ export async function generateAndSend(opts: {
 
   // Лёгкий пул и счётчики предмета читаются одновременно
   const [pool, counts] = await Promise.all([loadPool(sb, sel), loadQuestionCounts(sb, sel.subjectId)]);
-  const fit = T.fitSettings(T.poolStats(pool), s);
+  const stats = T.poolStats(pool);
+  // Тексты (английский): если состав не задан явно, а тексты в пуле есть и тестов хватает на блоки (8 вопросов) —
+  // в билет идёт по одному тексту для чтения и с пропусками
+  let want = s;
+  if (s.readingCount === undefined && s.clozeCount === undefined && (stats.reading > 0 || stats.cloze > 0)) {
+    let r = stats.reading > 0 ? 1 : 0;
+    let c = stats.cloze > 0 ? 1 : 0;
+    while (r + c > 0 && s.testCount < T.PASSAGE_SIZE * (r + c)) { if (c) c = 0; else r = 0; }
+    if (r + c > 0) want = { ...s, readingCount: r, clozeCount: c };
+  }
+  const fit = T.fitSettings(stats, want);
   if (fit.error) throw new Error(fit.error);
   if (fit.notes.length && opts.onNotes) await opts.onNotes(fit.notes);
 
@@ -286,6 +302,7 @@ export async function generateAndSend(opts: {
       generation_params: {
         chapter_ids: sel.chapterIds, topic_ids: sel.topicIds,
         test_count: fit.settings.testCount, matching_count: fit.settings.matchingCount, open_count: fit.settings.openCount, ticket_count: s.ticketCount,
+        ...(fit.settings.readingCount !== undefined ? { reading_count: fit.settings.readingCount, cloze_count: fit.settings.clozeCount ?? 0 } : {}),
         shuffle_options: s.shuffleOptions, shuffle_matching: s.shuffleMatching, source, lang,
         requested: { test: s.testCount, matching: s.matchingCount, open: s.openCount },
       },

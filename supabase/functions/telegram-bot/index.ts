@@ -332,8 +332,16 @@ async function screenQuick(chat: number, user: any, msgId?: number) {
     }]);
   }
 
+  const eng = userSubs.find((s: any) => /англ|инглис|english/i.test(s.name || ''));
+  if (eng) {
+    kb.push([{
+      text: `🇬🇧 Английский (20+4+2 = 26 в.) · ${T.shortName(eng.name, 20)}`,
+      callback_data: `Q:PRE:eng:${eng.id}`,
+    }]);
+  }
+
   userSubs.forEach((s: any, idx: number) => {
-    if (s.id !== physChem?.id && s.id !== bioState?.id && s.id !== law?.id && kb.length < 6) {
+    if (s.id !== physChem?.id && s.id !== bioState?.id && s.id !== law?.id && s.id !== eng?.id && kb.length < 7) {
       kb.push([{
         text: `📚 ${T.shortName(s.name, 35)}`,
         callback_data: `S:${idx}`,
@@ -352,13 +360,15 @@ async function screenQuick(chat: number, user: any, msgId?: number) {
 }
 
 // Стандартные составы для экспресс-генерации
-type QuickType = 'phys' | 'bio' | 'law';
+type QuickType = 'phys' | 'bio' | 'law' | 'eng';
 const QUICK: Record<QuickType, { test: number; matching: number; open: number; title: string; fallback: string }> = {
   phys: { test: 18, matching: 2, open: 7, title: '🧪 Физика / Химия (18 тестов, 2 соотв., 7 откр.)', fallback: 'Химия' },
   bio: { test: 20, matching: 4, open: 2, title: '🧬 Био / Гос / История (20 тестов, 4 соотв., 2 откр.)', fallback: 'Биология' },
   law: { test: 20, matching: 4, open: 2, title: '⚖️ Право (20 тестов, 4 соотв., 2 откр.)', fallback: 'Право' },
+  // 20 тестов = текст для чтения (8) + текст с пропусками (8) + 4 отдельных; тексты подставляет generateAndSend
+  eng: { test: 20, matching: 4, open: 2, title: '🇬🇧 Английский (20 тестов, из них 2 текста по 8; 4 соотв., 2 откр.)', fallback: 'Английский язык' },
 };
-const quickType = (v: string): QuickType => (v === 'bio' || v === 'law' ? v : 'phys');
+const quickType = (v: string): QuickType => (v === 'bio' || v === 'law' || v === 'eng' ? v : 'phys');
 
 async function screenQuickVariants(chat: number, msgId: number, type: QuickType, subjectId: string, user: any) {
   const limits = await limitsFor(sb, user);
@@ -444,6 +454,8 @@ async function handleQuickRepeat(chat: number, msgId: number, batchId: string, u
       shuffleOptions: p.shuffle_options ?? true,
       shuffleMatching: p.shuffle_matching ?? true,
       title: batch.title || 'Экзаменационные билеты',
+      // тексты (английский): сколько было в прошлом наборе; нет в параметрах — состав подберёт generateAndSend
+      ...(typeof p.reading_count === 'number' ? { readingCount: p.reading_count, clozeCount: p.cloze_count ?? 0 } : {}),
     },
     awaiting: null,
   };

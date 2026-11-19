@@ -24,6 +24,8 @@ export interface CheckInput {
   type: string;
   content?: string | null;
   image?: string | null;
+  /** Вопрос к тексту (английский): условие может быть пустым — пропуск в тексте, тогда «пустой текст вопроса» не считается ошибкой */
+  passage_id?: string | null;
   /** Варианты теста */
   options?: CheckText[];
   /** Соответствие: пункты слева и справа */
@@ -31,7 +33,7 @@ export interface CheckInput {
   right?: CheckText[];
 }
 
-const KNOWN_TAG = /^(b|i|u|sub|sup)$/;
+const KNOWN_TAG = /^(b|i|u|sub|sup|lab[1-9])$/;
 
 /** Текст без тегов оформления и неразрывных пробелов, пробелы схлопнуты */
 export const plainText = (s?: string | null) =>
@@ -41,11 +43,11 @@ export const plainText = (s?: string | null) =>
 export const sameKey = (s?: string | null) =>
   plainText(s).toLowerCase().replace(/ё/g, 'е').replace(/^[\s.,;:!?()«»"']+|[\s.,;:!?()«»"']+$/g, '');
 
-/** Проблемы с тегами <b> <i> <u> <sub> <sup>: незакрытый, лишний закрывающий, пустой, неизвестный */
+/** Проблемы с тегами <b> <i> <u> <sub> <sup> <lab1>–<lab9>: незакрытый, лишний закрывающий, пустой, неизвестный */
 export function formatProblem(text?: string | null): boolean {
   const s = text ?? '';
   if (!s.includes('<')) return false;
-  const depth: Record<string, number> = { b: 0, i: 0, u: 0, sub: 0, sup: 0 };
+  const depth: Record<string, number> = { b: 0, i: 0, u: 0, sub: 0, sup: 0, lab1: 0, lab2: 0, lab3: 0, lab4: 0, lab5: 0, lab6: 0, lab7: 0, lab8: 0, lab9: 0 };
   const re = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(s)) !== null) {
@@ -57,7 +59,7 @@ export function formatProblem(text?: string | null): boolean {
     } else depth[name]++;
   }
   if (Object.values(depth).some((d) => d !== 0)) return true;
-  return /<(b|i|u|sub|sup)>\s*<\/\1>/i.test(s);
+  return /<(b|i|u|sub|sup|lab[1-9])>\s*<\/\1>/i.test(s);
 }
 
 const badImage = (src?: string | null) => {
@@ -74,7 +76,7 @@ const hasDup = (list: CheckText[]) => {
 
 export function contentChecks(q: CheckInput): CheckCode[] {
   const out: CheckCode[] = [];
-  if (plainText(q.content) === '' && !(q.image && !badImage(q.image))) out.push('empty_text');
+  if (!q.passage_id && plainText(q.content) === '' && !(q.image && !badImage(q.image))) out.push('empty_text');
 
   const options = q.options ?? [];
   const left = q.left ?? [];
@@ -93,7 +95,7 @@ export function contentChecks(q: CheckInput): CheckCode[] {
 
 /** Вопрос банка (как его отдаёт база) → форма для проверки */
 export function checkInputFromBank(q: {
-  type: string; content?: string | null; image_url?: string | null;
+  type: string; content?: string | null; image_url?: string | null; passage_id?: string | null;
   options?: Array<{ text?: string | null; text_ru?: string | null; text_tg?: string | null; image_url?: string | null }> | null;
   matching_items?: Array<{ side: string; text?: string | null; text_ru?: string | null; text_tg?: string | null; image_url?: string | null }> | null;
 }): CheckInput {
@@ -104,6 +106,7 @@ export function checkInputFromBank(q: {
     type: q.type,
     content: q.content,
     image: q.image_url,
+    passage_id: q.passage_id,
     options: (q.options ?? []).map(pick),
     left: items.filter((m) => m.side === 'left').map(pick),
     right: items.filter((m) => m.side === 'right').map(pick),

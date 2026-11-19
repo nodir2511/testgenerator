@@ -1,6 +1,6 @@
 // Типы заданий НЦТ (метка вопроса в банке, questions.nct_type). Список составлен по анализу НЦТ 2022–2026:
 // код, раздел НЦТ, название, номера билета, на которых тип встречался.
-export type NctTypeSection = 'basic' | 'atom' | 'solutions' | 'elements' | 'organic';
+export type NctTypeSection = string; // ключ раздела предмета (химия: basic, atom, …; право: const, theory, branch, rights; история: tj, world)
 export interface NctTypeInfo { code: string; section: NctTypeSection; name: string; numbers: string }
 
 export const NCT_TYPES: NctTypeInfo[] = [
@@ -148,6 +148,20 @@ export const NCT_TYPES: NctTypeInfo[] = [
   { code: "EXCESS_PIC", section: 'basic', name: "Рисунок молекул в сосуде: сколько молекул после реакции", numbers: '22' },
 ];
 
-const BY_CODE = new Map(NCT_TYPES.map((t) => [t.code, t]));
+import { NCT_TYPES_LAW } from './nctTypesLaw';
+import { NCT_TYPES_HISTORY } from './nctTypesHistory';
+import { NCT_TYPES_MATH } from './nctTypesMath';
+
+const BY_CODE = new Map([...NCT_TYPES, ...NCT_TYPES_LAW, ...NCT_TYPES_HISTORY, ...NCT_TYPES_MATH].map((t) => [t.code, t]));
+
+/** Справочник типов предмета по его названию (химия — прежний список, право, история и математика — свои; другой предмет — пусто; без предмета — все) */
+export function nctTypesFor(subjectName?: string | null): NctTypeInfo[] {
+  const n = (subjectName ?? '').toLowerCase();
+  if (n.includes('прав') || n.includes('ҳуқуқ')) return NCT_TYPES_LAW;
+  if (n.includes('истор') || n.includes('таърих')) return NCT_TYPES_HISTORY;
+  if (n.includes('матем') || n.includes('риёз')) return NCT_TYPES_MATH;
+  if (n.includes('хим')) return NCT_TYPES;
+  return n ? [] : [...NCT_TYPES, ...NCT_TYPES_LAW, ...NCT_TYPES_HISTORY, ...NCT_TYPES_MATH]; // предмет не выбран — все типы
+}
 export const nctTypeName = (code?: string | null): string => (code ? BY_CODE.get(code)?.name ?? code : '');
 export const isNctType = (code?: string | null): boolean => !!code && BY_CODE.has(code);

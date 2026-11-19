@@ -104,6 +104,9 @@ export interface Question {
   nct_type?: string | null;
   /** Сложность для НЦТ: 1 лёгкий, 2 средний, 3 сложный (пока у химии) */
   nct_difficulty?: number | null;
+  /** Текст, к которому относится вопрос (английский: чтение / пропуски) и место вопроса в нём, 1–8 */
+  passage_id?: string | null;
+  passage_order?: number | null;
   version: number;
   is_deleted: boolean;
   deleted_at?: string | null;
@@ -121,10 +124,32 @@ export interface Question {
   source?: Source;
 }
 
+export type PassageKind = 'reading' | 'cloze';
+
+/** Текст для чтения или с пропусками ({{1}}…{{8}}); вопросы ссылаются на него через questions.passage_id */
+export interface Passage {
+  id: string;
+  subject_id: string;
+  chapter_id?: string | null;
+  topic_id?: string | null;
+  source_id?: string | null;
+  batch_id?: string | null;
+  kind: PassageKind;
+  title: string;
+  content: string;
+  is_deleted: boolean;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface QuestionSnapshot {
   id: string;
   type: QuestionType;
   content: string;
+  /** Текст вопроса к тексту (английский); у остальных вопросов нет */
+  passage?: { id: string; kind: PassageKind; title: string; content: string };
+  passage_order?: number;
   image_url?: string | null;
   correct_numeric_answer?: number | null;
   options?: Array<{

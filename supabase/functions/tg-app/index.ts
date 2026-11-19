@@ -184,7 +184,7 @@ function cleanAnswers(a: any, comp: Composition): Answers | null {
   if (a.tests.length !== comp.test || a.matching.length !== comp.matching || a.open.length !== comp.open) return null;
   if (!a.tests.every(isLetter)) return null;
   if (!a.matching.every((r: unknown) => Array.isArray(r) && r.length === MATCHING_ROWS && r.every(isDigit5))) return null;
-  if (!a.open.every((v: unknown) => typeof v === 'string' && /^\d{0,4}$/.test(v))) return null;
+  if (!a.open.every((v: unknown) => typeof v === 'string' && /^\d{0,5}$/.test(v))) return null;
   return a as Answers;
 }
 
@@ -193,7 +193,7 @@ function cleanKey(k: any, comp: Composition): TicketKey | null {
   if (k.tests.length !== comp.test || k.matching.length !== comp.matching || k.open.length !== comp.open) return null;
   if (!k.tests.every(isLetter)) return null;
   if (!k.matching.every((r: unknown) => Array.isArray(r) && r.length === MATCHING_ROWS && r.every(isDigit5))) return null;
-  if (!k.open.every((v: unknown) => v === null || (typeof v === 'string' && /^\d{1,4}$/.test(v)))) return null;
+  if (!k.open.every((v: unknown) => v === null || (typeof v === 'string' && /^\d{1,5}$/.test(v)))) return null;
   return k as TicketKey;
 }
 

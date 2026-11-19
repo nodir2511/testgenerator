@@ -213,6 +213,9 @@ export default function TgApp() {
       setChapters(ch);
       setChapterIds([]);
       setTopicSel([]);
+      // Английский: стандартный состав 20 тестов (текст для чтения + текст с пропусками + 4 отдельных) + 4 + 2;
+      // тексты в билет подставляет сервер (generateAndSend), если они есть в выбранных темах
+      if (/англ|инглис|english/i.test(s.name || '')) setNums((cur) => ({ ...cur, test: '20', matching: '4', open: '2' }));
       if (!auto) setStep('chapters');
     } catch (e) {
       if (auto) throw e;

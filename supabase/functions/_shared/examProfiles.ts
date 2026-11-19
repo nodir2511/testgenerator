@@ -1,4 +1,4 @@
-// Реестр предметов, для которых есть режим «Билет по формату НЦТ». Сейчас — только химия (движок: ./nct).
+// Реестр предметов, для которых есть режим «Билет по формату НЦТ». Химия, право, история и математика (движок: ./nct, настройки предмета — ./nctConfigs).
 // Чтобы подключить предмет, нужны данные из docs/NCT_SUBJECTS.md; пока их нет, предмета в реестре нет,
 // и режим для него не показывается. Файл без импортов — годится и для сайта, и для Deno.
 
@@ -36,6 +36,52 @@ export const EXAM_PROFILES: ExamProfile[] = [
     ],
     sourcePattern: /ЦВЭ/i,
     collectionSharePct: 40,
+    ready: true,
+  },
+  {
+    key: 'law',
+    subjectMatch: ['прав', 'ҳуқуқ'],
+    composition: { test: 20, matching: 4, open: 2, points: 40 },
+    pointsPer: { test: 1, matching: 4, open: 2 },
+    sections: [
+      { key: 'state', name: 'Государство и право. Отрасли права Таджикистана', share: 22 },
+      { key: 'rights', name: 'Защита прав и свобод человека и гражданина в Таджикистане. Обязанности граждан', share: 40 },
+      { key: 'intl', name: 'Международные нормы и средства защиты прав человека', share: 38 },
+    ],
+    sourcePattern: /ЦВЭ/i,
+    collectionSharePct: 30,
+    ready: true,
+  },
+  {
+    key: 'history',
+    subjectMatch: ['истор', 'таърих'],
+    composition: { test: 20, matching: 4, open: 2, points: 40 },
+    pointsPer: { test: 1, matching: 4, open: 2 },
+    sections: [
+      { key: 'p1', name: 'История таджикского народа (до конца XV века)', share: 27 },
+      { key: 'p2', name: 'История таджикского народа (с конца XV века)', share: 21 },
+      { key: 'p3', name: 'История таджикского народа (с 1920 года)', share: 27 },
+      { key: 'world', name: 'Всеобщая история (с 1918 года до начала XXI века)', share: 25 },
+    ],
+    sourcePattern: /ЦВЭ/i,
+    collectionSharePct: 10,
+    ready: true,
+  },
+  {
+    key: 'math',
+    subjectMatch: ['матем', 'риёз'],
+    composition: { test: 18, matching: 2, open: 7, points: 40 },
+    pointsPer: { test: 1, matching: 4, open: 2 },
+    sections: [
+      { key: 'arith', name: 'Арифметика', share: 18 },
+      { key: 'alg', name: 'Алгебра', share: 21 },
+      { key: 'func', name: 'Функция', share: 13 },
+      { key: 'trig', name: 'Тригонометрия', share: 13 },
+      { key: 'anal', name: 'Анализ', share: 17 },
+      { key: 'geo', name: 'Геометрия', share: 18 },
+    ],
+    sourcePattern: /ЦВЭ/i,
+    collectionSharePct: 44,
     ready: true,
   },
 ];

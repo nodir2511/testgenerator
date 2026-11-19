@@ -1,6 +1,6 @@
 import React, { useId, useRef } from 'react';
 import { Bold, Italic, Underline, Subscript, Superscript } from 'lucide-react';
-import { splitFractions, hasFraction, newFmtState, tokenizeFormatted, type MathNode, type FmtState, type FmtToken } from '../lib/fractions';
+import { splitFractions, hasFraction, newFmtState, tokenizeFormatted, groupByLabel, type MathNode, type FmtState, type FmtToken } from '../lib/fractions';
 
 interface FormulaEditorProps {
   value: string;
@@ -124,6 +124,23 @@ export const FormulaEditor: React.FC<FormulaEditorProps> = ({
 
         <span className="h-4 w-px bg-slate-300 mx-1" />
 
+        {/* Цифра над словом (морфологический разбор): выделите слово и нажмите цифру */}
+        <span className="text-[11px] text-slate-500 whitespace-nowrap">Цифра над словом:</span>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => wrapSelection(`<lab${n}>`, `</lab${n}>`)}
+            title={`Поставить цифру ${n} над выделенным словом`}
+            aria-label={`Цифра ${n} над словом`}
+            className="px-2 py-1 bg-white hover:bg-indigo-50 hover:text-indigo-600 rounded border border-slate-200 flex items-center justify-center font-mono font-bold min-h-[40px] min-w-[32px]"
+          >
+            {n}
+          </button>
+        ))}
+
+        <span className="h-4 w-px bg-slate-300 mx-1" />
+
         {/* Спецсимволы химии */}
         <button
           type="button"
@@ -217,16 +234,28 @@ const MathNodeView: React.FC<{ node: MathNode; state?: FmtState }> = ({ node, st
   );
 };
 
+const renderToken = (t: FmtToken, idx: number) => {
+  let el: React.ReactNode = t.text;
+  if (t.sub) el = <sub className="font-semibold">{el}</sub>;
+  if (t.sup) el = <sup className="font-semibold">{el}</sup>;
+  if (t.b) el = <strong>{el}</strong>;
+  if (t.i) el = <em>{el}</em>;
+  if (t.u) el = <u className="underline underline-offset-2">{el}</u>;
+  return <React.Fragment key={idx}>{el}</React.Fragment>;
+};
+
+// Цифра над словом (морфологический разбор): <ruby> с цифрой сверху, как в билетах НЦТ
 const renderTokens = (tokens: FmtToken[]) =>
-  tokens.map((t, idx) => {
-    let el: React.ReactNode = t.text;
-    if (t.sub) el = <sub className="font-semibold">{el}</sub>;
-    if (t.sup) el = <sup className="font-semibold">{el}</sup>;
-    if (t.b) el = <strong>{el}</strong>;
-    if (t.i) el = <em>{el}</em>;
-    if (t.u) el = <u className="underline underline-offset-2">{el}</u>;
-    return <React.Fragment key={idx}>{el}</React.Fragment>;
-  });
+  groupByLabel(tokens).map((g, gi) =>
+    g.lab > 0 ? (
+      <ruby key={gi} className="fmt-label">
+        {g.tokens.map(renderToken)}
+        <rt style={{ fontSize: '0.75em', fontWeight: 700 }}>{g.lab}</rt>
+      </ruby>
+    ) : (
+      <React.Fragment key={gi}>{g.tokens.map(renderToken)}</React.Fragment>
+    )
+  );
 
 // Обычный текст с тегами b, i, u, sub, sup (вложенные теги поддерживаются)
 const InlineTags: React.FC<{ text: string; className?: string; state?: FmtState }> = ({ text, className, state }) => (

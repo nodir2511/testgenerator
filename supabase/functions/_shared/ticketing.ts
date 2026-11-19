@@ -9,6 +9,17 @@ export interface Settings {
   shuffleOptions: boolean;
   shuffleMatching: boolean;
   title: string;
+  /** Английский: сколько текстов для чтения и с пропусками в билете. Вопросы текстов входят в testCount (по PASSAGE_SIZE на текст) */
+  readingCount?: number;
+  clozeCount?: number;
+}
+
+/** Вопросов в одном тексте; текст с меньшим числом вопросов в билет не берётся */
+export const PASSAGE_SIZE = 8;
+
+/** Сколько отдельных тестов (без вопросов к текстам) в билете; без текстов — все testCount */
+export function singleTests(s: Pick<Settings, 'testCount' | 'readingCount' | 'clozeCount'>): number {
+  return s.testCount - PASSAGE_SIZE * ((s.readingCount ?? 0) + (s.clozeCount ?? 0));
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -38,17 +49,22 @@ export function shuffle<T>(arr: T[], rnd: Rnd = Math.random): T[] {
   return copy;
 }
 
-export function poolStats(all: Array<{ type: string }>) {
+/** test — только отдельные тесты, вопросы к текстам считаются блоками в reading / cloze */
+export function poolStats(all: Array<{ type: string; passage_id?: string | null }>) {
+  const blocks = passageBlocks(all);
   return {
     total: all.length,
-    test: all.filter((x) => x.type === 'test').length,
+    test: all.filter((x) => x.type === 'test' && !x.passage_id).length,
     matching: all.filter((x) => x.type === 'matching').length,
     open: all.filter((x) => x.type === 'open').length,
+    reading: blocks.reading.length,
+    cloze: blocks.cloze.length,
   };
 }
 
 export function checkSettings(s: Settings, limits: { perType: number; tickets: number; total?: number } = LIMITS): string | null {
   if (s.testCount + s.matchingCount + s.openCount === 0) return 'Задайте хотя бы один вопрос в билете';
+  if (singleTests(s) < 0) return 'Тестов в билете меньше, чем вопросов в выбранных текстах (в каждом тексте их 8)';
   if (s.ticketCount < 1) return 'Количество билетов должно быть не менее 1';
   if (s.testCount > limits.perType || s.matchingCount > limits.perType || s.openCount > limits.perType) {
     return `Не больше ${limits.perType} вопросов каждого типа в билете`;
@@ -59,18 +75,24 @@ export function checkSettings(s: Settings, limits: { perType: number; tickets: n
 }
 
 export type PoolStats = ReturnType<typeof poolStats>;
+/** Статистика пула для fitSettings: счётчики текстов можно не указывать (предметы без текстов) */
+export type FitStats = Omit<PoolStats, 'reading' | 'cloze'> & { reading?: number; cloze?: number };
 
 // Подгоняет состав билета под то, что есть в выбранных темах: если вопросов какого-то
 // вида меньше, чем запрошено, берём сколько есть (в билет попадёт меньше вопросов этого вида).
 // error — только если подходящих вопросов нет вообще.
-export function fitSettings(stats: PoolStats, s: Settings): { settings: Settings; notes: string[]; error: string | null } {
+export function fitSettings(stats: FitStats, s: Settings): { settings: Settings; notes: string[]; error: string | null } {
   const notes: string[] = [];
   const fit = (want: number, have: number, label: string) => {
     if (want <= have) return want;
     notes.push(`${label}: в билете ${have} из ${want} (в выбранных темах их только ${have})`);
     return have;
   };
-  const testCount = fit(s.testCount, stats.test, 'Тестовые вопросы');
+  const hasPassages = s.readingCount !== undefined || s.clozeCount !== undefined;
+  const readingCount = fit(s.readingCount ?? 0, stats.reading ?? 0, 'Тексты для чтения');
+  const clozeCount = fit(s.clozeCount ?? 0, stats.cloze ?? 0, 'Тексты с пропусками');
+  const singles = fit(Math.max(0, singleTests(s)), stats.test, 'Тестовые вопросы');
+  const testCount = PASSAGE_SIZE * (readingCount + clozeCount) + singles;
   const matchingCount = fit(s.matchingCount, stats.matching, 'Задания на соответствие');
   const openCount = fit(s.openCount, stats.open, 'Открытые вопросы');
   // Каждому варианту нужны свои вопросы: если на все варианты их не хватает, часть вопросов повторится
@@ -79,15 +101,22 @@ export function fitSettings(stats: PoolStats, s: Settings): { settings: Settings
       notes.push(`${label}: на ${s.ticketCount} вариантов нужно ${count * s.ticketCount}, а в выбранных темах их ${have} — часть вопросов повторится в разных вариантах (выберите больше тем или уменьшите число вариантов)`);
     }
   };
-  repeats(testCount, stats.test, 'Тестовые вопросы');
+  const repeatsText = (count: number, have: number, label: string) => {
+    if (s.ticketCount > 1 && count > 0 && count * s.ticketCount > have) {
+      notes.push(`${label}: на ${s.ticketCount} вариантов нужно ${count * s.ticketCount}, а в выбранных темах их ${have} — текст повторится в разных вариантах (выберите больше тем или уменьшите число вариантов)`);
+    }
+  };
+  repeatsText(readingCount, stats.reading ?? 0, 'Тексты для чтения');
+  repeatsText(clozeCount, stats.cloze ?? 0, 'Тексты с пропусками');
+  repeats(singles, stats.test, 'Тестовые вопросы');
   repeats(matchingCount, stats.matching, 'Задания на соответствие');
   repeats(openCount, stats.open, 'Открытые вопросы');
   const error = testCount + matchingCount + openCount === 0 ? 'В выбранных темах нет вопросов нужных видов' : null;
-  return { settings: { ...s, testCount, matchingCount, openCount }, notes, error };
+  return { settings: { ...s, testCount, matchingCount, openCount, ...(hasPassages ? { readingCount, clozeCount } : {}) }, notes, error };
 }
 
 // Ошибка только если составить билет вообще не из чего
-export function checkPool(stats: PoolStats, s: Settings): string | null {
+export function checkPool(stats: FitStats, s: Settings): string | null {
   return fitSettings(stats, s).error;
 }
 
@@ -124,6 +153,11 @@ export function toSnapshot(q: any, s: Pick<Settings, 'shuffleOptions' | 'shuffle
     });
     matching = [...left.map(mapItem), ...rightUsed.map(mapItem)];
   }
+  // Вопрос к тексту (английский): снимок самодостаточен — текст лежит в нём. У остальных вопросов этих ключей нет.
+  const passage = Array.isArray(q.passage) ? q.passage[0] : q.passage;
+  const withPassage = q.passage_id && passage?.content !== undefined
+    ? { passage: { id: passage.id ?? q.passage_id, kind: passage.kind, title: passage.title ?? '', content: passage.content }, passage_order: q.passage_order }
+    : {};
   return {
     id: q.id,
     type: q.type,
@@ -136,6 +170,7 @@ export function toSnapshot(q: any, s: Pick<Settings, 'shuffleOptions' | 'shuffle
     topic_name: q.topic?.name,
     options,
     matching_items: matching,
+    ...withPassage,
   };
 }
 
@@ -402,6 +437,67 @@ export function pickParallel(
   return tickets;
 }
 
+/** Текст с его вопросами (ровно PASSAGE_SIZE, по passage_order) */
+export interface PassageBlock { id: string; kind: 'reading' | 'cloze'; topic_id: string; chapter_id: string; questions: any[] }
+
+/** Группирует вопросы пула по тексту. Тексты, где вопросов меньше PASSAGE_SIZE, отбрасываются; лишние вопросы сверх восьми не берутся. */
+export function passageBlocks(pool: Array<{ passage_id?: string | null }>): { reading: PassageBlock[]; cloze: PassageBlock[] } {
+  const byId = new Map<string, any[]>();
+  for (const q of pool as any[]) {
+    if (!q.passage_id) continue;
+    if (!byId.has(q.passage_id)) byId.set(q.passage_id, []);
+    byId.get(q.passage_id)!.push(q);
+  }
+  const out: { reading: PassageBlock[]; cloze: PassageBlock[] } = { reading: [], cloze: [] };
+  for (const [id, list] of byId) {
+    if (list.length < PASSAGE_SIZE) continue;
+    const sorted = [...list].sort((a, b) => Number(a.passage_order ?? 0) - Number(b.passage_order ?? 0)).slice(0, PASSAGE_SIZE);
+    const p = Array.isArray(sorted[0].passage) ? sorted[0].passage[0] : sorted[0].passage;
+    const kind = p?.kind === 'cloze' ? 'cloze' : 'reading';
+    out[kind].push({ id, kind, topic_id: sorted[0].topic_id, chapter_id: sorted[0].chapter_id, questions: sorted });
+  }
+  return out;
+}
+
+/**
+ * Подбор текстов для `ticketCount` билетов: матрица [билет][место]. Место делят билеты одной темы, пока в какой-нибудь
+ * теме хватает ещё не взятых текстов (по одному на билет); иначе текст берётся для каждого билета отдельно — не из
+ * уже стоящих в этом билете, сначала реже взятые в этом подборе, затем реже использованные в билетах.
+ */
+export function pickBlocks(blocks: PassageBlock[], count: number, ticketCount: number, rnd: Rnd = Math.random): PassageBlock[][] {
+  const T = ticketCount;
+  const tickets: PassageBlock[][] = Array.from({ length: T }, () => []);
+  if (count <= 0 || T <= 0 || blocks.length === 0) return tickets;
+  const use = (b: PassageBlock) => b.questions.reduce((s, q) => s + usageOf(q), 0);
+  const taken = new Map<string, number>();
+  for (let slot = 0; slot < count; slot++) {
+    const free = blocks.filter((b) => !taken.has(b.id));
+    const byTopic = new Map<string, PassageBlock[]>();
+    for (const b of free) {
+      if (!byTopic.has(b.topic_id)) byTopic.set(b.topic_id, []);
+      byTopic.get(b.topic_id)!.push(b);
+    }
+    const eligible = [...byTopic.values()].filter((l) => l.length >= T);
+    if (eligible.length > 0) {
+      let r = rnd() * eligible.reduce((s, l) => s + l.length, 0);
+      let group = eligible[eligible.length - 1];
+      for (const l of eligible) { r -= l.length; if (r < 0) { group = l; break; } }
+      const sorted = shuffle(group, rnd).sort((a, b) => use(a) - use(b));
+      for (let k = 0; k < T; k++) { tickets[k].push(sorted[k]); taken.set(sorted[k].id, 1); }
+      continue;
+    }
+    for (let k = 0; k < T; k++) {
+      const have = new Set(tickets[k].map((b) => b.id));
+      const cand = shuffle(blocks.filter((b) => !have.has(b.id)), rnd)
+        .sort((a, b) => (taken.get(a.id) ?? 0) - (taken.get(b.id) ?? 0) || use(a) - use(b));
+      if (cand.length === 0) continue;
+      tickets[k].push(cand[0]);
+      taken.set(cand[0].id, (taken.get(cand[0].id) ?? 0) + 1);
+    }
+  }
+  return tickets;
+}
+
 /**
  * Развод связанных вопросов: открытый вопрос, сделанный из теста (или задание на соответствие,
  * собранное из тестов), не должен попадать в один билет с этим тестом. Связь хранится в
@@ -485,7 +581,16 @@ export interface PickedTickets { kinds: any[][][]; ticketCount: number }
  */
 export function pickTickets(pool: any[], s: Settings, rnd: Rnd = Math.random, totals?: ChapterTotals): PickedTickets {
   const T = s.ticketCount;
-  const tests = pickParallel(pool.filter((q) => q.type === 'test'), s.testCount, T, rnd, totalsOf(totals, 'test'));
+  // Тесты билета: тексты целиком (чтение, затем пропуски), потом отдельные тесты. Вопросы с passage_id поодиночке не берутся никогда.
+  const blocks = passageBlocks(pool);
+  const readingPicked = pickBlocks(blocks.reading, s.readingCount ?? 0, T, rnd);
+  const clozePicked = pickBlocks(blocks.cloze, s.clozeCount ?? 0, T, rnd);
+  const singles = pickParallel(pool.filter((q) => q.type === 'test' && !q.passage_id), Math.max(0, singleTests(s)), T, rnd, totalsOf(totals, 'test'));
+  const tests = singles.map((list, k) => [
+    ...readingPicked[k].flatMap((b) => b.questions),
+    ...clozePicked[k].flatMap((b) => b.questions),
+    ...list,
+  ]);
   const matching = pickParallel(pool.filter((q) => q.type === 'matching'), s.matchingCount, T, rnd, totalsOf(totals, 'matching'));
   const open = pickParallel(pool.filter((q) => q.type === 'open'), s.openCount, T, rnd, totalsOf(totals, 'open'));
   separateLinked([tests, matching, open], pool, rnd);

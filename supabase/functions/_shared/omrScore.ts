@@ -81,11 +81,11 @@ export function parseMatchingKey(text: string, n: number): Parsed<string[][]> {
   return { value: out };
 }
 
-/** «12 5 700»: целые числа через пробел, не длиннее четырёх цифр */
+/** «12 5 700»: целые числа через пробел, не длиннее пяти цифр (пять клеток — у бланков таджикского и английского) */
 export function parseOpenKey(text: string, n: number): Parsed<string[]> {
   const items = text.split(/[\s,;]+/).filter(Boolean);
   if (items.length !== n) return { error: `Ключ открытых: нужно ${n} чисел, введено ${items.length}` };
-  for (const it of items) if (!/^\d{1,4}$/.test(it)) return { error: `Ответ «${it}»: нужно целое число до четырёх цифр` };
+  for (const it of items) if (!/^\d{1,5}$/.test(it)) return { error: `Ответ «${it}»: нужно целое число до пяти цифр` };
   return { value: items.map((x) => normOpen(x)) };
 }
 

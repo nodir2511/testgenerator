@@ -52,6 +52,9 @@ export async function fetchBatchSlots(batchId: string): Promise<BatchSlots> {
         nctType: m?.nct_type ?? null,
         nctDifficulty: m?.nct_difficulty ?? null,
         sourceId: m?.source_id ?? null,
+        // текст английского: берётся из снимка билета (там он сохранён целиком)
+        passageId: q.question_snapshot?.passage?.id ?? null,
+        passageKind: (q.question_snapshot?.passage?.kind ?? null) as Slot['passageKind'],
       };
     }),
   );
@@ -92,10 +95,16 @@ export async function fetchNctSourceIds(): Promise<Set<string>> {
 /** Полные вопросы по id (с вариантами и парами) */
 export async function fetchFullQuestions(ids: string[]): Promise<Map<string, any>> {
   const out = new Map<string, any>();
+  let select = QUESTION_FULL_SELECT;
   await Promise.all(chunk([...new Set(ids)], 100).map(async (part) => {
-    const { data, error } = await supabase.from('questions').select(QUESTION_FULL_SELECT).in('id', part);
+    let { data, error } = await supabase.from('questions').select(select).in('id', part);
+    if (error && /passage/.test(`${error.message ?? ''} ${error.details ?? ''} ${error.hint ?? ''}`)) {
+      // таблицы passages ещё нет в базе (миграция не применена) — вопрос без текста, как раньше
+      select = select.replace(/, passage:passages\([^)]*\)/, '');
+      ({ data, error } = await supabase.from('questions').select(select).in('id', part));
+    }
     if (error) throw error;
-    for (const q of data ?? []) out.set(q.id, q);
+    for (const q of (data ?? []) as any[]) out.set(q.id, q);
   }));
   return out;
 }

@@ -5,6 +5,7 @@ import writeExcelFile from 'write-excel-file/browser';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { must, notifyError, notifySuccess } from '../lib/errors';
+import { softDeletePassages } from '../lib/passages';
 import { Subject, Chapter, Topic, Source, QuestionType } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { parseDocxFile } from '../lib/docxImport';
@@ -772,10 +773,12 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const revertBatchMutation = useMutation({
     mutationFn: async (batchId: string) => {
       await must(supabase.from('questions').update({ is_deleted: true }).eq('batch_id', batchId));
+      await softDeletePassages({ batchId }); // тексты партии (английский); без таблицы ничего не делает
       await must(supabase.from('import_batches').update({ is_reverted: true }).eq('id', batchId));
     },
     meta: { action: 'Не удалось откатить импорт', success: 'Импорт отменён: вопросы партии удалены из базы' },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['passages'] });
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       queryClient.invalidateQueries({ queryKey: ['question_counts'] });
       queryClient.invalidateQueries({ queryKey: ['import_batches'] });

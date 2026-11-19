@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { assertRowsChanged } from '../lib/errors';
+import { softDeletePassages } from '../lib/passages';
 import { Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -196,18 +197,22 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
           .eq('is_deleted', false);
         if (qErr) throw qErr;
       };
-      if (table === 'topics') await dropQuestions('topic_id');
+      if (table === 'topics') {
+        await dropQuestions('topic_id');
+        await softDeletePassages({ topicIds: [id] }); // тексты темы (английский); без таблицы ничего не делает
+      }
       if (table === 'chapters') {
         const { error: tErr } = await supabase.from('topics').update({ is_deleted: true }).eq('chapter_id', id).eq('is_deleted', false);
         if (tErr) throw tErr;
         await dropQuestions('chapter_id');
+        await softDeletePassages({ chapterIds: [id] });
       }
     },
     meta: { action: 'Не удалось удалить запись', success: 'Запись удалена из базы' },
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: [variables.table] });
       // Справочники и вопросы, закэшированные в других разделах (генератор, импорт, банк вопросов)
-      for (const key of ['questions', 'pool_stats', 'topics_for_generation', 'question_counts', 'chapters', 'topics', 'all_chapters', 'all_topics']) {
+      for (const key of ['passages', 'questions', 'pool_stats', 'topics_for_generation', 'question_counts', 'chapters', 'topics', 'all_chapters', 'all_topics']) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       // Сохранённые в браузере выбор темы/главы мог указывать на удалённую запись

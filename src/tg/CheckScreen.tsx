@@ -4,7 +4,7 @@ import {
   type Answers, type Composition, type TicketKey,
 } from '../../supabase/functions/_shared/omrScore';
 import { OMR_LAYOUTS } from '../lib/omr/layouts.generated';
-import { omrDebug, omrRead } from '../lib/omr/recognize';
+import { omrDebug, omrReadAny } from '../lib/omr/recognize';
 import { debugPicture, loadGrayImage } from '../lib/omr/image';
 import { answersFromResult, doubts, keyFromAnswers, qualityWarnings, variantFromResult, type Doubt } from '../lib/omr/answers';
 import type { OmrResult } from '../lib/omr/types';
@@ -307,8 +307,7 @@ const debugOf = (img: Awaited<ReturnType<typeof loadGrayImage>>, layout: (typeof
 const readFile = async (f: File, layouts: string[]): Promise<{ res?: Ok; error?: string; debug?: string }> => {
   try {
     const img = await loadGrayImage(f);
-    const layout = OMR_LAYOUTS[layouts[0]];
-    const res = omrRead(img, layout, { codes: layouts.map((id) => OMR_LAYOUTS[id].code) });
+    const { res, layout } = omrReadAny(img, layouts.map((id) => OMR_LAYOUTS[id]));
     if (!res.ok) return { error: res.missingHint || FAIL_TEXT, debug: debugOf(img, layout) };
     if (!res.codeOk) return { error: res.missingHint || CODE_TEXT, debug: debugOf(img, layout) };
     return { res };
@@ -489,8 +488,7 @@ function Capture({ label, layouts, onResult, onError }: { label: string; layouts
     setBusy(true);
     try {
       const img = await loadGrayImage(f);
-      const layout = OMR_LAYOUTS[layouts[0]];
-      const res = omrRead(img, layout, { codes: layouts.map((id) => OMR_LAYOUTS[id].code) });
+      const { res, layout } = omrReadAny(img, layouts.map((id) => OMR_LAYOUTS[id]));
       if (!res.ok) return onError(res.missingHint || FAIL_TEXT, debugOf(img, layout));
       if (!res.codeOk) return onError(res.missingHint || CODE_TEXT, debugOf(img, layout));
       onResult(res);
@@ -558,7 +556,7 @@ function AnswerEditor({ res, answers, setAnswers, onlyDoubts, withEmpty, hints }
   const isDoubt = (kind: Doubt['kind'], q: number, row?: string) => dl.find((d) => d.kind === kind && d.q === q && d.row === row);
   const setTest = (i: number, v: string | null) => setAnswers({ ...answers, tests: answers.tests.map((x, j) => (j === i ? v : x)) });
   const setMatch = (i: number, r: number, v: string | null) => setAnswers({ ...answers, matching: answers.matching.map((row, j) => (j === i ? row.map((x, k) => (k === r ? v : x)) : row)) });
-  const setOpen = (i: number, v: string) => setAnswers({ ...answers, open: answers.open.map((x, j) => (j === i ? v.replace(/\D/g, '').slice(0, 4) : x)) });
+  const setOpen = (i: number, v: string) => setAnswers({ ...answers, open: answers.open.map((x, j) => (j === i ? v.replace(/\D/g, '').slice(0, res.open[i]?.boxes.length ?? 4) : x)) });
   const LET = ['A', 'B', 'C', 'D'];
   const ROWS = ['A', 'B', 'C', 'D'].slice(0, MATCHING_ROWS);
 
@@ -591,8 +589,8 @@ function AnswerEditor({ res, answers, setAnswers, onlyDoubts, withEmpty, hints }
             {o.boxes.map((b, j) => (b.hasDigit ? <DigitPic key={j} box={b} /> : <span key={j} className="tg-hint" style={{ width: 28, textAlign: 'center' }}>·</span>))}
           </div>
           <label className="tg-field">
-            <span>Число (целое, до четырёх цифр)</span>
-            <input inputMode="numeric" maxLength={4} value={answers.open[i]} onChange={(e) => setOpen(i, e.target.value)} placeholder={o.boxes.some((b) => b.hasDigit) ? 'впишите цифры с картинки' : 'пусто'} />
+            <span>Число (целое, цифр не больше {o.boxes.length})</span>
+            <input inputMode="numeric" maxLength={o.boxes.length} value={answers.open[i]} onChange={(e) => setOpen(i, e.target.value)} placeholder={o.boxes.some((b) => b.hasDigit) ? 'впишите цифры с картинки' : 'пусто'} />
           </label>
         </div>
       ))}

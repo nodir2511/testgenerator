@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { assertRowsChanged, withUndo } from '../lib/errors';
-import { Question, QuestionType, Subject, Chapter, Topic } from '../types/database';
+import { Question, QuestionType, Subject, Chapter, Topic, Passage } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { FormattedText } from './FormulaEditor';
 import { questionIssues, ISSUE_LABELS, ISSUE_FILTER_LABELS, matchesIssueFilter, IssueFilter } from '../lib/questionIssues';
@@ -25,9 +25,11 @@ import {
   SlidersHorizontal,
   Check
 } from 'lucide-react';
-import { NCT_TYPES, nctTypeName } from '../lib/nctTypes';
+import { nctTypesFor, nctTypeName } from '../lib/nctTypes';
 import { NCT_DIFFICULTIES, nctDifficultyName } from '../lib/nctDifficulty';
 import { Badge, Button, Card, EmptyState, Field, IconButton, Skeleton } from './ui';
+import { PassageEditor } from './PassageEditor';
+import { fetchPassages, fetchPassagesByIds, passageLabel } from '../lib/passages';
 
 interface QuestionListProps {
   onAddQuestion: () => void;
@@ -44,6 +46,9 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const { isStaff, canManage, isOwner } = useAuth();
   const [filterNct, setFilterNct] = useState<string>('all');
   const [filterDiff, setFilterDiff] = useState<string>('all');
+  // Фильтр «Текст» (английский): all — любой, none — вопросы без текста, иначе id текста
+  const [filterPassage, setFilterPassage] = useState<string>('all');
+  const [editPassage, setEditPassage] = useState<Passage | null>(null);
 
   // Фильтры (с сохранением в localStorage)
   const [filterSubjectId, setFilterSubjectId] = useState(() => localStorage.getItem('examiner_ql_subject_id') || '');
@@ -125,11 +130,24 @@ export const QuestionList: React.FC<QuestionListProps> = ({
     },
   });
 
+  // Тексты выбранной темы (английский); без таблицы или без текстов фильтр «Текст» не показывается
+  const { data: topicPassages = [] } = useQuery({
+    queryKey: ['passages', filterTopicId],
+    enabled: Boolean(filterTopicId),
+    queryFn: () => fetchPassages(filterTopicId),
+  });
+  // Выбранный текст действует, только пока он есть в теме
+  const activePassage = filterTopicId && topicPassages.length > 0
+    && (filterPassage === 'none' || topicPassages.some((p) => p.id === filterPassage))
+    ? filterPassage : 'all';
+
   const applyFilters = (query: any) => {
     if (filterSubjectId) query = query.eq('subject_id', filterSubjectId);
     if (filterChapterId) query = query.eq('chapter_id', filterChapterId);
     if (filterTopicId) query = query.eq('topic_id', filterTopicId);
     if (filterType !== 'all') query = query.eq('type', filterType);
+    if (activePassage === 'none') query = query.is('passage_id', null);
+    else if (activePassage !== 'all') query = query.eq('passage_id', activePassage);
     if (isOwner && filterNct === 'none') query = query.is('nct_type', null);
     else if (isOwner && filterNct !== 'all') query = query.eq('nct_type', filterNct);
     if (isOwner && filterDiff === 'none') query = query.is('nct_difficulty', null);
@@ -181,7 +199,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
   const fetchIssuePage = async (pageNo: number) => {
     const ids = await queryClient.fetchQuery({
-      queryKey: ['questions', 'issue-ids', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, filterDiff, searchQuery, filterIssue],
+      queryKey: ['questions', 'issue-ids', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, filterDiff, activePassage, searchQuery, filterIssue],
       staleTime: 15000,
       queryFn: loadIssueIds,
     });
@@ -231,7 +249,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   const shownPages = Array.from({ length: extra + 1 }, (_, i) => page + i);
   const pageResults = useQueries({
     queries: shownPages.map((p) => ({
-      queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, filterDiff, searchQuery, filterIssue, p],
+      queryKey: ['questions', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, filterDiff, activePassage, searchQuery, filterIssue, p],
       queryFn: () => fetchPage(p),
     })),
   });
@@ -277,6 +295,14 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
   const questions = pageResults.flatMap((r) => r.data?.questions || []).filter((q) => !hiddenIds.includes(q.id));
   const totalCount = data?.totalCount || 0;
+
+  // Подписи текстов у вопросов на странице («Чтение: заголовок · № k»)
+  const passageIds = Array.from(new Set(questions.map((q) => q.passage_id).filter(Boolean) as string[]));
+  const { data: passageById } = useQuery({
+    queryKey: ['passages-by-ids', passageIds.join(',')],
+    enabled: passageIds.length > 0,
+    queryFn: async () => new Map((await fetchPassagesByIds(passageIds)).map((p) => [p.id, p])),
+  });
 
   // Связи «тест ↔ открытый вопрос / соответствие»: показываем, где ещё используется вопрос
   const shownIds = questions.map((q) => q.id);
@@ -655,7 +681,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             >
               <option value="all">Любая метка НЦТ</option>
               <option value="none">Без метки</option>
-              {NCT_TYPES.map(t => <option key={t.code} value={t.code}>{t.name}</option>)}
+              {nctTypesFor((subjects as any[]).find((x: any) => x.id === filterSubjectId)?.name).map(t => <option key={t.code} value={t.code}>{t.name}</option>)}
             </CustomSelect>
           )}
 
@@ -668,6 +694,19 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               <option value="all">Любая сложность</option>
               <option value="none">Без сложности</option>
               {NCT_DIFFICULTIES.map(d => <option key={d.value} value={String(d.value)}>{d.name}</option>)}
+            </CustomSelect>
+          )}
+
+          {/* Текст (английский): только когда в теме есть тексты */}
+          {filterTopicId && topicPassages.length > 0 && (
+            <CustomSelect
+              value={activePassage}
+              onChange={(val) => { setFilterPassage(val); setPage(0); setExtra(0); }}
+              className="text-sm px-2.5 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="all">Любой текст</option>
+              <option value="none">Без текста</option>
+              {topicPassages.map((p) => <option key={p.id} value={p.id}>{passageLabel(p)}</option>)}
             </CustomSelect>
           )}
 
@@ -801,6 +840,12 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                     </Badge>
                   )}
 
+                  {q.passage_id && (
+                    <Badge tone="primary" className="font-normal" title="Вопрос к тексту; в билет такие вопросы попадают вместе с текстом">
+                      {passageById?.get(q.passage_id) ? passageLabel(passageById.get(q.passage_id), q.passage_order) : `Текст${q.passage_order ? ` · № ${q.passage_order}` : ''}`}
+                    </Badge>
+                  )}
+
                   {q.chapter && (
                     <Badge tone="neutral" className="font-normal">
                       Гл: {(q.chapter as any).name}
@@ -832,6 +877,14 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 </div>
 
                 <div className="flex items-center space-x-1">
+                  {q.passage_id && canManage(q.subject_id) && passageById?.get(q.passage_id) && (
+                    <IconButton
+                      icon={FileText}
+                      label="Открыть текст"
+                      onClick={() => setEditPassage(passageById.get(q.passage_id!)!)}
+                      className="w-10 h-10 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50"
+                    />
+                  )}
                   {canManage(q.subject_id) && (
                     <IconButton
                       icon={Edit3}
@@ -1108,6 +1161,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
 
       </div>
       </div>
+
+      {editPassage && <PassageEditor passage={editPassage} onClose={() => setEditPassage(null)} />}
 
       {/* Модальное окно увеличения изображения (Lightbox) */}
       {previewImage && (

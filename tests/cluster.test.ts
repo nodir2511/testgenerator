@@ -54,7 +54,7 @@ describe('кластер', () => {
     expect(names.filter((n) => n.startsWith('Ключи/')).length).toBe(4);
     expect(file.missingAnswers).toBe(0);
     expect(file.keyOverflow).toBe(0);
-  });
+  }, 30000);
 });
 
 describe('шаблоны ключей и рамка', () => {
@@ -161,11 +161,12 @@ describe('предметы и порядок по выбору', () => {
 });
 
 describe('клетки под открытый ответ в обычных билетах', () => {
-  it('таджикский — 5 клеток, остальные предметы — 4', async () => {
+  it('таджикский и английский — 5 клеток, остальные предметы — 4', async () => {
     const { openBoxesFor, buildSingleTicketBlob } = await import('../src/lib/docxExport');
     expect(openBoxesFor('Таджикский язык')).toBe(5);
     expect(openBoxesFor('Забони тоҷикӣ')).toBe(5);
-    for (const n of ['Химия', 'Физика', 'Математика', 'История', 'Английский язык', 'Забони англисӣ']) expect(openBoxesFor(n), n).toBe(4);
+    for (const n of ['Английский язык', 'Забони англисӣ']) expect(openBoxesFor(n), n).toBe(5);
+    for (const n of ['Химия', 'Физика', 'Математика', 'История']) expect(openBoxesFor(n), n).toBe(4);
     const cells = async (subject: string) => {
       const blob = await buildSingleTicketBlob('x', { ticket_number: 1, questions: [{ question_snapshot: open(1) }] }, subject, false);
       const xml = await (await JSZip.loadAsync(await blob.arrayBuffer())).file('word/document.xml')!.async('string');

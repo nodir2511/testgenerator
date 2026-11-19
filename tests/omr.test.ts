@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { OMR_LAYOUTS } from '../src/lib/omr/layouts.generated';
-import { omrRead } from '../src/lib/omr/recognize';
+import { omrRead, omrReadAny } from '../src/lib/omr/recognize';
 import type { GrayImage } from '../src/lib/omr/types';
 
 import { render } from './omrRender';
@@ -55,6 +55,26 @@ describe('распознавание бланка по снимку', () => {
     if (!res.ok) return;
     expect(res.codeOk).toBe(true);
     expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+  });
+
+  it('бланк таджикского — пять клеток под открытый ответ, раскладка выбирается по коду бланка', () => {
+    expect(OMR_LAYOUTS.taj.open.map((o) => o.boxes.length)).toEqual([5, 5]);
+    expect(OMR_LAYOUTS.bio.open.map((o) => o.boxes.length)).toEqual([4, 4]);
+    // клетки не доходят до правой угловой метки и не налезают на рамку соответствия
+    for (const o of OMR_LAYOUTS.taj.open) {
+      expect(o.boxes[0].x).toBeGreaterThan(165);
+      expect(o.boxes[4].x + o.boxes[4].w).toBeLessThan(199);
+    }
+    const pair = [OMR_LAYOUTS.bio, OMR_LAYOUTS.taj];
+    for (const id of ['taj', 'bio'] as const) {
+      const { img, truth } = render(OMR_LAYOUTS[id], 5, 2);
+      const { res, layout } = omrReadAny(img, pair);
+      expect(layout.id, id).toBe(id);
+      expect(res.ok && res.codeOk, id).toBe(true);
+      if (!res.ok) continue;
+      expect(res.open.map((o) => o.boxes.length)).toEqual(id === 'taj' ? [5, 5] : [4, 4]);
+      expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+    }
   });
 
   it('пустой стол без меток — отказ, а не случайные ответы', () => {

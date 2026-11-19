@@ -3,8 +3,8 @@
 // не берётся; предпочитаются реже использованные вопросы, затем порядок в сборнике; вопросы, связанные
 // друг с другом (тест и открытый вопрос из него), в один билет не попадают.
 
-import { toSnapshot, usageOf, type Settings } from '../../supabase/functions/_shared/ticketing';
-import { NCT_BANNED, sectionOfTopic, sectionOfTopicNumber, topicNumber, type NctSection } from '../../supabase/functions/_shared/nct';
+import { PASSAGE_SIZE, toSnapshot, usageOf, type Settings } from '../../supabase/functions/_shared/ticketing';
+import { CHEM_CONFIG, type NctConfig, type NctSection } from '../../supabase/functions/_shared/nct';
 
 export type QType = 'test' | 'matching' | 'open';
 export const TYPE_ORDER: QType[] = ['test', 'matching', 'open'];
@@ -27,6 +27,10 @@ export interface PoolQ {
   nct_difficulty?: number | null;
   source_id?: string | null;
   isNct?: boolean;
+  /** Вопрос к тексту (английский): id текста, номер вопроса в тексте и вид текста */
+  passage_id?: string | null;
+  passage_order?: number | null;
+  passage?: { kind?: string | null } | null;
   chapter?: { order_index?: number | null } | null;
   topic?: { order_index?: number | null } | null;
 }
@@ -46,7 +50,11 @@ export interface Slot {
   nctType?: string | null;
   nctDifficulty?: number | null;
   sourceId?: string | null;
+  /** Вопрос к тексту: id текста и его вид (чтение / пропуски); у обычного вопроса и пустого места — null */
+  passageId?: string | null;
+  passageKind?: PassageKindLite | null;
 }
+export type PassageKindLite = 'reading' | 'cloze';
 
 // ---------- Пустое место ----------
 
@@ -99,7 +107,62 @@ export function candidatesFor(
   pool: PoolQ[], type: QType, used: Set<string>, ticketOthers: Iterable<string>, links: Map<string, Set<string>>,
 ): PoolQ[] {
   const others = [...ticketOthers];
-  return rankFresh(pool.filter((q) => q.type === type && !used.has(q.id) && !clashes(q.id, others, links)));
+  // вопросы к тексту поодиночке не ставятся: они меняются только вместе с текстом (blockCandidates)
+  return rankFresh(pool.filter((q) => q.type === type && !q.passage_id && !used.has(q.id) && !clashes(q.id, others, links)));
+}
+
+// ---------- Тексты (английский): замена блоком ----------
+
+/** Текст из пула: все его вопросы по порядку passage_order */
+export interface PassageBlockQ { id: string; kind: PassageKindLite; topicId: string; questions: PoolQ[] }
+
+/** Номера мест билета (в массиве slots), которые меняются вместе с местом index: весь текст или только оно само */
+export function blockSlots(slots: Slot[], index: number): number[] {
+  const s = slots[index];
+  if (!s) return [];
+  const mine = slots.map((x, i) => ({ x, i })).filter(({ x }) => x.ticketId === s.ticketId).sort((a, b) => a.x.orderIndex - b.x.orderIndex);
+  let pid = s.passageId ?? null;
+  if (!pid && !s.questionId) {
+    // пустое место: оно в блоке, если слева и справа от него (среди непустых мест) стоит один и тот же текст
+    const at = mine.findIndex(({ i }) => i === index);
+    const filled = (from: number, step: number) => { for (let k = from; k >= 0 && k < mine.length; k += step) if (mine[k].x.questionId) return mine[k].x; return null; };
+    const prev = filled(at - 1, -1), next = filled(at + 1, 1);
+    if (prev?.passageId && prev.passageId === next?.passageId) pid = prev.passageId;
+  }
+  if (!pid) return [index];
+  const own = mine.filter(({ x }) => x.passageId === pid);
+  const lo = own[0].x.orderIndex, hi = own[own.length - 1].x.orderIndex;
+  return mine.filter(({ x }) => x.orderIndex >= lo && x.orderIndex <= hi && (x.passageId === pid || !x.questionId)).map(({ i }) => i).sort((a, b) => a - b);
+}
+
+/** id текстов, уже стоящих в билетах набора */
+export const usedPassageIds = (slots: Slot[]): Set<string> => new Set(slots.map((s) => s.passageId).filter((x): x is string => !!x));
+
+/**
+ * Тексты пула одного вида, которых нет в наборе: целые (ровно PASSAGE_SIZE вопросов-тестов), реже использованные первыми,
+ * затем порядок сборника. Вопросы каждого текста идут по passage_order.
+ */
+export function blockCandidates(pool: PoolQ[], kind: PassageKindLite, usedPassages: Set<string>): PassageBlockQ[] {
+  const groups = new Map<string, PoolQ[]>();
+  for (const q of pool) {
+    if (!q.passage_id || q.type !== 'test' || q.passage?.kind !== kind || usedPassages.has(q.passage_id)) continue;
+    if (!groups.has(q.passage_id)) groups.set(q.passage_id, []);
+    groups.get(q.passage_id)!.push(q);
+  }
+  const blocks: PassageBlockQ[] = [];
+  for (const [id, list] of groups) {
+    const questions = [...list].sort((a, b) => Number(a.passage_order) - Number(b.passage_order));
+    if (questions.length !== PASSAGE_SIZE || !questions.every((q, i) => Number(q.passage_order) === i + 1)) continue;
+    blocks.push({ id, kind, topicId: questions[0].topic_id, questions });
+  }
+  const load = (b: PassageBlockQ) => b.questions.reduce((n, q) => n + usageOf(q), 0);
+  return blocks.sort((a, b) => load(a) - load(b) || bookOrder(a.questions[0], b.questions[0]));
+}
+
+/** Изменения для замены текста: места блока по порядку получают вопросы нового текста; block = null — пустые места */
+export function blockSwapChanges(blockSlotList: Slot[], block: PassageBlockQ | null): PlanChange[] {
+  const sorted = [...blockSlotList].sort((a, b) => a.orderIndex - b.orderIndex);
+  return sorted.map((slot, i) => ({ slot, question: block?.questions[i] ?? null }));
 }
 
 // ---------- Замена в билете по формату НЦТ ----------
@@ -108,9 +171,8 @@ export function candidatesFor(
 export interface NctSlotInfo { section: NctSection | null; nctType: string | null; isNct: boolean; difficulty?: number | null }
 
 /** Раздел НЦТ вопроса по порядку главы и темы (уровни 1–3); null — тема вне режима НЦТ */
-export function sectionOfPoolQ(q: Pick<PoolQ, 'chapter' | 'topic'> & { nct_type?: string | null }): NctSection | null {
-  const n = topicNumber(Number(q.chapter?.order_index), Number(q.topic?.order_index));
-  return sectionOfTopic(n === null ? null : sectionOfTopicNumber(n), q.nct_type);
+export function sectionOfPoolQ(q: Pick<PoolQ, 'chapter' | 'topic'> & { nct_type?: string | null }, cfg: NctConfig = CHEM_CONFIG): NctSection | null {
+  return cfg.refineSection(cfg.topicSection(Number(q.chapter?.order_index), Number(q.topic?.order_index)), q.nct_type);
 }
 
 /**
@@ -123,13 +185,13 @@ export function sectionOfPoolQ(q: Pick<PoolQ, 'chapter' | 'topic'> & { nct_type?
  */
 export function nctCandidatesFor(
   pool: PoolQ[], type: QType, used: Set<string>, ticketOthers: Iterable<string>, links: Map<string, Set<string>>,
-  info: NctSlotInfo, typesInTicket: Set<string>, anySource = false,
+  info: NctSlotInfo, typesInTicket: Set<string>, anySource = false, cfg: NctConfig = CHEM_CONFIG,
 ): PoolQ[] {
   if (!info.section) return [];
   const fits = pool.filter((q) => {
-    if (sectionOfPoolQ(q) !== info.section) return false;
+    if (sectionOfPoolQ(q, cfg) !== info.section) return false;
     if (info.nctType) { if (q.nct_type !== info.nctType) return false; }
-    else if (q.nct_type && (NCT_BANNED.has(q.nct_type) || typesInTicket.has(q.nct_type))) return false;
+    else if (q.nct_type && (cfg.banned.has(q.nct_type) || typesInTicket.has(q.nct_type))) return false;
     if (!anySource && Boolean(q.isNct) !== info.isNct) return false;
     return true;
   });
@@ -179,7 +241,7 @@ export function planTopicRemoval(slots: Slot[], removedTopicId: string, pool: Po
 
   const byTopic = new Map<string, PoolQ[]>();
   for (const q of pool) {
-    if (q.topic_id === removedTopicId || !count.has(q.topic_id)) continue;
+    if (q.topic_id === removedTopicId || !count.has(q.topic_id) || q.passage_id) continue;
     if (!byTopic.has(q.topic_id)) byTopic.set(q.topic_id, []);
     byTopic.get(q.topic_id)!.push(q);
   }
@@ -187,10 +249,39 @@ export function planTopicRemoval(slots: Slot[], removedTopicId: string, pool: Po
   const freeOf = (t: string, type: QType) => (ranked.get(t) ?? []).filter((q) => q.type === type && !used.has(q.id));
   const ord = (t: string) => { const i = topicOrder.indexOf(t); return i < 0 ? 1e9 : i; };
 
+  // Тексты (английский): текст убираемой темы меняется целиком на текст другой темы набора, по одному на билет
+  const blockTargets = targets.filter((s) => s.passageId);
+  const singleTargets = targets.filter((s) => !s.passageId);
+  if (blockTargets.length) {
+    const usedP = usedPassageIds(slots);
+    const usablePool = pool.filter((q) => q.topic_id !== removedTopicId && count.has(q.topic_id));
+    const done = new Set<string>();
+    for (const t of [...blockTargets].sort((a, b) => a.ticketNumber - b.ticketNumber || a.orderIndex - b.orderIndex)) {
+      if (done.has(t.tqId)) continue;
+      const members = blockSlots(slots, slots.indexOf(t)).map((i) => slots[i]);
+      for (const m of members) done.add(m.tqId);
+      const memberIds = new Set(members.map((m) => m.tqId));
+      const others = new Set<string>();
+      for (const s of slots) if (s.ticketId === t.ticketId && s.questionId && !memberIds.has(s.tqId) && s.topicId !== removedTopicId) others.add(s.questionId);
+      const cands = blockCandidates(usablePool, t.passageKind ?? 'reading', usedP)
+        .filter((b) => !b.questions.some((q) => clashes(q.id, others, links)));
+      const best = [...cands].sort((a, b) => (count.get(a.topicId)! - count.get(b.topicId)!) || (ord(a.topicId) - ord(b.topicId)))[0] ?? null;
+      if (best) {
+        usedP.add(best.id);
+        for (const q of best.questions) used.add(q.id);
+        count.set(best.topicId, count.get(best.topicId)! + best.questions.length);
+        plan.fromTopic[best.topicId] = (plan.fromTopic[best.topicId] ?? 0) + best.questions.length;
+      }
+      const changes = blockSwapChanges(members, best);
+      for (const c of changes) if (!c.question) plan.missing.test++;
+      plan.changes.push(...changes);
+    }
+  }
+
   // Группы: (вид, номер среди вопросов этого вида убираемой темы в билете) — по одной на «позицию» в билетах
   const groups = new Map<string, Slot[]>();
   const rankIn = new Map<string, number>();
-  for (const s of [...targets].sort((a, b) => a.ticketNumber - b.ticketNumber || a.orderIndex - b.orderIndex)) {
+  for (const s of [...singleTargets].sort((a, b) => a.ticketNumber - b.ticketNumber || a.orderIndex - b.orderIndex)) {
     const key = `${s.ticketId}:${s.type}`;
     const r = rankIn.get(key) ?? 0;
     rankIn.set(key, r + 1);
@@ -247,7 +338,7 @@ export function planTopicRemoval(slots: Slot[], removedTopicId: string, pool: Po
  */
 export function planNctTopicRemoval(
   slots: Slot[], removedTopicId: string, pool: PoolQ[], sectionOf: (topicId: string) => NctSection | null,
-  isNctSource: (sourceId: string | null | undefined) => boolean, topicOrder: string[] = [],
+  isNctSource: (sourceId: string | null | undefined) => boolean, topicOrder: string[] = [], cfg: NctConfig = CHEM_CONFIG,
 ): RemovalPlan {
   const plan: RemovalPlan = { changes: [], fromTopic: {}, missing: { test: 0, matching: 0, open: 0 } };
   const targets = slots.filter((s) => s.topicId === removedTopicId);
@@ -274,11 +365,11 @@ export function planNctTopicRemoval(
   const ord = (t: string) => { const i = topicOrder.indexOf(t); return i < 0 ? 1e9 : i; };
 
   for (const slot of [...targets].sort((a, b) => a.ticketNumber - b.ticketNumber || a.orderIndex - b.orderIndex)) {
-    const info: NctSlotInfo = { section: slot.topicId ? sectionOfTopic(sectionOf(slot.topicId), slot.nctType) : null, nctType: slot.nctType ?? null, isNct: isNctSource(slot.sourceId), difficulty: slot.nctDifficulty ?? null };
+    const info: NctSlotInfo = { section: slot.topicId ? cfg.refineSection(sectionOf(slot.topicId), slot.nctType) : null, nctType: slot.nctType ?? null, isNct: isNctSource(slot.sourceId), difficulty: slot.nctDifficulty ?? null };
     const others = inTicket.get(slot.ticketId) ?? new Set<string>();
     const types = typesIn.get(slot.ticketId) ?? new Set<string>();
-    let cands = nctCandidatesFor(usable, slot.type, used, others, links, info, types);
-    if (cands.length === 0) cands = nctCandidatesFor(usable, slot.type, used, others, links, info, types, true);
+    let cands = nctCandidatesFor(usable, slot.type, used, others, links, info, types, false, cfg);
+    if (cands.length === 0) cands = nctCandidatesFor(usable, slot.type, used, others, links, info, types, true, cfg);
     if (cands.length === 0) {
       plan.changes.push({ slot, question: null });
       plan.missing[slot.type]++;
@@ -340,14 +431,14 @@ export function paramsAfterEdit(params: any, before: Slot[], after: Slot[]): any
 }
 
 /** Применяет изменения к списку мест (локально, без базы) */
-export function applyToSlots(slots: Slot[], rows: RowChange[], meta: Map<string, { topicId: string | null; chapterId?: string | null; linked?: string[]; nctType?: string | null; nctDifficulty?: number | null; sourceId?: string | null }>): Slot[] {
+export function applyToSlots(slots: Slot[], rows: RowChange[], meta: Map<string, { topicId: string | null; chapterId?: string | null; linked?: string[]; nctType?: string | null; nctDifficulty?: number | null; sourceId?: string | null; passageId?: string | null; passageKind?: PassageKindLite | null }>): Slot[] {
   const byId = new Map(rows.map((r) => [r.ticket_question_id, r]));
   return slots.map((s) => {
     const r = byId.get(s.tqId);
     if (!r) return s;
     const m = r.question_id ? meta.get(r.question_id) : undefined;
     // Пустое место ни к какой теме не относится
-    if (!r.question_id) return { ...s, questionId: null, topicId: null, chapterId: null, linked: undefined, nctType: null, nctDifficulty: null, sourceId: null };
-    return { ...s, questionId: r.question_id, topicId: m?.topicId ?? s.topicId, chapterId: m?.chapterId ?? s.chapterId, linked: m?.linked, nctType: m?.nctType ?? null, nctDifficulty: m?.nctDifficulty ?? null, sourceId: m?.sourceId ?? null };
+    if (!r.question_id) return { ...s, questionId: null, topicId: null, chapterId: null, linked: undefined, nctType: null, nctDifficulty: null, sourceId: null, passageId: null, passageKind: null };
+    return { ...s, questionId: r.question_id, topicId: m?.topicId ?? s.topicId, chapterId: m?.chapterId ?? s.chapterId, linked: m?.linked, nctType: m?.nctType ?? null, nctDifficulty: m?.nctDifficulty ?? null, sourceId: m?.sourceId ?? null, passageId: m?.passageId ?? null, passageKind: m?.passageKind ?? null };
   });
 }

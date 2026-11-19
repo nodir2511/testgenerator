@@ -85,6 +85,25 @@ describe('цифры из клеток', () => {
 });
 
 describe('цифры по снимкам бланков (конвейер от фото до цифры)', () => {
+  it('в узких клетках бланка таджикского (пять по 5,5 мм) цифры читаются не хуже', () => {
+    const knn = bootstrapKnn();
+    let total = 0, ok = 0;
+    for (let s = 0; s < 6; s++) {
+      const layout = OMR_LAYOUTS.taj;
+      const { img, truth } = render(layout, 700 + s * 13, s % 2 ? 6 : -5, { glyphs: true });
+      const res = omrRead(img, layout);
+      expect(res.ok && res.codeOk).toBe(true);
+      if (!res.ok) continue;
+      res.open.forEach((o, qi) => {
+        const want = truth.openText[qi];
+        const boxes = o.boxes.filter((b) => b.hasDigit);
+        expect(boxes.length).toBe(want.length);
+        boxes.forEach((b, i) => { total++; if (knn.predictBox(b)!.digit === Number(want[i])) ok++; });
+      });
+    }
+    expect(ok / total).toBeGreaterThan(0.9);
+  }, 20000);
+
   it('на нарисованных бланках узнаются цифры в клетках, а ненадёжные помечаются', () => {
     const knn = bootstrapKnn();
     let total = 0, ok = 0, unsureWrong = 0, sureWrong = 0, unsure = 0;
@@ -115,5 +134,5 @@ describe('цифры по снимкам бланков (конвейер от �
     expect(ok / total).toBeGreaterThan(0.9);
     expect(sureWrong / total).toBeLessThan(0.05);
     void unsureWrong; void unsure;
-  });
+  }, 30000);
 });

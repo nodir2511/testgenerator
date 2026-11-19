@@ -467,3 +467,26 @@ export function omrDebug(img: GrayImage, layout: OmrLayout): { bin: Uint8Array; 
   const bin = adaptiveBinary(img, win, best ? k : MARKER_K[0]);
   return { bin, markers: best ? best.ring.map((m) => ({ x: m.cx, y: m.cy })) : [] };
 }
+
+/**
+ * Чтение бланка, когда составу билета подходят несколько раскладок (биология и таджикский: у второго пять клеток
+ * под открытый ответ). Раскладки с одинаковыми клетками читаются за один проход по списку кодов, с разными —
+ * по очереди, пока код бланка не сойдётся. Если не сошёлся ни один, возвращается первый результат.
+ */
+export function omrReadAny(img: GrayImage, layouts: OmrLayout[]): { res: ReturnType<typeof omrRead>; layout: OmrLayout } {
+  const groups = new Map<string, { layout: OmrLayout; codes: number[] }>();
+  for (const l of layouts) {
+    const sig = JSON.stringify([l.kind, l.open]);
+    const g = groups.get(sig);
+    if (g) g.codes.push(l.code);
+    else groups.set(sig, { layout: l, codes: [l.code] });
+  }
+  let first: { res: ReturnType<typeof omrRead>; layout: OmrLayout } | null = null;
+  for (const g of groups.values()) {
+    const res = omrRead(img, g.layout, { codes: g.codes });
+    if (res.ok && res.codeOk) return { res, layout: g.layout };
+    first ??= { res, layout: g.layout };
+  }
+  if (!first) throw new Error('omrReadAny: нет раскладок');
+  return first;
+}

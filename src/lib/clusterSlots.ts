@@ -44,7 +44,7 @@ export const CLUSTER_SUBJECTS: Record<ClusterKind, ClusterSubjectDef> = {
   // История, право и английский: те же 20+4+2 и тот же шаблон ключей, что у биологии
   hist: { kind: 'hist', name: 'История', nameTj: 'Таърих', dative: 'истории', counts: A, draft: false, openBoxes: 4, keyTemplate: 'bio' },
   law: { kind: 'law', name: 'Право', nameTj: 'Ҳуқуқ', dative: 'праву', counts: A, draft: false, openBoxes: 4, keyTemplate: 'bio' },
-  eng: { kind: 'eng', name: 'Английский язык', nameTj: 'Забони англисӣ', dative: 'английскому языку', counts: A, draft: false, openBoxes: 4, keyTemplate: 'bio' },
+  eng: { kind: 'eng', name: 'Английский язык', nameTj: 'Забони англисӣ', dative: 'английскому языку', counts: A, draft: false, openBoxes: 5, keyTemplate: 'bio' },
 };
 
 /** Предметы в порядке списка выбора */

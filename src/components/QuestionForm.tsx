@@ -4,13 +4,14 @@ import { supabase } from '../lib/supabase';
 import { notifyError, describeError, must } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
-import { NCT_TYPES } from '../lib/nctTypes';
+import { nctTypesFor } from '../lib/nctTypes';
 import { NCT_DIFFICULTIES } from '../lib/nctDifficulty';
 import { FormulaEditor } from './FormulaEditor';
 import { QuestionPreview } from './QuestionPreview';
 import { QuestionProgress, type ProgressStep } from './QuestionProgress';
 import { CustomSelect } from './CustomSelect';
 import { uploadQuestionImage } from '../lib/imageCompression';
+import { fetchPassages, passageLabel, PASSAGE_QUESTIONS } from '../lib/passages';
 import { 
   CheckCircle2, 
   AlertCircle, 
@@ -68,7 +69,7 @@ const emptySide = (side: 'left' | 'right', n: number): MatchingItemState[] =>
 
 // Черновик нового вопроса: переживает случайное закрытие вкладки или перезагрузку
 const DRAFT_KEY = 'examiner_qf_draft';
-interface Draft { savedAt: number; type: QuestionType; contentRu: string; contentTg: string; imageUrl: string | null; correctNumeric: string; options: TestOptionState[]; leftItems: MatchingItemState[]; rightItems: MatchingItemState[] }
+interface Draft { savedAt: number; type: QuestionType; contentRu: string; contentTg: string; imageUrl: string | null; correctNumeric: string; options: TestOptionState[]; leftItems: MatchingItemState[]; rightItems: MatchingItemState[]; passageId?: string; passageOrder?: string }
 const readDraft = (): Draft | null => {
   try {
     const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
@@ -105,6 +106,9 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   );
   const [nctType, setNctType] = useState<string>(initialData?.nct_type || '');
   const [nctDifficulty, setNctDifficulty] = useState<string>(initialData?.nct_difficulty ? String(initialData.nct_difficulty) : '');
+  // Вопрос к тексту (английский): текст темы и место вопроса в нём (1–8); необязательно
+  const [passageId, setPassageId] = useState<string>(initialData?.passage_id || '');
+  const [passageOrder, setPassageOrder] = useState<string>(initialData?.passage_order ? String(initialData.passage_order) : '');
   const [type, setType] = useState<QuestionType>(
     initialData?.type || (localStorage.getItem('examiner_last_new_type') as QuestionType) || 'test'
   );
@@ -170,7 +174,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   const topRef = React.useRef<HTMLDivElement>(null);
 
   // Несохранённые изменения: сравниваем содержимое с тем, что было при открытии формы
-  const contentState = { type, contentRu, contentTg, imageUrl, correctNumeric, options, leftItems, rightItems };
+  const contentState = { type, contentRu, contentTg, imageUrl, correctNumeric, options, leftItems, rightItems, passageId, passageOrder };
   const contentJson = JSON.stringify(contentState);
   const [baseline, setBaseline] = useState(contentJson);
   const dirty = contentJson !== baseline;
@@ -199,6 +203,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     setOptions(d.options);
     setLeftItems(d.leftItems);
     setRightItems(d.rightItems);
+    setPassageId(d.passageId || '');
+    setPassageOrder(d.passageOrder || '');
     setDraft(null);
   };
   // Очистить содержимое для следующего вопроса (привязка к теме и тип остаются)
@@ -210,7 +216,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     setOptions(emptyOptions());
     setLeftItems(emptySide('left', 4));
     setRightItems(emptySide('right', 5));
-    setBaseline(JSON.stringify({ type, contentRu: '', contentTg: '', imageUrl: null, correctNumeric: '', options: emptyOptions(), leftItems: emptySide('left', 4), rightItems: emptySide('right', 5) }));
+    // Текст остаётся выбранным, место переходит на следующее (1–8)
+    const nextOrder = passageId && Number(passageOrder) > 0 && Number(passageOrder) < PASSAGE_QUESTIONS ? String(Number(passageOrder) + 1) : '';
+    setPassageOrder(nextOrder);
+    setBaseline(JSON.stringify({ type, contentRu: '', contentTg: '', imageUrl: null, correctNumeric: '', options: emptyOptions(), leftItems: emptySide('left', 4), rightItems: emptySide('right', 5), passageId, passageOrder: nextOrder }));
     setErrorMsg(null);
     topRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
@@ -241,6 +250,14 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       return (data || []) as Topic[];
     },
   });
+
+  // Тексты выбранной темы; без таблицы или без текстов полей «Текст» в форме нет
+  const { data: topicPassages = [] } = useQuery({
+    queryKey: ['passages', topicId],
+    enabled: Boolean(topicId),
+    queryFn: () => fetchPassages(topicId),
+  });
+  const withPassage = type === 'test' && Boolean(passageId);
 
   const { data: sources = [] } = useQuery({
     queryKey: ['sources'],
@@ -330,8 +347,12 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       if (!subjectId || !chapterId || !topicId) {
         throw new Error('Пожалуйста, выберите предмет, главу и тему');
       }
-      if (!contentRu.trim() && !contentTg.trim()) {
+      // Вопрос к тексту может быть без условия: пропуск в тексте с пропусками
+      if (!withPassage && !contentRu.trim() && !contentTg.trim()) {
         throw new Error('Пожалуйста, заполните текст вопроса (хотя бы на одном языке)');
+      }
+      if (withPassage && passageOrder && !(Number(passageOrder) >= 1 && Number(passageOrder) <= PASSAGE_QUESTIONS)) {
+        throw new Error(`Место в тексте — число от 1 до ${PASSAGE_QUESTIONS}`);
       }
 
       if (type === 'test') {
@@ -430,6 +451,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         content_tg: contentTg.trim() || null,
         image_url: imageUrl,
         correct_numeric_answer: numericVal,
+        // Колонки текста пишем, только если они нужны: на базе без миграции остальные предметы сохраняются как прежде
+        ...(withPassage || initialData?.passage_id
+          ? { passage_id: withPassage ? passageId : null, passage_order: withPassage && passageOrder ? Number(passageOrder) : null }
+          : {}),
       };
 
       if (initialData?.id) {
@@ -544,7 +569,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   const progressSteps: ProgressStep[] = (() => {
     const steps: ProgressStep[] = [
       { id: 'binding', label: 'Предмет, глава и тема', status: subjectId && chapterId && topicId ? 'done' : 'todo', target: 'qf-taxonomy', required: true },
-      { id: 'text', label: 'Текст вопроса', status: contentRu.trim() || contentTg.trim() ? 'done' : 'todo', target: 'qf-text', required: true },
+      { id: 'text', label: 'Текст вопроса', status: contentRu.trim() || contentTg.trim() || withPassage ? 'done' : 'todo', target: 'qf-text', required: true },
     ];
     if (type === 'test') {
       const filled = options.filter(isFilled);
@@ -621,6 +646,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 setSubjectId(val);
                 setChapterId('');
                 setTopicId('');
+                setPassageId(''); setPassageOrder('');
               }}
               className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
             >
@@ -636,6 +662,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               onChange={(val) => {
                 setChapterId(val);
                 setTopicId('');
+                setPassageId(''); setPassageOrder('');
               }}
               className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium disabled:bg-slate-100"
             >
@@ -648,7 +675,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 <CustomSelect
               disabled={!chapterId}
               value={topicId}
-              onChange={(val) => setTopicId(val)}
+              onChange={(val) => { setTopicId(val); setPassageId(''); setPassageOrder(''); }}
               className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium disabled:bg-slate-100"
             >
               <option value="">-- Выберите тему --</option>
@@ -675,7 +702,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
               >
                 <option value="">-- Без метки --</option>
-                {NCT_TYPES.map(t => <option key={t.code} value={t.code}>{t.name} ({t.code})</option>)}
+                {nctTypesFor((subjects as any[]).find((x: any) => x.id === subjectId)?.name).map(t => <option key={t.code} value={t.code}>{t.name} ({t.code})</option>)}
               </CustomSelect>
             </Field>
           )}
@@ -691,6 +718,33 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                 {NCT_DIFFICULTIES.map(d => <option key={d.value} value={String(d.value)}>{d.name}</option>)}
               </CustomSelect>
             </Field>
+          )}
+
+          {type === 'test' && topicPassages.length > 0 && (
+            <>
+              <Field label="Текст (необязательно)" hint="Вопрос к тексту для чтения или с пропусками; текст добавляется в списке вопросов темы">
+                <CustomSelect
+                  value={passageId}
+                  onChange={(val) => { setPassageId(val); if (!val) setPassageOrder(''); }}
+                  className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                >
+                  <option value="">-- Без текста --</option>
+                  {topicPassages.map(p => <option key={p.id} value={p.id}>{passageLabel(p)}</option>)}
+                </CustomSelect>
+              </Field>
+              {passageId && (
+                <Field label="Место в тексте" hint={`Номер вопроса к этому тексту, от 1 до ${PASSAGE_QUESTIONS}; у текста с пропусками совпадает с меткой {{номер}}`}>
+                  <CustomSelect
+                    value={passageOrder}
+                    onChange={(val) => setPassageOrder(val)}
+                    className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                  >
+                    <option value="">-- Не указано --</option>
+                    {Array.from({ length: PASSAGE_QUESTIONS }, (_, i) => <option key={i + 1} value={String(i + 1)}>{i + 1}</option>)}
+                  </CustomSelect>
+                </Field>
+              )}
+            </>
           )}
         </div>
 

@@ -174,29 +174,45 @@ export function splitFractions(text: string): MathNode[] {
 
 export const hasFraction = (nodes: MathNode[]) => nodes.some((n) => typeof n !== 'string');
 
-// ---- Вложенное форматирование (b, i, sub, sup) ----
-export interface FmtState { b: number; i: number; u: number; sub: number; sup: number }
-export interface FmtToken { text: string; b: boolean; i: boolean; u: boolean; sub: boolean; sup: boolean }
-export const newFmtState = (): FmtState => ({ b: 0, i: 0, u: 0, sub: 0, sup: 0 });
+// ---- Вложенное форматирование (b, i, u, sub, sup, lab1–lab9) ----
+// <lab1>слово</lab1> — цифра над словом (морфологический разбор, как в билетах НЦТ): lab = цифра, 0 — без цифры.
+export interface FmtState { b: number; i: number; u: number; sub: number; sup: number; lab: number }
+export interface FmtToken { text: string; b: boolean; i: boolean; u: boolean; sub: boolean; sup: boolean; lab: number }
+export const newFmtState = (): FmtState => ({ b: 0, i: 0, u: 0, sub: 0, sup: 0, lab: 0 });
 
-// Режет текст по тегам <b> <i> <u> <sub> <sup> (в том числе вложенным) на куски с одинаковым оформлением.
+// Режет текст по тегам <b> <i> <u> <sub> <sup> <lab1>–<lab9> (в том числе вложенным) на куски с одинаковым оформлением.
 // state переносится между вызовами: так тег, открытый до дроби, продолжает действовать после неё.
 // Лишние закрывающие теги игнорируются, незакрытые действуют до конца.
 export function tokenizeFormatted(text: string, state: FmtState): FmtToken[] {
   const out: FmtToken[] = [];
-  const re = /<(\/?)(b|i|u|sub|sup)>/g;
+  const re = /<(\/?)(b|i|u|sub|sup|lab[1-9])>/g;
   let last = 0;
   const push = (t: string) => {
-    if (t) out.push({ text: t, b: state.b > 0, i: state.i > 0, u: state.u > 0, sub: state.sub > 0, sup: state.sup > 0 });
+    if (t) out.push({ text: t, b: state.b > 0, i: state.i > 0, u: state.u > 0, sub: state.sub > 0, sup: state.sup > 0, lab: state.lab });
   };
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     push(text.slice(last, m.index));
-    const k = m[2] as keyof FmtState;
-    if (m[1]) state[k] = Math.max(0, state[k] - 1);
-    else state[k]++;
+    if (m[2].startsWith('lab')) {
+      state.lab = m[1] ? 0 : Number(m[2].slice(3));
+    } else {
+      const k = m[2] as 'b' | 'i' | 'u' | 'sub' | 'sup';
+      if (m[1]) state[k] = Math.max(0, state[k] - 1);
+      else state[k]++;
+    }
     last = m.index + m[0].length;
   }
   push(text.slice(last));
+  return out;
+}
+
+/** Идущие подряд куски с одной цифрой над словами собираются в одну группу (цифра рисуется один раз) */
+export function groupByLabel(tokens: FmtToken[]): Array<{ lab: number; tokens: FmtToken[] }> {
+  const out: Array<{ lab: number; tokens: FmtToken[] }> = [];
+  for (const t of tokens) {
+    const g = out[out.length - 1];
+    if (g && g.lab === t.lab && t.lab > 0) g.tokens.push(t);
+    else out.push({ lab: t.lab, tokens: [t] });
+  }
   return out;
 }

@@ -45,6 +45,9 @@ interface Saved {
   avoidRepeats?: boolean;
 }
 
+/** Предметы, которых нельзя выбрать для книжки: в них задания с текстами (подбор книжки берёт вопросы по одному) */
+const NO_BLOCKS_KINDS: ClusterKind[] = ['eng'];
+
 /** Какому предмету книжки соответствует предмет базы (по названию) */
 export function clusterKindOf(subjectName: string): ClusterKind | null {
   // Английский раньше остальных: «Забони англисӣ» иначе приняли бы за таджикский
@@ -351,7 +354,7 @@ export const ClusterExam: React.FC = () => {
   });
   const removeKind = (i: number) => setState((st) => (st.picks.length <= CLUSTER_MIN_SUBJECTS ? st : { ...st, picks: st.picks.filter((_, j) => j !== i) }));
   const addKind = () => setState((st) => {
-    const free = CLUSTER_KINDS.find((k) => !st.picks.includes(k));
+    const free = CLUSTER_KINDS.find((k) => !st.picks.includes(k) && !NO_BLOCKS_KINDS.includes(k));
     return free && st.picks.length < CLUSTER_MAX_SUBJECTS ? { ...st, picks: [...st.picks, free] } : st;
   });
 
@@ -366,6 +369,7 @@ export const ClusterExam: React.FC = () => {
     try {
       const { settings, variants: V, picks } = state;
       const subjectIds = picks.map((k) => state.subjectByKind[k] ?? '');
+      if (picks.some((k) => NO_BLOCKS_KINDS.includes(k))) throw new Error('Английский язык пока нельзя добавить в книжку: в нём задания с текстами, а книжка собирает вопросы по одному. Уберите его из списка.');
       if (picks.length < CLUSTER_MIN_SUBJECTS || picks.length > CLUSTER_MAX_SUBJECTS) throw new Error(`В книжке должно быть от ${CLUSTER_MIN_SUBJECTS} до ${CLUSTER_MAX_SUBJECTS} предметов`);
       if (!settings.code.trim()) throw new Error('Укажите код кластера (например, А.5)');
       if (!settings.exam.trim()) throw new Error('Укажите название экзамена (например, Авг)');
@@ -505,7 +509,7 @@ export const ClusterExam: React.FC = () => {
       <Card padding="none" className="p-5 space-y-4">
         <h3 className="font-bold text-slate-900 text-sm">2. Субтесты</h3>
         <p className="text-xs text-slate-500">
-          Выберите от {CLUSTER_MIN_SUBJECTS} до {CLUSTER_MAX_SUBJECTS} предметов и поставьте их в нужном порядке: так они пойдут на обложке, в инструкции и в книжке.
+          Выберите от {CLUSTER_MIN_SUBJECTS} до {CLUSTER_MAX_SUBJECTS} предметов и поставьте их в нужном порядке: так они пойдут на обложке, в инструкции и в книжке. Английского языка в списке пока нет: в нём задания с текстами, и книжка с ним появится позже.
         </p>
         <div className="space-y-3">
           {state.picks.map((kind, i) => {
@@ -519,7 +523,7 @@ export const ClusterExam: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-slate-700 w-5 shrink-0">{i + 1}.</span>
                   <CustomSelect className={input} value={kind} onChange={(val) => changeKind(i, val as ClusterKind)}>
-                    {CLUSTER_KINDS.filter((k) => k === kind || !state.picks.includes(k)).map((k) => <option key={k} value={k}>{CLUSTER_SUBJECTS[k].name}</option>)}
+                    {CLUSTER_KINDS.filter((k) => k === kind || (!state.picks.includes(k) && !NO_BLOCKS_KINDS.includes(k))).map((k) => <option key={k} value={k}>{CLUSTER_SUBJECTS[k].name}</option>)}
                   </CustomSelect>
                   <button type="button" className={iconBtn} disabled={i === 0} onClick={() => moveKind(i, -1)} aria-label={`Поднять «${slot.name}» выше`}><ArrowUp className="w-4 h-4" /></button>
                   <button type="button" className={iconBtn} disabled={i === state.picks.length - 1} onClick={() => moveKind(i, 1)} aria-label={`Опустить «${slot.name}» ниже`}><ArrowDown className="w-4 h-4" /></button>

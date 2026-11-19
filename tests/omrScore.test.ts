@@ -63,10 +63,11 @@ describe('ключ, введённый вручную', () => {
     expect('error' in parseMatchingKey('1234 5462', 2)).toBe(true);
     expect('error' in parseMatchingKey('1234', 2)).toBe(true);
   });
-  it('открытые: целые до четырёх цифр', () => {
+  it('открытые: целые до пяти цифр', () => {
     expect(parseOpenKey('12 0700', 2)).toEqual({ value: ['12', '700'] });
     expect('error' in parseOpenKey('12 2,5', 2)).toBe(true);
-    expect('error' in parseOpenKey('12345 1', 2)).toBe(true);
+    expect(parseOpenKey('12345 1', 2)).toEqual({ value: ['12345', '1'] });
+    expect('error' in parseOpenKey('123456 1', 2)).toBe(true);
   });
   it('полный ключ собирается и возвращается в текст', () => {
     const r = parseKey({ tests: 'ABC', matching: '1234 5432', open: '12 700' }, comp);

@@ -5,10 +5,53 @@
 import { pickParallel, separateLinked, type ChapterTotals, type PickedTickets, type Rnd } from './ticketing';
 import { NCT_SLOT_TYPES } from './nctSlots';
 
-export type NctSection = 'basic' | 'atom' | 'solutions' | 'elements' | 'organic';
+/** Ключ раздела экзамена: у химии 'basic' | 'atom' | 'solutions' | 'elements' | 'organic', у права 'state' | 'rights' | 'intl' */
+export type NctSection = string;
+type Kind = 'test' | 'matching' | 'open';
+
+/**
+ * Настройки режима НЦТ предмета. Движок (planNct, pickNct …) читает всё предметное отсюда;
+ * по умолчанию везде химия (CHEM_CONFIG), поэтому её поведение не зависит от других предметов.
+ */
+export interface NctConfig {
+  key: string;
+  /** разделы по порядку блоков в билете; share — доля баллов, % */
+  sections: Array<{ key: string; name: string; share: number }>;
+  composition: { test: number; matching: number; open: number; points: number };
+  pointsPer: { test: number; matching: number; open: number };
+  /** типы по частоте: 'раздел:вид' → код → число сессий */
+  slotTypes: Record<string, Record<string, number>>;
+  /** типы, которых в 1-м круге не даём */
+  banned: ReadonlySet<string>;
+  /** сколько заданий каждого вида берём из сборника НЦТ, и баллы за них */
+  quota: Record<Kind, number>;
+  quotaPoints: number;
+  /** открытые: сколько лёгких, средних, сложных (в сумме composition.open) */
+  openDifficulty: [number, number, number];
+  /** раздел темы по порядку главы и темы; null — тема в режим не входит */
+  topicSection: (chapterOrder: number, topicOrder: number) => NctSection | null;
+  /** уточнение раздела по метке типа (органические типы химии; у права — раздел, к которому тип относится) */
+  refineSection: (topicSection: NctSection | null, nctType?: string | null) => NctSection | null;
+  /** какие типы слотов раздела берутся вместе (у химии «основные понятия» берут и типы химии элементов) */
+  weightSections?: Record<string, string[]>;
+  /** при отсутствии типов у раздела на виде: разделы, чьи типы НЕ берутся */
+  fallbackExclude?: string[];
+  /** на каких разделах бывает вид (если не указано — на любых) */
+  kindSections?: Partial<Record<Kind, string[]>>;
+  /** не больше стольких заданий вида в одном разделе (у права открытые: по одному, на ТГП и КП) */
+  maxPerSection?: Partial<Record<Kind, number>>;
+  /** Предел заданий вида в разделе — число его типов (ключ «раздел:вид»; тип в билете не повторяется) */
+  maxByTypes?: Record<string, number>;
+  /** границы числа заданий вида в разделе [мин, макс] (у истории: всеобщая — ровно 5 тестов и 1 соответствие; без границ раздел может остаться без тестов) */
+  kindRange?: Record<string, Partial<Record<Kind, [number, number]>>>;
+  /** сколько раз один тип может встретиться в билете (по умолчанию 1: тип не повторяется; у истории 2 — в настоящих билетах типы повторяются) */
+  maxTypeUse?: number;
+  /** пояснение в заметках про темы вне режима */
+  skipNote: string;
+}
 
 export const NCT_SECTIONS: NctSection[] = ['basic', 'atom', 'solutions', 'elements', 'organic'];
-export const NCT_SECTION_NAMES: Record<NctSection, string> = {
+export const NCT_SECTION_NAMES: Record<string, string> = {
   basic: 'Основные понятия и законы',
   atom: 'Строение атома и ПЗ',
   solutions: 'Растворы',
@@ -19,6 +62,7 @@ export const NCT_SECTION_NAMES: Record<NctSection, string> = {
 export const NCT_SHARES: Record<NctSection, number> = { basic: 20, atom: 12, solutions: 12, elements: 20, organic: 36 };
 
 export const NCT_COMPOSITION = { test: 18, matching: 2, open: 7, points: 40 };
+export const NCT_POINTS_PER = { test: 1, matching: 4, open: 2 };
 
 /** Темы центра в уровнях 1–3: число тем в главе (сквозная нумерация 1–49) */
 const CHEM_LEVEL_SIZES = [21, 12, 16];
@@ -82,15 +126,16 @@ export function sectionOfTopic(topicSection: NctSection | null, nctType?: string
   return topicSection;
 }
 
-export function sectionOfQuestion(q: any): NctSection | null {
-  const n = topicNumber(q?.chapter?.order_index, q?.topic?.order_index);
-  return sectionOfTopic(n === null ? null : sectionOfTopicNumber(n), q?.nct_type);
+export function sectionOfQuestion(q: any, cfg: NctConfig = CHEM_CONFIG): NctSection | null {
+  return cfg.refineSection(cfg.topicSection(Number(q?.chapter?.order_index), Number(q?.topic?.order_index)), q?.nct_type);
 }
 
 /** Баллы по разделам: 40 × доля / сумма долей пройденных; целые, в сумме 40 (метод наибольших остатков) */
-export function sectionPoints(present: NctSection[], total = NCT_COMPOSITION.points): Record<string, number> {
-  const sum = present.reduce((s, k) => s + NCT_SHARES[k], 0);
-  const raw = present.map((k) => ({ k, v: (total * NCT_SHARES[k]) / sum }));
+export function sectionPoints(present: NctSection[], total0?: number, cfg: NctConfig = CHEM_CONFIG): Record<string, number> {
+  const total = total0 ?? cfg.composition.points;
+  const share = (k: string) => cfg.sections.find((x) => x.key === k)?.share ?? 0;
+  const sum = present.reduce((s, k) => s + share(k), 0);
+  const raw = present.map((k) => ({ k, v: (total * share(k)) / sum }));
   const out: Record<string, number> = {};
   let given = 0;
   for (const r of raw) { out[r.k] = Math.floor(r.v); given += out[r.k]; }
@@ -110,13 +155,18 @@ export type NctHave = Record<string, { test: number; matching: number; open: num
  * Сначала ограничиваем число заданий тем, что хватит на все варианты без повторов, потом тем, что есть,
  * потом без ограничения.
  */
-export function planNct(present: NctSection[], have: NctHave, ticketCount: number, rnd: Rnd = Math.random): NctPlan | null {
-  const { test: TEST, matching: MATCH, open: OPEN } = NCT_COMPOSITION;
+export function planNct(present: NctSection[], have: NctHave, ticketCount: number, rnd: Rnd = Math.random, cfg: NctConfig = CHEM_CONFIG): NctPlan | null {
+  const { test: TEST, matching: MATCH, open: OPEN } = cfg.composition;
+  const { matching: PM, open: PO } = cfg.pointsPer;
   if (present.length === 0) return null;
-  const target = sectionPoints(present);
+  const target = sectionPoints(present, undefined, cfg);
+  const allowed = (k: NctSection, t: Kind) => !cfg.kindSections?.[t] || cfg.kindSections[t]!.includes(k);
   const n = present.length;
 
-  const run = (cap: (k: NctSection, type: 'test' | 'matching' | 'open') => number): NctPlan | null => {
+  const run = (cap0: (k: NctSection, type: Kind) => number, tol: number): NctPlan | null => {
+    const rng = (k: NctSection, t: Kind): [number, number] => cfg.kindRange?.[k]?.[t] ?? [0, Infinity];
+    const cap = (k: NctSection, t: Kind) => (t !== 'test' && !allowed(k, t) ? 0 : Math.min(cap0(k, t), cfg.maxPerSection?.[t] ?? Infinity, cfg.maxByTypes?.[`${k}:${t}`] ?? Infinity, rng(k, t)[1]));
+    const floor = (k: NctSection, t: Kind) => Math.min(rng(k, t)[0], cap(k, t));
     let best = Infinity;
     let bestPlans: NctPlan[] = [];
     // m — соответствия по разделам (всего MATCH), o — открытые (всего OPEN)
@@ -139,9 +189,10 @@ export function planNct(present: NctSection[], have: NctHave, ticketCount: numbe
     enumerate(OPEN, 0, (i) => cap(present[i], 'open'), [], os);
     for (const m of ms) {
       for (const o of os) {
-        const c = present.map((k, i) => target[k] - 4 * m[i] - 2 * o[i]);
+        if (m.some((v, i) => v < floor(present[i], 'matching')) || o.some((v, i) => v < floor(present[i], 'open'))) continue;
+        const c = present.map((k, i) => target[k] - PM * m[i] - PO * o[i]);
         // c — «идеальные» тесты; корректируем в пределах ±1 балла так, чтобы сумма тестов была TEST
-        const base = c.map((v) => Math.max(0, v));
+        const base = c.map((v, i) => Math.max(floor(present[i], 'test'), cfg.kindRange ? Math.min(v, cap(present[i], 'test')) : v));
         let diff = TEST - base.reduce((a, b) => a + b, 0);
         const tests = [...base];
         const order = tests.map((_, i) => i);
@@ -149,15 +200,15 @@ export function planNct(present: NctSection[], have: NctHave, ticketCount: numbe
         while (diff !== 0 && guard++ < 100) {
           const i = order[guard % n];
           if (diff > 0 && tests[i] < cap(present[i], 'test')) { tests[i]++; diff--; }
-          else if (diff < 0 && tests[i] > 0) { tests[i]--; diff++; }
+          else if (diff < 0 && tests[i] > floor(present[i], 'test')) { tests[i]--; diff++; }
         }
         if (diff !== 0 || tests.some((v, i) => v > cap(present[i], 'test'))) continue;
         let dev = 0;
         let ok = true;
         present.forEach((k, i) => {
-          const pts = tests[i] + 4 * m[i] + 2 * o[i];
+          const pts = tests[i] + PM * m[i] + PO * o[i];
           const d = Math.abs(pts - target[k]);
-          if (d > 1) ok = false;
+          if (d > tol) ok = false;
           dev += d;
         });
         if (!ok) continue;
@@ -170,11 +221,12 @@ export function planNct(present: NctSection[], have: NctHave, ticketCount: numbe
   };
 
   const T = Math.max(1, ticketCount);
-  return (
-    run((k, t) => Math.floor((have[k]?.[t] ?? 0) / T)) ??
-    run((k, t) => have[k]?.[t] ?? 0) ??
-    run(() => 1000)
-  );
+  // допуск по баллам раздела: сначала ±1 (как у химии), при невозможности — шире
+  for (const tol of [1, 2, 3, 5]) {
+    const got = run((k, t) => Math.floor((have[k]?.[t] ?? 0) / T), tol) ?? run((k, t) => have[k]?.[t] ?? 0, tol) ?? run(() => 1000, tol);
+    if (got) return got;
+  }
+  return null;
 }
 
 export interface NctPicked extends PickedTickets {
@@ -182,8 +234,6 @@ export interface NctPicked extends PickedTickets {
   sections: NctSection[];
   notes: string[];
 }
-
-type Kind = 'test' | 'matching' | 'open';
 
 /** Типы, которые в 1-м круге не даём (правила 1-го круга): «с чем реагирует», получение, электролиз, термохимия, избыток, выход, смеси с реакциями, многостадийные расчёты и цепочки */
 export const NCT_BANNED = new Set([
@@ -213,18 +263,19 @@ export const NCT_QUOTA: Record<Kind, number> = { test: 8, matching: 1, open: 2 }
 export const NCT_QUOTA_POINTS = 16;
 
 /** Типы по частоте на номерах раздела; «основные понятия» берут и типы химии элементов (степень окисления, ОВР — темы 42–43) */
-export function typeWeights(section: NctSection, kind: Kind): Record<string, number> {
-  const keys = section === 'basic' ? ['basic', 'elements'] : [section];
+export function typeWeights(section: NctSection, kind: Kind, cfg: NctConfig = CHEM_CONFIG): Record<string, number> {
+  const keys = cfg.weightSections?.[section] ?? [section];
+  const slotTypes = cfg.slotTypes;
   let w: Record<string, number> = {};
-  for (const k of keys) for (const [c, n] of Object.entries(NCT_SLOT_TYPES[`${k}:${kind}`] ?? {})) w[c] = (w[c] ?? 0) + n;
+  for (const k of keys) for (const [c, n] of Object.entries(slotTypes[`${k}:${kind}`] ?? {})) w[c] = (w[c] ?? 0) + n;
   if (Object.keys(w).length === 0) {
-    // у раздела нет своего типа на этом виде (например, соответствие по растворам): типы всех разделов, кроме органики
-    for (const key of Object.keys(NCT_SLOT_TYPES)) {
-      if (!key.endsWith(`:${kind}`) || key.startsWith('organic')) continue;
-      for (const [c, n] of Object.entries(NCT_SLOT_TYPES[key])) w[c] = (w[c] ?? 0) + n;
+    // у раздела нет своего типа на этом виде (например, соответствие по растворам): типы всех разделов, кроме исключённых
+    for (const key of Object.keys(slotTypes)) {
+      if (!key.endsWith(`:${kind}`) || (cfg.fallbackExclude ?? []).some((x) => key.startsWith(`${x}:`))) continue;
+      for (const [c, n] of Object.entries(slotTypes[key])) w[c] = (w[c] ?? 0) + n;
     }
   }
-  return Object.fromEntries(Object.entries(w).filter(([c]) => !NCT_BANNED.has(c)));
+  return Object.fromEntries(Object.entries(w).filter(([c]) => !cfg.banned.has(c)));
 }
 
 /** Делит quota по разделам пропорционально числу заданий (метод наибольших остатков), не больше cap и want раздела */
@@ -251,17 +302,19 @@ function splitQuota(quota: number, counts: Array<{ k: NctSection; want: number; 
  * берутся неразмеченные вопросы раздела. Темы стараются не повторяться в билете: на каждое место предпочтительны
  * вопросы тем, из которых в билете ещё ничего не взято (а при нехватке — наименее использованных).
  */
-export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random, _totals?: ChapterTotals, difficulty: NctDifficultyShares = NCT_DEFAULT_DIFFICULTY): NctPicked {
+export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random, _totals?: ChapterTotals, difficulty: NctDifficultyShares = NCT_DEFAULT_DIFFICULTY, cfg: NctConfig = CHEM_CONFIG): NctPicked {
+  const SECTION_KEYS = cfg.sections.map((x) => x.key);
+  const NAME = (k: string) => cfg.sections.find((x) => x.key === k)?.name ?? k;
   const notes: string[] = [];
   const bySection = new Map<NctSection, any[]>();
   let skipped = 0;
   for (const q of pool) {
-    const s = sectionOfQuestion(q);
+    const s = sectionOfQuestion(q, cfg);
     if (!s) { skipped++; continue; }
     if (!bySection.has(s)) bySection.set(s, []);
     bySection.get(s)!.push(q);
   }
-  if (skipped > 0) notes.push(`${skipped} вопросов из тем, не распределённых по разделам НЦТ (главы 7–10, кроме тем 7.4–7.12), в билеты не взяты`);
+  if (skipped > 0) notes.push(`${skipped} вопросов ${cfg.skipNote}, в билеты не взяты`);
 
   const have: NctHave = {};
   for (const [k, list] of bySection) {
@@ -272,8 +325,8 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
     };
   }
   // Раздел считается пройденным, если в нём есть тесты (без них нет ни одного номера 1–18)
-  const present = NCT_SECTIONS.filter((k) => (have[k]?.test ?? 0) > 0);
-  const plan = present.length ? planNct(present, have, ticketCount, rnd) : null;
+  const present = SECTION_KEYS.filter((k) => (have[k]?.test ?? 0) > 0);
+  const plan = present.length ? planNct(present, have, ticketCount, rnd, cfg) : null;
 
   const T = ticketCount;
   const empty = () => Array.from({ length: T }, () => [] as any[]);
@@ -281,7 +334,9 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   if (!plan) return { kinds: [tests, matching, open], ticketCount: T, plan: {}, sections: present, notes: [...notes, 'В выбранных темах нет тестов из разделов НЦТ'] };
 
   const usedIds = new Set<string>();
-  const usedTypes = new Set<string>();
+  const usedTypes = new Map<string, number>(); // тип → сколько раз уже взят в билет
+  const maxUse = cfg.maxTypeUse ?? 1;
+  const typeFree = (c: string) => (usedTypes.get(c) ?? 0) < maxUse;
   const nctPicked: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
   const typePicked: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
 
@@ -301,9 +356,9 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   };
 
   const attempt = (pool: any[], section: NctSection, kind: Kind): { rows: any[]; code: string | null } | null => {
-    const w = typeWeights(section, kind);
+    const w = typeWeights(section, kind, cfg);
     const byCode = (c: string) => pool.filter((q) => q.nct_type === c);
-    let cands = Object.keys(w).filter((c) => !usedTypes.has(c) && byCode(c).length >= T);
+    let cands = Object.keys(w).filter((c) => typeFree(c) && byCode(c).length >= T);
     if (cands.length) {
       // из типов предпочитаем те, у которых есть вопросы ещё не использованной (или наименее использованной) темы
       const lvl = new Map(cands.map((c) => [c, enoughTopicsUse(byCode(c))[0] ?? Infinity]));
@@ -316,7 +371,7 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
       if (col.every((t) => t.length === 1)) return { rows: col.map((t) => t[0]), code };
     }
     // нет подходящей метки: неразмеченные вопросы и вопросы ещё не использованных разрешённых типов
-    const loose = pool.filter((q) => !q.nct_type || (!NCT_BANNED.has(q.nct_type) && !usedTypes.has(q.nct_type)));
+    const loose = pool.filter((q) => !q.nct_type || (!cfg.banned.has(q.nct_type) && typeFree(q.nct_type)));
     const col = pickParallel(freshest(loose), 1, T, rnd);
     if (col.every((t) => t.length === 1)) {
       const code = col[0][0].nct_type ?? null;
@@ -350,7 +405,7 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
       got.rows.forEach((q) => usedIds.add(q.id));
       for (const tid of new Set(got.rows.map((q) => q.topic_id))) topicUse.set(tid, (topicUse.get(tid) ?? 0) + 1);
       if (got.code) typePicked[kind]++;
-      for (const q of got.rows) if (q.nct_type) usedTypes.add(q.nct_type);
+      for (const c of new Set<string>(got.rows.map((q) => q.nct_type).filter(Boolean))) usedTypes.set(c, (usedTypes.get(c) ?? 0) + 1);
       if (got.rows[0].isNct) nctPicked[kind]++;
       return got.rows;
     }
@@ -358,13 +413,13 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   };
 
   const fill = (dst: any[][], kind: Kind) => {
-    const counts = NCT_SECTIONS
+    const counts = SECTION_KEYS
       .map((k) => ({ k, want: plan[k]?.[kind] ?? 0, cap: (bySection.get(k) ?? []).filter((q) => q.isNct && q.type === kind).length }))
       .filter((c) => c.want > 0);
-    const quota = splitQuota(NCT_QUOTA[kind], counts);
+    const quota = splitQuota(cfg.quota[kind], counts);
     const nPlaces = counts.reduce((a, c) => a + c.want, 0);
     const targets = kind === 'open'
-      ? difficultyTargets(nPlaces, { easy: (100 * NCT_OPEN_DIFFICULTY[0]) / NCT_COMPOSITION.open, medium: (100 * NCT_OPEN_DIFFICULTY[1]) / NCT_COMPOSITION.open, hard: (100 * NCT_OPEN_DIFFICULTY[2]) / NCT_COMPOSITION.open }, rnd)
+      ? difficultyTargets(nPlaces, { easy: (100 * cfg.openDifficulty[0]) / cfg.composition.open, medium: (100 * cfg.openDifficulty[1]) / cfg.composition.open, hard: (100 * cfg.openDifficulty[2]) / cfg.composition.open }, rnd)
       : difficultyTargets(nPlaces, difficulty, rnd);
     let place = 0;
     for (const { k, want } of counts) {
@@ -378,7 +433,7 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
         got++;
         for (let t = 0; t < T; t++) dst[t].push(rows[t]);
       }
-      if (got < want) notes.push(`${NCT_SECTION_NAMES[k]}: заданий вида «${kind}» ${got} из ${want} — не хватило вопросов`);
+      if (got < want) notes.push(`${NAME(k)}: заданий вида «${kind}» ${got} из ${want} — не хватило вопросов`);
     }
   };
   fill(tests, 'test');
@@ -388,19 +443,37 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
 
   const missTotal = diffMiss.test + diffMiss.matching + diffMiss.open;
   if (missTotal > 0) notes.push(`Нужной сложности не хватило для ${missTotal} заданий — взята ближайшая`);
-  const nctPoints = nctPicked.test + 4 * nctPicked.matching + 2 * nctPicked.open;
-  if (nctPoints < NCT_QUOTA_POINTS) notes.push(`Из сборника НЦТ набрано ${nctPoints} баллов из ${NCT_QUOTA_POINTS} (в выбранных темах мало таких вопросов)`);
+  const nctPoints = cfg.pointsPer.test * nctPicked.test + cfg.pointsPer.matching * nctPicked.matching + cfg.pointsPer.open * nctPicked.open;
+  if (nctPoints < cfg.quotaPoints) notes.push(`Из сборника НЦТ набрано ${nctPoints} баллов из ${cfg.quotaPoints} (в выбранных темах мало таких вопросов)`);
   const total = tests[0].length + matching[0].length + open[0].length;
   if (total > 0 && typePicked.test + typePicked.matching + typePicked.open < total / 2) notes.push('Меток типа НЦТ у вопросов этих тем мало: типы заданий выдерживаются лишь частично');
   return { kinds: [tests, matching, open], ticketCount: T, plan, sections: present, notes };
 }
 
+/** Настройки химии: прежние константы файла */
+export const CHEM_CONFIG: NctConfig = {
+  key: 'chemistry',
+  sections: NCT_SECTIONS.map((k) => ({ key: k, name: NCT_SECTION_NAMES[k], share: NCT_SHARES[k] })),
+  composition: NCT_COMPOSITION,
+  pointsPer: NCT_POINTS_PER,
+  slotTypes: NCT_SLOT_TYPES,
+  banned: NCT_BANNED,
+  quota: NCT_QUOTA,
+  quotaPoints: NCT_QUOTA_POINTS,
+  openDifficulty: NCT_OPEN_DIFFICULTY,
+  topicSection: (ch, tp) => { const n = topicNumber(ch, tp); return n === null ? null : sectionOfTopicNumber(n); },
+  refineSection: sectionOfTopic,
+  weightSections: { basic: ['basic', 'elements'] },
+  fallbackExclude: ['organic'],
+  skipNote: 'из тем, не распределённых по разделам НЦТ (главы 7–10, кроме тем 7.4–7.12)',
+};
+
 /** Короткое описание плана для интерфейса: «Основные понятия 18 б. (6+1+4) · …» */
-export function describePlan(plan: NctPlan): string {
-  return NCT_SECTIONS.filter((k) => plan[k]).map((k) => {
+export function describePlan(plan: NctPlan, cfg: NctConfig = CHEM_CONFIG): string {
+  return cfg.sections.filter((s) => plan[s.key]).map(({ key: k, name }) => {
     const p = plan[k];
-    const pts = p.test + 4 * p.matching + 2 * p.open;
-    return `${NCT_SECTION_NAMES[k]} — ${pts} б. (${p.test} тест. + ${p.matching} соотв. + ${p.open} откр.)`;
+    const pts = p.test * cfg.pointsPer.test + cfg.pointsPer.matching * p.matching + cfg.pointsPer.open * p.open;
+    return `${name} — ${pts} б. (${p.test} тест. + ${p.matching} соотв. + ${p.open} откр.)`;
   }).join('; ');
 }
 

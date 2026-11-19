@@ -5,13 +5,13 @@ import { notifyError, notifyInfo } from '../lib/errors';
 import { useAuth } from '../hooks/useAuth';
 import { fetchBatchSlots, fetchFullQuestions, fetchNctSourceIds, fetchTopicInfos, fetchTopicPool, saveBatchChanges, type BatchSlots, type TopicInfo } from '../lib/batchEdit';
 import {
-  applyToSlots, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, nctCandidatesFor, paramsAfterEdit, planNctTopicRemoval, planTopicRemoval, sectionOfPoolQ,
-  topicCounts, TYPE_LABEL, type PoolQ, type RowChange, type Slot,
+  applyToSlots, blockCandidates, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, nctCandidatesFor, paramsAfterEdit,
+  planNctTopicRemoval, planTopicRemoval, sectionOfPoolQ, topicCounts, TYPE_LABEL, usedPassageIds, type PassageBlockQ, type PoolQ, type RowChange, type Slot,
 } from '../lib/questionSwap';
 import { FormattedText } from './FormulaEditor';
 import { Badge, Button } from './ui';
 import { CustomSelect } from './CustomSelect';
-import { NCT_SECTION_NAMES } from '../../supabase/functions/_shared/nct';
+import { nctConfigByKey } from '../../supabase/functions/_shared/nctConfigs';
 import { nctTypeName } from '../lib/nctTypes';
 
 // Замена вопросов в готовом наборе билетов — и сразу после генерации, и в архиве.
@@ -159,6 +159,7 @@ const RemoveTopicModal: React.FC<{ batch: EditBatch; ed: Ed; topicId: string; on
   const order = useMemo(() => ed.topics.map((t) => t.id), [ed.topics]);
   // Билет по формату НЦТ: замены подбираются по месту (раздел, вид, тип задания, источник)
   const nctBatch = Boolean(batch.generation_params?.nct);
+  const nctCfg = nctConfigByKey(batch.generation_params?.nct_subject);
   const sourcesQ = useQuery({ queryKey: ['nct_sources'], queryFn: fetchNctSourceIds, enabled: nctBatch, staleTime: 5 * 60_000 });
   const plan = useMemo(() => {
     if (!poolQ.data) return null;
@@ -168,10 +169,10 @@ const RemoveTopicModal: React.FC<{ batch: EditBatch; ed: Ed; topicId: string; on
     const pool = poolQ.data.map((q) => ({ ...q, isNct: !!q.source_id && src.has(q.source_id) }));
     const sectionOf = (t: string) => {
       const info = ed.topicById.get(t);
-      return info ? sectionOfPoolQ({ chapter: { order_index: info.chapterOrder }, topic: { order_index: info.order } }) : null;
+      return info ? sectionOfPoolQ({ chapter: { order_index: info.chapterOrder }, topic: { order_index: info.order } }, nctCfg) : null;
     };
-    return planNctTopicRemoval(data.slots, topicId, pool, sectionOf, (id) => !!id && src.has(id), order);
-  }, [poolQ.data, data, topicId, order, nctBatch, sourcesQ.data, ed.topicById]);
+    return planNctTopicRemoval(data.slots, topicId, pool, sectionOf, (id) => !!id && src.has(id), order, nctCfg);
+  }, [poolQ.data, data, topicId, order, nctBatch, sourcesQ.data, ed.topicById, nctCfg]);
   const name = ed.label(ed.topicById.get(topicId));
   const total = plan?.changes.length ?? 0;
   const missing = plan ? plan.missing.test + plan.missing.matching + plan.missing.open : 0;
@@ -183,7 +184,7 @@ const RemoveTopicModal: React.FC<{ batch: EditBatch; ed: Ed; topicId: string; on
       const picked = plan.changes.map((c) => c.question?.id).filter((x): x is string => !!x);
       const full = await fetchFullQuestions(picked);
       const rows = buildRowChanges(plan.changes, full, shuffleOf(batch.generation_params), (id) => (id ? ed.topicById.get(id)?.name : undefined));
-      const meta = new Map(poolQ.data.map((q) => [q.id, { topicId: q.topic_id, chapterId: q.chapter_id, linked: q.linked_ids ?? [], nctType: q.nct_type ?? null, nctDifficulty: q.nct_difficulty ?? null, sourceId: q.source_id ?? null }]));
+      const meta = new Map(poolQ.data.map((q) => [q.id, { topicId: q.topic_id, chapterId: q.chapter_id, linked: q.linked_ids ?? [], nctType: q.nct_type ?? null, nctDifficulty: q.nct_difficulty ?? null, sourceId: q.source_id ?? null, passageId: q.passage_id ?? null, passageKind: (q.passage?.kind ?? null) as Slot['passageKind'] }]));
       await ed.commit(rows, applyToSlots(data.slots, rows, meta));
       const parts = Object.entries(plan.fromTopic).map(([t, n]) => `${ed.label(ed.topicById.get(t))}: ${n}`).join('; ');
       notifyInfo(`${name} убрана: заменено ${total - missing} из ${total}${parts ? ` (${parts})` : ''}.${missing ? ` Пустых мест: ${missing} — они выделены красным в билетах и ключах.` : ''}`);
@@ -243,6 +244,13 @@ export const BatchVariants: React.FC<{
   const canEdit = useCanEdit(batch);
   const ed = useBatchEdit(batch, enabled, onChanged);
   const [swap, setSwap] = useState<Slot | null>(null);
+  // места, входящие в текст (английский): у них кнопка «Заменить текст» вместо «Заменить вопрос»
+  const textSlotIds = useMemo(() => {
+    const ids = new Set<string>();
+    const slots = ed.data?.slots ?? [];
+    slots.forEach((s, i) => { if (s.passageId || !s.questionId) { const b = blockSlots(slots, i); if (b.length > 1) ids.add(s.tqId); } });
+    return ids;
+  }, [ed.data]);
   if (ed.loading || !ed.data) return <div className="py-6 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>;
   const slotOf = new Map(ed.data.slots.map((s) => [s.tqId, s]));
 
@@ -268,8 +276,8 @@ export const BatchVariants: React.FC<{
                     {canEdit && <button
                       onClick={() => setSwap(slotOf.get(tq.id) ?? null)}
                       className="w-9 h-9 shrink-0 rounded-lg text-indigo-700 hover:bg-indigo-50 flex items-center justify-center"
-                      aria-label={`Заменить вопрос ${i + 1} варианта ${t.ticket_number}`}
-                      title="Заменить вопрос"
+                      aria-label={textSlotIds.has(tq.id) ? `Заменить текст (вопрос ${i + 1} варианта ${t.ticket_number})` : `Заменить вопрос ${i + 1} варианта ${t.ticket_number}`}
+                      title={textSlotIds.has(tq.id) ? 'Заменить текст' : 'Заменить вопрос'}
                     >
                       <RefreshCw className="w-4 h-4" />
                     </button>}
@@ -280,8 +288,85 @@ export const BatchVariants: React.FC<{
           </div>
         ))}
       </div>
-      {swap && <ReplaceModal batch={batch} ed={ed} slot={swap} onClose={() => setSwap(null)} />}
+      {swap && (textSlotIds.has(swap.tqId)
+        ? <ReplaceTextModal batch={batch} ed={ed} slot={swap} onClose={() => setSwap(null)} />
+        : <ReplaceModal batch={batch} ed={ed} slot={swap} onClose={() => setSwap(null)} />)}
     </>
+  );
+};
+
+// ---------- Замена текста (английский): текст и все его вопросы меняются вместе ----------
+
+const ReplaceTextModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: () => void }> = ({ batch, ed, slot, onClose }) => {
+  const data = ed.data!;
+  const members = useMemo(() => blockSlots(data.slots, data.slots.findIndex((s) => s.tqId === slot.tqId)).map((i) => data.slots[i]), [data, slot]);
+  const kind = members.find((m) => m.passageKind)?.passageKind ?? 'reading';
+  const [tab, setTab] = useState<'same' | 'other'>(slot.topicId ? 'same' : 'other');
+  const [otherTopic, setOtherTopic] = useState('');
+  const topicId = tab === 'same' ? slot.topicId : otherTopic || null;
+  const [busy, setBusy] = useState<string | null>(null);
+  const poolQ = useQuery({ queryKey: ['swap_pool', batch.subject_id, topicId], queryFn: () => fetchTopicPool(batch.subject_id, [topicId!]), enabled: !!topicId, staleTime: 60_000 });
+  const cands: PassageBlockQ[] = useMemo(
+    () => (poolQ.data ? blockCandidates(poolQ.data, kind, usedPassageIds(data.slots)).slice(0, 5) : []),
+    [poolQ.data, data, kind],
+  );
+  // по первому вопросу каждого текста читаем сам текст для показа
+  const firstIds = cands.map((c) => c.questions[0].id);
+  const previewQ = useQuery({ queryKey: ['swap_full', firstIds.join(',')], queryFn: () => fetchFullQuestions(firstIds), enabled: firstIds.length > 0, staleTime: 60_000 });
+
+  const choose = async (b: PassageBlockQ) => {
+    setBusy(b.id);
+    try {
+      const full = await fetchFullQuestions(b.questions.map((q) => q.id));
+      const changes = blockSwapChanges(members, b);
+      const rows = buildRowChanges(changes, full, shuffleOf(batch.generation_params), (id) => (id ? ed.topicById.get(id)?.name : undefined));
+      const meta = new Map(b.questions.map((q) => [q.id, { topicId: q.topic_id, chapterId: q.chapter_id, linked: q.linked_ids ?? [], nctType: q.nct_type ?? null, nctDifficulty: q.nct_difficulty ?? null, sourceId: q.source_id ?? null, passageId: b.id, passageKind: b.kind }]));
+      await ed.commit(rows, applyToSlots(data.slots, rows, meta));
+      onClose();
+    } catch (e) {
+      notifyError(e, 'Не удалось заменить текст');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const tabBtn = (id: 'same' | 'other', text: string, disabled = false) => (
+    <button disabled={disabled} onClick={() => setTab(id)} className={`flex-1 min-h-[40px] rounded-lg text-sm font-semibold transition disabled:opacity-40 ${tab === id ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-600'}`}>{text}</button>
+  );
+
+  return (
+    <Modal title={`Заменить текст в варианте ${slot.ticketNumber}`} onClose={onClose}>
+      <p>Текст ({kind === 'cloze' ? 'с пропусками' : 'для чтения'}) заменится вместе со всеми {members.length} вопросами к нему. Подойдёт только текст того же вида, которого ещё нет в билетах набора.</p>
+      <div className="flex gap-1 p-1 bg-slate-100 rounded-xl">
+        {tabBtn('same', 'Из этой же темы', !slot.topicId)}
+        {tabBtn('other', 'Выбрать другую тему')}
+      </div>
+      {tab === 'other' && (
+        <CustomSelect value={otherTopic} onChange={setOtherTopic} placeholder="Выберите тему" searchable options={ed.topics.map((t) => ({ value: t.id, label: `${ed.label(t)} — ${ruPart(t.name)}` }))} />
+      )}
+      {!topicId ? (
+        <p className="text-slate-600">Выберите тему, чтобы увидеть тексты.</p>
+      ) : poolQ.isLoading || (cands.length > 0 && previewQ.isLoading) ? (
+        <div className="py-4 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>
+      ) : cands.length === 0 ? (
+        <p className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">В этой теме нет свободных текстов такого вида. Выберите другую тему.</p>
+      ) : (
+        <ul className="space-y-2">
+          {cands.map((c) => {
+            const p = previewQ.data?.get(c.questions[0].id)?.passage;
+            return (
+              <li key={c.id} className="p-3 rounded-xl border border-slate-200 flex items-start gap-3">
+                <div className="min-w-0 flex-1 text-left">
+                  <div className="font-semibold text-slate-900 break-words">{p?.title || 'Текст'}</div>
+                  {p?.content && <div className="text-slate-600 break-words line-clamp-3">{plain(p.content)}</div>}
+                </div>
+                <Button variant="primary" size="sm" onClick={() => choose(c)} loading={busy === c.id} disabled={!!busy || !previewQ.data}>Заменить</Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Modal>
   );
 };
 
@@ -312,17 +397,18 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   const data = ed.data!;
   // Билет по формату НЦТ: замена только из пула раздела, того же вида и типа задания
   const nctBatch = Boolean(batch.generation_params?.nct) && !!slot.questionId;
+  const nctCfg = nctConfigByKey(batch.generation_params?.nct_subject);
   const sourcesQ = useQuery({ queryKey: ['nct_sources'], queryFn: fetchNctSourceIds, enabled: nctBatch, staleTime: 5 * 60_000 });
   const slotTopic = slot.topicId ? ed.topicById.get(slot.topicId) : undefined;
   const section = useMemo(
-    () => (nctBatch && slotTopic ? sectionOfPoolQ({ chapter: { order_index: slotTopic.chapterOrder }, topic: { order_index: slotTopic.order }, nct_type: slot.nctType }) : null),
-    [nctBatch, slotTopic, slot.nctType],
+    () => (nctBatch && slotTopic ? sectionOfPoolQ({ chapter: { order_index: slotTopic.chapterOrder }, topic: { order_index: slotTopic.order }, nct_type: slot.nctType }, nctCfg) : null),
+    [nctBatch, slotTopic, slot.nctType, nctCfg],
   );
   const nctMode = nctBatch && section !== null;
   const [anySource, setAnySource] = useState(false);
   const sectionTopics = useMemo(
-    () => (section ? ed.topics.filter((t) => sectionOfPoolQ({ chapter: { order_index: t.chapterOrder }, topic: { order_index: t.order } }) === section).map((t) => t.id) : []),
-    [section, ed.topics],
+    () => (section ? ed.topics.filter((t) => sectionOfPoolQ({ chapter: { order_index: t.chapterOrder }, topic: { order_index: t.order } }, nctCfg) === section).map((t) => t.id) : []),
+    [section, ed.topics, nctCfg],
   );
 
   const [tab, setTab] = useState<'same' | 'other'>(slot.topicId ? 'same' : 'other');
@@ -347,7 +433,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       const pool = poolQ.data.map((q) => ({ ...q, isNct: !!q.source_id && src.has(q.source_id) }));
       const info = { section, nctType: slot.nctType ?? null, difficulty: slot.nctDifficulty ?? null, isNct: !!slot.sourceId && src.has(slot.sourceId) };
       const types = new Set(ticketSlots.map((s) => s.nctType).filter((x): x is string => !!x));
-      return nctCandidatesFor(pool, slot.type, used, others, links, info, types, anySource).slice(0, 10);
+      return nctCandidatesFor(pool, slot.type, used, others, links, info, types, anySource, nctCfg).slice(0, 10);
     }
     return candidatesFor(poolQ.data, slot.type, used, others, links).slice(0, tab === 'same' ? 3 : 10);
   }, [poolQ.data, data, slot, tab, nctMode, section, sourcesQ.data, anySource]);
@@ -378,7 +464,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       {nctMode ? (
         <>
           <p>
-            Билет по формату НЦТ: подойдёт только вопрос вида «{typeName}» из раздела «{NCT_SECTION_NAMES[section!]}»
+            Билет по формату НЦТ: подойдёт только вопрос вида «{typeName}» из раздела «{nctCfg.sections.find((x) => x.key === section)?.name ?? section}»
             {slot.nctType ? <> с типом задания «{nctTypeName(slot.nctType)}»</> : <> без метки или с типом, которого ещё нет в этом билете</>}, которого нет в билетах набора.
           </p>
           <label className="flex items-center gap-2 text-sm text-slate-700">

@@ -25,13 +25,27 @@ export const DownloadButton: React.FC<{
   busy: boolean;
   onDownload: (lang: Lang) => void;
   size?: 'lg' | 'md';
-}> = ({ lang, busy, onDownload, size = 'lg' }) => {
+  /** Предмет на одном языке (английский): простая кнопка «Скачать», без выбора языка */
+  singleLang?: boolean;
+}> = ({ lang, busy, onDownload, size = 'lg', singleLang = false }) => {
   const [open, setOpen] = useState(false);
   const h = size === 'lg' ? 'min-h-[52px] text-base' : 'min-h-[44px] text-sm';
   const pick = (l: Lang) => {
     setOpen(false);
     onDownload(l);
   };
+  if (singleLang) {
+    return (
+      <button
+        onClick={() => pick('ru')}
+        disabled={busy}
+        className={`w-full ${h} px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-70 min-h-[40px]`}
+      >
+        {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+        <span>{busy ? 'Готовим файл…' : 'Скачать'}</span>
+      </button>
+    );
+  }
   return (
     <div className="relative">
       <div className="flex">

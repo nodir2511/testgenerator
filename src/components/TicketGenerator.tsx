@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo } from '../lib/errors';
 import { examProfileFor } from '../../supabase/functions/_shared/examProfiles';
-import { pickNct, expandPermuted, NCT_COMPOSITION, NCT_DEFAULT_DIFFICULTY, NCT_OPEN_DIFFICULTY, type NctDifficultyShares } from '../../supabase/functions/_shared/nct';
+import { nctConfigFor } from '../../supabase/functions/_shared/nctConfigs';
+import { pickNct, expandPermuted, CHEM_CONFIG, NCT_DEFAULT_DIFFICULTY, type NctDifficultyShares } from '../../supabase/functions/_shared/nct';
 import { fitSettings, pickTickets, snapshotTickets, chapterTotalsFromCounts, poolStats as calcPoolStats, checkSettings, LIMITS } from '../../supabase/functions/_shared/ticketing';
 import { loadLightPool, hydrateTickets } from '../../supabase/functions/_shared/pool';
 import { Subject, Chapter, Topic, Question } from '../types/database';
@@ -39,16 +40,34 @@ const fetchQuestionCounts = async (subjectId: string): Promise<CountRow[]> => {
   return (data || []) as CountRow[];
 };
 
+type PassageCountRow = { chapter_id: string | null; topic_id: string | null; kind: string; passages: number; questions: number };
+
+// Тексты предмета (полные, по 8 вопросов). RPC появляется после применения supabase/sql/passages.sql;
+// до этого (или при любой ошибке) — пустой список, и экран выглядит как у предмета без текстов
+const fetchPassageCounts = async (subjectId: string): Promise<PassageCountRow[]> => {
+  try {
+    const { data, error } = await supabase.rpc('passage_counts', { p_subject_id: subjectId });
+    if (error) return [];
+    return (data || []) as PassageCountRow[];
+  } catch {
+    return [];
+  }
+};
+
 // Администратору на сайте можно до 50 вариантов; обычным пользователям — те же лимиты, что в Telegram (их же проверяет база)
 const ADMIN_SITE_LIMITS = { ...LIMITS, tickets: 50 };
 
 type ScopeMode = 'all' | 'pick';
 
 // Стандартный состав билета по предмету: подставляется сам при выборе предмета
-const STANDARDS = [
+// reading / cloze — сколько текстов (по 8 вопросов) входит в число тестовых; у английского 1 + 1
+const STANDARDS: Array<{ match: string[]; test: number; matching: number; open: number; reading?: number; cloze?: number }> = [
   { match: ['хим', 'физ', 'матем'], test: 18, matching: 2, open: 7 },
+  { match: ['англ', 'инглис', 'english'], test: 20, matching: 4, open: 2, reading: 1, cloze: 1 },
   { match: ['био', 'тадж', 'тоҷик', 'гос', 'истор', 'таърих', 'право', 'ҳуқуқ'], test: 20, matching: 4, open: 2 },
 ];
+// Английский — предмет на одном языке: скачивание без выбора RU/TJ
+const isEnglishName = (name?: string | null) => /англ|инглис|english/i.test(name || '');
 const standardFor = (name?: string) => {
   const n = (name || '').toLowerCase();
   return STANDARDS.find((s) => s.match.some((m) => n.includes(m))) ?? null;
@@ -99,6 +118,9 @@ interface GenCfg {
   test: number;
   matching: number;
   open: number;
+  /** сколько текстов для чтения и с пропусками (английский); нет = 0 */
+  reading?: number;
+  cloze?: number;
   tickets: number;
   shuffleOptions: boolean;
   shuffleMatching: boolean;
@@ -191,6 +213,8 @@ export const TicketGenerator: React.FC = () => {
   const [testCount, setTestCount] = useState<number>(() => getStorageNumber('examiner_tg_test_count', 10));
   const [matchingCount, setMatchingCount] = useState<number>(() => getStorageNumber('examiner_tg_matching_count', 2));
   const [openCount, setOpenCount] = useState<number>(() => getStorageNumber('examiner_tg_open_count', 3));
+  const [readingCount, setReadingCount] = useState<number>(() => getStorageNumber('examiner_tg_reading_count', 0));
+  const [clozeCount, setClozeCount] = useState<number>(() => getStorageNumber('examiner_tg_cloze_count', 0));
   const [ticketCount, setTicketCount] = useState<number>(() => getStorageNumber('examiner_tg_ticket_count', 2));
   const [shuffleOptions, setShuffleOptions] = useState<boolean>(() => getStorageBool('examiner_tg_shuffle_options', true));
   const [shuffleMatching, setShuffleMatching] = useState<boolean>(() => getStorageBool('examiner_tg_shuffle_matching', true));
@@ -250,6 +274,11 @@ export const TicketGenerator: React.FC = () => {
   }, [openCount]);
 
   React.useEffect(() => {
+    localStorage.setItem('examiner_tg_reading_count', String(readingCount));
+    localStorage.setItem('examiner_tg_cloze_count', String(clozeCount));
+  }, [readingCount, clozeCount]);
+
+  React.useEffect(() => {
     localStorage.setItem('examiner_tg_ticket_count', String(ticketCount));
   }, [ticketCount]);
 
@@ -301,6 +330,7 @@ export const TicketGenerator: React.FC = () => {
 
   const subjectName = subjects.find((s) => s.id === subjectId)?.name || '';
   const standard = standardFor(subjectName);
+  const nctCfg = nctConfigFor(subjectName) ?? CHEM_CONFIG; // настройки режима НЦТ предмета (химия, право)
   const isChem = isOwner && !!examProfileFor(subjectName); // режим НЦТ пока только для главного админа
   const [nctPref, setNctPref] = useState<boolean>(() => getStorageBool('examiner_nct_mode', false));
   const nctMode = isChem && nctPref;
@@ -321,7 +351,8 @@ export const TicketGenerator: React.FC = () => {
   };
   const permAvailable = ticketCount >= 4 && ticketCount % 2 === 0;
   const nctPerm = nctMode && permPref && permAvailable;
-  const isStandard = !!standard && testCount === standard.test && matchingCount === standard.matching && openCount === standard.open;
+  const isStandard = !!standard && testCount === standard.test && matchingCount === standard.matching && openCount === standard.open
+    && readingCount === (standard.reading ?? 0) && clozeCount === (standard.cloze ?? 0);
 
   // Смена предмета: выбор глав сбрасывается, состав билета — стандартный для предмета
   const applyPresetForSubject = (sId: string) => {
@@ -336,6 +367,8 @@ export const TicketGenerator: React.FC = () => {
       setMatchingCount(st.matching);
       setOpenCount(st.open);
     }
+    setReadingCount(st?.reading ?? 0);
+    setClozeCount(st?.cloze ?? 0);
   };
 
   // Автоматический выбор предмета (вместе с его стандартным составом билета)
@@ -421,23 +454,42 @@ export const TicketGenerator: React.FC = () => {
     enabled: Boolean(subjectId),
     queryFn: () => fetchQuestionCounts(subjectId),
   });
+  // Тексты предмета (английский): RPC есть только в supabase/sql/passages.sql; пока он не применён — пустой список
+  const { data: passageRows } = useQuery({
+    queryKey: ['passage_counts', subjectId],
+    staleTime: 30_000,
+    enabled: Boolean(subjectId),
+    queryFn: () => fetchPassageCounts(subjectId),
+  });
   const poolStats = React.useMemo(() => {
     if (!poolCounts) return undefined;
     const topicSet = new Set(effTopicIds);
     const chapterSet = new Set(effChapterIds);
-    const out = { total: 0, test: 0, matching: 0, open: 0 };
+    const inScope = (r: { topic_id: string | null; chapter_id: string | null }) =>
+      topicSet.size > 0 ? !!(r.topic_id && topicSet.has(r.topic_id)) : chapterSet.size === 0 || !!(r.chapter_id && chapterSet.has(r.chapter_id));
+    const out = { total: 0, test: 0, matching: 0, open: 0, reading: 0, cloze: 0 };
     for (const r of poolCounts) {
-      if (topicSet.size > 0 ? !(r.topic_id && topicSet.has(r.topic_id)) : chapterSet.size > 0 && !(r.chapter_id && chapterSet.has(r.chapter_id))) continue;
+      if (!inScope(r)) continue;
       out.total += r.cnt;
       if (r.type === 'test' || r.type === 'matching' || r.type === 'open') out[r.type] += r.cnt;
     }
+    // вопросы текстов не считаются отдельными тестами; тексты считаются блоками
+    for (const p of passageRows ?? []) {
+      if (!inScope(p)) continue;
+      out.test = Math.max(0, out.test - p.questions);
+      if (p.kind === 'reading') out.reading += p.passages;
+      else if (p.kind === 'cloze') out.cloze += p.passages;
+    }
     return out;
-  }, [poolCounts, effTopicIds.join(','), effChapterIds.join(',')]);
+  }, [poolCounts, passageRows, effTopicIds.join(','), effChapterIds.join(',')]);
+  const hasTexts = (poolStats?.reading ?? 0) + (poolStats?.cloze ?? 0) > 0;
+  // поля текстов показываем, если в выбранных темах есть тексты или они уже заданы
+  const showTexts = hasTexts || readingCount + clozeCount > 0;
 
   // Состав билета с учётом того, что реально есть в выбранных темах
   const fitted = fitSettings(
-    { total: poolStats?.total || 0, test: poolStats?.test || 0, matching: poolStats?.matching || 0, open: poolStats?.open || 0 },
-    { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: '' }
+    { total: poolStats?.total || 0, test: poolStats?.test || 0, matching: poolStats?.matching || 0, open: poolStats?.open || 0, reading: poolStats?.reading || 0, cloze: poolStats?.cloze || 0 },
+    { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: '', ...(hasTexts || readingCount + clozeCount > 0 ? { readingCount, clozeCount } : {}) }
   );
   const fittedTotal = fitted.settings.testCount + fitted.settings.matchingCount + fitted.settings.openCount;
 
@@ -445,8 +497,12 @@ export const TicketGenerator: React.FC = () => {
   const health = React.useMemo(() => {
     if (!poolStats || pickEmpty) return null;
     const { testCount: t, matchingCount: m, openCount: o } = fitted.settings;
+    const rc = fitted.settings.readingCount ?? 0, cc = fitted.settings.clozeCount ?? 0;
     const maxBy = (pool: number, n: number) => (n > 0 ? Math.floor(pool / n) : Infinity);
-    const safeRaw = Math.min(maxBy(poolStats.test, t), maxBy(poolStats.matching, m), maxBy(poolStats.open, o));
+    const safeRaw = Math.min(
+      maxBy(poolStats.test, t - 8 * (rc + cc)), maxBy(poolStats.matching, m), maxBy(poolStats.open, o),
+      maxBy(poolStats.reading, rc), maxBy(poolStats.cloze, cc),
+    );
     const safe = safeRaw === Infinity ? 0 : safeRaw;
     if (fitted.error) {
       return { status: 'red' as const, title: 'В выбранных главах нет нужных вопросов', desc: 'Выберите другие главы или возьмите весь предмет.', safe: 0 };
@@ -518,6 +574,7 @@ export const TicketGenerator: React.FC = () => {
   const currentCfg = (): GenCfg => ({
     subjectId, chapterIds: effChapterIds, topicIds: effTopicIds,
     test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount,
+    ...(readingCount + clozeCount > 0 ? { reading: readingCount, cloze: clozeCount } : {}),
     shuffleOptions, shuffleMatching, title: customTitle.trim() || null, nct: nctMode, nctPerm,
     ...(nctMode ? { nctDiff: diffShares } : {}),
   });
@@ -531,18 +588,20 @@ export const TicketGenerator: React.FC = () => {
     setGenProgress({ percent: 15, stage: 'Загрузка вопросов...' });
     const nct = !!cfg.nct;
     const { test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount, shuffleOptions, shuffleMatching } = nct
-      ? { ...cfg, test: NCT_COMPOSITION.test, matching: NCT_COMPOSITION.matching, open: NCT_COMPOSITION.open }
+      ? { ...cfg, test: nctCfg.composition.test, matching: nctCfg.composition.matching, open: nctCfg.composition.open }
       : cfg;
     const subjectId = cfg.subjectId;
     const effTopicIds = cfg.topicIds;
     const effChapterIds = cfg.chapterIds;
+    // тексты (английский) — только вне режима НЦТ; без них ключей в настройках нет, подбор как раньше
+    const textOpts = !nct && ((cfg.reading ?? 0) + (cfg.cloze ?? 0) > 0) ? { readingCount: cfg.reading ?? 0, clozeCount: cfg.cloze ?? 0 } : {};
 
     try {
       if (!subjectId) throw new Error('Выберите предмет');
       if (testCount + matchingCount + openCount === 0) throw new Error('Задайте хотя бы один вопрос в билете');
       if (ticketCount < 1) throw new Error('Количество билетов должно быть не менее 1');
 
-      const limitErr = checkSettings({ testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: '' }, limits);
+      const limitErr = checkSettings({ testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: '', ...textOpts }, limits);
       if (limitErr) throw new Error(limitErr);
 
       // 1. Лёгкий пул (только поля для подбора) и счётчики предмета — одновременно.
@@ -557,7 +616,7 @@ export const TicketGenerator: React.FC = () => {
       // 2. Если вопросов какого-то вида не хватает, берём сколько есть (считаем по реально загруженным вопросам)
       const fit = fitSettings(
         calcPoolStats(allQuestionsRaw),
-        { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: '' }
+        { testCount, matchingCount, openCount, ticketCount, shuffleOptions, shuffleMatching, title: '', ...textOpts }
       );
       if (fit.error) throw new Error(fit.error);
       if (fit.notes.length) notifyInfo(`Вопросов не хватает, билеты составлены из того, что есть. ${fit.notes.join('; ')}`);
@@ -576,7 +635,7 @@ export const TicketGenerator: React.FC = () => {
         const nctSources = new Set((srcRows || []).filter((r: any) => /ЦВЭ/i.test(r.name || '')).map((r: any) => r.id));
         allQuestionsRaw.forEach((q: any) => { q.isNct = !!q.source_id && nctSources.has(q.source_id); });
         const permuted = !!cfg.nctPerm && ticketCount >= 4 && ticketCount % 2 === 0;
-        let np = pickNct(allQuestionsRaw, permuted ? 2 : ticketCount, Math.random, totals, cfg.nctDiff ?? NCT_DEFAULT_DIFFICULTY);
+        let np = pickNct(allQuestionsRaw, permuted ? 2 : ticketCount, Math.random, totals, cfg.nctDiff ?? NCT_DEFAULT_DIFFICULTY, nctCfg);
         if (np.notes.length) notifyInfo(`Формат НЦТ: ${np.notes.join('; ')}`);
         if (np.kinds[0][0]?.length + np.kinds[1][0]?.length + np.kinds[2][0]?.length === 0) throw new Error('В выбранных темах нет вопросов для формата НЦТ');
         if (permuted) np = expandPermuted(np, ticketCount, Math.random);
@@ -618,10 +677,11 @@ export const TicketGenerator: React.FC = () => {
             ticket_count: ticketCount,
             shuffle_options: shuffleOptions,
             shuffle_matching: shuffleMatching,
+            ...(textOpts.readingCount !== undefined ? { reading_count: fit.settings.readingCount ?? 0, cloze_count: fit.settings.clozeCount ?? 0 } : {}),
             requested: { test: testCount, matching: matchingCount, open: openCount },
             auto_title: !cfg.title?.trim(),
             source: 'site',
-            ...(nct ? { nct: true, nct_difficulty: cfg.nctDiff ?? NCT_DEFAULT_DIFFICULTY } : {}),
+            ...(nct ? { nct: true, nct_subject: nctCfg.key, nct_difficulty: cfg.nctDiff ?? NCT_DEFAULT_DIFFICULTY } : {}),
             ...(nct && cfg.nctPerm && ticketCount >= 4 && ticketCount % 2 === 0 ? { nct_perm: true } : {}),
           },
         },
@@ -835,7 +895,7 @@ export const TicketGenerator: React.FC = () => {
 
           {/* Главное действие: скачать на запомненном языке; стрелка — выбрать другой язык */}
           <div className="sm:max-w-md sm:mx-auto">
-            <DownloadButton lang={exportLang} busy={isDownloading} onDownload={handleDownload} />
+            <DownloadButton lang={exportLang} busy={isDownloading} onDownload={handleDownload} singleLang={isEnglishName(generatedSubjectName)} />
             <p className="text-xs text-slate-500 mt-2 text-center">
               {generatedHasKey ? 'В архиве: билеты + ключи ответов' : 'Билеты в формате Word'}
             </p>
@@ -887,14 +947,14 @@ export const TicketGenerator: React.FC = () => {
                   onChanged={handleBatchChanged}
                   renderActions={(t) => (
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {(exportLang === 'both' ? (['ru', 'tg'] as const) : [exportLang]).map((l) => (
+                      {(isEnglishName(generatedSubjectName) ? ['ru' as const] : exportLang === 'both' ? (['ru', 'tg'] as const) : [exportLang]).map((l) => (
                         <button
                           key={l}
                           onClick={() => exportSingleWithKey(t, l)}
                           className="min-h-[36px] px-2.5 text-sm bg-white hover:bg-indigo-50 text-indigo-700 font-semibold rounded-lg border border-indigo-200/70 flex items-center gap-1 transition active:scale-95"
                         >
                           <Download className="w-3.5 h-3.5" />
-                          {l === 'tg' ? 'TJ' : 'RU'}
+                          {isEnglishName(generatedSubjectName) ? 'Word' : l === 'tg' ? 'TJ' : 'RU'}
                         </button>
                       ))}
                     </div>
@@ -1085,6 +1145,7 @@ export const TicketGenerator: React.FC = () => {
                 {!editComposition && (
                   <p className="text-sm text-slate-700 mt-1">
                     <b>{testCount + matchingCount + openCount}</b> {plural(testCount + matchingCount + openCount, 'вопрос', 'вопроса', 'вопросов')}: {testCount} тест. · {matchingCount} соотв. · {openCount} откр.
+                    {showTexts && readingCount + clozeCount > 0 && ` (в тестах: ${readingCount} ${plural(readingCount, 'текст', 'текста', 'текстов')} для чтения, ${clozeCount} с пропусками)`}
                   </p>
                 )}
                 {!editComposition && isStandard && (
@@ -1113,7 +1174,7 @@ export const TicketGenerator: React.FC = () => {
                 <span className="text-sm text-slate-700">
                   <b className="text-slate-900">Билет по формату НЦТ</b>
                   <span className="block text-slate-500 mt-0.5">
-                    27 заданий (18 тест. + 2 соотв. + 7 откр.), 40 баллов. Задания идут блоками разделов, как в НЦТ: основные понятия → атом и ПЗ → растворы; баллы делятся между пройденными разделами. На каждое место берётся тип задания по меткам (в билете типы не повторяются), около 16 баллов — из сборника НЦТ (источник «ЦВЭ»). Берутся главы 1–6 и темы 7.4–7.12 (растворы); остальные темы пока не берутся.
+                    {nctCfg.composition.test + nctCfg.composition.matching + nctCfg.composition.open} заданий ({nctCfg.composition.test} тест. + {nctCfg.composition.matching} соотв. + {nctCfg.composition.open} откр.), {nctCfg.composition.points} баллов. Задания идут блоками разделов, как в НЦТ: {nctCfg.sections.map((x) => x.name.toLowerCase()).join(' → ')}; баллы делятся между пройденными разделами. На каждое место берётся тип задания по меткам (в билете типы не повторяются), около 16 баллов — из сборника НЦТ (источник «ЦВЭ»). Берутся главы 1–6 и темы 7.4–7.12 (растворы); остальные темы пока не берутся.
                   </span>
                 </span>
               </label>
@@ -1139,7 +1200,7 @@ export const TicketGenerator: React.FC = () => {
                   ))}
                 </div>
                 <div className={`text-xs ${diffSum === 100 ? 'text-slate-500' : 'text-rose-600 font-semibold'}`}>
-                  Сумма: {diffSum} %. Открытые задачи всегда: {NCT_OPEN_DIFFICULTY[0]} лёгких, {NCT_OPEN_DIFFICULTY[1]} средних, {NCT_OPEN_DIFFICULTY[2]} сложных.
+                  Сумма: {diffSum} %. Открытые задачи всегда: {nctCfg.openDifficulty[0]} лёгких, {nctCfg.openDifficulty[1]} средних, {nctCfg.openDifficulty[2]} сложных.
                 </div>
               </div>
             )}
@@ -1164,14 +1225,24 @@ export const TicketGenerator: React.FC = () => {
 
             {editComposition && (
               <div className="divide-y divide-slate-100 -mt-1">
-                <Stepper label="Тестовые" hint={`Доступно: ${poolStats?.test ?? 0}`} value={testCount} min={0} max={limits.perType} onChange={setTestCount} />
+                {showTexts && (
+                  <>
+                    <Stepper label="Текстов для чтения" hint={`Доступно: ${poolStats?.reading ?? 0} (по 8 вопросов)`} value={readingCount} min={0} max={3} onChange={setReadingCount} />
+                    <Stepper label="Текстов с пропусками" hint={`Доступно: ${poolStats?.cloze ?? 0} (по 8 вопросов)`} value={clozeCount} min={0} max={3} onChange={setClozeCount} />
+                  </>
+                )}
+                <Stepper
+                  label="Тестовые"
+                  hint={showTexts ? `Вместе с вопросами текстов. Отдельных в билете: ${Math.max(0, testCount - 8 * (readingCount + clozeCount))}, доступно: ${poolStats?.test ?? 0}` : `Доступно: ${poolStats?.test ?? 0}`}
+                  value={testCount} min={0} max={limits.perType} onChange={setTestCount}
+                />
                 <Stepper label="На соответствие" hint={`Доступно: ${poolStats?.matching ?? 0}`} value={matchingCount} min={0} max={limits.perType} onChange={setMatchingCount} />
                 <Stepper label="Открытые" hint={`Доступно: ${poolStats?.open ?? 0}`} value={openCount} min={0} max={limits.perType} onChange={setOpenCount} />
                 {standard && !isStandard && (
                   <div className="pt-2">
                     <button
                       type="button"
-                      onClick={() => { setTestCount(standard.test); setMatchingCount(standard.matching); setOpenCount(standard.open); }}
+                      onClick={() => { setTestCount(standard.test); setMatchingCount(standard.matching); setOpenCount(standard.open); setReadingCount(standard.reading ?? 0); setClozeCount(standard.cloze ?? 0); }}
                       className="min-h-[40px] text-sm font-semibold text-indigo-700"
                     >
                       Вернуть стандарт: {standard.test} + {standard.matching} + {standard.open}
@@ -1237,7 +1308,7 @@ export const TicketGenerator: React.FC = () => {
                         {'fixCounts' in health && health.fixCounts && (
                           <button
                             type="button"
-                            onClick={() => { setTestCount(fitted.settings.testCount); setMatchingCount(fitted.settings.matchingCount); setOpenCount(fitted.settings.openCount); }}
+                            onClick={() => { setTestCount(fitted.settings.testCount); setMatchingCount(fitted.settings.matchingCount); setOpenCount(fitted.settings.openCount); setReadingCount(fitted.settings.readingCount ?? 0); setClozeCount(fitted.settings.clozeCount ?? 0); }}
                             className="min-h-[40px] px-3 rounded-xl bg-white border border-black/10 text-sm font-semibold active:scale-95"
                           >
                             Сделать билет из {fittedTotal} вопр.

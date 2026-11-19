@@ -14,10 +14,14 @@ export interface PoolSelection {
 }
 
 /** Поля, которые читают pickParallel и separateLinked */
-export const POOL_SELECT = 'id, type, topic_id, chapter_id, num, seq, created_at, linked_ids, source_id, nct_type, nct_difficulty, chapter:chapters(order_index), topic:topics(order_index), usage:question_usage(times_used)';
+export const POOL_SELECT = 'id, type, topic_id, chapter_id, num, seq, created_at, linked_ids, source_id, nct_type, nct_difficulty, passage_id, passage_order, chapter:chapters(order_index), topic:topics(order_index), passage:passages(kind), usage:question_usage(times_used)';
 
-/** Полный вопрос для снимка билета */
-export const QUESTION_FULL_SELECT = '*, chapter:chapters(name, order_index), topic:topics(name, order_index), options:question_options(*), matching_items:matching_items(*)';
+const PASSAGE_POOL_FIELDS = /, passage_id, passage_order|, passage:passages\(kind\)/g;
+const PASSAGE_FULL_FIELD = /, passage:passages\([^)]*\)/;
+const mentions = (e: any, re: RegExp) => re.test(`${e?.message ?? ''} ${e?.details ?? ''} ${e?.hint ?? ''}`);
+
+/** Полный вопрос для снимка билета (с текстом, если вопрос к тексту) */
+export const QUESTION_FULL_SELECT = '*, chapter:chapters(name, order_index), topic:topics(name, order_index), options:question_options(*), matching_items:matching_items(*), passage:passages(id, kind, title, content)';
 
 const PAGE = 1000; // Supabase отдаёт не больше 1000 строк за запрос
 const PARALLEL = 4;
@@ -39,8 +43,13 @@ export async function loadLightPool(sb: any, sel: PoolSelection): Promise<any[]>
       return q.order('id').range(from, from + PAGE - 1);
     };
     let { data, error } = await run();
-    if (error && select === POOL_SELECT && /question_usage/.test(`${error.message ?? ''} ${error.details ?? ''}`)) {
-      select = POOL_SELECT.replace(/, usage:question_usage\(times_used\)/, '');
+    // Таблиц question_usage и passages в базе может ещё не быть (миграция не применена): тогда читаем без них
+    if (error && mentions(error, /question_usage/)) {
+      select = select.replace(/, usage:question_usage\(times_used\)/, '');
+      ({ data, error } = await run());
+    }
+    if (error && mentions(error, /passage/)) {
+      select = select.replace(PASSAGE_POOL_FIELDS, '');
       ({ data, error } = await run());
     }
     if (error) throw error;
@@ -66,10 +75,16 @@ export async function hydrateTickets(sb: any, kinds: any[][][]): Promise<void> {
   const list = [...ids];
   const full = new Map<string, any>();
   const jobs: Promise<void>[] = [];
+  let select = QUESTION_FULL_SELECT;
   for (let i = 0; i < list.length; i += IDS_PER_REQUEST) {
     const slice = list.slice(i, i + IDS_PER_REQUEST);
     jobs.push((async () => {
-      const { data, error } = await sb.from('questions').select(QUESTION_FULL_SELECT).in('id', slice);
+      let { data, error } = await sb.from('questions').select(select).in('id', slice);
+      if (error && mentions(error, /passage/)) {
+        // таблицы passages ещё нет в базе — снимок без текста
+        select = select.replace(PASSAGE_FULL_FIELD, '');
+        ({ data, error } = await sb.from('questions').select(select).in('id', slice));
+      }
       if (error) throw error;
       for (const q of data ?? []) full.set(q.id, q);
     })());
