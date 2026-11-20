@@ -6,7 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { fetchBatchSlots, fetchFullQuestions, fetchNctSourceIds, fetchSubjectPool, fetchTopicInfos, fetchTopicPool, saveBatchChanges, type BatchSlots, type TopicInfo } from '../lib/batchEdit';
 import {
   applyToSlots, blockCandidates, blocksWithoutLinkClash, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, isPermutedBatch, mirrorChanges, mirrorPlan,
-  nctCandidatesFor, nctTieredCandidates, paramsAfterEdit, sameTypeElsewhere, planNctTopicRemoval, planTopicRemoval, scopeTopicIds, sectionOfPoolQ, topicCounts, twinSlots, TYPE_LABEL, usedPassageIds, withoutTwins,
+  nctCandidatesFor, nctTieredCandidates, otherTypeCandidates, otherTypeOptions, paramsAfterEdit, sameTypeElsewhere, planNctTopicRemoval, planTopicRemoval, scopeTopicIds, sectionOfPoolQ, topicCounts, twinSlots, TYPE_LABEL, usedPassageIds, withoutTwins,
   type NctTier, type PassageBlockQ, type PoolQ, type RowChange, type Slot,
 } from '../lib/questionSwap';
 import { FormattedText } from './FormulaEditor';
@@ -419,6 +419,9 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   );
   const nctMode = nctBatch && section !== null;
   const [anySource, setAnySource] = useState(false);
+  // Галочка «Другой тип задания»: вопросы выбранного типа из всего предмета; на этом месте он встанет во всех вариантах
+  const [otherType, setOtherType] = useState(false);
+  const [pickType, setPickType] = useState('');
   // Темы раздела места среди выбранных при создании набора
   const sectionTopics = useMemo(
     () => (section ? ed.scopeTopics.filter((t) => sectionOfPoolQ({ chapter: { order_index: t.chapterOrder }, topic: { order_index: t.order } }, nctCfg) === section).map((t) => t.id) : []),
@@ -426,6 +429,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   );
   // Место с меткой типа задания: замена — из всех вопросов предмета с этой меткой (по типу, а не по теме)
   const byType = !!slot.nctType;
+  const wholeSubject = byType || otherType;
   const poolTopics = useMemo(() => (byType ? ed.topics.map((t) => t.id) : sectionTopics), [byType, ed.topics, sectionTopics]); // при byType — только для проверки «есть темы»
 
   const [tab, setTab] = useState<'same' | 'other'>(slot.topicId ? 'same' : 'other');
@@ -436,15 +440,15 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   const twins = useMemo(() => (isPermutedBatch(batch.generation_params) ? twinSlots(data.slots, slot) : []), [batch.generation_params, data, slot]);
 
   const poolQ = useQuery({
-    queryKey: nctMode ? ['swap_pool_nct', batch.subject_id, byType ? 'all' : poolTopics.join(',')] : ['swap_pool', batch.subject_id, topicId],
-    queryFn: () => (nctMode && byType ? fetchSubjectPool(batch.subject_id) : fetchTopicPool(batch.subject_id, nctMode ? poolTopics : [topicId!])),
+    queryKey: nctMode ? ['swap_pool_nct', batch.subject_id, wholeSubject ? 'all' : poolTopics.join(',')] : ['swap_pool', batch.subject_id, topicId],
+    queryFn: () => (nctMode && wholeSubject ? fetchSubjectPool(batch.subject_id) : fetchTopicPool(batch.subject_id, nctMode ? poolTopics : [topicId!])),
     enabled: nctMode ? poolTopics.length > 0 && !!sourcesQ.data : !!topicId,
     staleTime: 60_000,
   });
   // Билет НЦТ: если вопросов того же типа не осталось (тип редкий, а вариантов много), показываем другие вопросы того же раздела и вида
   const scopeSet = useMemo(() => (ed.scopeTopics.length < ed.topics.length ? new Set(ed.scopeTopics.map((t) => t.id)) : null), [ed.scopeTopics, ed.topics]);
-  const { cands: allCands, relaxed, total, bothSources, tier } = useMemo((): { cands: PoolQ[]; relaxed: boolean; total: number; bothSources: boolean; tier: NctTier | null } => {
-    if (!poolQ.data) return { cands: [], relaxed: false, total: 0, bothSources: false, tier: null };
+  const { cands: allCands, relaxed, total, bothSources, tier, typeOptions } = useMemo((): { cands: PoolQ[]; relaxed: boolean; total: number; bothSources: boolean; tier: NctTier | null; typeOptions: Array<{ type: string; count: number }> } => {
+    if (!poolQ.data) return { cands: [], relaxed: false, total: 0, bothSources: false, tier: null, typeOptions: [] };
     const used = new Set(data.slots.map((s) => s.questionId).filter((x): x is string => !!x));
     // остальные вопросы этого варианта и его двойников (замена встанет во все)
     const mine = new Set([slot.tqId, ...twins.map((t) => t.tqId)]);
@@ -457,29 +461,38 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       const pool = poolQ.data.map((q) => ({ ...q, isNct: !!q.source_id && src.has(q.source_id) }));
       const info = { section, nctType: slot.nctType ?? null, difficulty: slot.nctDifficulty ?? null, isNct: !!slot.sourceId && src.has(slot.sourceId) };
       const types = new Set(ticketSlots.map((s) => s.nctType).filter((x): x is string => !!x));
+      if (otherType) {
+        const all = otherTypeOptions(pool, slot.type, used, others, links, slot.nctType ?? null, nctCfg.banned, true, info.isNct);
+        const own = otherTypeOptions(pool, slot.type, used, others, links, slot.nctType ?? null, nctCfg.banned, false, info.isNct);
+        const sum = (l: Array<{ count: number }>) => l.reduce((n, o) => n + o.count, 0);
+        const bothSources = sum(own) > 0 && sum(own) < sum(all);
+        const typeOptions = anySource ? all : own;
+        const list = pickType ? otherTypeCandidates(pool, slot.type, used, others, links, pickType, anySource, info.isNct, scopeSet) : [];
+        return { cands: list, relaxed: false, total: list.length, bothSources, tier: null, typeOptions };
+      }
       if (byType) {
         // по ступеням: метка в выбранных темах → близкие типы там же → метка во всём предмете → близкие во всём предмете
         // галочка «Любой источник» имеет смысл, только если на этой ступени есть и сборник НЦТ, и банк
         const all = nctTieredCandidates(pool, slot.type, used, others, links, info, types, true, nctCfg, scopeSet);
         const bothSources = all.cands.some((q) => q.isNct) && all.cands.some((q) => !q.isNct);
         const got = anySource ? all : nctTieredCandidates(pool, slot.type, used, others, links, info, types, false, nctCfg, scopeSet);
-        if (got.cands.length) return { cands: got.cands, relaxed: false, total: got.cands.length, bothSources, tier: got.tier };
+        if (got.cands.length) return { cands: got.cands, relaxed: false, total: got.cands.length, bothSources, tier: got.tier, typeOptions: [] };
         // запасной путь: другие вопросы того же раздела и вида — из тем, выбранных при создании набора
         const inScope = new Set(sectionTopics);
         const loose = nctCandidatesFor(pool.filter((q) => inScope.has(q.topic_id)), slot.type, used, others, links, { ...info, nctType: null }, types, true, nctCfg);
-        return { cands: loose, relaxed: loose.length > 0, total: loose.length, bothSources, tier: null };
+        return { cands: loose, relaxed: loose.length > 0, total: loose.length, bothSources, tier: null, typeOptions: [] };
       }
       const all = nctCandidatesFor(pool, slot.type, used, others, links, info, types, true, nctCfg);
       const bothSources = all.some((q) => q.isNct) && all.some((q) => !q.isNct);
       const strict = anySource ? all : nctCandidatesFor(pool, slot.type, used, others, links, info, types, false, nctCfg);
-      return { cands: strict, relaxed: false, total: strict.length, bothSources, tier: null };
+      return { cands: strict, relaxed: false, total: strict.length, bothSources, tier: null, typeOptions: [] };
     }
     const list = candidatesFor(poolQ.data, slot.type, used, others, links);
-    return { cands: list, relaxed: false, total: list.length, bothSources: false, tier: null };
-  }, [poolQ.data, data, slot, twins, tab, nctMode, section, sectionTopics, byType, scopeSet, sourcesQ.data, anySource, nctCfg]);
+    return { cands: list, relaxed: false, total: list.length, bothSources: false, tier: null, typeOptions: [] };
+  }, [poolQ.data, data, slot, twins, tab, nctMode, section, sectionTopics, byType, scopeSet, sourcesQ.data, anySource, nctCfg, otherType, pickType]);
   // Постранично по 25: «Назад» / «Дальше»; при смене условий подбора — снова первая страница
   const [page, setPage] = useState(0);
-  React.useEffect(() => { setPage(0); }, [anySource, tab, otherTopic]);
+  React.useEffect(() => { setPage(0); }, [anySource, tab, otherTopic, otherType, pickType]);
   const pages = Math.max(1, Math.ceil(allCands.length / SWAP_PAGE));
   const pageNo = Math.min(page, pages - 1);
   const cands = useMemo(() => allCands.slice(pageNo * SWAP_PAGE, pageNo * SWAP_PAGE + SWAP_PAGE), [allCands, pageNo]);
@@ -530,11 +543,24 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       )}
       {nctMode ? (
         <>
-          <p>
+          <label className="flex items-start gap-2 p-3 rounded-xl border border-slate-200 text-sm text-slate-800">
+            <input type="checkbox" className="h-4 w-4 mt-0.5" checked={otherType} onChange={(e) => { setOtherType(e.target.checked); setPickType(''); }} />
+            <span><b>Другой тип задания</b> — выбрать вопрос другого типа; на месте {slot.orderIndex} он встанет во всех вариантах набора.</span>
+          </label>
+          {otherType && (
+            <CustomSelect
+              value={pickType}
+              onChange={setPickType}
+              placeholder="Выберите тип задания"
+              searchable
+              options={[...typeOptions].sort((a, b) => nctTypeName(a.type).localeCompare(nctTypeName(b.type), 'ru')).map((o) => ({ value: o.type, label: `${nctTypeName(o.type)} — ${o.count}` }))}
+            />
+          )}
+          {!otherType && <p>
             {slot.nctType
               ? <>Билет по формату НЦТ: подойдёт вопрос вида «{typeName}» с типом задания «{nctTypeName(slot.nctType)}», которого нет в билетах набора. Сначала — из тем, выбранных при создании набора; нет таких — близкие типы заданий оттуда же; затем — из остальных тем предмета.</>
               : <>Билет по формату НЦТ: подойдёт только вопрос вида «{typeName}» из раздела «{nctCfg.sections.find((x) => x.key === section)?.name ?? section}» без метки или с типом, которого ещё нет в этом билете, и которого нет в билетах набора.</>}
-          </p>
+          </p>}
           {(bothSources || anySource) && (
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <input type="checkbox" className="h-4 w-4" checked={anySource} onChange={(e) => setAnySource(e.target.checked)} />
@@ -562,6 +588,8 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       )}
       {!nctMode && !topicId ? (
         <p className="text-slate-600">Выберите тему, чтобы увидеть вопросы.</p>
+      ) : nctMode && otherType && !pickType && !poolQ.isLoading && !sourcesQ.isLoading ? (
+        <p className="text-slate-600">{typeOptions.length ? 'Выберите тип задания, чтобы увидеть вопросы.' : `Нет свободных вопросов вида «${typeName}» другого типа.`}</p>
       ) : poolQ.isLoading || (nctMode && sourcesQ.isLoading) || (cands.length > 0 && fullQ.isLoading) ? (
         <div className="py-4 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>
       ) : cands.length === 0 ? (

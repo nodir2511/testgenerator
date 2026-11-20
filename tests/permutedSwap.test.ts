@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CHEM_CONFIG, pickNct } from '../supabase/functions/_shared/nct';
 import { CHEM_RELATED } from '../supabase/functions/_shared/nctRelated';
 import { NCT_TYPES } from '../src/lib/nctTypes';
-import { isPermutedBatch, mirrorChanges, nctCandidatesFor, nctTieredCandidates, planTopicRemoval, sameTypeElsewhere, scopeTopicIds, sectionOfPoolQ, twinSlots, withoutTwins, type PoolQ, type QType, type Slot } from '../src/lib/questionSwap';
+import { isPermutedBatch, mirrorChanges, nctCandidatesFor, nctTieredCandidates, otherTypeCandidates, otherTypeOptions, planTopicRemoval, sameTypeElsewhere, scopeTopicIds, sectionOfPoolQ, twinSlots, withoutTwins, type PoolQ, type QType, type Slot } from '../src/lib/questionSwap';
 
 describe('замена в билете НЦТ по типу задания', () => {
   // химия: тема 1.1 — раздел «Основные понятия», тема 5.1 — «Органика»
@@ -123,6 +123,19 @@ describe('тот же тип на позиции во всех варианта�
     const slots = [s(1, 27, 'a1', 'A'), s(2, 27, 'a2', 'A'), s(3, 5, 'a1', 'A'), s(4, 9, 'a2', 'A')];
     const r = sameTypeElsewhere(slots, slots[0], p('n1', 'B'), [p('n1', 'B'), p('n2', 'B')], null, new Map(), true);
     expect(r.changes.map((c) => c.slot.tqId)).toEqual(['tq2-27']);
+  });
+});
+
+describe('галочка «Другой тип задания»', () => {
+  const p = (id: string, nct: string | null, topic = 'T1', isNct = false, type: QType = 'test'): PoolQ => ({ ...pq(id, topic, type), nct_type: nct, isNct });
+  const pool = [p('a', 'A'), p('b1', 'B'), p('b2', 'B', 'T9'), p('b3', 'B', 'T1', true), p('c', 'C'), p('z', 'Z'), p('n', null), p('o', 'B', 'T1', false, 'open')];
+  it('типы без текущего и запрещённых, с числом свободных вопросов того же вида и источника', () => {
+    const got = otherTypeOptions(pool, 'test', new Set(['c']), [], new Map(), 'A', new Set(['Z']), false, false);
+    expect(got).toEqual([{ type: 'B', count: 2 }]);
+    expect(otherTypeOptions(pool, 'test', new Set(), [], new Map(), 'A', new Set(['Z']), true, false).sort((x, y) => x.type.localeCompare(y.type))).toEqual([{ type: 'B', count: 3 }, { type: 'C', count: 1 }]);
+  });
+  it('вопросы выбранного типа: сначала темы набора', () => {
+    expect(otherTypeCandidates(pool, 'test', new Set(), [], new Map(), 'B', false, false, new Set(['T9'])).map((q) => q.id)).toEqual(['b2', 'b1']);
   });
 });
 

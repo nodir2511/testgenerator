@@ -111,6 +111,32 @@ export function candidatesFor(
   return rankFresh(pool.filter((q) => q.type === type && !q.passage_id && !used.has(q.id) && !clashes(q.id, others, links)));
 }
 
+// ---------- Замена на другой тип задания (галочка в окне замены) ----------
+
+/** Типы задания, на которые можно заменить место: сколько свободных вопросов того же вида у каждого (кроме текущего и запрещённых) */
+export function otherTypeOptions(
+  pool: PoolQ[], kind: QType, used: Set<string>, others: Iterable<string>, links: Map<string, Set<string>>,
+  current: string | null, banned: ReadonlySet<string>, anySource: boolean, isNct: boolean,
+): Array<{ type: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const q of candidatesFor(pool, kind, used, others, links)) {
+    const t = q.nct_type;
+    if (!t || t === current || banned.has(t)) continue;
+    if (!anySource && Boolean(q.isNct) !== isNct) continue;
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  return [...counts].map(([type, count]) => ({ type, count }));
+}
+
+/** Вопросы выбранного типа задания: сначала из тем, выбранных при создании набора, внутри — реже бравшиеся */
+export function otherTypeCandidates(
+  pool: PoolQ[], kind: QType, used: Set<string>, others: Iterable<string>, links: Map<string, Set<string>>,
+  nctType: string, anySource: boolean, isNct: boolean, scope: Set<string> | null,
+): PoolQ[] {
+  const fit = candidatesFor(pool.filter((q) => q.nct_type === nctType && (anySource || Boolean(q.isNct) === isNct)), kind, used, others, links);
+  return scope ? [...fit.filter((q) => scope.has(q.topic_id)), ...fit.filter((q) => !scope.has(q.topic_id))] : fit;
+}
+
 // ---------- Тексты (английский): замена блоком ----------
 
 /** Текст из пула: все его вопросы по порядку passage_order */
