@@ -462,12 +462,14 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       const info = { section, nctType: slot.nctType ?? null, difficulty: slot.nctDifficulty ?? null, isNct: !!slot.sourceId && src.has(slot.sourceId) };
       const types = new Set(ticketSlots.map((s) => s.nctType).filter((x): x is string => !!x));
       if (otherType) {
-        const all = otherTypeOptions(pool, slot.type, used, others, links, slot.nctType ?? null, nctCfg.banned, true, info.isNct);
-        const own = otherTypeOptions(pool, slot.type, used, others, links, slot.nctType ?? null, nctCfg.banned, false, info.isNct);
+        // только темы и главы, выбранные при создании набора (пройденные): других типов из непройденных тем в списке нет
+        const inScope = scopeSet ? pool.filter((q) => scopeSet.has(q.topic_id)) : pool;
+        const all = otherTypeOptions(inScope, slot.type, used, others, links, slot.nctType ?? null, nctCfg.banned, true, info.isNct);
+        const own = otherTypeOptions(inScope, slot.type, used, others, links, slot.nctType ?? null, nctCfg.banned, false, info.isNct);
         const sum = (l: Array<{ count: number }>) => l.reduce((n, o) => n + o.count, 0);
         const bothSources = sum(own) > 0 && sum(own) < sum(all);
         const typeOptions = anySource ? all : own;
-        const list = pickType ? otherTypeCandidates(pool, slot.type, used, others, links, pickType, anySource, info.isNct, scopeSet) : [];
+        const list = pickType ? otherTypeCandidates(inScope, slot.type, used, others, links, pickType, anySource, info.isNct, scopeSet) : [];
         return { cands: list, relaxed: false, total: list.length, bothSources, tier: null, typeOptions };
       }
       if (byType) {
@@ -507,7 +509,9 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       let missing: number[] = [];
       if (nctMode && q.nct_type && poolQ.data) {
         const links = buildLinks([...poolQ.data, ...data.slots.filter((s) => s.questionId).map((s) => ({ id: s.questionId!, linked_ids: s.linked }))]);
-        const r = sameTypeElsewhere(data.slots, slot, q, poolQ.data, scopeSet, links, permuted);
+        // при «Другом типе задания» остальные варианты тоже берут вопросы только из тем набора
+        const swapPool = otherType && scopeSet ? poolQ.data.filter((x) => scopeSet.has(x.topic_id)) : poolQ.data;
+        const r = sameTypeElsewhere(data.slots, slot, q, swapPool, scopeSet, links, permuted);
         base = [...base, ...r.changes];
         missing = r.missing;
       }
@@ -545,7 +549,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
         <>
           <label className="flex items-start gap-2 p-3 rounded-xl border border-slate-200 text-sm text-slate-800">
             <input type="checkbox" className="h-4 w-4 mt-0.5" checked={otherType} onChange={(e) => { setOtherType(e.target.checked); setPickType(''); }} />
-            <span><b>Другой тип задания</b> — выбрать вопрос другого типа; на месте {slot.orderIndex} он встанет во всех вариантах набора.</span>
+            <span><b>Другой тип задания</b> — выбрать вопрос другого типа; на месте {slot.orderIndex} он встанет во всех вариантах набора. В списке — только типы из тем, выбранных при создании набора.</span>
           </label>
           {otherType && (
             <CustomSelect
