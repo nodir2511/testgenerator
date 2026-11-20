@@ -111,7 +111,7 @@ describe('режим НЦТ: математика — карта тем и со�
     expect(examProfileFor('Математика')?.key).toBe('math');
     expect(nctConfigFor('Химия')?.key).toBe('chemistry');
     expect(nctConfigFor('Право')?.key).toBe('law');
-    expect(nctConfigFor('Физика')).toBeNull();
+    expect(nctConfigFor('Физика')?.key).toBe('physics');
     expect(nctConfigByKey('math')).toBe(MATH_CONFIG);
     expect(nctConfigByKey(undefined)).toBe(CHEM_CONFIG);
   });

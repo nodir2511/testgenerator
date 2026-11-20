@@ -92,8 +92,8 @@ describe('режим НЦТ: история — карта тем и соста�
     expect(nctConfigFor('Таърих')?.key).toBe('history');
     expect(nctConfigFor('Право')?.key).toBe('law');
     expect(nctConfigFor('Химия')?.key).toBe('chemistry');
-    expect(nctConfigFor('Биология')).toBeNull();
-    expect(nctConfigFor('Физика')).toBeNull();
+    expect(nctConfigFor('Биология')?.key).toBe('biology');
+    expect(nctConfigFor('Физика')?.key).toBe('physics');
     expect(nctConfigFor('Таджикский язык')).toBeNull();
     expect(nctConfigByKey('history')).toBe(HISTORY_CONFIG);
     expect(nctConfigByKey(undefined)).toBe(CHEM_CONFIG);

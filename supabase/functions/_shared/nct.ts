@@ -54,6 +54,8 @@ export interface NctConfig {
   textSections?: { reading: string; cloze: string; rest: string };
   /** пояснение в заметках про темы вне режима */
   skipNote: string;
+  /** фраза для подсказки у галочки режима в «Составе билета» (после слов про блоки разделов); нет — стандартный текст химии */
+  uiNote?: string;
 }
 
 export const NCT_SECTIONS: NctSection[] = ['basic', 'atom', 'solutions', 'elements', 'organic'];

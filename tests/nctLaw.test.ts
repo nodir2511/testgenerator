@@ -83,7 +83,7 @@ describe('режим НЦТ: право — карта тем и состав', 
   it('предмет выбирает свои настройки', () => {
     expect(nctConfigFor('Право')?.key).toBe('law');
     expect(nctConfigFor('Химия')?.key).toBe('chemistry');
-    expect(nctConfigFor('Биология')).toBeNull();
+    expect(nctConfigFor('Биология')?.key).toBe('biology');
     expect(nctConfigByKey('law')).toBe(LAW_CONFIG);
     expect(nctConfigByKey(undefined)).toBe(CHEM_CONFIG);
   });
