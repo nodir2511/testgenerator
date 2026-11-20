@@ -1,6 +1,27 @@
 "use strict";
 (function() {
-  window.onerror = function(m, u, l) {
+  // Отчёт в журнал ошибок сайта (client_errors через RPC report_client_error; анониму разрешено, частота ограничена в базе)
+  var sent = {};
+  window.gameReport = function(msg, stack) {
+    try {
+      var cfg = window.GAME_CFG || {};
+      if (!cfg.url || !cfg.key || sent[msg]) return;
+      sent[msg] = 1;
+      var x = new XMLHttpRequest();
+      x.open("POST", cfg.url + "/rest/v1/rpc/report_client_error");
+      x.setRequestHeader("Content-Type", "application/json");
+      x.setRequestHeader("apikey", cfg.key);
+      x.setRequestHeader("Authorization", "Bearer " + cfg.key);
+      x.send(JSON.stringify({ p_message: "[игра priem] " + String(msg).slice(0, 900), p_stack: String(stack || "").slice(0, 3800) + "\nUA: " + navigator.userAgent, p_url: location.href, p_version: "game" }));
+    } catch (e) {
+    }
+  };
+  window.addEventListener("unhandledrejection", function(e) {
+    var r = e && e.reason;
+    window.gameReport("unhandledrejection: " + (r && r.message || r), r && r.stack);
+  });
+  window.onerror = function(m, u, l, c, err) {
+    window.gameReport(m + " (стр. " + l + ":" + c + ")", err && err.stack);
     var b = document.getElementById("errbox");
     if (!b) {
       b = document.createElement("div");
@@ -3645,3 +3666,34 @@ $("btnReset").onclick = () => {
 };
 if (load()) render();
 else reset();
+// Разовая проверка: главный экран действительно виден. Если нет — отчёт с параметрами браузера (раз на версию игры в браузере)
+setTimeout(() => {
+  try {
+    if (!home || window.CLASS) return;
+    const M = $("cxMain"), h = M && M.querySelector("h2");
+    const r = h ? h.getBoundingClientRect() : null;
+    const at = r && r.width ? document.elementFromPoint(Math.min(innerWidth - 1, r.left + Math.min(r.width, 200) / 2), Math.max(0, Math.min(innerHeight - 1, r.top + r.height / 2))) : null;
+    const ok = !!(r && r.width > 0 && r.height > 0 && r.top < innerHeight && at && (at === h || h.contains(at)));
+    if (ok) return;
+    const key = "priem-diag-" + SIG.length + "-" + SIG[0];
+    try {
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, "1");
+    } catch (e) {
+    }
+    const cs = (el) => {
+      if (!el) return "нет";
+      const c = getComputedStyle(el), b = el.getBoundingClientRect();
+      return "".concat(el.tagName, "#").concat(el.id || "", ".").concat(el.className || "", " disp=").concat(c.display, " vis=").concat(c.visibility, " op=").concat(c.opacity, " pos=").concat(c.position, " color=").concat(c.color, " font=").concat(c.fontFamily.slice(0, 40), " rect=").concat([b.left, b.top, b.width, b.height].map(Math.round).join(","));
+    };
+    let fonts = "";
+    try {
+      fonts = document.fonts ? document.fonts.status + " " + [...document.fonts].map((f) => f.family + ":" + f.status).slice(0, 8).join(";") : "нет API";
+    } catch (e) {
+      fonts = "ошибка";
+    }
+    window.gameReport("главный экран не виден", ["экран " + innerWidth + "x" + innerHeight + " dpr " + devicePixelRatio + " scrollY " + scrollY + " высота страницы " + document.body.scrollHeight, "html cxMain " + (M ? M.innerHTML.length : -1) + " текст " + (M ? M.innerText.length : -1), "h2: " + cs(h), "точка: " + cs(at), "cxMain: " + cs(M), "board: " + cs(document.querySelector(".board")), "app: " + cs(document.querySelector(".app")), "body: " + cs(document.body), "шрифты: " + fonts].join("\n"));
+  } catch (e) {
+    window.gameReport("проверка экрана упала: " + e.message, e.stack);
+  }
+}, 2500);

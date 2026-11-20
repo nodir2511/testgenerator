@@ -484,7 +484,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 
 **Новая версия сайта у открытого окна:** сборка кладёт `version.json`; `UpdateBanner` замечает другой идентификатор и предлагает обновиться.
 
-**Ошибки интерфейса:** `installGlobalErrorReporting` и `AppErrorBoundary` → `report_client_error` → `client_errors` (читает owner).
+**Ошибки интерфейса:** `installGlobalErrorReporting` и `AppErrorBoundary` → `report_client_error` → `client_errors` (читает owner). Игра «Приём пациента» пишет туда же без входа (`window.gameReport` в начале `games-src/priem-patsienta/app.js`, анонимным ключом из `config.js`): необработанные ошибки и разовый отчёт «главный экран не виден» (через 2,5 с после загрузки проверяет, что заголовок главного экрана действительно на экране; в отчёте размеры, стили и шрифты; один раз на браузер и версию случаев, флаг `priem-diag-…` в `localStorage`). Сообщения начинаются с `[игра priem]`, `app_version = 'game'`, в `stack` — строка `UA:` с браузером.
 
 **Своя игра:**
 1. Ведущий (`GameHost`, только owner) вызывает `game_create`.
