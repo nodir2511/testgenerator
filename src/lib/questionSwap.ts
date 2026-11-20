@@ -282,15 +282,25 @@ export function sameTypeElsewhere(
   slots: Slot[], slot: Slot, chosen: PoolQ, pool: PoolQ[], scope: Set<string> | null, links: Map<string, Set<string>>, permuted = false,
 ): { changes: PlanChange[]; missing: number[] } {
   const type = chosen.nct_type;
-  if (!type || type === slot.nctType) return { changes: [], missing: [] };
+  // тип сверяется всегда: даже если выбран вопрос того же типа, другие варианты с иным типом на этом месте выравниваются
+  if (!type) return { changes: [], missing: [] };
   const used = new Set<string>(slots.map((s) => s.questionId).filter((x): x is string => !!x));
   used.add(chosen.id);
   const fit = rankFresh(pool.filter((q) => q.type === slot.type && q.nct_type === type && !q.passage_id && !used.has(q.id)));
   const ordered = scope ? [...fit.filter((q) => scope.has(q.topic_id)), ...fit.filter((q) => !scope.has(q.topic_id))] : fit;
   const parity = (n: number) => n % 2;
+  // в переставленном наборе места совпадают только у первых вариантов каждой чётности (1 и 2);
+  // в 3-м, 4-м… порядок другой — берём место-двойник в базовом варианте той же чётности
+  const baseOf = (p: number) => Math.min(...slots.filter((s) => parity(s.ticketNumber) === p).map((s) => s.ticketNumber));
+  let anchor = slot;
+  if (permuted) {
+    const baseNo = baseOf(parity(slot.ticketNumber));
+    if (slot.ticketNumber !== baseNo) anchor = twinSlots(slots, slot).find((s) => s.ticketNumber === baseNo) ?? slot;
+  }
   const done = new Set<number>(permuted ? [parity(slot.ticketNumber)] : []);
   const targets = slots
-    .filter((s) => s.ticketId !== slot.ticketId && s.orderIndex === slot.orderIndex && s.type === slot.type)
+    .filter((s) => s.ticketId !== slot.ticketId && s.orderIndex === anchor.orderIndex && s.type === slot.type)
+    .filter((s) => !permuted || s.ticketNumber === baseOf(parity(s.ticketNumber)))
     .sort((a, b) => a.ticketNumber - b.ticketNumber);
   const changes: PlanChange[] = [];
   const missing: number[] = [];

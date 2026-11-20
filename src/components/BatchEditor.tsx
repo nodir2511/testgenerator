@@ -492,7 +492,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       const permuted = isPermutedBatch(batch.generation_params);
       let base: Array<{ slot: Slot; question: PoolQ | null }> = [{ slot, question: q }];
       let missing: number[] = [];
-      if (nctMode && q.nct_type && q.nct_type !== slot.nctType && poolQ.data) {
+      if (nctMode && q.nct_type && poolQ.data) {
         const links = buildLinks([...poolQ.data, ...data.slots.filter((s) => s.questionId).map((s) => ({ id: s.questionId!, linked_ids: s.linked }))]);
         const r = sameTypeElsewhere(data.slots, slot, q, poolQ.data, scopeSet, links, permuted);
         base = [...base, ...r.changes];

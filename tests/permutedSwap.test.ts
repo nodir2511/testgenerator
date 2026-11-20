@@ -96,9 +96,20 @@ describe('тот же тип на позиции во всех варианта�
     expect(r.changes.map((c) => [c.slot.tqId, c.question!.id])).toEqual([['tq2-27', 'n3'], ['tq3-27', 'n2']]);
     expect(r.missing).toEqual([]);
   });
-  it('тип не изменился — остальные варианты не трогаются', () => {
+  it('тип не изменился и в других вариантах тот же — остальные не трогаются', () => {
     const slots = [s(1, 27, 'a1', 'ORG_FORMULA'), s(2, 27, 'a2', 'ORG_FORMULA')];
     expect(sameTypeElsewhere(slots, slots[0], p('n1', 'ORG_FORMULA'), [p('n2', 'ORG_FORMULA')], null, new Map()).changes).toEqual([]);
+  });
+  it('выбран тот же тип, но в варианте 2 на этом месте другой — вариант 2 выравнивается', () => {
+    const slots = [s(1, 27, 'a1', 'A'), s(2, 27, 'a2', 'B')];
+    const r = sameTypeElsewhere(slots, slots[0], p('n1', 'A'), [p('n1', 'A'), p('n2', 'A')], null, new Map());
+    expect(r.changes.map((c) => [c.slot.tqId, c.question!.id])).toEqual([['tq2-27', 'n2']]);
+  });
+  it('переставленные: замена в варианте 3 выравнивает вариант 2 на месте-двойнике варианта 1', () => {
+    // вариант 3 = вариант 1 с перестановкой: a1 стоит на месте 5, в варианте 1 — на месте 27
+    const slots = [s(1, 27, 'a1', 'A'), s(1, 5, 'x1', 'A'), s(2, 27, 'a2', 'C'), s(2, 5, 'x2', 'A'), s(3, 5, 'a1', 'A'), s(3, 27, 'x1', 'A'), s(4, 9, 'a2', 'C'), s(4, 5, 'x2', 'A')];
+    const r = sameTypeElsewhere(slots, slots[4], p('n1', 'B'), [p('n1', 'B'), p('n2', 'B')], null, new Map(), true);
+    expect(r.changes.map((c) => c.slot.tqId)).toEqual(['tq2-27']);
   });
   it('сначала темы выбора набора; не хватило — вариант в списке нехватки', () => {
     const slots = [s(1, 27, 'a1', 'A'), s(2, 27, 'a2', 'A'), s(3, 27, 'a3', 'A')];
