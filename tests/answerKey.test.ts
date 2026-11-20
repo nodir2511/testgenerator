@@ -201,4 +201,36 @@ describe('ключи английского: как у таджикского (t
     expect(runs.length).toBe(20 + 4 * 4 + 4 + 4); // 20 букв, 16 цифр соответствий, два ответа по 4 цифры
     expect(runs.join('')).toContain('2413'); expect(runs.join('')).toContain('3142');
   });
+
+  // Цифры ответа открытого вопроса в строке ключа: клетки после номера (25 / 26)
+  const openDigits = async (bytes: Uint8Array, label: string) => {
+    const xml = await (await JSZip.loadAsync(bytes)).file('word/document.xml')!.async('string');
+    const tbl = xml.slice(xml.indexOf('<w:tbl>'), xml.indexOf('</w:tbl>'));
+    const text = (c: string) => (c.match(/<w:t(?:\s[^>]*)?>[^<]*<\/w:t>/g) || []).map((t) => t.replace(/<[^>]+>/g, '')).join('').trim();
+    const rows = (tbl.match(/<w:tr[ >][\s\S]*?<\/w:tr>/g) || []).map((r) => (r.match(/<w:tc>[\s\S]*?<\/w:tc>/g) || []).map(text));
+    // номер открытого вопроса стоит не в первом столбце (там номера тестов)
+    const cells = rows.find((r) => r.indexOf(label) > 0)!;
+    return cells.slice(cells.indexOf(label, 1) + 1);
+  };
+
+  it('пять клеток: ответ из пяти цифр (13579) — по цифре в клетку, ничего не склеено', async () => {
+    const tk = ticket(13579);
+    const { bytes, stats } = await buildAnswerKeyDocx(fs.readFileSync('templates/key/taj-cluster.docx'), [tk]);
+    expect(stats.overflow).toBe(0);
+    expect(await openDigits(bytes, '25')).toEqual(['1', '3', '5', '7', '9']);
+    expect(await openDigits(bytes, '26')).toEqual(['3', '1', '4', '2', '']);
+  });
+
+  it('у таджикского те же пять клеток', async () => {
+    const tk = ticket(24135);
+    expect(keyTemplateName('taj', [tk])).toBe('taj-cluster');
+    const { bytes } = await buildAnswerKeyDocx(fs.readFileSync('templates/key/taj-cluster.docx'), [tk]);
+    expect(await openDigits(bytes, '25')).toEqual(['2', '4', '1', '3', '5']);
+  });
+
+  it('у биологии по-прежнему четыре клетки', async () => {
+    const tk = ticket(1234);
+    const { bytes } = await buildAnswerKeyDocx(fs.readFileSync('templates/key/bio.docx'), [tk]);
+    expect(await openDigits(bytes, '25')).toEqual(['1', '2', '3', '4']);
+  });
 });

@@ -114,8 +114,9 @@ function layoutOf(texts: string[][]): Layout {
         for (let i = 0; texts[r + i] && LETTERS.includes(texts[r + i][c + 1] ?? '#') && texts[r + i][c + 1] === LETTERS[i]; i++) rows.push(r + i);
         matching.push({ n: +row[c], rows, col: c + 2 });
       } else {
+        // клетки ответа — до конца строки: 4 у большинства шаблонов, 5 у taj-cluster (таджикский и английский)
         const cols: number[] = [];
-        for (let k = c + 1; k < row.length && k <= c + 4; k++) cols.push(k);
+        for (let k = c + 1; k < row.length && k <= c + 5; k++) cols.push(k);
         open.push({ n: +row[c], r, cols });
       }
     }
