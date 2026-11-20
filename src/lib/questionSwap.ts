@@ -239,6 +239,38 @@ export function nctCandidatesFor(
   return candidatesFor(fits, type, used, ticketOthers, links);
 }
 
+/** Ступень, с которой взяты кандидаты замены по типу задания */
+export type NctTier = 'same' | 'related' | 'same-wide' | 'related-wide';
+
+/**
+ * Замена места с меткой типа — по ступеням: 1) та же метка в темах выбора набора; 2) близкие типы (cfg.related) там же;
+ * 3) та же метка во всём предмете; 4) близкие типы во всём предмете. Возвращает первую непустую ступень.
+ * scope — темы выбора набора (null — весь предмет: ступени 3–4 совпадают с 1–2 и пропускаются).
+ */
+export function nctTieredCandidates(
+  pool: PoolQ[], type: QType, used: Set<string>, ticketOthers: Iterable<string>, links: Map<string, Set<string>>,
+  info: NctSlotInfo, typesInTicket: Set<string>, anySource: boolean, cfg: NctConfig, scope: Set<string> | null,
+): { cands: PoolQ[]; tier: NctTier | null } {
+  if (!info.nctType) return { cands: [], tier: null };
+  const others = [...ticketOthers];
+  const same = (list: PoolQ[]) => nctCandidatesFor(list, type, used, others, links, info, typesInTicket, anySource, cfg, true);
+  const near = (list: PoolQ[]) => {
+    const seen = new Set<string>();
+    const out: PoolQ[] = [];
+    for (const r of cfg.related?.[info.nctType!] ?? []) {
+      for (const q of nctCandidatesFor(list, type, used, others, links, { ...info, nctType: r }, typesInTicket, anySource, cfg, true)) {
+        if (!seen.has(q.id)) { seen.add(q.id); out.push(q); }
+      }
+    }
+    return rankFresh(out);
+  };
+  const inScope = scope ? pool.filter((q) => scope.has(q.topic_id)) : pool;
+  const steps: Array<[NctTier, () => PoolQ[]]> = [['same', () => same(inScope)], ['related', () => near(inScope)]];
+  if (scope) steps.push(['same-wide', () => same(pool)], ['related-wide', () => near(pool)]);
+  for (const [tier, run] of steps) { const c = run(); if (c.length) return { cands: c, tier }; }
+  return { cands: [], tier: null };
+}
+
 // ---------- Убрать тему из набора ----------
 
 export interface PlanChange { slot: Slot; question: PoolQ | null }

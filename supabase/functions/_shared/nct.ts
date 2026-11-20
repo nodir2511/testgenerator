@@ -4,6 +4,7 @@
 // (в банке нет меток типов). Чистая логика; импорт без «.ts», поэтому пока только для сайта (для Deno-бота нужно «.ts»).
 import { pickParallel, separateLinked, passageBlocks, pickBlocks, PASSAGE_SIZE, type ChapterTotals, type PickedTickets, type Rnd } from './ticketing';
 import { NCT_SLOT_TYPES } from './nctSlots';
+import { CHEM_RELATED } from './nctRelated';
 
 /** Ключ раздела экзамена: у химии 'basic' | 'atom' | 'solutions' | 'elements' | 'organic', у права 'state' | 'rights' | 'intl' */
 export type NctSection = string;
@@ -58,6 +59,8 @@ export interface NctConfig {
   skipNote: string;
   /** фраза для подсказки у галочки режима в «Составе билета» (после слов про блоки разделов); нет — стандартный текст химии */
   uiNote?: string;
+  /** Близкие типы заданий: код → коды, которыми можно заменить, если вопросов нужного типа нет (nctRelated.ts) */
+  related?: Record<string, string[]>;
 }
 
 export const NCT_SECTIONS: NctSection[] = ['basic', 'atom', 'solutions', 'elements', 'organic'];
@@ -371,6 +374,10 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   const typeFree = (c: string) => (usedTypes.get(c) ?? 0) < maxUse;
   const nctPicked: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
   const typePicked: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
+  const exactPicked: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
+  const relatedPicked: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
+  // все вопросы выбранных тем, попавшие в разделы НЦТ
+  const scoped = [...bySection.values()].flat();
 
   // Разнообразие тем: сколько раз тема уже встретилась в билете (счёт по всему билету, а не по разделу)
   const topicUse = new Map<string, number>();
@@ -387,20 +394,32 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
     return [...new Set([...byTopic.values()].filter((g) => g.length >= T).map((g) => useOf(g[0])))].sort((a, b) => a - b);
   };
 
-  const attempt = (pool: any[], section: NctSection, kind: Kind): { rows: any[]; code: string | null } | null => {
-    const w = typeWeights(section, kind, cfg);
+  /** Выбор типа по весам среди тех, где хватает вопросов на все билеты; затем — столбец вопросов этого типа */
+  const pickTyped = (pool: any[], w: Record<string, number>): { rows: any[]; code: string } | null => {
     const byCode = (c: string) => pool.filter((q) => q.nct_type === c);
     let cands = Object.keys(w).filter((c) => typeFree(c) && byCode(c).length >= T);
-    if (cands.length) {
-      // из типов предпочитаем те, у которых есть вопросы ещё не использованной (или наименее использованной) темы
-      const lvl = new Map(cands.map((c) => [c, enoughTopicsUse(byCode(c))[0] ?? Infinity]));
-      const best = Math.min(...lvl.values());
-      cands = cands.filter((c) => lvl.get(c) === best);
-      let r = rnd() * cands.reduce((a, c) => a + w[c], 0);
-      let code = cands[cands.length - 1];
-      for (const c of cands) { r -= w[c]; if (r < 0) { code = c; break; } }
-      const col = pickParallel(freshest(byCode(code)), 1, T, rnd);
-      if (col.every((t) => t.length === 1)) return { rows: col.map((t) => t[0]), code };
+    if (!cands.length) return null;
+    // из типов предпочитаем те, у которых есть вопросы ещё не использованной (или наименее использованной) темы
+    const lvl = new Map(cands.map((c) => [c, enoughTopicsUse(byCode(c))[0] ?? Infinity]));
+    const best = Math.min(...lvl.values());
+    cands = cands.filter((c) => lvl.get(c) === best);
+    let r = rnd() * cands.reduce((a, c) => a + w[c], 0);
+    let code = cands[cands.length - 1];
+    for (const c of cands) { r -= w[c]; if (r < 0) { code = c; break; } }
+    const col = pickParallel(freshest(byCode(code)), 1, T, rnd);
+    return col.every((t) => t.length === 1) ? { rows: col.map((t) => t[0]), code } : null;
+  };
+
+  const attempt = (pool: any[], section: NctSection, kind: Kind, wide: any[] = []): { rows: any[]; code: string | null } | null => {
+    const w = typeWeights(section, kind, cfg);
+    const exact = pickTyped(pool, w);
+    if (exact) { exactPicked[kind]++; return exact; }
+    // нужного типа нет: близкие типы (семьи из nctRelated) — сначала в разделе, затем в выбранных темах других разделов
+    if (cfg.related) {
+      const rw: Record<string, number> = {};
+      for (const [c, n] of Object.entries(w)) for (const r of cfg.related[c] ?? []) if (!(r in w) && !cfg.banned.has(r)) rw[r] = (rw[r] ?? 0) + n;
+      const near = pickTyped(pool, rw) ?? (wide.length ? pickTyped(wide, rw) : null);
+      if (near) { relatedPicked[kind]++; return near; }
     }
     // нет подходящей метки: неразмеченные вопросы и вопросы ещё не использованных разрешённых типов
     const loose = pool.filter((q) => !q.nct_type || (!cfg.banned.has(q.nct_type) && typeFree(q.nct_type)));
@@ -427,6 +446,8 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   const diffMiss: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
   const pickOne = (list: any[], section: NctSection, kind: Kind, wantNct: boolean, diff: number): any[] | null => {
     const free = list.filter((q) => q.type === kind && !usedIds.has(q.id));
+    // вопросы того же вида из всех разделов выбранных тем — для близких типов из других разделов
+    const wideAll = scoped.filter((q) => q.type === kind && !usedIds.has(q.id));
     // сначала нужная сложность, затем ближайшие; вопросы без оценки сложности — в последнюю очередь
     const levels: Array<number | null> = [diff, ...[1, 2, 3].filter((d) => d !== diff).sort((a, b) => Math.abs(a - diff) - Math.abs(b - diff)), null];
     for (const lvl of levels) {
@@ -434,7 +455,8 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
       if (byLvl.length < T) continue;
       const nctFree = byLvl.filter((q) => q.isNct);
       const own = byLvl.filter((q) => !q.isNct);
-      const got = tryPools(wantNct ? [nctFree, own] : [own, nctFree], section, kind);
+      const wide = lvl === null ? wideAll.filter((q) => !q.nct_difficulty) : wideAll.filter((q) => q.nct_difficulty === lvl);
+      const got = tryPools(wantNct ? [nctFree, own] : [own, nctFree], section, kind, wide);
       if (!got) continue;
       if (lvl === diff) diffHit[kind]++; else if (lvl !== null) diffMiss[kind]++;
       return got;
@@ -443,7 +465,7 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
     if (free.length >= T) {
       const nctFree = free.filter((q) => q.isNct);
       const own = free.filter((q) => !q.isNct);
-      const got = tryPools(wantNct ? [nctFree, own] : [own, nctFree], section, kind);
+      const got = tryPools(wantNct ? [nctFree, own] : [own, nctFree], section, kind, wideAll);
       if (got) {
         diffMiss[kind]++;
         return got;
@@ -451,9 +473,9 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
     }
     return null;
   };
-  const tryPools = (pools: any[][], section: NctSection, kind: Kind): any[] | null => {
+  const tryPools = (pools: any[][], section: NctSection, kind: Kind, wide: any[] = []): any[] | null => {
     for (const pool of pools) {
-      const got = attempt(pool, section, kind);
+      const got = attempt(pool, section, kind, wide);
       if (!got) continue;
       got.rows.forEach((q) => usedIds.add(q.id));
       for (const tid of new Set(got.rows.map((q) => q.topic_id))) topicUse.set(tid, (topicUse.get(tid) ?? 0) + 1);
@@ -494,6 +516,8 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   fill(open, 'open');
   separateLinked([tests, matching, open], pool, rnd);
 
+  const relTotal = relatedPicked.test + relatedPicked.matching + relatedPicked.open;
+  if (relTotal > 0) notes.push(`Нужного типа задания не нашлось для ${relTotal} мест — взяты близкие типы (например, вывод формулы из неорганики вместо органики)`);
   const missTotal = diffMiss.test + diffMiss.matching + diffMiss.open;
   if (missTotal > 0) notes.push(`Нужной сложности не хватило для ${missTotal} заданий — взята ближайшая`);
   const nctPoints = cfg.pointsPer.test * nctPicked.test + cfg.pointsPer.matching * nctPicked.matching + cfg.pointsPer.open * nctPicked.open;
@@ -559,6 +583,7 @@ export const CHEM_CONFIG: NctConfig = {
   composition: NCT_COMPOSITION,
   pointsPer: NCT_POINTS_PER,
   slotTypes: NCT_SLOT_TYPES,
+  related: CHEM_RELATED,
   banned: NCT_BANNED,
   quota: NCT_QUOTA,
   quotaPoints: NCT_QUOTA_POINTS,
