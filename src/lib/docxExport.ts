@@ -15,6 +15,7 @@ import {
   HeightRule,
   LineRuleType,
   VerticalAlign,
+  TableLayoutType,
   Math as DocxMath,
   MathFraction,
   MathRun,
@@ -349,11 +350,11 @@ export function openBoxesFor(subjectName: string): number {
 
 const COMPACT_MARGINS = { top: 20, bottom: 20, left: 100, right: 100 };
 
-// «Ответ: □□□□» — подпись и ряд клеток по числу цифр
+// «Ответ: □□□□» — подпись и ряд клеток по числу цифр; вся строка прижата к правому краю
 function createAnswerBoxes(label: string, n: number): Table {
   const BOX = 480;
   const GAP = 90; // зазор между клетками: каждая клетка — отдельный квадрат
-  const LABEL = 1700;
+  const LABEL = 1500;
   const line = { style: BorderStyle.SINGLE, size: 8, color: '000000' };
   const cells = Array.from({ length: n }, (_, i) => [
     ...(i > 0 ? [new TableCell({
@@ -371,6 +372,8 @@ function createAnswerBoxes(label: string, n: number): Table {
   return new Table({
     width: { size: LABEL + n * BOX + (n - 1) * GAP, type: WidthType.DXA },
     columnWidths: [LABEL, ...Array.from({ length: n }, (_, i) => (i > 0 ? [GAP, BOX] : [BOX])).flat()],
+    alignment: AlignmentType.RIGHT,
+    layout: TableLayoutType.FIXED,
     borders: NO_TABLE_BORDERS,
     rows: [new TableRow({ cantSplit: true,
       height: { value: BOX, rule: HeightRule.EXACT },
@@ -379,7 +382,8 @@ function createAnswerBoxes(label: string, n: number): Table {
           width: { size: LABEL, type: WidthType.DXA },
           borders: NO_CELL_BORDERS,
           verticalAlign: VerticalAlign.CENTER,
-          children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, font: 'Times New Roman', size: 28 })] })],
+          margins: { top: 0, bottom: 0, left: 0, right: 180 },
+          children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: label, bold: true, font: 'Times New Roman', size: 28 })] })],
         }),
         ...cells,
       ],
