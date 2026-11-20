@@ -422,8 +422,9 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
     enabled: nctMode ? sectionTopics.length > 0 && !!sourcesQ.data : !!topicId,
     staleTime: 60_000,
   });
-  const cands: PoolQ[] = useMemo(() => {
-    if (!poolQ.data) return [];
+  // Билет НЦТ: если вопросов того же типа не осталось (тип редкий, а вариантов много), показываем другие вопросы того же раздела и вида
+  const { cands, relaxed } = useMemo((): { cands: PoolQ[]; relaxed: boolean } => {
+    if (!poolQ.data) return { cands: [], relaxed: false };
     const used = new Set(data.slots.map((s) => s.questionId).filter((x): x is string => !!x));
     const ticketSlots = data.slots.filter((s) => s.ticketId === slot.ticketId && s.tqId !== slot.tqId && s.questionId);
     const others = ticketSlots.map((s) => s.questionId!);
@@ -433,9 +434,14 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       const pool = poolQ.data.map((q) => ({ ...q, isNct: !!q.source_id && src.has(q.source_id) }));
       const info = { section, nctType: slot.nctType ?? null, difficulty: slot.nctDifficulty ?? null, isNct: !!slot.sourceId && src.has(slot.sourceId) };
       const types = new Set(ticketSlots.map((s) => s.nctType).filter((x): x is string => !!x));
-      return nctCandidatesFor(pool, slot.type, used, others, links, info, types, anySource, nctCfg).slice(0, 10);
+      const strict = nctCandidatesFor(pool, slot.type, used, others, links, info, types, anySource, nctCfg);
+      if (strict.length === 0 && slot.nctType) {
+        const loose = nctCandidatesFor(pool, slot.type, used, others, links, { ...info, nctType: null }, types, true, nctCfg);
+        if (loose.length) return { cands: loose.slice(0, 10), relaxed: true };
+      }
+      return { cands: strict.slice(0, 10), relaxed: false };
     }
-    return candidatesFor(poolQ.data, slot.type, used, others, links).slice(0, tab === 'same' ? 3 : 10);
+    return { cands: candidatesFor(poolQ.data, slot.type, used, others, links).slice(0, tab === 'same' ? 3 : 10), relaxed: false };
   }, [poolQ.data, data, slot, tab, nctMode, section, sourcesQ.data, anySource]);
   const fullQ = useQuery({ queryKey: ['swap_full', cands.map((c) => c.id).join(',')], queryFn: () => fetchFullQuestions(cands.map((c) => c.id)), enabled: cands.length > 0, staleTime: 60_000 });
 
@@ -498,6 +504,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
         <p className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">{nctMode ? `В разделе нет свободных вопросов вида «${typeName}» такого типа. Попробуйте «Любой источник».` : `В этой теме нет свободных вопросов вида «${typeName}». Выберите другую тему.`}</p>
       ) : (
         <ul className="space-y-2">
+          {relaxed && <li className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 list-none">Вопросов типа «{nctTypeName(slot.nctType)}» больше не осталось — показаны другие свободные вопросы того же раздела и вида.</li>}
           {cands.map((c) => {
             const q = fullQ.data?.get(c.id);
             return (
