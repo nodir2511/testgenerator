@@ -5,8 +5,9 @@ import { notifyError, notifyInfo } from '../lib/errors';
 import { useAuth } from '../hooks/useAuth';
 import { fetchBatchSlots, fetchFullQuestions, fetchNctSourceIds, fetchTopicInfos, fetchTopicPool, saveBatchChanges, type BatchSlots, type TopicInfo } from '../lib/batchEdit';
 import {
-  applyToSlots, blockCandidates, blocksWithoutLinkClash, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, nctCandidatesFor, paramsAfterEdit,
-  planNctTopicRemoval, planTopicRemoval, sectionOfPoolQ, topicCounts, TYPE_LABEL, usedPassageIds, type PassageBlockQ, type PoolQ, type RowChange, type Slot,
+  applyToSlots, blockCandidates, blocksWithoutLinkClash, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, isPermutedBatch, mirrorChanges, mirrorPlan,
+  nctCandidatesFor, paramsAfterEdit, planNctTopicRemoval, planTopicRemoval, sectionOfPoolQ, topicCounts, twinSlots, TYPE_LABEL, usedPassageIds, withoutTwins,
+  type PassageBlockQ, type PoolQ, type RowChange, type Slot,
 } from '../lib/questionSwap';
 import { FormattedText } from './FormulaEditor';
 import { Badge, Button } from './ui';
@@ -161,9 +162,13 @@ const RemoveTopicModal: React.FC<{ batch: EditBatch; ed: Ed; topicId: string; on
   const nctBatch = Boolean(batch.generation_params?.nct);
   const nctCfg = nctConfigByKey(batch.generation_params?.nct_subject);
   const sourcesQ = useQuery({ queryKey: ['nct_sources'], queryFn: fetchNctSourceIds, enabled: nctBatch, staleTime: 5 * 60_000 });
+  // «Переставленные варианты»: планируются места без двойников в младших вариантах, затем изменения повторяются в двойниках
+  const permuted = isPermutedBatch(batch.generation_params);
   const plan = useMemo(() => {
     if (!poolQ.data) return null;
-    if (!nctBatch) return planTopicRemoval(data.slots, topicId, poolQ.data, order);
+    const slots = permuted ? withoutTwins(data.slots, topicId) : data.slots;
+    const done = (p: ReturnType<typeof planTopicRemoval>) => (permuted ? mirrorPlan(data.slots, p) : p);
+    if (!nctBatch) return done(planTopicRemoval(slots, topicId, poolQ.data, order));
     if (!sourcesQ.data) return null;
     const src = sourcesQ.data;
     const pool = poolQ.data.map((q) => ({ ...q, isNct: !!q.source_id && src.has(q.source_id) }));
@@ -171,8 +176,8 @@ const RemoveTopicModal: React.FC<{ batch: EditBatch; ed: Ed; topicId: string; on
       const info = ed.topicById.get(t);
       return info ? sectionOfPoolQ({ chapter: { order_index: info.chapterOrder }, topic: { order_index: info.order } }, nctCfg) : null;
     };
-    return planNctTopicRemoval(data.slots, topicId, pool, sectionOf, (id) => !!id && src.has(id), order, nctCfg);
-  }, [poolQ.data, data, topicId, order, nctBatch, sourcesQ.data, ed.topicById, nctCfg]);
+    return done(planNctTopicRemoval(slots, topicId, pool, sectionOf, (id) => !!id && src.has(id), order, nctCfg));
+  }, [poolQ.data, data, topicId, order, nctBatch, permuted, sourcesQ.data, ed.topicById, nctCfg]);
   const name = ed.label(ed.topicById.get(topicId));
   const total = plan?.changes.length ?? 0;
   const missing = plan ? plan.missing.test + plan.missing.matching + plan.missing.open : 0;
@@ -415,6 +420,8 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   const [otherTopic, setOtherTopic] = useState('');
   const topicId = tab === 'same' ? slot.topicId : otherTopic || null;
   const [busy, setBusy] = useState<string | null>(null);
+  // «Переставленные варианты»: то же задание стоит в вариантах той же чётности — заменяется и там
+  const twins = useMemo(() => (isPermutedBatch(batch.generation_params) ? twinSlots(data.slots, slot) : []), [batch.generation_params, data, slot]);
 
   const poolQ = useQuery({
     queryKey: nctMode ? ['swap_pool_nct', batch.subject_id, section] : ['swap_pool', batch.subject_id, topicId],
@@ -426,7 +433,10 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   const { cands, relaxed } = useMemo((): { cands: PoolQ[]; relaxed: boolean } => {
     if (!poolQ.data) return { cands: [], relaxed: false };
     const used = new Set(data.slots.map((s) => s.questionId).filter((x): x is string => !!x));
-    const ticketSlots = data.slots.filter((s) => s.ticketId === slot.ticketId && s.tqId !== slot.tqId && s.questionId);
+    // остальные вопросы этого варианта и его двойников (замена встанет во все)
+    const mine = new Set([slot.tqId, ...twins.map((t) => t.tqId)]);
+    const tickets = new Set([slot.ticketId, ...twins.map((t) => t.ticketId)]);
+    const ticketSlots = data.slots.filter((s) => tickets.has(s.ticketId) && !mine.has(s.tqId) && s.questionId);
     const others = ticketSlots.map((s) => s.questionId!);
     const links = buildLinks([...poolQ.data, ...data.slots.filter((s) => s.questionId).map((s) => ({ id: s.questionId!, linked_ids: s.linked }))]);
     if (nctMode) {
@@ -442,14 +452,15 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       return { cands: strict.slice(0, 10), relaxed: false };
     }
     return { cands: candidatesFor(poolQ.data, slot.type, used, others, links).slice(0, tab === 'same' ? 3 : 10), relaxed: false };
-  }, [poolQ.data, data, slot, tab, nctMode, section, sourcesQ.data, anySource]);
+  }, [poolQ.data, data, slot, twins, tab, nctMode, section, sourcesQ.data, anySource]);
   const fullQ = useQuery({ queryKey: ['swap_full', cands.map((c) => c.id).join(',')], queryFn: () => fetchFullQuestions(cands.map((c) => c.id)), enabled: cands.length > 0, staleTime: 60_000 });
 
   const choose = async (q: PoolQ) => {
     setBusy(q.id);
     try {
       const full = fullQ.data ?? (await fetchFullQuestions([q.id]));
-      const rows = buildRowChanges([{ slot, question: q }], full, shuffleOf(batch.generation_params), (id) => (id ? ed.topicById.get(id)?.name : undefined));
+      const changes = twins.length ? mirrorChanges(data.slots, [{ slot, question: q }]) : [{ slot, question: q }];
+      const rows = buildRowChanges(changes, full, shuffleOf(batch.generation_params), (id) => (id ? ed.topicById.get(id)?.name : undefined));
       const meta = new Map([[q.id, { topicId: q.topic_id, chapterId: q.chapter_id, linked: q.linked_ids ?? [], nctType: q.nct_type ?? null, nctDifficulty: q.nct_difficulty ?? null, sourceId: q.source_id ?? null }]]);
       await ed.commit(rows, applyToSlots(data.slots, rows, meta));
       onClose();
@@ -467,6 +478,11 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
 
   return (
     <Modal title={`Заменить вопрос ${slot.orderIndex} в варианте ${slot.ticketNumber}`} onClose={onClose}>
+      {twins.length > 0 && (
+        <p className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900">
+          Переставленные варианты: этот вопрос заменится и в {twins.length > 1 ? 'вариантах' : 'варианте'} {twins.map((t) => t.ticketNumber).sort((a, b) => a - b).join(', ')}.
+        </p>
+      )}
       {nctMode ? (
         <>
           <p>

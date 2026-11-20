@@ -408,6 +408,66 @@ export function planNctTopicRemoval(
   return plan;
 }
 
+// ---------- «Переставленные варианты» (НЦТ) ----------
+
+/** Набор НЦТ с «переставленными вариантами»: варианты одной чётности (1, 3, 5… и 2, 4, 6…) — одни и те же задания */
+export const isPermutedBatch = (params: any): boolean => Boolean(params?.nct && params?.nct_perm);
+
+const byOrder = (a: Slot, b: Slot) => a.orderIndex - b.orderIndex;
+
+/**
+ * Места-двойники места slot в вариантах той же чётности: где стоит то же задание.
+ * Пустое место — k-е пустое место того же вида в другом варианте, если пустых мест этого вида там столько же.
+ */
+export function twinSlots(slots: Slot[], slot: Slot): Slot[] {
+  const tickets = new Map<string, Slot[]>();
+  for (const s of slots) {
+    if (s.ticketId === slot.ticketId || s.ticketNumber % 2 !== slot.ticketNumber % 2) continue;
+    if (!tickets.has(s.ticketId)) tickets.set(s.ticketId, []);
+    tickets.get(s.ticketId)!.push(s);
+  }
+  const out: Slot[] = [];
+  if (slot.questionId) {
+    for (const list of tickets.values()) { const t = list.find((s) => s.questionId === slot.questionId); if (t) out.push(t); }
+    return out;
+  }
+  const emptyOf = (list: Slot[]) => list.filter((s) => !s.questionId && s.type === slot.type).sort(byOrder);
+  const mine = emptyOf(slots.filter((s) => s.ticketId === slot.ticketId));
+  const k = mine.findIndex((s) => s.tqId === slot.tqId);
+  for (const list of tickets.values()) { const their = emptyOf(list); if (k >= 0 && their.length === mine.length) out.push(their[k]); }
+  return out;
+}
+
+/** Повторяет каждое изменение на местах-двойниках (то же задание в вариантах той же чётности); места не дублируются */
+export function mirrorChanges(slots: Slot[], changes: PlanChange[]): PlanChange[] {
+  const out = [...changes];
+  const taken = new Set(changes.map((c) => c.slot.tqId));
+  for (const c of changes) {
+    for (const t of twinSlots(slots, c.slot)) {
+      if (taken.has(t.tqId)) continue;
+      taken.add(t.tqId);
+      out.push({ slot: t, question: c.question });
+    }
+  }
+  return out;
+}
+
+/** План снятия темы с повтором на двойниках: итоги (по темам, пустые места) пересчитываются по всем изменениям */
+export function mirrorPlan(slots: Slot[], plan: RemovalPlan): RemovalPlan {
+  const changes = mirrorChanges(slots, plan.changes);
+  const out: RemovalPlan = { changes, fromTopic: {}, missing: { test: 0, matching: 0, open: 0 } };
+  for (const c of changes) {
+    if (c.question) out.fromTopic[c.question.topic_id] = (out.fromTopic[c.question.topic_id] ?? 0) + 1;
+    else out.missing[c.slot.type]++;
+  }
+  return out;
+}
+
+/** Для снятия темы: места этой темы, у которых есть двойник в варианте с меньшим номером, не планируются (их повторит mirrorChanges) */
+export function withoutTwins(slots: Slot[], topicId: string): Slot[] {
+  return slots.filter((s) => s.topicId !== topicId || !twinSlots(slots, s).some((t) => t.ticketNumber < s.ticketNumber));
+}
+
 // ---------- Сборка изменений для базы ----------
 
 export interface RowChange { ticket_question_id: string; question_id: string | null; question_snapshot: any }
