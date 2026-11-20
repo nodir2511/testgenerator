@@ -6,7 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { fetchBatchSlots, fetchFullQuestions, fetchNctSourceIds, fetchTopicInfos, fetchTopicPool, saveBatchChanges, type BatchSlots, type TopicInfo } from '../lib/batchEdit';
 import {
   applyToSlots, blockCandidates, blocksWithoutLinkClash, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, isPermutedBatch, mirrorChanges, mirrorPlan,
-  nctCandidatesFor, paramsAfterEdit, planNctTopicRemoval, planTopicRemoval, sectionOfPoolQ, topicCounts, twinSlots, TYPE_LABEL, usedPassageIds, withoutTwins,
+  nctCandidatesFor, paramsAfterEdit, planNctTopicRemoval, planTopicRemoval, scopeTopicIds, sectionOfPoolQ, topicCounts, twinSlots, TYPE_LABEL, usedPassageIds, withoutTwins,
   type PassageBlockQ, type PoolQ, type RowChange, type Slot,
 } from '../lib/questionSwap';
 import { FormattedText } from './FormulaEditor';
@@ -46,6 +46,11 @@ function useBatchEdit(batch: EditBatch, enabled: boolean, onChanged?: Changed) {
   const topics = topicsQ.data ?? [];
   const topicById = useMemo(() => new Map(topics.map((t) => [t.id, t])), [topics]);
   const label = (t?: TopicInfo) => (t ? `${t.chapterName.replace(/^Глава\s*/i, 'Гл. ')} · т. ${t.order}` : 'тема');
+  // Темы, выбранные при создании набора: замена берёт вопросы только из них (весь предмет — все темы)
+  const scopeTopics = useMemo(() => {
+    const scope = scopeTopicIds(batch.generation_params, topics);
+    return scope ? topics.filter((t) => scope.has(t.id)) : topics;
+  }, [batch.generation_params, topics]);
 
   // Записывает изменения, перечитывает набор и сообщает родителю новые билеты и параметры
   const commit = async (rows: RowChange[], newSlots: Slot[]) => {
@@ -61,7 +66,7 @@ function useBatchEdit(batch: EditBatch, enabled: boolean, onChanged?: Changed) {
     onChanged?.(params, fresh.tickets);
   };
 
-  return { data: slotsQ.data, loading: slotsQ.isLoading || topicsQ.isLoading, topics, topicById, label, commit };
+  return { data: slotsQ.data, loading: slotsQ.isLoading || topicsQ.isLoading, topics, scopeTopics, topicById, label, commit };
 }
 
 // ---------- Окно ----------
@@ -347,7 +352,7 @@ const ReplaceTextModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose
         {tabBtn('other', 'Выбрать другую тему')}
       </div>
       {tab === 'other' && (
-        <CustomSelect value={otherTopic} onChange={setOtherTopic} placeholder="Выберите тему" searchable options={ed.topics.map((t) => ({ value: t.id, label: `${ed.label(t)} — ${ruPart(t.name)}` }))} />
+        <CustomSelect value={otherTopic} onChange={setOtherTopic} placeholder="Выберите тему" searchable options={ed.scopeTopics.map((t) => ({ value: t.id, label: `${ed.label(t)} — ${ruPart(t.name)}` }))} />
       )}
       {!topicId ? (
         <p className="text-slate-600">Выберите тему, чтобы увидеть тексты.</p>
@@ -412,8 +417,8 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   const nctMode = nctBatch && section !== null;
   const [anySource, setAnySource] = useState(false);
   const sectionTopics = useMemo(
-    () => (section ? ed.topics.filter((t) => sectionOfPoolQ({ chapter: { order_index: t.chapterOrder }, topic: { order_index: t.order } }, nctCfg) === section).map((t) => t.id) : []),
-    [section, ed.topics, nctCfg],
+    () => (section ? ed.scopeTopics.filter((t) => sectionOfPoolQ({ chapter: { order_index: t.chapterOrder }, topic: { order_index: t.order } }, nctCfg) === section).map((t) => t.id) : []),
+    [section, ed.scopeTopics, nctCfg],
   );
 
   const [tab, setTab] = useState<'same' | 'other'>(slot.topicId ? 'same' : 'other');
@@ -509,7 +514,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
           onChange={setOtherTopic}
           placeholder="Выберите тему"
           searchable
-          options={ed.topics.map((t) => ({ value: t.id, label: `${ed.label(t)} — ${ruPart(t.name)}` }))}
+          options={ed.scopeTopics.map((t) => ({ value: t.id, label: `${ed.label(t)} — ${ruPart(t.name)}` }))}
         />
       )}
       {!nctMode && !topicId ? (

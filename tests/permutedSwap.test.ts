@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { isPermutedBatch, mirrorChanges, planTopicRemoval, twinSlots, withoutTwins, type PoolQ, type QType, type Slot } from '../src/lib/questionSwap';
+import { isPermutedBatch, mirrorChanges, planTopicRemoval, scopeTopicIds, twinSlots, withoutTwins, type PoolQ, type QType, type Slot } from '../src/lib/questionSwap';
+
+describe('темы, выбранные при создании набора', () => {
+  const topics = [{ id: 'a', chapterId: 'c1' }, { id: 'b', chapterId: 'c1' }, { id: 'c', chapterId: 'c2' }];
+  it('заданы темы — только они', () => {
+    expect([...scopeTopicIds({ topic_ids: ['b'], chapter_ids: ['c1', 'c2'] }, topics)!]).toEqual(['b']);
+  });
+  it('заданы главы — все темы этих глав', () => {
+    expect([...scopeTopicIds({ chapter_ids: ['c1'] }, topics)!].sort()).toEqual(['a', 'b']);
+  });
+  it('весь предмет — без ограничения', () => {
+    expect(scopeTopicIds({ topic_ids: [], chapter_ids: [] }, topics)).toBeNull();
+    expect(scopeTopicIds(null, topics)).toBeNull();
+  });
+});
 
 const pq = (id: string, topic: string, type: QType = 'test'): PoolQ => ({ id, topic_id: topic, type, chapter_id: 'c1', num: Number(id.replace(/\D/g, '')) || 0 });
 const slot = (n: number, i: number, qid: string | null, topic: string | null, type: QType = 'test'): Slot => ({

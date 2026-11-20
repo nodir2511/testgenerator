@@ -185,6 +185,20 @@ export function blockSwapChanges(blockSlotList: Slot[], block: PassageBlockQ | n
   return sorted.map((slot, i) => ({ slot, question: block?.questions[i] ?? null }));
 }
 
+// ---------- Выбор глав и тем при создании набора ----------
+
+/**
+ * Темы, из которых создавался набор (generation_params): заданы темы — они, иначе темы заданных глав;
+ * null — весь предмет. Замена вопроса берёт вопросы только отсюда.
+ */
+export function scopeTopicIds(params: any, topics: Array<{ id: string; chapterId: string }>): Set<string> | null {
+  const topicIds: string[] = Array.isArray(params?.topic_ids) ? params.topic_ids : [];
+  if (topicIds.length) return new Set(topicIds);
+  const chapterIds: string[] = Array.isArray(params?.chapter_ids) ? params.chapter_ids : [];
+  if (chapterIds.length) { const ch = new Set(chapterIds); return new Set(topics.filter((t) => ch.has(t.chapterId)).map((t) => t.id)); }
+  return null;
+}
+
 // ---------- Замена в билете по формату НЦТ ----------
 
 /** Что за место в билете НЦТ: раздел, метка типа и из сборника ли НЦТ стоит вопрос */
