@@ -31,7 +31,7 @@ export const NCT_TYPES_BIO: NctTypeInfo[] = [
   { code: "BIO_Z_AMR", section: 'zoo', name: "Земноводные и пресмыкающиеся", numbers: '12,14' },
   { code: "BIO_Z_ARTH", section: 'zoo', name: "Членистоногие: ракообразные, паукообразные, насекомые", numbers: '11,12,13,14' },
   { code: "BIO_Z_BIRD", section: 'zoo', name: "Птицы", numbers: '11,12,13,14' },
-  { code: "BIO_Z_CMP", section: 'zoo', name: "Сравнить классы позвоночных по рисунку (головной мозг)", numbers: '16' },
+  { code: "BIO_Z_CMP", section: 'zoo', name: "Сравнение классов позвоночных", numbers: '16' },
   { code: "BIO_Z_FISH", section: 'zoo', name: "Рыбы", numbers: '14,15' },
   { code: "BIO_Z_LOW", section: 'zoo', name: "Губки, кишечнополостные и черви, в том числе паразиты", numbers: '13,14,16' },
   { code: "BIO_Z_MAMM", section: 'zoo', name: "Млекопитающие", numbers: '11,14,15,16' },
