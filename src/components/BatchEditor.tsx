@@ -21,6 +21,9 @@ import { nctTypeName } from '../lib/nctTypes';
 export interface EditBatch { id: string; title?: string; subject_id: string; generation_params: any; created_by?: string | null }
 type Changed = (params: any, tickets: BatchSlots['tickets']) => void;
 
+/** Сколько вопросов-кандидатов на странице окна замены */
+const SWAP_PAGE = 25;
+
 const plain = (s: string) => (s || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
 const ruPart = (s: string) => (s.split(' / ')[0] || s).trim();
 const shuffleOf = (p: any) => ({ shuffleOptions: p?.shuffle_options !== false, shuffleMatching: p?.shuffle_matching !== false });
@@ -440,7 +443,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   });
   // Билет НЦТ: если вопросов того же типа не осталось (тип редкий, а вариантов много), показываем другие вопросы того же раздела и вида
   const scopeSet = useMemo(() => (ed.scopeTopics.length < ed.topics.length ? new Set(ed.scopeTopics.map((t) => t.id)) : null), [ed.scopeTopics, ed.topics]);
-  const { cands, relaxed, total, bothSources, tier } = useMemo((): { cands: PoolQ[]; relaxed: boolean; total: number; bothSources: boolean; tier: NctTier | null } => {
+  const { cands: allCands, relaxed, total, bothSources, tier } = useMemo((): { cands: PoolQ[]; relaxed: boolean; total: number; bothSources: boolean; tier: NctTier | null } => {
     if (!poolQ.data) return { cands: [], relaxed: false, total: 0, bothSources: false, tier: null };
     const used = new Set(data.slots.map((s) => s.questionId).filter((x): x is string => !!x));
     // остальные вопросы этого варианта и его двойников (замена встанет во все)
@@ -460,20 +463,26 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
         const all = nctTieredCandidates(pool, slot.type, used, others, links, info, types, true, nctCfg, scopeSet);
         const bothSources = all.cands.some((q) => q.isNct) && all.cands.some((q) => !q.isNct);
         const got = anySource ? all : nctTieredCandidates(pool, slot.type, used, others, links, info, types, false, nctCfg, scopeSet);
-        if (got.cands.length) return { cands: got.cands.slice(0, 10), relaxed: false, total: got.cands.length, bothSources, tier: got.tier };
+        if (got.cands.length) return { cands: got.cands, relaxed: false, total: got.cands.length, bothSources, tier: got.tier };
         // запасной путь: другие вопросы того же раздела и вида — из тем, выбранных при создании набора
         const inScope = new Set(sectionTopics);
         const loose = nctCandidatesFor(pool.filter((q) => inScope.has(q.topic_id)), slot.type, used, others, links, { ...info, nctType: null }, types, true, nctCfg);
-        return { cands: loose.slice(0, 10), relaxed: loose.length > 0, total: loose.length, bothSources, tier: null };
+        return { cands: loose, relaxed: loose.length > 0, total: loose.length, bothSources, tier: null };
       }
       const all = nctCandidatesFor(pool, slot.type, used, others, links, info, types, true, nctCfg);
       const bothSources = all.some((q) => q.isNct) && all.some((q) => !q.isNct);
       const strict = anySource ? all : nctCandidatesFor(pool, slot.type, used, others, links, info, types, false, nctCfg);
-      return { cands: strict.slice(0, 10), relaxed: false, total: strict.length, bothSources, tier: null };
+      return { cands: strict, relaxed: false, total: strict.length, bothSources, tier: null };
     }
     const list = candidatesFor(poolQ.data, slot.type, used, others, links);
-    return { cands: list.slice(0, tab === 'same' ? 3 : 10), relaxed: false, total: list.length, bothSources: false, tier: null };
+    return { cands: list, relaxed: false, total: list.length, bothSources: false, tier: null };
   }, [poolQ.data, data, slot, twins, tab, nctMode, section, sectionTopics, byType, scopeSet, sourcesQ.data, anySource, nctCfg]);
+  // Постранично по 25: «Назад» / «Дальше»; при смене условий подбора — снова первая страница
+  const [page, setPage] = useState(0);
+  React.useEffect(() => { setPage(0); }, [anySource, tab, otherTopic]);
+  const pages = Math.max(1, Math.ceil(allCands.length / SWAP_PAGE));
+  const pageNo = Math.min(page, pages - 1);
+  const cands = useMemo(() => allCands.slice(pageNo * SWAP_PAGE, pageNo * SWAP_PAGE + SWAP_PAGE), [allCands, pageNo]);
   const fullQ = useQuery({ queryKey: ['swap_full', cands.map((c) => c.id).join(',')], queryFn: () => fetchFullQuestions(cands.map((c) => c.id)), enabled: cands.length > 0, staleTime: 60_000 });
 
   const choose = async (q: PoolQ) => {
@@ -552,7 +561,9 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
               {tier === 'related-wide' && <>В выбранных темах подходящих вопросов нет — показаны близкие типы заданий из других тем предмета.</>}
             </li>
           )}
-          {nctMode && <li className="list-none text-slate-600 px-1">Подходит вопросов: <b>{total}</b>{total > cands.length ? ` — показаны ${cands.length} реже всего бравшихся` : ''}.</li>}
+          <li className="list-none text-slate-600 px-1">
+            Подходит вопросов: <b>{total}</b>{pages > 1 ? ` — показаны ${pageNo * SWAP_PAGE + 1}–${pageNo * SWAP_PAGE + cands.length}, сначала реже всего бравшиеся` : ''}.
+          </li>
           {cands.map((c) => {
             const q = fullQ.data?.get(c.id);
             const where = ed.topicById.get(c.topic_id);
@@ -572,6 +583,13 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
               </li>
             );
           })}
+          {pages > 1 && (
+            <li className="list-none flex items-center justify-between gap-2 pt-1">
+              <Button variant="secondary" size="sm" onClick={() => setPage(pageNo - 1)} disabled={pageNo === 0 || !!busy}>Назад</Button>
+              <span className="text-slate-600">Страница {pageNo + 1} из {pages}</span>
+              <Button variant="secondary" size="sm" onClick={() => setPage(pageNo + 1)} disabled={pageNo >= pages - 1 || !!busy}>Дальше</Button>
+            </li>
+          )}
         </ul>
       )}
     </Modal>

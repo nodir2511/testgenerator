@@ -22,6 +22,20 @@ import {
 } from 'lucide-react';
 import { Badge, Button, Card, EmptyState, PageHeader, Skeleton } from './ui';
 import { BatchTopicsBar, BatchVariants } from './BatchEditor';
+import { CustomSelect } from './CustomSelect';
+
+// Преподаватели, у которых есть наборы (только для главного админа: чужие наборы видит только он)
+interface Teacher { id: string; name: string; count: number }
+async function fetchTeachers(): Promise<Teacher[]> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name, email, ticket_batches!ticket_batches_created_by_fkey(count)');
+  if (error) throw error;
+  return (data || [])
+    .map((p: any) => ({ id: p.id, name: (p.full_name || '').trim() || p.email || 'Без имени', count: p.ticket_batches?.[0]?.count ?? 0 }))
+    .filter((t) => t.count > 0)
+    .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+}
 
 const PAGE = 15;
 
@@ -76,6 +90,18 @@ export const SavedTicketsView: React.FC = () => {
   React.useEffect(() => {
     localStorage.setItem('examiner_archive_subject', subjectFilter);
   }, [subjectFilter]);
+  // Фильтр по преподавателю — только у главного админа
+  const [teacherPref, setTeacherFilter] = useState(() => { try { return localStorage.getItem('examiner_archive_teacher') || ''; } catch { return ''; } });
+  const teacherFilter = isOwner ? teacherPref : '';
+  React.useEffect(() => {
+    try { localStorage.setItem('examiner_archive_teacher', teacherPref); } catch { /* память недоступна */ }
+  }, [teacherPref]);
+  const teachersQ = useQuery({ queryKey: ['archive_teachers'], queryFn: fetchTeachers, enabled: isOwner, staleTime: 5 * 60_000 });
+  const teachers = teachersQ.data ?? [];
+  // Сохранённый преподаватель пропал из списка (наборы удалены) — фильтр снимается
+  React.useEffect(() => {
+    if (teacherPref && teachersQ.data && !teachersQ.data.some((t) => t.id === teacherPref)) setTeacherFilter('');
+  }, [teacherPref, teachersQ.data]);
 
   const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
@@ -90,7 +116,7 @@ export const SavedTicketsView: React.FC = () => {
 
   // Архив по страницам: только заголовки наборов, без вопросов
   const list = useInfiniteQuery({
-    queryKey: ['saved_ticket_batches', subjectFilter, search],
+    queryKey: ['saved_ticket_batches', subjectFilter, search, teacherFilter],
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       let q = supabase
@@ -99,6 +125,7 @@ export const SavedTicketsView: React.FC = () => {
         .order('created_at', { ascending: false })
         .range(pageParam, pageParam + PAGE - 1);
       if (subjectFilter) q = q.eq('subject_id', subjectFilter);
+      if (teacherFilter) q = q.eq('created_by', teacherFilter);
       if (search) q = q.ilike('title', `%${search.replace(/[%_]/g, (c) => `\\${c}`)}%`);
       // Экзамен-кластер виден только главному админу — это уже проверяет база (политика «Просмотр партий билетов»)
       const { data, error, count } = await q;
@@ -115,7 +142,7 @@ export const SavedTicketsView: React.FC = () => {
   });
   const batches = (list.data?.pages.flatMap((p) => p.rows) ?? []).filter((b) => !hiddenIds.includes(b.id));
   const total = Math.max(0, (list.data?.pages[0]?.count ?? 0) - hiddenIds.length);
-  const filtered = Boolean(subjectFilter || search);
+  const filtered = Boolean(subjectFilter || search || teacherFilter);
 
   const deleteBatchMutation = useMutation({
     mutationFn: async (batchId: string) => {
@@ -232,6 +259,20 @@ export const SavedTicketsView: React.FC = () => {
             ))}
           </div>
         )}
+        {isOwner && teachers.length > 1 && (
+          <CustomSelect
+            value={teacherFilter}
+            onChange={setTeacherFilter}
+            searchable
+            searchPlaceholder="Найти преподавателя"
+            title="Преподаватель"
+            className="w-full sm:max-w-sm"
+            options={[
+              { value: '', label: 'Все преподаватели' },
+              ...teachers.map((t) => ({ value: t.id, label: `${t.name} · ${t.count}` })),
+            ]}
+          />
+        )}
         {!list.isLoading && total > 0 && (
           <p className="text-sm text-slate-600 px-1">
             {filtered ? 'Найдено' : 'Всего'}: {total} {plural(total, 'набор', 'набора', 'наборов')}
@@ -247,8 +288,8 @@ export const SavedTicketsView: React.FC = () => {
             <EmptyState
               icon={FileCheck2}
               title="Ничего не нашлось"
-              description="Попробуйте другое название или другой предмет."
-              action={<Button onClick={() => { setSearchInput(''); setSubjectFilter(''); }}>Сбросить фильтры</Button>}
+              description={teacherFilter ? 'Попробуйте другое название, предмет или преподавателя.' : 'Попробуйте другое название или другой предмет.'}
+              action={<Button onClick={() => { setSearchInput(''); setSubjectFilter(''); setTeacherFilter(''); }}>Сбросить фильтры</Button>}
             />
           ) : (
             <EmptyState
