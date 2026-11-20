@@ -6,15 +6,16 @@ import { MATH_CONFIG } from './nctMath';
 import { ENGLISH_CONFIG } from './nctEnglish';
 import { BIO_CONFIG } from './nctBio';
 import { PHYS_CONFIG } from './nctPhys';
+import { TAJ_CONFIG } from './nctTaj';
 import { examProfileFor } from './examProfiles';
 
 /** Настройки по ключу, записанному в параметрах набора (`nct_subject`); у старых наборов ключа нет — химия */
 export function nctConfigByKey(key: string | null | undefined): NctConfig {
-  return key === 'law' ? LAW_CONFIG : key === 'history' ? HISTORY_CONFIG : key === 'math' ? MATH_CONFIG : key === 'english' ? ENGLISH_CONFIG : key === 'biology' ? BIO_CONFIG : key === 'physics' ? PHYS_CONFIG : CHEM_CONFIG;
+  return key === 'law' ? LAW_CONFIG : key === 'history' ? HISTORY_CONFIG : key === 'math' ? MATH_CONFIG : key === 'english' ? ENGLISH_CONFIG : key === 'biology' ? BIO_CONFIG : key === 'physics' ? PHYS_CONFIG : key === 'taj' ? TAJ_CONFIG : CHEM_CONFIG;
 }
 
 export function nctConfigFor(subjectName: string | null | undefined): NctConfig | null {
   const p = examProfileFor(subjectName);
   if (!p) return null;
-  return p.key === 'law' ? LAW_CONFIG : p.key === 'history' ? HISTORY_CONFIG : p.key === 'math' ? MATH_CONFIG : p.key === 'english' ? ENGLISH_CONFIG : p.key === 'biology' ? BIO_CONFIG : p.key === 'physics' ? PHYS_CONFIG : p.key === 'chemistry' ? CHEM_CONFIG : null;
+  return p.key === 'law' ? LAW_CONFIG : p.key === 'history' ? HISTORY_CONFIG : p.key === 'math' ? MATH_CONFIG : p.key === 'english' ? ENGLISH_CONFIG : p.key === 'biology' ? BIO_CONFIG : p.key === 'physics' ? PHYS_CONFIG : p.key === 'taj' ? TAJ_CONFIG : p.key === 'chemistry' ? CHEM_CONFIG : null;
 }

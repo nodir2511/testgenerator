@@ -44,6 +44,8 @@ export interface NctConfig {
   maxByTypes?: Record<string, number>;
   /** границы числа заданий вида в разделе [мин, макс] (у истории: всеобщая — ровно 5 тестов и 1 соответствие; без границ раздел может остаться без тестов) */
   kindRange?: Record<string, Partial<Record<Kind, [number, number]>>>;
+  /** разделы, для которых в банке может не быть заданий (таджикский: литература): их отсутствие не делает подбор «частичным», жёсткая раскладка kindRange остаётся */
+  optionalSections?: string[];
   /** сколько раз один тип может встретиться в билете (по умолчанию 1: тип не повторяется; у истории 2 — в настоящих билетах типы повторяются) */
   maxTypeUse?: number;
   /**
@@ -174,7 +176,7 @@ export function planNct(present: NctSection[], have: NctHave, ticketCount: numbe
   const run = (cap0: (k: NctSection, type: Kind) => number, tol: number): NctPlan | null => {
     // Если выбрана только часть разделов экзамена (например, одна глава или несколько тем),
     // лимиты полного экзамена (kindRange, maxPerSection, maxByTypes) не должны блокировать подбор:
-    const isSubset = present.length < cfg.sections.length;
+    const isSubset = cfg.sections.some((x) => !present.includes(x.key) && !(cfg.optionalSections ?? []).includes(x.key));
     const rng = (k: NctSection, t: Kind): [number, number] => (isSubset ? [0, Infinity] : (cfg.kindRange?.[k]?.[t] ?? [0, Infinity]));
     const cap = (k: NctSection, t: Kind) => {
       if (t !== 'test' && !allowed(k, t) && !isSubset) return 0;

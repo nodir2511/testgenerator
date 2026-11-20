@@ -154,8 +154,9 @@ import { NCT_TYPES_HISTORY } from './nctTypesHistory';
 import { NCT_TYPES_MATH } from './nctTypesMath';
 import { NCT_TYPES_BIO } from './nctTypesBio';
 import { NCT_TYPES_PHYS } from './nctTypesPhys';
+import { NCT_TYPES_TAJ } from './nctTypesTaj';
 
-const BY_CODE = new Map([...NCT_TYPES, ...NCT_TYPES_LAW, ...NCT_TYPES_HISTORY, ...NCT_TYPES_MATH, ...NCT_TYPES_ENGLISH, ...NCT_TYPES_BIO, ...NCT_TYPES_PHYS].map((t) => [t.code, t]));
+const BY_CODE = new Map([...NCT_TYPES, ...NCT_TYPES_LAW, ...NCT_TYPES_HISTORY, ...NCT_TYPES_MATH, ...NCT_TYPES_ENGLISH, ...NCT_TYPES_BIO, ...NCT_TYPES_PHYS, ...NCT_TYPES_TAJ].map((t) => [t.code, t]));
 
 /** Справочник типов предмета по его названию (химия — прежний список, право, история, математика, английский, биология и физика — свои; другой предмет — пусто; без предмета — все) */
 export function nctTypesFor(subjectName?: string | null): NctTypeInfo[] {
@@ -166,8 +167,9 @@ export function nctTypesFor(subjectName?: string | null): NctTypeInfo[] {
   if (n.includes('англи') || n.includes('english')) return NCT_TYPES_ENGLISH;
   if (n.includes('биол')) return NCT_TYPES_BIO;
   if (n.includes('физ')) return NCT_TYPES_PHYS;
+  if (n.includes('таджик') || n.includes('тоҷик')) return NCT_TYPES_TAJ;
   if (n.includes('хим')) return NCT_TYPES;
-  return n ? [] : [...NCT_TYPES, ...NCT_TYPES_LAW, ...NCT_TYPES_HISTORY, ...NCT_TYPES_MATH, ...NCT_TYPES_ENGLISH, ...NCT_TYPES_BIO, ...NCT_TYPES_PHYS]; // предмет не выбран — все типы
+  return n ? [] : [...NCT_TYPES, ...NCT_TYPES_LAW, ...NCT_TYPES_HISTORY, ...NCT_TYPES_MATH, ...NCT_TYPES_ENGLISH, ...NCT_TYPES_BIO, ...NCT_TYPES_PHYS, ...NCT_TYPES_TAJ]; // предмет не выбран — все типы
 }
 export const nctTypeName = (code?: string | null): string => (code ? BY_CODE.get(code)?.name ?? code : '');
 export const isNctType = (code?: string | null): boolean => !!code && BY_CODE.has(code);

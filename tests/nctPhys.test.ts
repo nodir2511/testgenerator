@@ -124,7 +124,7 @@ describe('режим НЦТ: физика — карта тем и настро�
     expect(nctConfigFor('История')?.key).toBe('history');
     expect(nctConfigFor('Математика')?.key).toBe('math');
     expect(nctConfigFor('Английский язык')?.key).toBe('english');
-    expect(nctConfigFor('Таджикский язык')).toBeNull();
+    expect(nctConfigFor('Таджикский язык')?.key).toBe('taj');
     expect(nctConfigByKey(undefined)).toBe(CHEM_CONFIG);
   });
 

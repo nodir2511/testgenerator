@@ -102,7 +102,7 @@ describe('режим НЦТ: биология — карта тем и наст�
     expect(nctConfigFor('Математика')?.key).toBe('math');
     expect(nctConfigFor('Английский язык')?.key).toBe('english');
     expect(nctConfigFor('Физика')?.key).toBe('physics');
-    expect(nctConfigFor('Таджикский язык')).toBeNull();
+    expect(nctConfigFor('Таджикский язык')?.key).toBe('taj');
     expect(nctConfigByKey(undefined)).toBe(CHEM_CONFIG);
   });
 

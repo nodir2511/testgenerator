@@ -94,7 +94,7 @@ describe('режим НЦТ: история — карта тем и соста�
     expect(nctConfigFor('Химия')?.key).toBe('chemistry');
     expect(nctConfigFor('Биология')?.key).toBe('biology');
     expect(nctConfigFor('Физика')?.key).toBe('physics');
-    expect(nctConfigFor('Таджикский язык')).toBeNull();
+    expect(nctConfigFor('Таджикский язык')?.key).toBe('taj');
     expect(nctConfigByKey('history')).toBe(HISTORY_CONFIG);
     expect(nctConfigByKey(undefined)).toBe(CHEM_CONFIG);
   });
