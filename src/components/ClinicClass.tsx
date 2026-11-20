@@ -14,6 +14,9 @@ export interface Board { title: string; status: 'open' | 'closed'; entry_closed?
 
 export const GAME_PATH = '/games/priem-patsienta/index.html';
 export const joinUrl = (code: string) => `${window.location.origin}${GAME_PATH}?c=${code}`;
+/** Пробный проход учителя: те же случаи, без имени и без отправки баллов (class.js, параметр demo) */
+export const demoUrl = (keys: string[], modes?: string[]) =>
+  `${GAME_PATH}?demo=${keys.join(',')}${modes && modes.length === 1 ? `&m=${modes[0]}` : ''}`;
 const MODES = [
   { id: 'norm', name: '🩺 Обычный', hint: 'Подсказки сразу: полезный шаг светится зелёным, ошибка — красным, баллы видны.', hc: false },
   { id: 'hard', name: '💀 Хардкор', hint: 'Как в настоящей больнице: никаких подсказок до конца приёма. Баллы ×2.', hc: true },
@@ -165,6 +168,9 @@ const LiveBoard: React.FC<{ code: string; onBack: () => void; onDeleted: () => v
               <div className="cl-link-url">{url}</div>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <a className="cl-btn sm" href={`/clinic/${code}`} target="_blank" rel="noopener">📽 Проектор</a>
+                {b && b.keys.length > 0 && (
+                  <a className="cl-btn sm" href={demoUrl(b.keys)} target="_blank" rel="noopener" title="Пройти случаи занятия самому: без имени, баллы на табло не попадают">🎓 Пройти самому</a>
+                )}
                 <button className="cl-btn sm" type="button" onClick={copy}>{copied ? '✓ Скопировано' : '📋 Скопировать ссылку'}</button>
                 {open && <button className={`cl-btn sm ${locked ? '' : 'primary'}`} type="button" onClick={() => lock.mutate(!locked)} disabled={!b || lock.isPending}>{locked ? '🔓 Открыть вход' : '🔒 Вход закрыт — все зашли'}</button>}
                 <button className={`cl-btn sm ${open ? '' : 'primary'}`} type="button" onClick={() => toggle.mutate(!open)} disabled={!b || toggle.isPending}>
@@ -234,7 +240,7 @@ const NewSession: React.FC<{ onCreated: (code: string) => void; onBack: () => vo
         </div>
 
         <div>
-          <div className="cl-hint" style={{ margin: '0 4px 8px' }}>Какие случаи пройдут ординаторы: выбрано {picked.length}</div>
+          <div className="cl-hint" style={{ margin: '0 4px 8px' }}>Какие случаи пройдут ординаторы: выбрано {picked.length}. Кнопка «Пройти самому» внизу откроет их для вас без занятия — например, для презентации.</div>
           <div className="cl-dirs">
             {!cat ? <div className="cl-empty">Загрузка…</div> : cat.topics.map((t) => {
               const ks = topicKeys(t.id);
@@ -257,7 +263,12 @@ const NewSession: React.FC<{ onCreated: (code: string) => void; onBack: () => vo
         </div>
 
         {error && <div className="cl-err">{error}</div>}
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+          {picked.length > 0 && modes.length > 0 ? (
+            <a className="cl-btn" href={demoUrl(picked, modes)} target="_blank" rel="noopener" title="Пройти выбранные случаи самому, например для презентации: занятие не создаётся, баллы никуда не отправляются">🎓 Пройти самому</a>
+          ) : (
+            <button className="cl-btn" type="button" disabled>🎓 Пройти самому</button>
+          )}
           <button className="cl-btn primary" type="button" disabled={picked.length === 0 || modes.length === 0 || create.isPending}
             onClick={() => { setError(''); create.mutate(); }}>
             ▶ Начать занятие

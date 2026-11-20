@@ -11,6 +11,9 @@
     '.cl-err{color:var(--bad);margin:0 0 10px;min-height:20px}' +
     '.cl-chip{display:inline-block;margin-left:8px;font:700 13px var(--f-body);padding:4px 10px;border-radius:10px;background:var(--accent-soft);color:var(--ink)}';
   document.head.appendChild(st);
+  // Пробный проход учителя (?demo=ключ,ключ…): случаи по списку, без имени и без отправки баллов
+  var dm = !m && /[?&]demo=([a-z0-9,]{1,400})/.exec(location.search);
+  if (dm) { demo(dm[1].split(',').filter(Boolean)); return; }
   addCodeBtn(!!m);
   if (!m) return;
   var code = m[1].toUpperCase();
@@ -238,4 +241,53 @@
     });
   }
   setTimeout(start, 0);
+
+  function demo(keys) {
+    var mm = /[?&]m=(norm|hard)/.exec(location.search);
+    var D = (window.CLASS = {
+      code: 'demo-' + keys.join('-'), keys: keys, ready: true, demo: true,
+      modes: mm ? [mm[1]] : ['norm', 'hard'],
+      report: function () { /* баллы пробного прохода никуда не отправляются */ },
+      homeView: function () { return '<div class="home"><h2>Пробный проход</h2><p class="s">Выберите случай на вкладках выше.</p></div>'; }
+    });
+    var hide = document.createElement('style');
+    hide.textContent = '#btnReset,#secs{display:none!important}';
+    document.head.appendChild(hide);
+    var rb = document.getElementById('btnReset');
+    if (rb && rb.parentNode) {
+      var again = document.createElement('button');
+      again.type = 'button';
+      again.className = 'btn';
+      again.textContent = '↺ Пройти заново';
+      again.onclick = function () {
+        if (!confirm('Начать пробный проход заново? Пройденные случаи сбросятся.')) return;
+        try { localStorage.removeItem('priem-class-progress-' + D.code); } catch (e) { }
+        location.reload();
+      };
+      rb.parentNode.insertBefore(again, rb);
+    }
+    setTimeout(function () {
+      var h = document.querySelector('.top h1');
+      if (h && !document.getElementById('clChip')) {
+        var el = document.createElement('span');
+        el.id = 'clChip';
+        el.className = 'cl-chip';
+        el.textContent = 'Пробный проход · баллы никуда не отправляются';
+        h.appendChild(el);
+      }
+      var L = secIdx();
+      if (!L.length) {
+        var o = document.createElement('div');
+        o.className = 'cl-back';
+        o.innerHTML = '<div class="cl-box"><h2>Случаи не найдены</h2><p>В ссылке нет случаев этой игры. Откройте пробный проход заново из раздела «Игры».</p></div>';
+        document.body.appendChild(o);
+        return;
+      }
+      home = false;
+      finished = false;
+      var next = L.find(function (i) { return !cxDone(i); });
+      cur = next != null ? next : L[0];
+      render();
+    }, 0);
+  }
 })();
