@@ -2,7 +2,8 @@
   "topics": [
     { "id": "ulcer", "sec": "Педиатрия", "name": "Язвенная болезнь" },
     { "id": "thyro", "sec": "Эндокринология", "name": "Тиреотоксикоз" },
-    { "id": "hypo", "sec": "Эндокринология", "name": "Гипотиреоз" }
+    { "id": "hypo", "sec": "Эндокринология", "name": "Гипотиреоз" },
+    { "id": "hypog", "sec": "Эндокринология", "name": "Мужской гипогонадизм" }
   ],
   "cases": [
     { "key": "hp", "title": "Язва двенадцатиперстной кишки", "topic": "ulcer", "emer": false },
@@ -18,6 +19,9 @@
     { "key": "storm", "title": "Тиреотоксический криз", "topic": "thyro", "emer": true },
     { "key": "hypo1", "title": "Микседематозная кома", "topic": "hypo", "emer": true },
     { "key": "hypo2", "title": "Двойник: септический шок", "topic": "hypo", "emer": true },
-    { "key": "hypo3", "title": "Двойник: синдром Шмидта", "topic": "hypo", "emer": true }
+    { "key": "hypo3", "title": "Двойник: синдром Шмидта", "topic": "hypo", "emer": true },
+    { "key": "kalm", "title": "Синдром Кальмана", "topic": "hypog", "emer": false },
+    { "key": "kalm2", "title": "Синдром Кальмана: бесплодие", "topic": "hypog", "emer": false },
+    { "key": "klin", "title": "Двойник: синдром Клайнфельтера", "topic": "hypog", "emer": false }
   ]
 }
