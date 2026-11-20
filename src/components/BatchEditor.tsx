@@ -6,7 +6,7 @@ import { useAuth } from '../hooks/useAuth';
 import { fetchBatchSlots, fetchFullQuestions, fetchNctSourceIds, fetchSubjectPool, fetchTopicInfos, fetchTopicPool, saveBatchChanges, type BatchSlots, type TopicInfo } from '../lib/batchEdit';
 import {
   applyToSlots, blockCandidates, blocksWithoutLinkClash, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, isPermutedBatch, mirrorChanges, mirrorPlan,
-  nctCandidatesFor, nctTieredCandidates, paramsAfterEdit, planNctTopicRemoval, planTopicRemoval, scopeTopicIds, sectionOfPoolQ, topicCounts, twinSlots, TYPE_LABEL, usedPassageIds, withoutTwins,
+  nctCandidatesFor, nctTieredCandidates, paramsAfterEdit, sameTypeElsewhere, planNctTopicRemoval, planTopicRemoval, scopeTopicIds, sectionOfPoolQ, topicCounts, twinSlots, TYPE_LABEL, usedPassageIds, withoutTwins,
   type NctTier, type PassageBlockQ, type PoolQ, type RowChange, type Slot,
 } from '../lib/questionSwap';
 import { FormattedText } from './FormulaEditor';
@@ -488,11 +488,26 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   const choose = async (q: PoolQ) => {
     setBusy(q.id);
     try {
-      const full = fullQ.data ?? (await fetchFullQuestions([q.id]));
-      const changes = twins.length ? mirrorChanges(data.slots, [{ slot, question: q }]) : [{ slot, question: q }];
+      // Тип задания на позиции — один во всех вариантах: выбран вопрос другого типа — в остальных вариантах на этом месте тоже он
+      const permuted = isPermutedBatch(batch.generation_params);
+      let base: Array<{ slot: Slot; question: PoolQ | null }> = [{ slot, question: q }];
+      let missing: number[] = [];
+      if (nctMode && q.nct_type && q.nct_type !== slot.nctType && poolQ.data) {
+        const links = buildLinks([...poolQ.data, ...data.slots.filter((s) => s.questionId).map((s) => ({ id: s.questionId!, linked_ids: s.linked }))]);
+        const r = sameTypeElsewhere(data.slots, slot, q, poolQ.data, scopeSet, links, permuted);
+        base = [...base, ...r.changes];
+        missing = r.missing;
+      }
+      const changes = permuted ? mirrorChanges(data.slots, base) : base;
+      const picked = [...new Set(changes.map((c) => c.question?.id).filter((x): x is string => !!x))];
+      const full = picked.every((id) => fullQ.data?.has(id)) ? fullQ.data! : await fetchFullQuestions(picked);
       const rows = buildRowChanges(changes, full, shuffleOf(batch.generation_params), (id) => (id ? ed.topicById.get(id)?.name : undefined));
-      const meta = new Map([[q.id, { topicId: q.topic_id, chapterId: q.chapter_id, linked: q.linked_ids ?? [], nctType: q.nct_type ?? null, nctDifficulty: q.nct_difficulty ?? null, sourceId: q.source_id ?? null }]]);
+      const meta = new Map(changes.filter((c) => c.question).map((c) => { const x = c.question!; return [x.id, { topicId: x.topic_id, chapterId: x.chapter_id, linked: x.linked_ids ?? [], nctType: x.nct_type ?? null, nctDifficulty: x.nct_difficulty ?? null, sourceId: x.source_id ?? null }]; }));
       await ed.commit(rows, applyToSlots(data.slots, rows, meta));
+      const also = [...new Set(changes.map((c) => c.slot.ticketNumber).filter((n) => n !== slot.ticketNumber))].sort((a, b) => a - b);
+      if (base.length > 1 || missing.length) {
+        notifyInfo(`Тип задания «${nctTypeName(q.nct_type)}» поставлен на место ${slot.orderIndex}${also.length ? ` и в вариантах ${also.join(', ')}` : ''}.${missing.length ? ` В вариантах ${missing.join(', ')} свободных вопросов этого типа не нашлось — там вопрос не менялся.` : ''}`);
+      }
       onClose();
     } catch (e) {
       notifyError(e, 'Не удалось заменить вопрос');
@@ -574,7 +589,7 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
                     <div className="flex flex-wrap gap-1.5 mb-1">
                       <Badge tone={c.isNct ? 'info' : 'neutral'} className="text-xs font-normal">{c.isNct ? 'сборник НЦТ' : 'банк'}</Badge>
                       {where && <Badge tone="neutral" className="text-xs font-normal">{ed.label(where)}</Badge>}
-                      {c.nct_type && c.nct_type !== slot.nctType && <Badge tone="warning" className="text-xs font-normal">{nctTypeName(c.nct_type)}</Badge>}
+                      {c.nct_type && c.nct_type !== slot.nctType && <Badge tone="warning" className="text-xs font-normal" title="Другой тип: на этом месте он встанет и в остальных вариантах">{nctTypeName(c.nct_type)} · во всех вариантах</Badge>}
                     </div>
                   )}
                   {q ? <Brief q={q} /> : <span className="text-slate-500">Загрузка…</span>}

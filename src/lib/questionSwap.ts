@@ -271,6 +271,41 @@ export function nctTieredCandidates(
   return { cands: [], tier: null };
 }
 
+/**
+ * Тип задания на позиции — один во всех вариантах (как при создании набора НЦТ). Если на место `slot` выбран вопрос
+ * другого типа (`chosen.nct_type` ≠ `slot.nctType`), в остальных вариантах на том же месте (orderIndex, вид) ставятся
+ * свободные вопросы этого же типа: сначала из тем выбора набора (`scope`), затем из остальных; реже бравшиеся первыми;
+ * не стоящие в наборе и не связанные с вопросами своего варианта. В переставленных наборах (`permuted`) варианты
+ * той же чётности — пары: их не трогаем здесь (изменения повторит mirrorChanges). Вариант без подходящего вопроса — в missing.
+ */
+export function sameTypeElsewhere(
+  slots: Slot[], slot: Slot, chosen: PoolQ, pool: PoolQ[], scope: Set<string> | null, links: Map<string, Set<string>>, permuted = false,
+): { changes: PlanChange[]; missing: number[] } {
+  const type = chosen.nct_type;
+  if (!type || type === slot.nctType) return { changes: [], missing: [] };
+  const used = new Set<string>(slots.map((s) => s.questionId).filter((x): x is string => !!x));
+  used.add(chosen.id);
+  const fit = rankFresh(pool.filter((q) => q.type === slot.type && q.nct_type === type && !q.passage_id && !used.has(q.id)));
+  const ordered = scope ? [...fit.filter((q) => scope.has(q.topic_id)), ...fit.filter((q) => !scope.has(q.topic_id))] : fit;
+  const parity = (n: number) => n % 2;
+  const done = new Set<number>(permuted ? [parity(slot.ticketNumber)] : []);
+  const targets = slots
+    .filter((s) => s.ticketId !== slot.ticketId && s.orderIndex === slot.orderIndex && s.type === slot.type)
+    .sort((a, b) => a.ticketNumber - b.ticketNumber);
+  const changes: PlanChange[] = [];
+  const missing: number[] = [];
+  for (const t of targets) {
+    if (permuted) { if (done.has(parity(t.ticketNumber))) continue; done.add(parity(t.ticketNumber)); }
+    if (t.nctType === type) continue;
+    const others = slots.filter((x) => x.ticketId === t.ticketId && x.tqId !== t.tqId && x.questionId).map((x) => x.questionId!);
+    const pick = ordered.find((q) => !used.has(q.id) && !clashes(q.id, others, links));
+    if (!pick) { missing.push(t.ticketNumber); continue; }
+    used.add(pick.id);
+    changes.push({ slot: t, question: pick });
+  }
+  return { changes, missing };
+}
+
 // ---------- Убрать тему из набора ----------
 
 export interface PlanChange { slot: Slot; question: PoolQ | null }

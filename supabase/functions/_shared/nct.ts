@@ -395,9 +395,9 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
   };
 
   /** Выбор типа по весам среди тех, где хватает вопросов на все билеты; затем — столбец вопросов этого типа */
-  const pickTyped = (pool: any[], w: Record<string, number>): { rows: any[]; code: string } | null => {
+  const pickTyped = (pool: any[], w: Record<string, number>, anyUse = false): { rows: any[]; code: string } | null => {
     const byCode = (c: string) => pool.filter((q) => q.nct_type === c);
-    let cands = Object.keys(w).filter((c) => typeFree(c) && byCode(c).length >= T);
+    let cands = Object.keys(w).filter((c) => (anyUse || typeFree(c)) && byCode(c).length >= T);
     if (!cands.length) return null;
     // из типов предпочитаем те, у которых есть вопросы ещё не использованной (или наименее использованной) темы
     const lvl = new Map(cands.map((c) => [c, enoughTopicsUse(byCode(c))[0] ?? Infinity]));
@@ -423,6 +423,17 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
     }
     // нет подходящей метки: неразмеченные вопросы и вопросы ещё не использованных разрешённых типов
     const loose = pool.filter((q) => !q.nct_type || (!cfg.banned.has(q.nct_type) && typeFree(q.nct_type)));
+    // тип на позиции один во всех вариантах: сначала любой другой разрешённый тип, которого хватает на все варианты,
+    // затем только неразмеченные вопросы; смесь типов — лишь когда иначе никак
+    const lw: Record<string, number> = {};
+    for (const q of loose) if (q.nct_type) lw[q.nct_type] = (lw[q.nct_type] ?? 0) + 1;
+    const other = pickTyped(loose, lw);
+    if (other) return other;
+    const plainQ = loose.filter((q) => !q.nct_type);
+    if (plainQ.length >= T) {
+      const pc = pickParallel(freshest(plainQ), 1, T, rnd);
+      if (pc.every((t) => t.length === 1)) return { rows: pc.map((t) => t[0]), code: null };
+    }
     let col = pickParallel(freshest(loose), 1, T, rnd);
     if (col.every((t) => t.length === 1)) {
       const code = col[0][0].nct_type ?? null;
@@ -434,7 +445,11 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
       const code = col[0][0].nct_type ?? null;
       return { rows: col.map((t) => t[0]), code: code && col.every((t) => t[0].nct_type === code) ? code : null };
     }
-    // запасной вариант: любые доступные вопросы пула нужного вида
+    // запасной вариант: один тип на все варианты, даже если он уже есть в билете; иначе — любые вопросы пула нужного вида
+    const aw: Record<string, number> = {};
+    for (const q of pool) if (q.nct_type && !cfg.banned.has(q.nct_type)) aw[q.nct_type] = (aw[q.nct_type] ?? 0) + 1;
+    const repeat = pickTyped(pool, aw, true);
+    if (repeat) return repeat;
     col = pickParallel(pool, 1, T, rnd);
     if (col.every((t) => t.length === 1)) {
       return { rows: col.map((t) => t[0]), code: null };

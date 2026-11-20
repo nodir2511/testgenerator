@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CHEM_CONFIG, pickNct } from '../supabase/functions/_shared/nct';
 import { CHEM_RELATED } from '../supabase/functions/_shared/nctRelated';
 import { NCT_TYPES } from '../src/lib/nctTypes';
-import { isPermutedBatch, mirrorChanges, nctCandidatesFor, nctTieredCandidates, planTopicRemoval, scopeTopicIds, sectionOfPoolQ, twinSlots, withoutTwins, type PoolQ, type QType, type Slot } from '../src/lib/questionSwap';
+import { isPermutedBatch, mirrorChanges, nctCandidatesFor, nctTieredCandidates, planTopicRemoval, sameTypeElsewhere, scopeTopicIds, sectionOfPoolQ, twinSlots, withoutTwins, type PoolQ, type QType, type Slot } from '../src/lib/questionSwap';
 
 describe('замена в билете НЦТ по типу задания', () => {
   // химия: тема 1.1 — раздел «Основные понятия», тема 5.1 — «Органика»
@@ -44,6 +44,22 @@ describe('близкие типы химии', () => {
   });
 });
 
+describe('генератор: тип на позиции один во всех вариантах', () => {
+  it('нет ни нужного, ни близкого типа — берётся один другой тип на все варианты, а не смесь', () => {
+    const cfg = { ...CHEM_CONFIG, slotTypes: { 'basic:test': { A: 1 } }, related: {}, banned: new Set<string>(), quota: { test: 0, matching: 0, open: 0 } };
+    // по 8 вопросов типов C, D, E (каждого хватает ровно на 2 позиции в 4 вариантах) и 2 неразмеченных
+    const pool = [...['C', 'D', 'E'].flatMap((c) => Array.from({ length: 8 }, (_, i) => ({ id: `${c}${i}`, nct_type: c }))), { id: 'u1', nct_type: null }, { id: 'u2', nct_type: null }]
+      .map((q, i) => ({ ...q, type: 'test', topic_id: `t${i % 7}`, chapter: { order_index: 1 }, topic: { order_index: 1 }, nct_difficulty: 1 }));
+    const got = pickNct(pool, 4, () => 0.42, undefined, undefined, cfg);
+    const T = got.kinds[0];
+    // первые 6 позиций (на них хватает однотипных вопросов) — у всех вариантов один тип
+    for (let pos = 0; pos < 6; pos++) {
+      const types = new Set(T.map((v: any[]) => v[pos]?.nct_type ?? null));
+      expect(types.size, `позиция ${pos + 1}`).toBe(1);
+    }
+  });
+});
+
 describe('замена в билете НЦТ по ступеням', () => {
   const q = (id: string, topic: string, nct: string): PoolQ =>
     ({ ...pq(id, topic, 'open'), chapter: { order_index: 5 }, topic: { order_index: 3 }, nct_type: nct });
@@ -66,6 +82,36 @@ describe('замена в билете НЦТ по ступеням', () => {
   it('4) затем близкие из других тем', () => {
     const r = run([q('d', 'T2', 'FORMULA_CALC')], new Set(['T1']));
     expect(r.tier).toBe('related-wide');
+  });
+});
+
+describe('тот же тип на позиции во всех вариантах', () => {
+  const s = (n: number, i: number, qid: string, nct: string | null, type: QType = 'open'): Slot => ({ ...slot(n, i, qid, 'T1', type), nctType: nct });
+  const p = (id: string, nct: string, topic = 'T1', type: QType = 'open'): PoolQ => ({ ...pq(id, topic, type), nct_type: nct });
+
+  it('в других вариантах на том же месте ставится вопрос нового типа, реже бравшийся первым', () => {
+    const slots = [s(1, 27, 'a1', 'ORG_FORMULA'), s(2, 27, 'a2', 'ORG_FORMULA'), s(3, 27, 'a3', 'ORG_FORMULA'), s(1, 26, 'b1', 'X')];
+    const pool = [p('n1', 'FORMULA_CALC'), { ...p('n2', 'FORMULA_CALC'), usage: [{ times_used: 5 }] }, p('n3', 'FORMULA_CALC'), p('z', 'OTHER')];
+    const r = sameTypeElsewhere(slots, slots[0], pool[0], pool, null, new Map());
+    expect(r.changes.map((c) => [c.slot.tqId, c.question!.id])).toEqual([['tq2-27', 'n3'], ['tq3-27', 'n2']]);
+    expect(r.missing).toEqual([]);
+  });
+  it('тип не изменился — остальные варианты не трогаются', () => {
+    const slots = [s(1, 27, 'a1', 'ORG_FORMULA'), s(2, 27, 'a2', 'ORG_FORMULA')];
+    expect(sameTypeElsewhere(slots, slots[0], p('n1', 'ORG_FORMULA'), [p('n2', 'ORG_FORMULA')], null, new Map()).changes).toEqual([]);
+  });
+  it('сначала темы выбора набора; не хватило — вариант в списке нехватки', () => {
+    const slots = [s(1, 27, 'a1', 'A'), s(2, 27, 'a2', 'A'), s(3, 27, 'a3', 'A')];
+    const pool = [p('n1', 'B'), p('far', 'B', 'T9'), p('near', 'B', 'T1')];
+    const r = sameTypeElsewhere(slots, slots[0], pool[0], pool, new Set(['T1']), new Map());
+    expect(r.changes.map((c) => c.question!.id)).toEqual(['near', 'far']);
+    const r2 = sameTypeElsewhere(slots, slots[0], pool[0], [pool[0], pool[2]], null, new Map());
+    expect(r2.missing).toEqual([3]);
+  });
+  it('переставленные варианты: пара выбранного варианта не трогается (её заменит mirrorChanges)', () => {
+    const slots = [s(1, 27, 'a1', 'A'), s(2, 27, 'a2', 'A'), s(3, 5, 'a1', 'A'), s(4, 9, 'a2', 'A')];
+    const r = sameTypeElsewhere(slots, slots[0], p('n1', 'B'), [p('n1', 'B'), p('n2', 'B')], null, new Map(), true);
+    expect(r.changes.map((c) => c.slot.tqId)).toEqual(['tq2-27']);
   });
 });
 
