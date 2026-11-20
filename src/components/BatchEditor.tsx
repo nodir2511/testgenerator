@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
 import { notifyError, notifyInfo } from '../lib/errors';
 import { useAuth } from '../hooks/useAuth';
-import { fetchBatchSlots, fetchFullQuestions, fetchNctSourceIds, fetchTopicInfos, fetchTopicPool, saveBatchChanges, type BatchSlots, type TopicInfo } from '../lib/batchEdit';
+import { fetchBatchSlots, fetchFullQuestions, fetchNctSourceIds, fetchSubjectPool, fetchTopicInfos, fetchTopicPool, saveBatchChanges, type BatchSlots, type TopicInfo } from '../lib/batchEdit';
 import {
   applyToSlots, blockCandidates, blocksWithoutLinkClash, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, isPermutedBatch, mirrorChanges, mirrorPlan,
   nctCandidatesFor, paramsAfterEdit, planNctTopicRemoval, planTopicRemoval, scopeTopicIds, sectionOfPoolQ, topicCounts, twinSlots, TYPE_LABEL, usedPassageIds, withoutTwins,
@@ -416,10 +416,14 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   );
   const nctMode = nctBatch && section !== null;
   const [anySource, setAnySource] = useState(false);
+  // Темы раздела места среди выбранных при создании набора
   const sectionTopics = useMemo(
     () => (section ? ed.scopeTopics.filter((t) => sectionOfPoolQ({ chapter: { order_index: t.chapterOrder }, topic: { order_index: t.order } }, nctCfg) === section).map((t) => t.id) : []),
     [section, ed.scopeTopics, nctCfg],
   );
+  // Место с меткой типа задания: замена — из всех вопросов предмета с этой меткой (по типу, а не по теме)
+  const byType = !!slot.nctType;
+  const poolTopics = useMemo(() => (byType ? ed.topics.map((t) => t.id) : sectionTopics), [byType, ed.topics, sectionTopics]); // при byType — только для проверки «есть темы»
 
   const [tab, setTab] = useState<'same' | 'other'>(slot.topicId ? 'same' : 'other');
   const [otherTopic, setOtherTopic] = useState('');
@@ -429,14 +433,14 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
   const twins = useMemo(() => (isPermutedBatch(batch.generation_params) ? twinSlots(data.slots, slot) : []), [batch.generation_params, data, slot]);
 
   const poolQ = useQuery({
-    queryKey: nctMode ? ['swap_pool_nct', batch.subject_id, section] : ['swap_pool', batch.subject_id, topicId],
-    queryFn: () => fetchTopicPool(batch.subject_id, nctMode ? sectionTopics : [topicId!]),
-    enabled: nctMode ? sectionTopics.length > 0 && !!sourcesQ.data : !!topicId,
+    queryKey: nctMode ? ['swap_pool_nct', batch.subject_id, byType ? 'all' : poolTopics.join(',')] : ['swap_pool', batch.subject_id, topicId],
+    queryFn: () => (nctMode && byType ? fetchSubjectPool(batch.subject_id) : fetchTopicPool(batch.subject_id, nctMode ? poolTopics : [topicId!])),
+    enabled: nctMode ? poolTopics.length > 0 && !!sourcesQ.data : !!topicId,
     staleTime: 60_000,
   });
   // Билет НЦТ: если вопросов того же типа не осталось (тип редкий, а вариантов много), показываем другие вопросы того же раздела и вида
-  const { cands, relaxed } = useMemo((): { cands: PoolQ[]; relaxed: boolean } => {
-    if (!poolQ.data) return { cands: [], relaxed: false };
+  const { cands, relaxed, total, bothSources } = useMemo((): { cands: PoolQ[]; relaxed: boolean; total: number; bothSources: boolean } => {
+    if (!poolQ.data) return { cands: [], relaxed: false, total: 0, bothSources: false };
     const used = new Set(data.slots.map((s) => s.questionId).filter((x): x is string => !!x));
     // остальные вопросы этого варианта и его двойников (замена встанет во все)
     const mine = new Set([slot.tqId, ...twins.map((t) => t.tqId)]);
@@ -449,15 +453,21 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       const pool = poolQ.data.map((q) => ({ ...q, isNct: !!q.source_id && src.has(q.source_id) }));
       const info = { section, nctType: slot.nctType ?? null, difficulty: slot.nctDifficulty ?? null, isNct: !!slot.sourceId && src.has(slot.sourceId) };
       const types = new Set(ticketSlots.map((s) => s.nctType).filter((x): x is string => !!x));
-      const strict = nctCandidatesFor(pool, slot.type, used, others, links, info, types, anySource, nctCfg);
+      // галочка «Любой источник» имеет смысл, только если среди подходящих вопросов есть и сборник НЦТ, и банк
+      const all = nctCandidatesFor(pool, slot.type, used, others, links, info, types, true, nctCfg, byType);
+      const bothSources = all.some((q) => q.isNct) && all.some((q) => !q.isNct);
+      const strict = anySource ? all : nctCandidatesFor(pool, slot.type, used, others, links, info, types, false, nctCfg, byType);
       if (strict.length === 0 && slot.nctType) {
-        const loose = nctCandidatesFor(pool, slot.type, used, others, links, { ...info, nctType: null }, types, true, nctCfg);
-        if (loose.length) return { cands: loose.slice(0, 10), relaxed: true };
+        // запасной путь: другие вопросы того же раздела и вида — из тем, выбранных при создании набора
+        const inScope = new Set(sectionTopics);
+        const loose = nctCandidatesFor(pool.filter((q) => inScope.has(q.topic_id)), slot.type, used, others, links, { ...info, nctType: null }, types, true, nctCfg);
+        if (loose.length) return { cands: loose.slice(0, 10), relaxed: true, total: loose.length, bothSources };
       }
-      return { cands: strict.slice(0, 10), relaxed: false };
+      return { cands: strict.slice(0, 10), relaxed: false, total: strict.length, bothSources };
     }
-    return { cands: candidatesFor(poolQ.data, slot.type, used, others, links).slice(0, tab === 'same' ? 3 : 10), relaxed: false };
-  }, [poolQ.data, data, slot, twins, tab, nctMode, section, sourcesQ.data, anySource]);
+    const list = candidatesFor(poolQ.data, slot.type, used, others, links);
+    return { cands: list.slice(0, tab === 'same' ? 3 : 10), relaxed: false, total: list.length, bothSources: false };
+  }, [poolQ.data, data, slot, twins, tab, nctMode, section, sectionTopics, byType, sourcesQ.data, anySource, nctCfg]);
   const fullQ = useQuery({ queryKey: ['swap_full', cands.map((c) => c.id).join(',')], queryFn: () => fetchFullQuestions(cands.map((c) => c.id)), enabled: cands.length > 0, staleTime: 60_000 });
 
   const choose = async (q: PoolQ) => {
@@ -491,13 +501,16 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       {nctMode ? (
         <>
           <p>
-            Билет по формату НЦТ: подойдёт только вопрос вида «{typeName}» из раздела «{nctCfg.sections.find((x) => x.key === section)?.name ?? section}»
-            {slot.nctType ? <> с типом задания «{nctTypeName(slot.nctType)}»</> : <> без метки или с типом, которого ещё нет в этом билете</>}, которого нет в билетах набора.
+            {slot.nctType
+              ? <>Билет по формату НЦТ: подойдёт вопрос вида «{typeName}» с типом задания «{nctTypeName(slot.nctType)}» из любой темы предмета, которого нет в билетах набора.</>
+              : <>Билет по формату НЦТ: подойдёт только вопрос вида «{typeName}» из раздела «{nctCfg.sections.find((x) => x.key === section)?.name ?? section}» без метки или с типом, которого ещё нет в этом билете, и которого нет в билетах набора.</>}
           </p>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" className="h-4 w-4" checked={anySource} onChange={(e) => setAnySource(e.target.checked)} />
-            Любой источник (без разделения на сборник НЦТ и остальной банк)
-          </label>
+          {(bothSources || anySource) && (
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" className="h-4 w-4" checked={anySource} onChange={(e) => setAnySource(e.target.checked)} />
+              Любой источник: вместе вопросы из сборника НЦТ и из остального банка (без галочки — только {slot.sourceId && sourcesQ.data?.has(slot.sourceId) ? 'из сборника НЦТ' : 'из банка'}, как у заменяемого)
+            </label>
+          )}
         </>
       ) : (
         <>
@@ -522,15 +535,25 @@ const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: ()
       ) : poolQ.isLoading || (nctMode && sourcesQ.isLoading) || (cands.length > 0 && fullQ.isLoading) ? (
         <div className="py-4 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-indigo-600" /></div>
       ) : cands.length === 0 ? (
-        <p className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">{nctMode ? `В разделе нет свободных вопросов вида «${typeName}» такого типа. Попробуйте «Любой источник».` : `В этой теме нет свободных вопросов вида «${typeName}». Выберите другую тему.`}</p>
+        <p className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">{nctMode ? `Нет свободных вопросов вида «${typeName}» такого типа.${bothSources && !anySource ? ' Попробуйте «Любой источник».' : ''}` : `В этой теме нет свободных вопросов вида «${typeName}». Выберите другую тему.`}</p>
       ) : (
         <ul className="space-y-2">
           {relaxed && <li className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 list-none">Вопросов типа «{nctTypeName(slot.nctType)}» больше не осталось — показаны другие свободные вопросы того же раздела и вида.</li>}
+          {nctMode && <li className="list-none text-slate-600 px-1">Подходит вопросов: <b>{total}</b>{total > cands.length ? ` — показаны ${cands.length} реже всего бравшихся` : ''}.</li>}
           {cands.map((c) => {
             const q = fullQ.data?.get(c.id);
+            const where = ed.topicById.get(c.topic_id);
             return (
               <li key={c.id} className="p-3 rounded-xl border border-slate-200 flex items-start gap-3">
-                <div className="min-w-0 flex-1">{q ? <Brief q={q} /> : <span className="text-slate-500">Загрузка…</span>}</div>
+                <div className="min-w-0 flex-1">
+                  {nctMode && (
+                    <div className="flex flex-wrap gap-1.5 mb-1">
+                      <Badge tone={c.isNct ? 'info' : 'neutral'} className="text-xs font-normal">{c.isNct ? 'сборник НЦТ' : 'банк'}</Badge>
+                      {where && <Badge tone="neutral" className="text-xs font-normal">{ed.label(where)}</Badge>}
+                    </div>
+                  )}
+                  {q ? <Brief q={q} /> : <span className="text-slate-500">Загрузка…</span>}
+                </div>
                 <Button variant="primary" size="sm" onClick={() => choose(c)} loading={busy === c.id} disabled={!!busy || !q}>Заменить</Button>
               </li>
             );

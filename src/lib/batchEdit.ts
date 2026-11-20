@@ -85,6 +85,11 @@ export async function fetchTopicPool(subjectId: string, topicIds: string[]): Pro
   return (await loadLightPool(supabase, { subjectId, chapterIds: [], topicIds })) as PoolQ[];
 }
 
+/** Все вопросы предмета в лёгком виде (замена в билете НЦТ по типу задания — из любой темы) */
+export async function fetchSubjectPool(subjectId: string): Promise<PoolQ[]> {
+  return (await loadLightPool(supabase, { subjectId, chapterIds: [], topicIds: [] })) as PoolQ[];
+}
+
 /** Источники сборника НЦТ (в названии «ЦВЭ»): их вопросы идут на ~40 % баллов билета НЦТ */
 export async function fetchNctSourceIds(): Promise<Set<string>> {
   const { data, error } = await supabase.from('sources').select('id, name').eq('is_deleted', false);

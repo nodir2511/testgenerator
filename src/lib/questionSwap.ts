@@ -214,16 +214,19 @@ export function sectionOfPoolQ(q: Pick<PoolQ, 'chapter' | 'topic'> & { nct_type?
  * - у вопроса на месте есть метка — берутся вопросы с той же меткой (клоны по типу);
  * - метки нет — берутся вопросы без метки или с ещё не стоящим в билете разрешённым типом;
  * - у вопроса на месте есть сложность — сначала берутся вопросы той же сложности, нет таких — любой сложности;
- * - вопрос из сборника НЦТ меняется на вопрос из сборника НЦТ, обычный — на обычный (anySource снимает ограничение).
+ * - вопрос из сборника НЦТ меняется на вопрос из сборника НЦТ, обычный — на обычный (anySource снимает ограничение);
+ * - byType при метке на месте: подходит любой вопрос с этой меткой, раздел (по теме) не проверяется — вызывающий
+ *   передаёт пул всего предмета, чтобы замена шла по типу задания, а не по теме.
  * Остальное — как у candidatesFor: нет в наборе, не связан с вопросами билета.
  */
 export function nctCandidatesFor(
   pool: PoolQ[], type: QType, used: Set<string>, ticketOthers: Iterable<string>, links: Map<string, Set<string>>,
-  info: NctSlotInfo, typesInTicket: Set<string>, anySource = false, cfg: NctConfig = CHEM_CONFIG,
+  info: NctSlotInfo, typesInTicket: Set<string>, anySource = false, cfg: NctConfig = CHEM_CONFIG, byType = false,
 ): PoolQ[] {
   if (!info.section) return [];
+  const anyTopic = byType && !!info.nctType;
   const fits = pool.filter((q) => {
-    if (sectionOfPoolQ(q, cfg) !== info.section) return false;
+    if (!anyTopic && sectionOfPoolQ(q, cfg) !== info.section) return false;
     if (info.nctType) { if (q.nct_type !== info.nctType) return false; }
     else if (q.nct_type && (cfg.banned.has(q.nct_type) || typesInTicket.has(q.nct_type))) return false;
     if (!anySource && Boolean(q.isNct) !== info.isNct) return false;

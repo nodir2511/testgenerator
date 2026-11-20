@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { isPermutedBatch, mirrorChanges, planTopicRemoval, scopeTopicIds, twinSlots, withoutTwins, type PoolQ, type QType, type Slot } from '../src/lib/questionSwap';
+import { isPermutedBatch, mirrorChanges, nctCandidatesFor, planTopicRemoval, scopeTopicIds, sectionOfPoolQ, twinSlots, withoutTwins, type PoolQ, type QType, type Slot } from '../src/lib/questionSwap';
+
+describe('замена в билете НЦТ по типу задания', () => {
+  // химия: тема 1.1 — раздел «Основные понятия», тема 5.1 — «Органика»
+  const q = (id: string, ch: number, tp: number, nct: string | null, isNct = false): PoolQ =>
+    ({ ...pq(id, `t${ch}.${tp}`), chapter: { order_index: ch }, topic: { order_index: tp }, nct_type: nct, isNct });
+  const pool = [q('a', 1, 1, 'X'), q('b', 5, 1, 'X'), q('c', 5, 1, 'Y'), q('d', 1, 1, 'X', true)];
+  const info = { section: sectionOfPoolQ(pool[0]), nctType: 'X', isNct: false };
+  const ids = (l: PoolQ[]) => l.map((x) => x.id).sort();
+
+  it('без byType — только раздел места', () => {
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(), [], new Map(), info, new Set()))).toEqual(['a']);
+  });
+  it('byType — вопрос с той же меткой из любой темы, источник тот же', () => {
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(), [], new Map(), info, new Set(), false, undefined, true))).toEqual(['a', 'b']);
+  });
+  it('byType + любой источник — добавляется сборник НЦТ', () => {
+    expect(ids(nctCandidatesFor(pool, 'test', new Set(), [], new Map(), info, new Set(), true, undefined, true))).toEqual(['a', 'b', 'd']);
+  });
+});
 
 describe('темы, выбранные при создании набора', () => {
   const topics = [{ id: 'a', chapterId: 'c1' }, { id: 'b', chapterId: 'c1' }, { id: 'c', chapterId: 'c2' }];
