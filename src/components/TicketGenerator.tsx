@@ -331,7 +331,7 @@ export const TicketGenerator: React.FC = () => {
   const subjectName = subjects.find((s) => s.id === subjectId)?.name || '';
   const standard = standardFor(subjectName);
   const nctCfg = nctConfigFor(subjectName) ?? CHEM_CONFIG; // настройки режима НЦТ предмета (химия, право)
-  const isChem = isOwner && !!examProfileFor(subjectName); // режим НЦТ пока только для главного админа
+  const isChem = isStaff && !!examProfileFor(subjectName); // режим НЦТ: админы по предметам и выше (доли сложности — только главный админ)
   const [nctPref, setNctPref] = useState<boolean>(() => getStorageBool('examiner_nct_mode', false));
   const nctMode = isChem && nctPref;
   const [permPref, setPermPref] = useState<boolean>(() => getStorageBool('examiner_nct_perm', false));
@@ -576,7 +576,7 @@ export const TicketGenerator: React.FC = () => {
     test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount,
     ...(readingCount + clozeCount > 0 ? { reading: readingCount, cloze: clozeCount } : {}),
     shuffleOptions, shuffleMatching, title: customTitle.trim() || null, nct: nctMode, nctPerm,
-    ...(nctMode ? { nctDiff: diffShares } : {}),
+    ...(nctMode && isOwner ? { nctDiff: diffShares } : {}),
   });
 
   // Алгоритм параллельной генерации билетов
@@ -874,7 +874,7 @@ export const TicketGenerator: React.FC = () => {
     ? 'Лимит на сегодня исчерпан'
     : cooldownLeft > 0
     ? `Можно через ${formatWait(cooldownLeft)}`
-    : nctMode && diffSum !== 100
+    : nctMode && isOwner && diffSum !== 100
     ? 'Доли сложности: сумма не 100 %'
     : null;
   const healthDot = !health ? 'bg-slate-300' : health.status === 'green' ? 'bg-emerald-500' : health.status === 'amber' ? 'bg-amber-500' : 'bg-rose-500';
@@ -1213,7 +1213,7 @@ export const TicketGenerator: React.FC = () => {
               </label>
             )}
 
-            {nctMode && (
+            {nctMode && isOwner && (
               <div className="rounded-xl border border-slate-200 p-3 space-y-2.5">
                 <div className="text-sm">
                   <b className="text-slate-900">Сложность тестов и соответствий</b>
