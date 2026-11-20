@@ -89,7 +89,7 @@ export async function fetchTopicPool(subjectId: string, topicIds: string[]): Pro
 export async function fetchNctSourceIds(): Promise<Set<string>> {
   const { data, error } = await supabase.from('sources').select('id, name').eq('is_deleted', false);
   if (error) throw error;
-  return new Set((data ?? []).filter((r: any) => /ЦВЭ/i.test(r.name || '')).map((r: any) => r.id));
+  return new Set((data ?? []).filter((r: any) => /ЦВЭ|НЦТ 20\d\d/i.test(r.name || '')).map((r: any) => r.id));
 }
 
 /** Полные вопросы по id (с вариантами и парами) */

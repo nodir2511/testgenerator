@@ -67,13 +67,12 @@ const MULTI_SECTION = new Set<string>();
 }
 
 /**
- * Квота заданий из сборника НЦТ. Источника «ЦВЭ 2026 (Физика)» в банке пока нет, поэтому 0.
- * Как включить: после импорта (в названии источника есть «ЦВЭ») поставьте, как у химии, test 8 + matching 1 + open 2 (= 16 баллов, 40 %):
- *   PHYS_QUOTA = { test: 8, matching: 1, open: 2 }, PHYS_QUOTA_POINTS = 16, а в examProfiles.ts у профиля 'physics' — collectionSharePct: 40.
+ * Квота заданий из сборника НЦТ: как у химии, test 8 + matching 1 + open 2 = 16 баллов (40 %). Сборник — источники «ЦВЭ 2026 (Физика)»
+ * и «НЦТ 2022…2026 (Физика)» (экзамены); учебные «Сборник НЦТ (Часть N)» в квоту не входят (см. sourcePattern профиля 'physics').
  * Квота делится по разделам пропорционально числу заданий сборника в разделе (не больше, чем их там есть).
  */
-export const PHYS_QUOTA: { test: number; matching: number; open: number } = { test: 0, matching: 0, open: 0 };
-export const PHYS_QUOTA_POINTS = 0;
+export const PHYS_QUOTA: { test: number; matching: number; open: number } = { test: 8, matching: 1, open: 2 };
+export const PHYS_QUOTA_POINTS = 16;
 
 export const PHYS_CONFIG: NctConfig = {
   key: 'physics',

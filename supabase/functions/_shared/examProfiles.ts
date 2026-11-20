@@ -129,9 +129,9 @@ export const EXAM_PROFILES: ExamProfile[] = [
       { key: 'opt', name: 'Оптика', share: 7 },
       { key: 'atom', name: 'Физика атома и атомного ядра', share: 15 },
     ],
-    sourcePattern: /ЦВЭ|НЦТ/i,
-    // источника «ЦВЭ 2026 (Физика)» в банке пока нет; когда появится — 40 % и квота в nctPhys.ts
-    collectionSharePct: 0,
+    // сборник — «ЦВЭ 2026 (Физика)» и экзамены «НЦТ 2022…2026 (Физика)»; учебные «Сборник НЦТ (Часть N)» не в счёт
+    sourcePattern: /ЦВЭ|НЦТ 20\d\d/i,
+    collectionSharePct: 40,
     ready: true,
   },
 ];

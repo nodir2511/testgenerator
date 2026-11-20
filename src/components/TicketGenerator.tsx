@@ -632,7 +632,7 @@ export const TicketGenerator: React.FC = () => {
       if (nct) {
         // сборник НЦТ в банке — источники «ЦВЭ …» и «НЦТ …»: их вопросы идут на ~40 % баллов
         const { data: srcRows } = await supabase.from('sources').select('id, name').eq('is_deleted', false);
-        const nctSources = new Set((srcRows || []).filter((r: any) => /ЦВЭ|НЦТ/i.test(r.name || '')).map((r: any) => r.id));
+        const nctSources = new Set((srcRows || []).filter((r: any) => (examProfileFor(subjectName)?.sourcePattern ?? /ЦВЭ|НЦТ/i).test(r.name || '')).map((r: any) => r.id));
         allQuestionsRaw.forEach((q: any) => { q.isNct = !!q.source_id && nctSources.has(q.source_id); });
         const permuted = !!cfg.nctPerm && ticketCount >= 4 && ticketCount % 2 === 0;
         let np = pickNct(allQuestionsRaw, permuted ? 2 : ticketCount, Math.random, totals, cfg.nctDiff ?? NCT_DEFAULT_DIFFICULTY, nctCfg);

@@ -100,8 +100,8 @@ describe('режим НЦТ: физика — карта тем и настро�
     expect(sectionPoints(SECTIONS, undefined, PHYS_CONFIG)).toEqual({ mech: 14, mol: 5, elec: 12, opt: 3, atom: 6 });
     expect(PHYS_CONFIG.composition).toEqual({ test: 18, matching: 2, open: 7, points: 40 });
     expect(PHYS_CONFIG.pointsPer).toEqual({ test: 1, matching: 4, open: 2 });
-    expect(PHYS_CONFIG.quotaPoints).toBe(0);
-    expect(PHYS_CONFIG.quota).toEqual({ test: 0, matching: 0, open: 0 });
+    expect(PHYS_CONFIG.quotaPoints).toBe(16);
+    expect(PHYS_CONFIG.quota).toEqual({ test: 8, matching: 1, open: 2 });
     expect(PHYS_CONFIG.openDifficulty.reduce((a, b) => a + b, 0)).toBe(7);
     // состав по kindRange = состав билета
     const sum = (k: 'test' | 'matching' | 'open', i: 0 | 1) => Object.values(PHYS_CONFIG.kindRange!).reduce((a, r) => a + r[k]![i], 0);
