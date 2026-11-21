@@ -5,6 +5,7 @@ import {
 import JSZip from 'jszip';
 import { createQuestionTable, estimateQuestionHeightPt, type QuestionOpts } from './docxExport';
 import { buildAnswerKeyFile } from './answerKeyExport';
+import { retitleKeyDocx } from './answerKey';
 
 // Кластерный экзамен: тестовая книжка из 4 предметов (таджикский язык, биология, химия, физика)
 // в оформлении образца «Тестовая книжка»: обложка, инструкция, субтесты, справочные материалы.
@@ -465,7 +466,11 @@ export interface ClusterFile { blob: Blob; fileName: string; missingAnswers: num
 
 /** ZIP: Русский/Вариант N.docx, Тоҷикӣ/Варианти N.docx и Ключи/Ключи – <предмет>.docx (все варианты).
  *  keys: false — только книжки, без ключей (книжка из готовых билетов) */
-export async function buildClusterZip(settings: ClusterSettings, variants: ClusterVariant[], opts: { keys?: boolean } = {}): Promise<ClusterFile> {
+export async function buildClusterZip(settings: ClusterSettings, variants: ClusterVariant[], opts: {
+  keys?: boolean;
+  /** Готовые ключи из архивов предметов (по местам предметов в книжке): берутся как есть, меняется только шапка. null — собрать ключ по ответам */
+  readyKeys?: Array<Uint8Array | null | undefined>;
+} = {}): Promise<ClusterFile> {
   const withKeys = opts.keys !== false;
   const zip = new JSZip();
   // Варианты (RU и TJ) и ключи собираются одновременно: пока один файл ждёт картинки и шаблоны, идёт другой.
@@ -481,6 +486,17 @@ export async function buildClusterZip(settings: ClusterSettings, variants: Clust
   const keys = Promise.all(kinds.map((kind, s) => {
     const slot = CLUSTER_SUBJECTS[kind];
     if (!withKeys || variants.some((v) => v.subjects[s] == null)) return null;
+    // Режим готовых ключей: нет файла у предмета — ключа по нему нет (по снимкам без ответов он вышел бы пустым)
+    const ready = opts.readyKeys?.[s];
+    if (opts.readyKeys && !ready) return null;
+    if (ready) {
+      const title = `${settings.code}-${settings.exam} – ${slot.name}`;
+      return retitleKeyDocx(ready, title, `к субтесту по ${slot.dative} – ${settings.code}`).then((bytes) => ({
+        blob: new Blob([bytes as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }),
+        fileName: `Ключи – ${title.replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 80)}.docx`,
+        stats: { missing: 0, overflow: 0, universal: false },
+      }));
+    }
     const tickets = variants.map((v) => ({
       ticket_number: v.number,
       questions: (v.subjects[s] || []).map((q) => ({ question_snapshot: q })),

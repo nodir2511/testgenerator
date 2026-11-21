@@ -298,8 +298,8 @@ export function selectionInfo(
 }
 
 // Шапка шаблона («ҶАВОБИ ДУРУСТИ / саволу … – А.5») заменяется на два свои текста
-function setParagraphText(xml: string, marker: string, text: string, size?: number): string {
-  const at = xml.indexOf(marker);
+function setParagraphText(xml: string, marker: string, text: string, size?: number, from = 0): string {
+  const at = xml.indexOf(marker, from);
   if (at < 0) return xml;
   const ps = paragraphStart(xml, at);
   const pe = xml.indexOf('</w:p>', at) + 6;
@@ -374,6 +374,36 @@ export async function buildUniversalKeyDocx(
   zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
   zip.file('word/document.xml', doc);
   return { bytes: await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }), stats };
+}
+
+/**
+ * Готовый ключ (Word, собранный генератором) с новой шапкой: название экзамена под «ҶАВОБИ ДУРУСТИ» и строка «к субтесту по …»
+ * на каждой странице-варианте. Ответы и таблицы не трогаются. Универсальный ключ (без этих надписей) остаётся как есть.
+ */
+export async function retitleKeyDocx(bytes: Uint8Array | ArrayBuffer, info: string, subjectLine: string): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(bytes);
+  for (const name of Object.keys(zip.files).filter((n) => /^word\/header\d*\.xml$/.test(n))) {
+    let h = await zip.file(name)!.async('string');
+    if (!h.includes('ДУРУСТИ')) continue;
+    // В готовом ключе строки шаблона «саволу …» уже нет: на её месте название набора — абзац сразу после «ҶАВОБИ ДУРУСТИ»
+    if (h.includes('саволу')) h = setParagraphText(h, 'саволу', info, 24);
+    else {
+      const after = h.indexOf('</w:p>', h.indexOf('ДУРУСТИ')) + 6;
+      const t = h.slice(after).match(/<w:t[ >]/);
+      if (t) h = setParagraphText(h, t[0], info, 24, after);
+    }
+    zip.file(name, h);
+  }
+  let xml = await zip.file('word/document.xml')!.async('string');
+  // Строка есть на каждой странице-варианте; новая тоже содержит «субтесту», поэтому идём вперёд по документу
+  for (let pos = 0; ;) {
+    const at = xml.indexOf('субтесту', pos);
+    if (at < 0) break;
+    xml = setParagraphText(xml, 'субтесту', subjectLine, undefined, at);
+    pos = xml.indexOf('</w:p>', at) + 6;
+  }
+  zip.file('word/document.xml', xml);
+  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }
 
 export async function buildAnswerKeyDocx(

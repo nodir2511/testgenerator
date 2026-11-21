@@ -7,6 +7,7 @@ import { describeError } from '../lib/errors';
 import { isClusterBatch } from '../lib/clusterStore';
 import { CLUSTER_SLOTS, buildClusterZip, type ClusterSettings } from '../lib/clusterExport';
 import { checkSlot, orderByType, snapshotFromPaired, type Snap } from '../lib/clusterTickets';
+import type { ParsedArchive } from '../lib/clusterArchive';
 import { CustomSelect } from './CustomSelect';
 import { Button, Card, Field } from './ui';
 
@@ -14,7 +15,7 @@ import { Button, Card, Field } from './ui';
 // или пара файлов Word (RU + TJ), в том числе сборники не из системы. Собирается только книжка
 // (RU и TJ), без ключей; в базу ничего не пишется. Можно взять часть предметов, например химию и биологию.
 
-type Mode = 'archive' | 'file' | 'off';
+type Mode = 'archive' | 'zip' | 'file' | 'off';
 
 interface Slot {
   mode: Mode;
@@ -22,6 +23,10 @@ interface Slot {
   ticketNumber: number;
   ruFile: File | null;
   tgFile: File | null;
+  /** ZIP архива предмета из обычного генератора (папки «Русский» и «Тоҷикӣ», ключи) */
+  zipFile: File | null;
+  /** Разобранный архив: все варианты предмета с ответами из ключа */
+  archive: ParsedArchive | null;
   /** Вопросы билета в порядке книжки; null — ещё не загружены */
   snaps: Snap[] | null;
   /** Откуда взяты вопросы (для подписи) */
@@ -38,7 +43,7 @@ const PRESETS: Array<{ label: string; kinds: string[] }> = [
   { label: 'Химия + биология (ХБ)', kinds: ['bio', 'chem'] },
 ];
 
-const emptySlot = (): Slot => ({ mode: 'archive', batchId: '', ticketNumber: 1, ruFile: null, tgFile: null, snaps: null, label: '', skipped: [], loading: false, error: null });
+const emptySlot = (): Slot => ({ mode: 'archive', batchId: '', ticketNumber: 1, ruFile: null, tgFile: null, zipFile: null, archive: null, snaps: null, label: '', skipped: [], loading: false, error: null });
 
 // Наборы предмета из архива (без экзаменов-кластеров), новые сверху
 function useBatches(subjectId: string) {
@@ -105,13 +110,18 @@ const SlotCard: React.FC<{
   const check = slot.snaps ? checkSlot(slot.snaps, def.counts) : null;
 
   const load = async () => {
-    onChange({ loading: true, error: null });
+    onChange({ loading: true, error: null, archive: null });
     try {
       if (slot.mode === 'archive') {
         if (!slot.batchId) throw new Error('Выберите набор из архива');
         const snaps = orderByType(await loadArchiveTicket(slot.batchId, slot.ticketNumber));
         if (!snaps.length) throw new Error('В билете нет вопросов');
         onChange({ snaps, skipped: [], label: `${batch?.title ?? 'Набор'} · билет №${slot.ticketNumber}`, loading: false });
+      } else if (slot.mode === 'zip') {
+        if (!slot.zipFile) throw new Error('Выберите ZIP-архив предмета');
+        const { parseSubjectArchive } = await import('../lib/clusterArchive');
+        const archive = await parseSubjectArchive(slot.zipFile);
+        onChange({ archive, snaps: null, skipped: [], label: slot.zipFile.name, loading: false });
       } else {
         if (!slot.ruFile || !slot.tgFile) throw new Error('Выберите оба файла: русский и таджикский');
         const { snaps, skipped } = await loadFileTicket(slot.ruFile, slot.tgFile, index);
@@ -119,14 +129,14 @@ const SlotCard: React.FC<{
         onChange({ snaps: orderByType(snaps), skipped, label: slot.ruFile.name, loading: false });
       }
     } catch (e) {
-      onChange({ loading: false, snaps: null, error: describeError(e, 'Не удалось загрузить билет') });
+      onChange({ loading: false, snaps: null, archive: null, error: describeError(e, 'Не удалось загрузить билет') });
     }
   };
 
   const modeBtn = (m: Mode, label: string, Icon?: React.ComponentType<{ className?: string }>) => (
     <button
       type="button"
-      onClick={() => onChange({ mode: m, snaps: null, error: null, skipped: [] })}
+      onClick={() => onChange({ mode: m, snaps: null, archive: null, error: null, skipped: [] })}
       className={`inline-flex items-center gap-1.5 px-3 min-h-[40px] rounded-lg text-sm font-semibold border ${slot.mode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}
     >
       {Icon && <Icon className="w-4 h-4" />}<span>{label}</span>
@@ -138,6 +148,7 @@ const SlotCard: React.FC<{
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm font-bold text-slate-800">{index + 1}. {def.name}</span>
         <div className="flex flex-wrap gap-1.5">
+          {modeBtn('zip', 'Архив ZIP', Archive)}
           {modeBtn('archive', 'Из архива', Archive)}
           {modeBtn('file', 'Файлы Word', FileText)}
           {modeBtn('off', 'Не включать')}
@@ -167,6 +178,33 @@ const SlotCard: React.FC<{
             />
           </Field>
           <Button variant="primary" size="sm" loading={slot.loading} disabled={!slot.batchId} onClick={load}>Взять билет</Button>
+        </div>
+      )}
+
+      {slot.mode === 'zip' && (
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+          <Field label="Архив предмета (.zip): папки «Русский» и «Тоҷикӣ» и файл ключей, как скачан из «Архива билетов»">
+            <input type="file" accept=".zip" className="block w-full text-sm" onChange={(e) => onChange({ zipFile: e.target.files?.[0] ?? null, archive: null })} />
+          </Field>
+          <Button variant="primary" size="sm" loading={slot.loading} disabled={!slot.zipFile} onClick={load}>Разобрать</Button>
+        </div>
+      )}
+      {slot.mode === 'zip' && slot.archive && (
+        <div className="space-y-2">
+          <p className="text-xs text-slate-700">
+            <strong>{slot.label}</strong>: вариантов {slot.archive.variants.length} ({slot.archive.variants.map((v) => v.number).join(', ')}); в варианте тестов {slot.archive.variants[0].snaps.filter((q) => q.type === 'test').length}, соответствий {slot.archive.variants[0].snaps.filter((q) => q.type === 'matching').length}, открытых {slot.archive.variants[0].snaps.filter((q) => q.type === 'open').length}
+          </p>
+          {slot.archive.warnings.map((w, i) => (
+            <p key={i} className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span>{w}</span>
+            </p>
+          ))}
+          {slot.archive.variants.some((v) => v.skipped.length > 0) && (
+            <details className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">
+              <summary className="cursor-pointer font-semibold">Не разобрано заданий — в книжку не попали</summary>
+              <ul className="mt-1 list-disc pl-4 space-y-0.5">{slot.archive.variants.flatMap((v) => v.skipped.map((t) => `Вариант ${v.number}, ${t}`)).map((t, i) => <li key={i}>{t}</li>)}</ul>
+            </details>
+          )}
         </div>
       )}
 
@@ -239,7 +277,7 @@ export const ClusterFromTickets: React.FC<{
   };
 
   const active = slots.map((s, i) => ({ s, i })).filter(({ s }) => s.mode !== 'off');
-  const ready = active.length > 0 && active.every(({ s }) => s.snaps && s.snaps.length > 0);
+  const ready = active.length > 0 && active.every(({ s }) => (s.mode === 'zip' ? s.archive : s.snaps && s.snaps.length > 0));
 
   const build = async () => {
     setError(null);
@@ -249,11 +287,27 @@ export const ClusterFromTickets: React.FC<{
       if (!settings.exam.trim()) throw new Error('Укажите название экзамена (например, Авг)');
       if (!settings.date.trim()) throw new Error('Выберите дату экзамена в календаре');
       if (!active.length) throw new Error('Включите хотя бы один предмет');
-      const notLoaded = active.find(({ s }) => !s.snaps);
+      const notLoaded = active.find(({ s }) => (s.mode === 'zip' ? !s.archive : !s.snaps));
       if (notLoaded) throw new Error(`Предмет «${CLUSTER_SLOTS[notLoaded.i].name}»: сначала возьмите билет (кнопка «Взять билет» или «Разобрать»)`);
+      const zips = active.filter(({ s }) => s.mode === 'zip');
+      if (zips.length && zips.length !== active.length) throw new Error('Архивы ZIP нельзя смешивать с одиночными билетами: у всех включённых предметов выберите «Архив ZIP» или ни у одного');
       setBusy(true);
-      // Только книжки RU и TJ, без ключей
-      const file = await buildClusterZip(settings, [{ number: variantNo, subjects: slots.map((s) => (s.mode === 'off' ? null : s.snaps)) }], { keys: false });
+      let variants: Array<{ number: number; subjects: Array<Snap[] | null> }>;
+      if (zips.length) {
+        // Книжка N — вариант N каждого предмета; номера вариантов во всех архивах должны совпасть
+        const nums = (a: ParsedArchive) => a.variants.map((v) => v.number).join(', ');
+        const first = nums(zips[0].s.archive!);
+        const diff = zips.find(({ s }) => nums(s.archive!) !== first);
+        if (diff) throw new Error(`Номера вариантов в архивах разные: у «${CLUSTER_SLOTS[zips[0].i].name}» — ${first}, у «${CLUSTER_SLOTS[diff.i].name}» — ${nums(diff.s.archive!)}`);
+        variants = zips[0].s.archive!.variants.map((v) => ({
+          number: v.number,
+          subjects: slots.map((s) => (s.mode === 'off' ? null : s.archive!.variants.find((x) => x.number === v.number)!.snaps)),
+        }));
+      } else {
+        variants = [{ number: variantNo, subjects: slots.map((s) => (s.mode === 'off' ? null : s.snaps)) }];
+      }
+      // Одиночные билеты — только книжки RU и TJ; из архивов — ещё и ключи: готовые файлы из архивов с новой шапкой (код кластера)
+      const file = await buildClusterZip(settings, variants, { keys: zips.length > 0, readyKeys: slots.map((sl) => (sl.mode === 'zip' ? sl.archive?.keyBytes ?? null : null)) });
       setResult({ blob: file.blob, fileName: file.fileName });
     } catch (e) {
       setError(describeError(e, 'Не удалось собрать книжку'));
@@ -267,7 +321,7 @@ export const ClusterFromTickets: React.FC<{
       <Card padding="none" className="p-5 space-y-4">
         <h3 className="font-bold text-slate-900 text-sm">2. Билеты по предметам</h3>
         <p className="text-xs text-slate-500">
-          Для каждого предмета возьмите один готовый билет из «Архива билетов» или загрузите пару файлов Word. Получится один вариант книжки на русском и таджикском, без ключей.
+          Для каждого предмета возьмите один готовый билет из «Архива билетов» или загрузите пару файлов Word — получится один вариант книжки на русском и таджикском, без ключей. Либо загрузите по одному ZIP-архиву на предмет (как скачан из «Архива билетов», с ключами): вариант N каждого предмета станет книжкой N, и для 4 вариантов выйдет 8 книжек (4 русских и 4 таджикских) и готовые ключи из архивов с шапкой кластера.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-slate-800">Состав книжки:</span>
