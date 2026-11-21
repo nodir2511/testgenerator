@@ -545,6 +545,15 @@ function parseTicketTables(tables: Cell[][][]): DocxParsedQuestion[] {
     }
   }
 
+  // Опечатка в нумерации файла: два задания подряд подписаны одним номером, а перед ними пропущен номер
+  // (…24, 26, 26) — первому из пары возвращается пропущенный номер (…24, 25, 26), иначе пара в другом языке не находится
+  for (let n = 1; n < questions.length - 1; n++) {
+    const prev = Number(questions[n - 1].num);
+    const cur = Number(questions[n].num);
+    if (Number.isFinite(prev) && Number.isFinite(cur) && questions[n].num === questions[n + 1].num && cur > prev + 1) {
+      questions[n].num = String(prev + 1);
+    }
+  }
   return questions;
 }
 

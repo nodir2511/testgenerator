@@ -814,30 +814,37 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
     const maxLen = Math.max(leftItems.length, rightItems.length);
     const grid = opts.matchingGrid;
     const gridSize = grid ? imageSize(grid) : null;
-    // Таблица ответа стоит справа от пунктов, только если им хватает места; очень длинные пункты (больше ~140 знаков)
-    // сузили бы колонки, слова рвались бы по слогам — тогда таблица ответа ставится ниже задания, на всю ширину
     const plainLen = (t: any) => String(t || '').replace(/<[^>]+>/g, '').length;
-    const longItems = [...leftItems, ...rightItems].some((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) > 140);
-    const gridBeside = !!(grid && gridSize) && !longItems;
-    const gridBelow = !!(grid && gridSize) && longItems;
+    const textOf = (m: any) => (isTg ? (m.text_tg || m.text) : (m.text_ru || m.text));
     // Ширина колонок гибкая. «Нужная» ширина стороны — чтобы самый длинный пункт (с маркером «A) ») встал в одну строку
     // (~125 twips на знак при 14 pt). Если обе стороны помещаются — делим пропорционально; если нет, то короткая сторона
     // получает свою нужную ширину (но не меньше 22 % и не больше 42 % места), остальное — длинной
-    const need = (items: any[]) => (Math.max(4, ...items.map((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) + 3))) * 125;
-    const itemsTotal = gridBeside ? 6200 : 8848;
+    const need = (items: any[]) => (Math.max(4, ...items.map((m: any) => plainLen(textOf(m)) + 3))) * 125;
     const needL = need(leftItems);
     const needR = need(rightItems);
-    const clampW = (w: number, lo: number, hi: number) => Math.min(hi * itemsTotal, Math.max(lo * itemsTotal, w));
-    let leftW: number;
-    if (needL + needR <= itemsTotal) {
-      leftW = clampW(itemsTotal * needL / (needL + needR), 0.22, 0.78);
-    } else if (needL <= needR) {
-      leftW = clampW(needL, 0.22, 0.42);
-    } else {
-      leftW = itemsTotal - clampW(needR, 0.22, 0.42);
-    }
-    leftW = Math.round(leftW);
-    const rightW = itemsTotal - leftW;
+    const widthsFor = (total: number) => {
+      const clampW = (w: number, lo: number, hi: number) => Math.min(hi * total, Math.max(lo * total, w));
+      let l: number;
+      if (needL + needR <= total) l = clampW(total * needL / (needL + needR), 0.22, 0.78);
+      else if (needL <= needR) l = clampW(needL, 0.22, 0.42);
+      else l = total - clampW(needR, 0.22, 0.42);
+      l = Math.round(l);
+      return { leftW: l, rightW: total - l };
+    };
+    // Сколько пунктов переносится на вторую строку при таких колонках (знак ≈ 125 twips, на поля уходит ~200)
+    const wrapped = (items: any[], w: number) =>
+      items.filter((m: any) => plainLen(textOf(m)) + 3 > Math.max(4, (w - 200) / 125)).length;
+    // Таблица ответа стоит справа от пунктов, если им хватает места. Когда при такой раскладке переносятся пункты
+    // и слева, и справа (по два и больше), задание получается тесным — таблица ответа ставится ниже, на всю ширину;
+    // то же при очень длинном пункте (больше ~140 знаков)
+    const hasGrid = !!(grid && gridSize);
+    const wideW = widthsFor(8848);
+    const besideW = widthsFor(6200);
+    const longItems = [...leftItems, ...rightItems].some((m: any) => plainLen(textOf(m)) > 140);
+    const cramped = wrapped(leftItems, besideW.leftW) >= 2 && wrapped(rightItems, besideW.rightW) >= 2;
+    const gridBelow = hasGrid && (longItems || cramped);
+    const gridBeside = hasGrid && !gridBelow;
+    const { leftW, rightW } = gridBeside ? besideW : wideW;
     const spanCols = gridBeside ? 3 : 2;
     const leftImgBuffers = await Promise.all(
       leftItems.map((m: any) => m.image_url ? fetchImageBuffer(m.image_url) : Promise.resolve(null))
