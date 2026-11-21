@@ -171,7 +171,8 @@ export function parseDocumentXml(
   const blocks = splitBody(docXml);
   const tables = blocks
     .filter((b) => b.kind === 'tbl')
-    .map((b) => parseTableRows(b.xml, rIdToPublicUrl));
+    .map((b) => parseTableRows(b.xml, rIdToPublicUrl))
+    .flatMap(splitMergedQuestionTables);
 
   // Таблицы-вопросы (формат экспортированных билетов) — отдельный режим.
   // Все остальные таблицы (данные внутри вопроса, таблицы ключей) вопросами не считаются.
@@ -319,6 +320,28 @@ function isTicketQuestionTable(rows: Cell[][]): boolean {
   return rows
     .slice(1)
     .some((r) => r.some((c) => OPTION_OR_ANSWER_RE.test(plainOf(c.text)) || c.imgUrl));
+}
+
+/**
+ * Word склеивает соседние таблицы, если между ними удалить пустой абзац: задания «24» и «25» оказываются
+ * в одной таблице, и разбор считал их одним заданием. Режем по строке, где первая ячейка — следующий по порядку
+ * номер, а во второй есть текст или рисунок. Таблица ключей (в углу «№») и обычные таблицы не затрагиваются.
+ */
+function splitMergedQuestionTables(rows: Cell[][]): Cell[][][] {
+  if (rows.length < 3 || rows[0].length < 2 || !/^\d+$/.test(plainOf(rows[0][0].text))) return [rows];
+  const parts: Cell[][][] = [];
+  let cur: Cell[][] = [];
+  let num = Number(plainOf(rows[0][0].text));
+  rows.forEach((r, i) => {
+    if (i > 0 && r.length >= 2 && plainOf(r[0].text) === String(num + 1) && (plainOf(r[1].text) || r[1].imgUrl)) {
+      parts.push(cur);
+      cur = [];
+      num++;
+    }
+    cur.push(r);
+  });
+  parts.push(cur);
+  return parts;
 }
 
 /** Таблица ключей: «№ | Ответ | № | Ответ ...», ниже пары номер/ответ. */
