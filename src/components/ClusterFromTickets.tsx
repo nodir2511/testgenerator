@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { saveAs } from 'file-saver';
-import { CheckCircle2, Download, FileText, Archive, Loader2, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, Download, FileText, Archive, Loader2, AlertTriangle, Upload } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { describeError } from '../lib/errors';
 import { isClusterBatch } from '../lib/clusterStore';
@@ -16,6 +16,36 @@ import { Button, Card, Field } from './ui';
 // (RU и TJ), без ключей; в базу ничего не пишется. Можно взять часть предметов, например химию и биологию.
 
 type Mode = 'archive' | 'zip' | 'file' | 'off';
+
+/** Поле файла: можно перетащить файл сюда или нажать и выбрать (внутри `Field`, поэтому клик по зоне открывает выбор сам) */
+const FileDrop: React.FC<{ accept: '.zip' | '.docx'; file: File | null; onFile: (f: File) => void }> = ({ accept, file, onFile }) => {
+  const [over, setOver] = useState(false);
+  const [bad, setBad] = useState('');
+  const take = (f: File | undefined | null) => {
+    if (!f) return;
+    if (!f.name.toLowerCase().endsWith(accept)) { setBad(`Нужен файл ${accept}, а это «${f.name}»`); return; }
+    setBad('');
+    onFile(f);
+  };
+  return (
+    <span
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files?.[0]); }}
+      className={`flex flex-col items-center justify-center gap-1 min-h-[76px] px-3 py-3 rounded-xl border-2 border-dashed text-center cursor-pointer transition ${
+        over ? 'border-indigo-500 bg-indigo-50' : file ? 'border-emerald-300 bg-emerald-50' : 'border-slate-300 bg-white hover:border-indigo-400'
+      }`}
+    >
+      <input type="file" accept={accept} className="sr-only" onChange={(e) => { take(e.target.files?.[0]); e.target.value = ''; }} />
+      <Upload className={`w-5 h-5 pointer-events-none ${file ? 'text-emerald-700' : 'text-slate-500'}`} />
+      <span className="text-sm font-semibold text-slate-800 break-all pointer-events-none">
+        {file ? file.name : 'Перетащите файл сюда или нажмите, чтобы выбрать'}
+      </span>
+      {file && <span className="text-xs text-slate-600 pointer-events-none">Чтобы заменить, перетащите другой файл или нажмите</span>}
+      {bad && <span role="alert" className="text-xs font-semibold text-red-700">{bad}</span>}
+    </span>
+  );
+};
 
 interface Slot {
   mode: Mode;
@@ -184,7 +214,7 @@ const SlotCard: React.FC<{
       {slot.mode === 'zip' && (
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
           <Field label="Архив предмета (.zip): папки «Русский» и «Тоҷикӣ» и файл ключей, как скачан из «Архива билетов»">
-            <input type="file" accept=".zip" className="block w-full text-sm" onChange={(e) => onChange({ zipFile: e.target.files?.[0] ?? null, archive: null })} />
+            <FileDrop accept=".zip" file={slot.zipFile} onFile={(f) => onChange({ zipFile: f, archive: null })} />
           </Field>
           <Button variant="primary" size="sm" loading={slot.loading} disabled={!slot.zipFile} onClick={load}>Разобрать</Button>
         </div>
@@ -211,10 +241,10 @@ const SlotCard: React.FC<{
       {slot.mode === 'file' && (
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
           <Field label="Русский файл (.docx)">
-            <input type="file" accept=".docx" className="block w-full text-sm" onChange={(e) => onChange({ ruFile: e.target.files?.[0] ?? null, snaps: null })} />
+            <FileDrop accept=".docx" file={slot.ruFile} onFile={(f) => onChange({ ruFile: f, snaps: null })} />
           </Field>
           <Field label="Таджикский файл (.docx)">
-            <input type="file" accept=".docx" className="block w-full text-sm" onChange={(e) => onChange({ tgFile: e.target.files?.[0] ?? null, snaps: null })} />
+            <FileDrop accept=".docx" file={slot.tgFile} onFile={(f) => onChange({ tgFile: f, snaps: null })} />
           </Field>
           <Button variant="primary" size="sm" loading={slot.loading} disabled={!slot.ruFile || !slot.tgFile} onClick={load}>Разобрать</Button>
         </div>
