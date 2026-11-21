@@ -113,7 +113,9 @@ export function cleanXmlRunsToFormattedText(xml: string): string {
     const isUnder = /<w:u\s+w:val="(?!none")[^"]+"/.test(rXml);
 
     const tMatches = [...rXml.matchAll(/<w:tab\s*\/>|<w:br\s*\/>|<[wm]:t(?:\s[^>]*)?>([\s\S]*?)<\/[wm]:t>/g)];
-    let t = tMatches.map((m) => (m[1] === undefined ? ' ' : m[1])).join('');
+    // В XML кавычки и амперсанд записаны кодами (&quot; &apos; &amp;): в текст они попадают обычными знаками.
+    // &lt; и &gt; остаются кодами — текст потом разбирается как разметка (<b>, <sub>…)
+    let t = tMatches.map((m) => (m[1] === undefined ? ' ' : m[1])).join('').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
     if (!t.trim()) {
       // Пробел между словами Word нередко хранит отдельным фрагментом (<w:t xml:space="preserve"> </w:t>, особенно рядом с
       // proofErr): без него слова склеиваются. Пустые фрагменты, табы и переносы без текста по-прежнему пропускаются.

@@ -12,3 +12,9 @@ describe('пробел отдельным фрагментом Word', () => {
     expect(cleanXmlRunsToFormattedText(r('а', false) + '<w:r><w:t></w:t></w:r>' + r('б', false))).toBe('аб');
   });
 });
+
+describe('коды символов XML', () => {
+  it('&quot; и &amp; становятся обычными знаками', () => {
+    expect(cleanXmlRunsToFormattedText(r('Слово &quot;Физика&quot; и Tom &amp; Jerry', false))).toBe('Слово "Физика" и Tom & Jerry');
+  });
+});
