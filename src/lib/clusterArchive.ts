@@ -52,8 +52,17 @@ export async function parseSubjectArchive(file: File | Blob): Promise<ParsedArch
     (v.tg ? tg : ru).set(v.n, e);
   }
   if (!ru.size && !tg.size) throw new Error('В архиве нет файлов «Вариант N.docx» и «Варианти N.docx»');
-  if (!ru.size) throw new Error('В архиве нет русских вариантов (папка «Русский»)');
-  if (!tg.size) throw new Error('В архиве нет таджикских вариантов (папка «Тоҷикӣ»)');
+  // Предмет на одном языке: таджикский сайт выгружает только «Варианти N», английский — только «Variant N».
+  // Единственный язык берётся для обеих книжек (русская получает тот же текст)
+  const warnings: string[] = [];
+  if (!ru.size) {
+    tg.forEach((e, n) => ru.set(n, e));
+    warnings.push('В архиве только таджикские варианты (предмет на одном языке): русская книжка получит тот же таджикский текст');
+  } else if (!tg.size) {
+    if (![...ru.values()].every((e) => /^Variant/i.test(e.name.split('/').pop() || ''))) throw new Error('В архиве нет таджикских вариантов (папка «Тоҷикӣ»)');
+    ru.forEach((e, n) => tg.set(n, e));
+    warnings.push('В архиве только английские варианты (предмет на одном языке): таджикская книжка получит тот же английский текст');
+  }
   const onlyRu = [...ru.keys()].filter((n) => !tg.has(n));
   const onlyTg = [...tg.keys()].filter((n) => !ru.has(n));
   if (onlyRu.length || onlyTg.length) {
@@ -61,8 +70,7 @@ export async function parseSubjectArchive(file: File | Blob): Promise<ParsedArch
   }
 
   // Ключи: Word в корне архива, имя начинается с «Ключи»
-  const warnings: string[] = [];
-  const keyEntry = files.find((e) => !e.name.includes('/') && /^Ключи/i.test(e.name) && /\.docx$/i.test(e.name));
+  const keyEntry = files.find((e) => !e.name.includes('/') && /^(Ключи|Калид)/i.test(e.name) && /\.docx$/i.test(e.name));
   const keyBytes = keyEntry ? await keyEntry.file.async('uint8array') : null;
   if (!keyBytes) warnings.push('В архиве нет файла ключей (Ключи – ….docx): ключей по этому предмету в итоговом архиве не будет');
 
