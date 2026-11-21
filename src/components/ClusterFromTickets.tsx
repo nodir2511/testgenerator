@@ -50,6 +50,8 @@ const FileDrop: React.FC<{ accept: '.zip' | '.docx'; file: File | null; onFile: 
 
 interface Slot {
   mode: Mode;
+  /** Способ загрузки до «Не включать» — вернётся при повторном включении предмета вместе с загруженным */
+  prevMode?: Exclude<Mode, 'off'>;
   batchId: string;
   ticketNumber: number;
   /** Режим «Из архива»: взять все билеты набора (а не один) — получится по книжке на каждый билет */
@@ -174,7 +176,11 @@ const SlotCard: React.FC<{
   const modeBtn = (m: Mode, label: string, Icon?: React.ComponentType<{ className?: string }>) => (
     <button
       type="button"
-      onClick={() => onChange({ mode: m, snaps: null, archive: null, error: null, skipped: [] })}
+      onClick={() => onChange(m === 'off'
+        ? { mode: 'off', prevMode: slot.mode === 'off' ? slot.prevMode : slot.mode }
+        : slot.mode === 'off' && slot.prevMode === m
+          ? { mode: m } // возврат к прежнему способу: загруженное сохранено
+          : { mode: m, snaps: null, archive: null, error: null, skipped: [] })}
       className={`inline-flex items-center gap-1.5 px-3 min-h-[40px] rounded-lg text-sm font-semibold border ${slot.mode === m ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}
     >
       {Icon && <Icon className="w-4 h-4" />}<span>{label}</span>
@@ -353,8 +359,9 @@ export const ClusterFromTickets: React.FC<{
     setResult(null);
     setSlots((all) => all.map((s, i) => {
       const want = kinds.includes(CLUSTER_SLOTS[i].kind);
-      if (want && s.mode === 'off') return { ...s, mode: 'archive' };
-      if (!want && s.mode !== 'off') return { ...s, mode: 'off', snaps: null, error: null, skipped: [] };
+      // Выключенный предмет ничего не теряет: загруженные файлы, архив и вопросы остаются до повторного включения
+      if (want && s.mode === 'off') return { ...s, mode: s.prevMode ?? 'archive' };
+      if (!want && s.mode !== 'off') return { ...s, mode: 'off', prevMode: s.mode };
       return s;
     }));
   };
