@@ -26,3 +26,16 @@ describe('склеенные таблицы заданий', () => {
     expect(qs.map((q) => [q.num, q.type])).toEqual([['1', 'test'], ['2', 'matching'], ['3', 'open']]);
   });
 });
+
+describe('рамка ответа отдельной таблицей (таджикский)', () => {
+  it('открытые задания «25», «26» не пропадают', () => {
+    const answerBox = tbl(tr('Ҷавоб:', '', '', '', '', '', '', '', '', ''));
+    const qs = parseDocumentXml(doc(
+      tbl(...matching24),
+      tbl(tr('25', 'Ҳодисаи коҳишёбии овозро муайян кунед. китоб (1), хона (3)')), answerBox,
+      tbl(tr('26', 'Вазифаи ҳарфи ӣ-ро муайян кунед.')), answerBox,
+    ));
+    expect(qs.map((q) => [q.num, q.type])).toEqual([['24', 'matching'], ['25', 'open'], ['26', 'open']]);
+    expect(qs[1].content).toContain('коҳишёбии');
+  });
+});

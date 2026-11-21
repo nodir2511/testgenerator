@@ -169,10 +169,11 @@ export function parseDocumentXml(
   opts: DocxParseOptions = {}
 ): DocxParsedQuestion[] {
   const blocks = splitBody(docXml);
-  const tables = blocks
+  const rawTables = blocks
     .filter((b) => b.kind === 'tbl')
     .map((b) => parseTableRows(b.xml, rIdToPublicUrl))
     .flatMap(splitMergedQuestionTables);
+  const tables = joinAnswerTables(rawTables);
 
   // Таблицы-вопросы (формат экспортированных билетов) — отдельный режим.
   // Все остальные таблицы (данные внутри вопроса, таблицы ключей) вопросами не считаются.
@@ -320,6 +321,30 @@ function isTicketQuestionTable(rows: Cell[][]): boolean {
   return rows
     .slice(1)
     .some((r) => r.some((c) => OPTION_OR_ANSWER_RE.test(plainOf(c.text)) || c.imgUrl));
+}
+
+/**
+ * У открытых заданий (например, таджикский «25», «26») рамка ответа — отдельная таблица под условием: одна строка
+ * «Ҷавоб:» / «Ответ:» и пустые клетки. Без склейки такое задание — одна строка «номер | условие», и оно пропадало.
+ * Склеиваем: рамка становится строкой задания (с пустой колонкой номера, как у остальных открытых).
+ */
+function joinAnswerTables(tables: Cell[][][]): Cell[][][] {
+  const ANSWER_FIRST = /^\s*(?:Ответ|Ҷавоб)\s*[:.]?/i;
+  const out: Cell[][][] = [];
+  for (let i = 0; i < tables.length; i++) {
+    const t = tables[i];
+    const next = tables[i + 1];
+    if (
+      next && t.length === 1 && t[0].length >= 2 && /^\d+$/.test(plainOf(t[0][0].text)) &&
+      next.length === 1 && next[0].length >= 2 && ANSWER_FIRST.test(plainOf(next[0][0].text))
+    ) {
+      out.push([t[0], [{ text: '', imgUrl: null }, ...next[0]]]);
+      i++;
+    } else {
+      out.push(t);
+    }
+  }
+  return out;
 }
 
 /**
