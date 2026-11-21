@@ -1,3 +1,6 @@
+-- !!! Частично устарел: отдельные политики и функции этого файла позже ужесточены
+-- (security_round2–5.sql, owner_only_delete_batches.sql, cluster_batches.sql). Если применяете
+-- его повторно, сразу после него примените эти файлы заново — иначе права станут шире.
 -- Экзамены-кластеры хранятся как обычные партии билетов (generation_params.source = 'cluster'),
 -- но видеть, создавать и удалять их может только главный админ (public.is_owner()).
 -- Применено: supabase db query --linked -f supabase/sql/cluster_batches.sql

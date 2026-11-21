@@ -779,7 +779,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
             Тип вопроса *
           </label>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-3">
             {[
               { id: 'test', title: 'Тестовый', desc: 'С вариантами ответа' },
               { id: 'matching', title: 'Соответствие', desc: 'Два списка (левый и правый)' },
@@ -795,8 +795,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                     : 'border-slate-200 hover:border-slate-300'
                 } min-h-[40px]`}
               >
-                <div className="font-bold text-sm text-slate-900">{t.title}</div>
-                <div className="text-xs text-slate-500">{t.desc}</div>
+                <div className="font-bold text-sm text-slate-900 break-words">{t.title}</div>
+                <div className="text-xs text-slate-500 break-words">{t.desc}</div>
               </button>
             ))}
           </div>
@@ -891,8 +891,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           )}
 
           {/* Картинка к вопросу + вставка из буфера (Ctrl+V) */}
-          <div className="flex items-center space-x-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-            <div className="flex-1 flex items-center space-x-3">
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <div className="flex-1 min-w-0 flex items-center space-x-3">
               {imageUrl ? (
                 <div className="relative group h-20 w-auto min-w-[80px] max-w-[200px] rounded-lg overflow-hidden border border-slate-300 bg-white shrink-0 p-1">
                   <img loading="lazy" decoding="async" src={imageUrl} alt="Вопрос" className="h-full w-full object-contain" />
@@ -911,7 +911,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
                   <ImageIcon className="w-6 h-6" />
                 </div>
               )}
-              <div className="text-xs">
+              <div className="text-xs min-w-0 flex-1">
                 <span className="font-medium text-slate-700 block">
                   {imageUrl ? 'Изображение прикреплено' : 'Добавить схему, рисунок или формулу'}
                 </span>
@@ -921,7 +921,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
               </div>
             </div>
 
-            <label className="cursor-pointer px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 flex items-center space-x-1 transition shadow-sm">
+            <label className="cursor-pointer shrink-0 min-h-[40px] px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 flex items-center space-x-1 transition shadow-sm">
               {uploadingImage ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
               ) : (

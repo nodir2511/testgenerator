@@ -1,6 +1,6 @@
 # Схема проекта
 
-Сверено с кодом и SQL-файлами на версии 0.64.0 (24 ноября 2026). Живая база в этот раз не сверялась: перед работой с таблицами проверьте `pg_policies` и `list_tables`.
+Сверено с кодом и SQL-файлами на версии 0.64.0; полная проверка перед 1.0.0 — версия 0.99.8 (21 ноября 2026, политики и функции сверены с живой базой). Перед работой с таблицами проверьте `pg_policies` и `list_tables`.
 Как пользоваться: найдите нужный раздел, откройте только указанные в нём файлы. Весь код перечитывать не нужно.
 Меняете структуру (таблица, функция БД, модуль, экспорт, ключ кэша, поток данных, правило деплоя) — обновите этот файл в том же коммите.
 
@@ -33,7 +33,7 @@ src/main.tsx            QueryClient; маршрутизация по пути (�
 src/App.tsx             Боковая навигация (SideNav) и меню «Ещё» на телефоне, вкладки, форма вопроса, окно «Что нового», ChangePasswordScreen; раздел виден в адресе (`#archive`), кнопка «Назад» работает по шагам
 src/components/         Экраны и элементы интерфейса (раздел 6.3); ui/ — Button, Card, Badge, Field, Hint, PageHeader, EmptyState, Skeleton
 src/lib/                Логика без интерфейса (раздел 7)
-src/hooks/              useAuth.tsx, useReleases.ts, useTheme.ts
+src/hooks/              useAuth.tsx (при выходе шлёт событие `auth:signed-out` — `main.tsx` очищает кэш запросов), useReleases.ts, useTheme.ts, useDialog.ts (окна и шторки: фокус внутри, Tab по кругу, Esc, без прокрутки фона)
 src/game/               «Своя игра»: GameHost, GamePlay, GameScreen, api.ts, ui.tsx, content.ts, review.ts, game.css
 src/tg/                 TgApp.tsx + tg.css — Telegram Mini App (/tg); CheckScreen.tsx — «Проверка работ по фото бланка» (грузится лениво, раздел 8); снимки идут в стопку (камера снимок за снимком или много фото из галереи), читаются сразу, проверяются по очереди
 src/types/database.ts   Типы таблиц и ролей
@@ -192,7 +192,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - RLS включён на всех таблицах. Во всех политиках `(select auth.uid())`: вычисляется один раз на запрос (`rls_initplan_indexes.sql`).
 - **questions**:
   - SELECT: admin — всё; user — неудалённые; subject_teacher — неудалённые своих предметов; subject_admin — все своих предметов.
-  - DELETE — только админ.
+  - DELETE — только админ (`security_round5.sql`; сайт физически не удаляет, только `is_deleted`).
   - INSERT и UPDATE — по `can_manage_*`.
 - **question_options, matching_items**: SELECT — admin и user всё, остальные через `auth_question_ids()`; политики ускорены в `question_children_rls_fast.sql`.
 - **chapters, topics, subjects**: SELECT для вошедших, DELETE только админ, INSERT и UPDATE для управляющих предметом.
@@ -212,7 +212,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 
 ## 5. SQL-файлы (`supabase/sql`)
 
-Применяются вручную (раздел 13), почти все идемпотентны. Порядок появления:
+Применяются вручную (раздел 13), почти все идемпотентны. Порядок появления (ранние файлы частично заменены поздними: `close_public_read.sql` и `fix_role_escalation.sql` устарели целиком и помечены в шапке — повторно их не применять; после повторного запуска `subject_roles.sql`, `question_order.sql`, `rls_initplan_indexes.sql`, `owner_history.sql`, `cluster_batches.sql` заново примените `security_round2`–`5`, `owner_only_delete_batches.sql`):
 
 | Файл | Что делает |
 |---|---|
@@ -249,6 +249,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `user_prefs.sql` | `user_prefs` |
 | `omr_checks.sql` | `omr_checks`: результаты проверки бланков (пишет только `tg-app`) |
 | `omr_digit_samples.sql` | `omr_digit_samples`: собранные картинки цифр из клеток (только `tg-app`) |
+| `security_round5.sql` | проверка перед 1.0.0: `update_batch_questions` не превращает набор в кластерный и проверяет вопрос; DELETE вопросов, глав, тем и картинок — только админ; лимиты `report_client_error` на отправителя; `game_rejoin` — 5 попыток за 15 минут; `guard_ticket_insert` освобождает и админа по предметам; привязка Telegram закрыта «Учителю игры»; историю импорта читают только staff; триггерные функции не вызываются через RPC. **Применяется последним** |
 | `game.sql`, `game_v2.sql` … `game_v6.sql` | «Своя игра» по версиям; все применены (v6 — 1 ноября 2026) |
 
 
@@ -366,7 +367,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 |---|---|---|---|
 | `telegram-bot` | вебхук Telegram, `--no-verify-jwt`, заголовок `X-Telegram-Bot-Api-Secret-Token` = `TELEGRAM_WEBHOOK_SECRET` | диалог бота (ниже) | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` |
 | `tg-app` | `POST {action, …}`, заголовок `X-Tg-Init-Data` (подпись по токену бота), `--no-verify-jwt` | действия `me` → `{name, subjects, limits}`, `history` (8 последних наборов без кластерных), `tree` (главы и темы со счётчиками; проверка назначенных предметов), `generate`, `resend`; файл присылает бот; проверка бланков: `check_sets` (свои наборы с составом и признаком `supported`; параметр `q` — поиск по названию, предмету и дате среди последних 200), `check_key` (ключи всех билетов набора из снимков вопросов; отказ, если состав не 18/2/7, 20/4/2, 8/2/2), `check_save` (проверяет форму ответов, считает баллы по ключу из базы или по присланному ключу, пишет в `omr_checks`), `check_list`; цифры: `blank_send` (PDF шаблона бланка в чат; бот берёт файл из `public/blanks` с raw.githubusercontent.com, ветка `main`, поэтому новые PDF нужно запушить), `digits_get` (общий набор картинок), `digits_save`, `digits_admin` / `digits_admin_delete` / `digits_admin_relabel` (просмотр, удаление и перенос картинок по цифрам; только главный админ: `profiles.is_owner` и `role = admin`) | `TELEGRAM_BOT_TOKEN` |
-| `release-notify` | вызывает pg_cron раз в минуту, `--no-verify-jwt`, тела запроса не читает | «занимает» версии с `notified_at is null` и шлёт каждому привязанному пользователю пункты, видимые его роли и предметам (все `scope`: сайт, бот, мини-приложение) | `TELEGRAM_BOT_TOKEN` |
+| `release-notify` | вызывает pg_cron раз в минуту, `--no-verify-jwt`, тела запроса не читает; берёт только версии, у которых уже есть пункты; если задан секрет `RELEASE_NOTIFY_SECRET`, требует заголовок `x-cron-secret` (тогда его же добавьте в задание pg_cron) | «занимает» версии с `notified_at is null` и шлёт каждому привязанному пользователю пункты, видимые его роли и предметам (все `scope`: сайт, бот, мини-приложение) | `TELEGRAM_BOT_TOKEN` |
 | `send-to-telegram` | JWT пользователя | принимает собранный браузером файл и шлёт его в `chat_id` из `telegram_links`; `{action:'bot'}` отдаёт имя бота | `TELEGRAM_BOT_TOKEN` |
 | `admin-create-user` | JWT админа | пишет `account_invites`, создаёт пользователя с паролем, ставит `must_change_password` | — |
 | `admin-update-user` | JWT админа | имя, email, пароль; owner правит всех, админ — себя и не-админов | — |
@@ -394,7 +395,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - Дерево предмета кэшируется на сессию (`treeCache`).
 - Настройки хранятся в CloudStorage Telegram, запасной вариант — localStorage.
 - Навигация через MainButton и BackButton Telegram.
-- **Проверка работ** (`CheckScreen.tsx`, шаг `check`, кнопка на шагах «Предмет» и «Главы»; свои кнопки «Назад», MainButton скрыт): бланк снимается системной камерой (`<input type=file capture=environment>`, политика `camera=()` не мешает), распознавание — в телефоне, фото никуда не уходят. Ключ: из набора билетов, введённый вручную (хранится в localStorage `omr_custom_keys_v1`, только на устройстве) или снятый с эталонного бланка (один билет — одно фото). Баллы: тест 1, пункт соответствия 1 (4 на задание), открытый 2.
+- **Проверка работ** (`CheckScreen.tsx`, шаг `check`, кнопка на шагах «Предмет» и «Главы»; свои кнопки «Назад», MainButton скрыт): бланк снимается системной камерой (`<input type=file capture=environment>`, политика `camera=()` ей не мешает; живому видоискателю нужен `camera=(self)` — он задан в `vercel.json` только для `/tg`), распознавание — в телефоне, фото никуда не уходят. Ключ: из набора билетов, введённый вручную (хранится в localStorage `omr_custom_keys_v1`, только на устройстве) или снятый с эталонного бланка (один билет — одно фото). Баллы: тест 1, пункт соответствия 1 (4 на задание), открытый 2.
 
 ## 9. Общий код `supabase/functions/_shared`
 
@@ -584,6 +585,8 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 
 ## 15. Ловушки
 
+- Запрос справочника в `queryFn` обязан бросать ошибку (`if (error) throw error`): иначе сбой сети кэшируется как пустой список на 5 минут.
+- Роль без доступа к банку (`game_teacher` и любая новая) в боте и мини-приложении получает пустой список предметов: `allowedSubjectIds` в `_shared/generate.ts` разрешает весь банк только ролям `user` и `admin` — как `can_view_subject` в базе.
 - Supabase отдаёт максимум 1000 строк за запрос: большие выборки читайте страницами (`fetchAllPages`, `loadLightPool`) с `.order('id')`.
 - `.in('id', [...])` идёт в URL: держите не больше ~100 uuid за запрос.
 - Мягкое удаление: почти везде нужен `.eq('is_deleted', false)`. Для вложенных тем — `.eq('topics.is_deleted', false)`.

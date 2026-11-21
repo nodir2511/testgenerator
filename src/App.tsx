@@ -20,6 +20,7 @@ import { AuthModal } from './components/AuthModal';
 import { Logo } from './components/Logo';
 import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { TelegramLink } from './components/TelegramLink';
+import { useDialog } from './hooks/useDialog';
 import { WhatsNewModal } from './components/WhatsNewModal';
 import { confirmAction } from './lib/confirm';
 import { SideNav, type SideNavGroup } from './components/SideNav';
@@ -181,6 +182,8 @@ export const App: React.FC = () => {
   const closeSheet = () => {
     if (sheetOpenRef.current) window.history.back();
   };
+  const sheetPanel = React.useRef<HTMLDivElement>(null);
+  useDialog(sheetPanel, closeSheet, mobileMenuOpen);
 
   // Обновления сайта: окно «Что нового» при входе, пока есть непрочитанные версии
   const { unread, markRead } = useReleases();
@@ -288,16 +291,16 @@ export const App: React.FC = () => {
             role="link"
             tabIndex={0}
             aria-label="Экзаменатор — на главную"
-            className="flex items-center space-x-3 cursor-pointer group rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+            className="flex min-w-0 items-center space-x-3 cursor-pointer group rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
             onClick={() => goTab('generator')}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goTab('generator'); } }}
           >
             <div className="group-hover:scale-105 transition-transform">
               <Logo size="md" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center space-x-1.5">
-                <h1 className="font-bold text-base sm:text-lg text-slate-900 leading-tight tracking-tight">
+                <h1 className="truncate font-bold text-base sm:text-lg text-slate-900 leading-tight tracking-tight">
                   Экзаменатор
                 </h1>
               </div>
@@ -328,7 +331,7 @@ export const App: React.FC = () => {
                   )}
                 </div>
               </div>
-              <TelegramLink />
+              {!isGameOnly && <TelegramLink />}
               <ThemeButton />
               <button 
                 onClick={openReleases} 
@@ -353,8 +356,8 @@ export const App: React.FC = () => {
           </div>
 
           {/* Мобильные быстрые кнопки в шапке */}
-          <div className="md:hidden flex items-center space-x-1.5">
-            <TelegramLink />
+          <div className="md:hidden flex shrink-0 items-center space-x-1.5">
+            {!isGameOnly && <TelegramLink />}
             <button 
               onClick={openReleases} 
               className="relative p-2 text-slate-500 hover:text-indigo-600 active:scale-90 rounded-xl transition hover:bg-slate-100 min-h-[44px] min-w-[44px] flex items-center justify-center" 
@@ -414,12 +417,12 @@ export const App: React.FC = () => {
         <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end">
           {/* Затемнение фона с закрытием при тапе */}
           <div 
-            className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs transition-opacity duration-200 animate-in fade-in"
+            className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs"
             onClick={closeSheet}
           />
 
           {/* Панель-шторка снизу */}
-          <div className="relative bg-white rounded-t-3xl border-t border-slate-200/80 shadow-2xl p-5 max-h-[85vh] overflow-y-auto pb-[calc(2rem+env(safe-area-inset-bottom))] z-10 animate-in slide-in-from-bottom duration-200">
+          <div ref={sheetPanel} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Меню" className="relative bg-white rounded-t-3xl border-t border-slate-200/80 shadow-2xl p-5 max-h-[85vh] overflow-y-auto pb-[calc(2rem+env(safe-area-inset-bottom))] z-10">
             {/* Индикатор смахивания */}
             <div className="w-12 h-1 bg-slate-200 rounded-full mx-auto mb-4" />
 

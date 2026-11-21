@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useDialog } from '../hooks/useDialog';
 import { supabase } from '../lib/supabase';
 import { assertRowsChanged, withUndo } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Passage } from '../types/database';
@@ -67,6 +68,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   );
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
+  const filterSheet = React.useRef<HTMLDivElement>(null);
+  useDialog(filterSheet, () => setIsFilterSheetOpen(false), isFilterSheetOpen);
 
   const activeFiltersCount = 
     (filterSubjectId ? 1 : 0) + 
@@ -448,6 +451,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               setPage(0); setExtra(0);
             }}
             placeholder="Поиск вопросов по тексту..."
+            aria-label="Поиск вопросов по тексту"
             className="w-full text-sm pl-9 pr-8 py-2.5 bg-white border border-slate-200/90 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
           />
           {searchQuery && (
@@ -483,10 +487,10 @@ export const QuestionList: React.FC<QuestionListProps> = ({
       {isFilterSheetOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end">
           <div 
-            className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs transition-opacity animate-in fade-in" 
+            className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs" 
             onClick={() => setIsFilterSheetOpen(false)} 
           />
-          <div className="relative bg-white rounded-t-3xl border-t border-slate-200 shadow-2xl p-5 max-h-[85vh] overflow-y-auto pb-[calc(2rem+env(safe-area-inset-bottom))] z-10 animate-in slide-in-from-bottom duration-200 space-y-4">
+          <div ref={filterSheet} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Фильтры" className="relative bg-white rounded-t-3xl border-t border-slate-200 shadow-2xl p-5 max-h-[85vh] overflow-y-auto pb-[calc(2rem+env(safe-area-inset-bottom))] z-10 space-y-4">
             <div className="w-12 h-1 bg-slate-200 rounded-full mx-auto mb-2" />
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center space-x-2">
@@ -638,6 +642,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
                 setPage(0); setExtra(0);
               }}
               placeholder="Поиск по тексту..."
+              aria-label="Поиск вопросов по тексту"
               className="w-full text-sm pl-9 pr-3 py-2 bg-slate-50/70 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
@@ -1201,7 +1206,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
       {/* Модальное окно увеличения изображения (Lightbox) */}
       {previewImage && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm transition-all animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm transition-all duration-150"
           onClick={() => setPreviewImage(null)}
           role="dialog" aria-modal="true" aria-label="Увеличенное изображение"
         >

@@ -51,7 +51,7 @@ export const ClinicScreen: React.FC<{ code: string }> = ({ code }) => {
         {!b?.entry_closed && <div className="cl-box">
           <div className="cl-head">
             {qr && <img src={qr} alt="QR-код для входа" className="cl-qr big" />}
-            <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ minWidth: 0, flex: '1 1 220px' }}>
               <span className="cl-lbl">Код занятия</span>
               <div className="cl-code">{code}</div>
               <div className="cl-link-url">{url}</div>

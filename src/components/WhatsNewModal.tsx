@@ -2,18 +2,18 @@ import React from 'react';
 import { Megaphone, X } from 'lucide-react';
 import { SiteRelease } from '../types/database';
 import { ReleaseCard } from './ReleaseCard';
+import { useDialog } from '../hooks/useDialog';
 
 /** Окно «Что нового» с непрочитанными версиями (только пункты уровня пользователя) */
 export const WhatsNewModal: React.FC<{ releases: SiteRelease[]; onClose: () => void; onOpenHistory: () => void }> = ({ releases, onClose, onOpenHistory }) => {
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const panel = React.useRef<HTMLDivElement>(null);
+  useDialog(panel, onClose);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 sm:p-4" onClick={onClose}>
       <div
+        ref={panel}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Что нового"

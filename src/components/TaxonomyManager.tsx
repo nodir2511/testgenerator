@@ -250,6 +250,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
               value={newSubjectName}
               onChange={(e) => setNewSubjectName(e.target.value)}
               placeholder="Новый предмет (напр. Химия)"
+              aria-label="Название нового предмета"
               className="min-w-0 flex-1 text-sm px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <Button variant="primary" type="submit" disabled={addSubjectMutation.isPending || !newSubjectName.trim()}>
@@ -330,7 +331,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* 1. Главы */}
             <Card padding="none" className={`p-5 flex flex-col h-[520px] xl:h-[calc(100vh-17rem)] xl:min-h-[520px] ${mobileTab !== 'chapters' ? 'hidden md:flex' : ''}`}>
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
@@ -355,7 +356,8 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 value={newChapterName}
                 onChange={(e) => setNewChapterName(e.target.value)}
                 placeholder="Название главы"
-                className="text-sm flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                aria-label="Название новой главы"
+                className="text-sm min-w-0 flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               <IconButton
                 type="submit"
@@ -404,7 +406,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                               softDeleteMutation.mutate({ table: 'chapters', id: ch.id });
                             }
                           }}
-                          className="w-9 h-9 -my-1 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить главу" title="Удалить главу"
+                          className="w-10 h-10 -my-1.5 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить главу" title="Удалить главу"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -487,7 +489,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                                 softDeleteMutation.mutate({ table: 'topics', id: tp.id });
                               }
                             }}
-                            className="w-9 h-9 -my-1 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить тему" title="Удалить тему"
+                            className="w-10 h-10 -my-1.5 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить тему" title="Удалить тему"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -522,7 +524,8 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                 value={newSourceName}
                 onChange={(e) => setNewSourceName(e.target.value)}
                 placeholder="Сборник / Автор (напр. ЕГЭ 2025)"
-                className="text-sm flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                aria-label="Название нового источника"
+                className="text-sm min-w-0 flex-1 px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
               <IconButton
                 type="submit"
@@ -556,7 +559,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
                             softDeleteMutation.mutate({ table: 'sources', id: src.id });
                           }
                         }}
-                        className="w-9 h-9 -my-1 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить источник" title="Удалить источник"
+                        className="w-10 h-10 -my-1.5 inline-flex items-center justify-center shrink-0 text-slate-500 hover:text-destructive hover:bg-destructive-soft rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Удалить источник" title="Удалить источник"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>

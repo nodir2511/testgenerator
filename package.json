@@ -1,7 +1,7 @@
 {
   "name": "exam-ticket-generator",
   "private": true,
-  "version": "0.99.7",
+  "version": "0.99.8",
   "type": "module",
   "scripts": {
     "dev": "vite",

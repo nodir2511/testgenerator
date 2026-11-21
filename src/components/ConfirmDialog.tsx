@@ -61,7 +61,7 @@ export default function ConfirmDialog() {
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl p-5 sm:p-6 pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pb-6 animate-in fade-in slide-in-from-bottom-4 duration-150"
+        className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl p-5 sm:p-6 pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pb-6 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3">

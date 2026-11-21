@@ -254,7 +254,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
         }}
         onKeyDown={handleKeyDown}
         className={cn(
-          "relative inline-flex items-center justify-between gap-2 text-left cursor-pointer transition-all duration-150 select-none",
+          "relative inline-flex min-h-[40px] items-center justify-between gap-2 text-left cursor-pointer transition-all duration-150 select-none",
           isOpen && "ring-2 ring-indigo-500/20 border-indigo-500 bg-white shadow-xs",
           className
         )}
@@ -285,7 +285,6 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
             }}
             className={cn(
               "bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-2xl shadow-2xl shadow-indigo-950/15 ring-1 ring-slate-900/5 p-1.5 flex flex-col text-slate-800 transition-all",
-              "animate-in fade-in-0 zoom-in-95 duration-100",
               dropdownClassName
             )}
           >

@@ -39,7 +39,7 @@ export function Hint({ children, label = 'Пояснение' }: { children: Rea
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(); }}
         aria-label={label}
         aria-expanded={open}
-        className="inline-flex items-center justify-center w-6 h-6 rounded-full text-slate-500 hover:text-primary hover:bg-primary-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="relative inline-flex items-center justify-center w-6 h-6 rounded-full before:absolute before:-inset-2 before:content-[''] text-slate-500 hover:text-primary hover:bg-primary-soft focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <HelpCircle className="w-4 h-4" />
       </button>
@@ -47,7 +47,7 @@ export function Hint({ children, label = 'Пояснение' }: { children: Rea
         <span
           role="note"
           style={{ left: pos.left, top: pos.top, width: Math.min(288, window.innerWidth - 16) }}
-          className="fixed z-[90] rounded-xl bg-slate-900 text-white text-sm font-normal normal-case tracking-normal leading-relaxed p-3 shadow-xl"
+          className="fixed z-[90] rounded-xl bg-slate-900 border border-slate-700 text-white text-sm font-normal normal-case tracking-normal leading-relaxed p-3 shadow-xl"
         >
           {children}
         </span>

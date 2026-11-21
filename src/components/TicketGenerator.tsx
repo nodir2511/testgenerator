@@ -1469,7 +1469,7 @@ export const TicketGenerator: React.FC = () => {
               <button
                 onClick={() => handleGenerate()}
                 disabled={isGenerating || !!blockReason}
-                className={`relative overflow-hidden min-h-[52px] px-5 rounded-xl text-base font-bold flex ${generatedBatch && !isGenerating ? 'bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/25'} items-center justify-center gap-2 transition active:scale-[0.98] disabled:bg-slate-300 disabled:border-transparent disabled:text-slate-600 disabled:shadow-none shrink-0 max-w-[60%]`}
+                className={`relative overflow-hidden min-h-[52px] px-3 min-[360px]:px-5 shrink-0 max-w-[62%] rounded-xl text-base font-bold flex ${generatedBatch && !isGenerating ? 'bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/25'} items-center justify-center gap-2 transition active:scale-[0.98] disabled:bg-slate-300 disabled:border-transparent disabled:text-slate-600 disabled:shadow-none shrink-0 max-w-[60%]`}
               >
                 {isGenerating && (
                   <div

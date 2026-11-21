@@ -354,8 +354,8 @@ export const UserManagementView: React.FC = () => {
               <div key={p.id} className="bg-white">
               <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 xl:flex-col xl:items-start 2xl:flex-row 2xl:items-center">
                 <div>
-                  <div className="font-semibold text-slate-900 text-sm flex items-center space-x-2">
-                    <span>{p.full_name || p.email}</span>
+                  <div className="font-semibold text-slate-900 text-sm flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="min-w-0 break-words">{p.full_name || p.email}</span>
                     <Badge tone={p.role === 'admin' || p.role === 'subject_admin' ? 'warning' : 'neutral'} className="uppercase whitespace-nowrap font-bold">
                       {p.is_owner ? 'Главный админ' : ROLE_LABELS[p.role]}
                     </Badge>

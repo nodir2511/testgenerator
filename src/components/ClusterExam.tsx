@@ -472,7 +472,7 @@ export const ClusterExam: React.FC = () => {
         <h3 className="font-bold text-slate-900 text-sm">1. Параметры экзамена</h3>
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <Field label={<span className="inline-flex items-center gap-1">Код кластера <Hint label="Что такое код кластера">Короткий шифр экзаменационной книжки, например «А.5». Он печатается на обложке («Компонент А.5-Авг») и в колонтитулах вариантов.</Hint></span>}>
-            <input className={input} value={state.settings.code} onChange={(e) => setSetting('code', e.target.value)} placeholder="А.5" />
+            <input className={input} value={state.settings.code} onChange={(e) => setSetting('code', e.target.value)} placeholder="А.5" aria-label="Код кластера" />
           </Field>
           <Field label="Название экзамена">
             <input className={input} value={state.settings.exam} onChange={(e) => setSetting('exam', e.target.value)} placeholder="Авг" />
@@ -522,15 +522,17 @@ export const ClusterExam: React.FC = () => {
             const slot = CLUSTER_SUBJECTS[kind];
             const subjectId = state.subjectByKind[kind] ?? '';
             const counts = countsOf(state, kind);
-            const iconBtn = 'p-2 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white min-h-[40px] min-w-[40px] inline-flex items-center justify-center';
+            const iconBtn = 'p-2 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white min-h-[40px] min-w-[40px] shrink-0 inline-flex items-center justify-center';
             return (
             <div key={kind} className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end p-3 rounded-xl bg-slate-50 border border-slate-200">
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-slate-700 w-5 shrink-0">{i + 1}.</span>
-                  <CustomSelect className={input} value={kind} onChange={(val) => changeKind(i, val as ClusterKind)}>
-                    {CLUSTER_KINDS.filter((k) => k === kind || (!state.picks.includes(k) && !NO_BLOCKS_KINDS.includes(k))).map((k) => <option key={k} value={k}>{CLUSTER_SUBJECTS[k].name}</option>)}
-                  </CustomSelect>
+                  <div className="min-w-0 flex-1">
+                    <CustomSelect className={input} value={kind} onChange={(val) => changeKind(i, val as ClusterKind)}>
+                      {CLUSTER_KINDS.filter((k) => k === kind || (!state.picks.includes(k) && !NO_BLOCKS_KINDS.includes(k))).map((k) => <option key={k} value={k}>{CLUSTER_SUBJECTS[k].name}</option>)}
+                    </CustomSelect>
+                  </div>
                   <button type="button" className={iconBtn} disabled={i === 0} onClick={() => moveKind(i, -1)} aria-label={`Поднять «${slot.name}» выше`}><ArrowUp className="w-4 h-4" /></button>
                   <button type="button" className={iconBtn} disabled={i === state.picks.length - 1} onClick={() => moveKind(i, 1)} aria-label={`Опустить «${slot.name}» ниже`}><ArrowDown className="w-4 h-4" /></button>
                   <button type="button" className={iconBtn} disabled={state.picks.length <= CLUSTER_MIN_SUBJECTS} onClick={() => removeKind(i)} aria-label={`Убрать «${slot.name}» из книжки`}><X className="w-4 h-4" /></button>

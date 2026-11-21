@@ -1013,6 +1013,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
               accept=".docx, .xlsx, .xls, .csv, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
               onChange={handleFileUpload}
               disabled={isProcessing}
+              aria-label="Файл с вопросами: Word, Excel или CSV"
               className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
             />
             {isProcessing ? (

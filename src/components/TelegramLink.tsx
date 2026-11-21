@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send, X, Loader2, Copy, Check, ExternalLink } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import { useDialog } from '../hooks/useDialog';
 import { confirmAction } from '../lib/confirm';
 import { Button, IconButton } from './ui';
 
@@ -65,6 +66,8 @@ export const TelegramLink: React.FC = () => {
 
   useEffect(() => { if (!open) { setCode(null); setError(null); } }, [open]);
   // Код убираем, когда привязка только что состоялась; при «Привязать другой чат» (уже привязан) он нужен
+  const panel = useRef<HTMLDivElement>(null);
+  useDialog(panel, () => setOpen(false), open);
   const wasLinked = useRef(linked);
   useEffect(() => {
     if (linked && !wasLinked.current && code) setCode(null);
@@ -100,6 +103,8 @@ export const TelegramLink: React.FC = () => {
       {open && createPortal(
         <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 sm:p-4" onClick={() => setOpen(false)}>
           <div
+            ref={panel}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label="Telegram-бот"

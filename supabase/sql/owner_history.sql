@@ -1,3 +1,6 @@
+-- !!! Частично устарел: отдельные политики и функции этого файла позже ужесточены
+-- (security_round2–5.sql, owner_only_delete_batches.sql, cluster_batches.sql). Если применяете
+-- его повторно, сразу после него примените эти файлы заново — иначе права станут шире.
 -- Главный админ (владелец) и история создания билетов.
 -- Историю всех партий (кто и когда создал) видит только владелец; остальные, включая обычных админов,
 -- видят только свои партии. Признак is_owner нельзя выставить из приложения — только SQL/service role.
@@ -68,6 +71,6 @@ create policy "Просмотр вопросов в билетах" on public.ti
   ));
 
 -- Главные администраторы
-update public.profiles set is_owner = true where email = 'nodir.burhonow@gmail.com';
+update public.profiles set is_owner = true where email = '<почта главного администратора>'; -- подставьте адрес перед запуском
 
 select email, role, is_owner from public.profiles where is_owner order by email;

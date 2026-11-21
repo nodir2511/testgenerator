@@ -63,6 +63,9 @@
   input[type="search"],
   input[type="tel"],
   input[type="url"],
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"],
   select,
   textarea {
     font-size: 16px !important;
@@ -114,3 +117,13 @@ body {
 /* Полоска обратного отсчёта в уведомлении «Удалено · Отменить» */
 @keyframes toast-countdown { from { width: 100%; } to { width: 0%; } }
 .toast-countdown { animation-name: toast-countdown; animation-timing-function: linear; animation-fill-mode: forwards; }
+
+/* Пользователь просил уменьшить движение (настройка системы): анимации и плавные переходы отключаются */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

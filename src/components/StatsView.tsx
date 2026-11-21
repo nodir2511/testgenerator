@@ -329,7 +329,7 @@ export const StatsView: React.FC = () => {
         <TimeBars buckets={bucketDays(data.days, days)} unit={days <= 31 ? 'дням' : 'неделям'} />
       </Card>
 
-      <div className="grid lg:grid-cols-2 gap-4 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start [&>*]:min-w-0">
         {people && (
           <Card title="Люди">
             <dl className="grid grid-cols-2 gap-3">

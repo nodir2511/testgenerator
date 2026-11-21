@@ -40,7 +40,7 @@ export const GameHost: React.FC = () => {
         supabase.from('game_packs').select('content').eq('id', PACK_ID).maybeSingle(),
       ]);
       if (dead) return;
-      if (pe || !p) setError('Не найден пакет вопросов игры. Примените supabase/sql/game_pack_chemistry.sql.');
+      if (pe || !p) setError('Вопросы игры пока не загружены. Обратитесь к главному администратору.');
       else setPack((p.content as { rounds: GameRound[] }).rounds);
       setCode(data?.[0]?.code ?? null);
       setLooking(false);
