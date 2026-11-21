@@ -7,8 +7,11 @@ import JSZip from 'jszip';
 // Картинки и шаблоны читаются с диска, canvas подменён заглушкой (как в cluster.test.ts)
 const png1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 
+const realFetch = globalThis.fetch;
 beforeAll(() => {
-  (globalThis as any).fetch = async (url: string) => {
+  (globalThis as any).fetch = async (url: string, init?: any) => {
+    // blob: — картинки, вынутые из Word при разборе архива (как в браузере)
+    if (String(url).startsWith('blob:')) return realFetch(url, init);
     const file = path.join('public', url.replace(/^\//, ''));
     if (!fs.existsSync(file)) return { ok: false, arrayBuffer: async () => new ArrayBuffer(0) };
     const b = fs.readFileSync(file);
@@ -67,7 +70,7 @@ async function build(which: number[]) {
   const parsed: Array<Awaited<ReturnType<typeof parseSubjectArchive>> | null> = [];
   for (let i = 0; i < 4; i++) parsed.push(which.includes(i) ? await parseSubjectArchive(await archiveOf(SUBJECTS[i][0], SUBJECTS[i][1])) : null);
   const variants = [1, 2, 3, 4].map((n) => ({ number: n, subjects: parsed.map((p) => p?.variants.find((v) => v.number === n)!.snaps ?? null) }));
-  const file = await buildClusterZip({ code: 'А.5', exam: 'Авг', date: '27.09' }, variants, { keys: true, readyKeys: parsed.map((p) => p?.keyBytes ?? null) });
+  const file = await buildClusterZip({ code: 'А.5', exam: 'Авг', date: '27.09' }, variants, { keys: true, readyKeys: parsed.map((p) => (p ? p.keyBytes : null)) });
   const zip = await JSZip.loadAsync(await file.blob.arrayBuffer());
   return { zip, parsed, names: Object.keys(zip.files).filter((n) => !zip.files[n].dir) };
 }
@@ -105,6 +108,15 @@ describe('архив предмета → разбор', () => {
         expect(v.snaps.filter((s) => s.type === 'test').length).toBe(c.test);
         expect(v.snaps.filter((s) => s.type === 'matching').length).toBe(c.matching);
         expect(v.snaps.filter((s) => s.type === 'open').length).toBe(c.open);
+        // ответы прочитаны из ключа архива и совпадают с исходными
+        expect(v.noAnswer).toBe(0);
+        const { testAnswer, matchingAnswer, openAnswer } = await import('../src/lib/answerKey');
+        const src = ticket(v.number, c).questions.map((q) => q.question_snapshot);
+        v.snaps.forEach((s, i) => {
+          if (s.type === 'test') expect(testAnswer(s)).toBe(testAnswer(src[i]));
+          if (s.type === 'matching') expect(matchingAnswer(s)).toEqual(matchingAnswer(src[i]));
+          if (s.type === 'open') expect(openAnswer(s)).toBe(openAnswer(src[i]));
+        });
       }
     }
   }, 60000);
@@ -121,5 +133,105 @@ describe('архив предмета → разбор', () => {
     expect(names.filter((n) => n.startsWith('Русский/')).length).toBe(4);
     expect(names.filter((n) => n.startsWith('Тоҷикӣ/')).length).toBe(4);
     await checkKeys(zip, names, [1, 2]);
+  }, 120000);
+
+  it('предмет архива определяется сам; ключ собирается и по ответам из архива (для истории)', async () => {
+    const { parseSubjectArchive } = await import('../src/lib/clusterArchive');
+    const { buildClusterZip } = await import('../src/lib/clusterExport');
+    const kinds = ['taj', 'bio', 'chem', 'phys'];
+    const parsed = [];
+    for (let i = 0; i < 4; i++) {
+      const p = await parseSubjectArchive(await archiveOf(SUBJECTS[i][0], SUBJECTS[i][1]));
+      expect(p.kind).toBe(kinds[i]);
+      parsed.push(p);
+    }
+    // без готовых ключей (readyKeys не заданы) ключи строятся по ответам, прочитанным из архивов
+    const variants = [1, 2, 3, 4].map((n) => ({ number: n, subjects: parsed.map((p) => p.variants.find((v) => v.number === n)!.snaps) }));
+    const file = await buildClusterZip({ code: 'А.5', exam: 'Авг', date: '27.09' }, variants);
+    expect(file.missingAnswers).toBe(0);
+    expect(file.keyOverflow).toBe(0);
+  }, 120000);
+
+  it('формулы (индексы, дробь) и рисунки доходят до книжки', async () => {
+    const { buildTicketsFile } = await import('../src/lib/docxExport');
+    const { parseSubjectArchive } = await import('../src/lib/clusterArchive');
+    const { buildClusterZip } = await import('../src/lib/clusterExport');
+    const rich = (t: any) => ({
+      ...t,
+      content: 'Формула H<sub>2</sub>O, x<sup>2</sup> и a/b', content_ru: 'Формула H<sub>2</sub>O, x<sup>2</sup> и a/b', content_tg: 'Формула H<sub>2</sub>O, x<sup>2</sup> и a/b',
+      image_url: '/cluster-assets/grid.png',
+      options: t.options.map((o: any, i: number) => (i === 0 ? { ...o, image_url: '/cluster-assets/grid.png' } : o)),
+    });
+    const tickets = [1, 2].map((v) => {
+      const t = ticket(v, { test: 20, matching: 4, open: 2 });
+      t.questions[0] = { question_snapshot: rich(t.questions[0].question_snapshot) };
+      return t;
+    });
+    const blob = (await buildTicketsFile('Экзамен', tickets as any, 'Биология', 'both', [])).blob;
+    const parsed = await parseSubjectArchive(blob);
+    expect(parsed.keyBytes).toBeNull();
+    const q = parsed.variants[0].snaps[0];
+    expect(q.content_ru).toContain('H<sub>2</sub>O');
+    expect(q.content_ru).toContain('x<sup>2</sup>');
+    // дробь возвращается со скобками «(a)/(b)» и снова рисуется как дробь
+    expect(q.content_ru).toMatch(/\(?a\)?\/\(?b\)?/);
+    expect(q.image_url).toBeTruthy();
+    expect(q.options[0].image_url).toBeTruthy();
+    expect(q.options[1].image_url ?? null).toBeNull();
+
+    const variants = parsed.variants.map((v) => ({ number: v.number, subjects: [null, v.snaps, null, null] }));
+    const file = await buildClusterZip({ code: 'А.5', exam: 'Авг', date: '27.09' }, variants, { keys: false });
+    const zip = await JSZip.loadAsync(await file.blob.arrayBuffer());
+    for (const name of ['Русский/Вариант 1.docx', 'Тоҷикӣ/Варианти 1.docx']) {
+      const dz = await JSZip.loadAsync(await zip.file(name)!.async('uint8array'));
+      const xml = await dz.file('word/document.xml')!.async('string');
+      expect(xml).toContain('w:val="subscript"'); // нижний индекс (H₂O)
+      expect(xml).toContain('w:val="superscript"'); // верхний (x²)
+      expect(xml).toContain('<m:f>'); // дробь
+      // рисунок вопроса и рисунок варианта ответа: два изображения сверх обложки
+      const media = Object.keys(dz.files).filter((n) => n.startsWith('word/media/'));
+      expect(media.length).toBeGreaterThan(0);
+      expect((xml.match(/<w:drawing>/g) || []).length).toBeGreaterThanOrEqual(2);
+    }
+  }, 120000);
+});
+
+describe('нестандартные имена файлов в архиве', () => {
+  it('узнаёт варианты и ключ по номеру и папке; книжки получают стандартные имена', async () => {
+    const { parseSubjectArchive } = await import('../src/lib/clusterArchive');
+    const { buildClusterZip } = await import('../src/lib/clusterExport');
+    const std = await JSZip.loadAsync(await (await archiveOf('Биология', { test: 20, matching: 4, open: 2 })).arrayBuffer());
+    // те же файлы под другими именами и папками
+    const odd = new JSZip();
+    for (const v of [1, 2, 3, 4]) {
+      odd.file(`РУС/вариант_${v}.docx`, await std.file(`Русский/Вариант ${v}.docx`)!.async('uint8array'));
+      odd.file(`TJ/Вар ${v} тадж.docx`, await std.file(`Тоҷикӣ/Варианти ${v}.docx`)!.async('uint8array'));
+    }
+    const keyName = Object.keys(std.files).find((n) => n.startsWith('Ключи'))!;
+    odd.file(`ключи/${keyName}`, await std.file(keyName)!.async('uint8array'));
+    const parsed = await parseSubjectArchive(new File([await odd.generateAsync({ type: 'uint8array' })], 'моё.zip'));
+    expect(parsed.variants.map((v) => v.number)).toEqual([1, 2, 3, 4]);
+    expect(parsed.keyBytes).not.toBeNull();
+    expect(parsed.kind).toBe('bio');
+    expect(parsed.warnings.some((w) => w.includes('не по стандарту'))).toBe(true);
+    const variants = parsed.variants.map((v) => ({ number: v.number, subjects: [null, v.snaps, null, null] }));
+    const file = await buildClusterZip({ code: 'А.5', exam: 'Авг', date: '27.09' }, variants, { keys: true, readyKeys: [null, parsed.keyBytes, null, null] });
+    const names = Object.keys((await JSZip.loadAsync(await file.blob.arrayBuffer())).files).filter((n) => /\.docx$/.test(n));
+    expect(names).toContain('Русский/Вариант 3.docx');
+    expect(names).toContain('Тоҷикӣ/Варианти 3.docx');
+  }, 120000);
+});
+
+describe('таджикский архив без папки «Русский»', () => {
+  it('читается: русская книжка получает тот же таджикский текст', async () => {
+    const { parseSubjectArchive } = await import('../src/lib/clusterArchive');
+    const std = await JSZip.loadAsync(await (await archiveOf('Таджикский язык', { test: 20, matching: 4, open: 2 })).arrayBuffer());
+    const only = new JSZip();
+    for (const n of Object.keys(std.files)) if (!std.files[n].dir && !n.startsWith('Русский/')) only.file(n, await std.files[n].async('uint8array'));
+    const parsed = await parseSubjectArchive(new File([await only.generateAsync({ type: 'uint8array' })], 'Имтиҳон №1..zip'));
+    expect(parsed.variants.map((v) => v.number)).toEqual([1, 2, 3, 4]);
+    expect(parsed.kind).toBe('taj');
+    expect(parsed.keyBytes).not.toBeNull();
+    expect(parsed.warnings.some((w) => w.includes('только таджикские'))).toBe(true);
   }, 120000);
 });

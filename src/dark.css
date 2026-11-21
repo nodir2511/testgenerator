@@ -64,6 +64,7 @@
 .dark .disabled\:text-slate-500:disabled{color:#94a3b8}
 .dark .disabled\:text-slate-600:disabled{color:#aab7c9}
 .dark .divide-slate-100>:not([hidden])~:not([hidden]){border-color:#1e293b}
+.dark .divide-slate-200>:not([hidden])~:not([hidden]){border-color:#334155}
 .dark .focus\:bg-white:focus{background-color:#0f172a}
 .dark .from-slate-300{--tw-gradient-from:#475569 var(--tw-gradient-from-position);--tw-gradient-to:transparent var(--tw-gradient-to-position);--tw-gradient-stops:var(--tw-gradient-from),var(--tw-gradient-to)}
 .dark .from-slate-50{--tw-gradient-from:#0b1324 var(--tw-gradient-from-position);--tw-gradient-to:transparent var(--tw-gradient-to-position);--tw-gradient-stops:var(--tw-gradient-from),var(--tw-gradient-to)}
@@ -84,6 +85,7 @@
 .dark .hover\:bg-white:hover{background-color:#0f172a}
 .dark .hover\:bg-white\/20:hover{background-color:rgb(15 23 42 / 0.2)}
 .dark .hover\:border-indigo-200:hover{border-color:rgb(99 102 241 / 0.35)}
+.dark .hover\:border-indigo-300:hover{border-color:rgb(99 102 241 / 0.35)}
 .dark .hover\:border-slate-300:hover{border-color:#475569}
 .dark .hover\:text-amber-950:hover{color:#fcd34d}
 .dark .hover\:text-indigo-600:hover{color:#a5b4fc}
@@ -100,6 +102,7 @@
 .dark .placeholder\:text-slate-400::placeholder{color:#64748b}
 .dark .placeholder\:text-slate-500::placeholder{color:#94a3b8}
 .dark .ring-emerald-200\/60{--tw-ring-color:rgb(16 185 129 / 0.35)}
+.dark .ring-indigo-200{--tw-ring-color:rgb(99 102 241 / 0.35)}
 .dark .text-amber-600{color:#fcd34d}
 .dark .text-amber-700{color:#fcd34d}
 .dark .text-amber-800{color:#fcd34d}

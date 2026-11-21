@@ -103,20 +103,27 @@ function layoutOf(texts: string[][]): Layout {
   const tests: Slot[] = [];
   const matching: Array<{ n: number; rows: number[]; col: number }> = [];
   const open: Array<{ n: number; r: number; cols: number[] }> = [];
+  // Клетки ответов соответствий: в заполненном ключе в них цифры, и это не номера заданий
+  const answerCells = new Set<string>();
   texts.forEach((row, r) => {
     if (/^\d+$/.test(row[0] ?? '')) tests.push({ r, c: 1 });
     for (let c = 2; c < row.length - 1; c++) {
-      if (!/^\d+$/.test(row[c] ?? '')) continue;
-      if (row[c + 1] === 'A') {
-        const rows: number[] = [];
-        for (let i = 0; texts[r + i] && LETTERS.includes(texts[r + i][c + 1] ?? '#') && texts[r + i][c + 1] === LETTERS[i]; i++) rows.push(r + i);
-        matching.push({ n: +row[c], rows, col: c + 2 });
-      } else {
-        // клетки ответа — до конца строки: 4 у большинства шаблонов, 5 у taj-cluster (таджикский и английский)
-        const cols: number[] = [];
-        for (let k = c + 1; k < row.length && k <= c + 5; k++) cols.push(k);
-        open.push({ n: +row[c], r, cols });
-      }
+      if (!/^\d+$/.test(row[c] ?? '') || row[c + 1] !== 'A') continue;
+      const rows: number[] = [];
+      for (let i = 0; texts[r + i] && LETTERS.includes(texts[r + i][c + 1] ?? '#') && texts[r + i][c + 1] === LETTERS[i]; i++) rows.push(r + i);
+      matching.push({ n: +row[c], rows, col: c + 2 });
+      rows.forEach((rr) => answerCells.add(`${rr}:${c + 2}`));
+    }
+  });
+  texts.forEach((row, r) => {
+    for (let c = 2; c < row.length - 1; c++) {
+      if (!/^\d+$/.test(row[c] ?? '') || row[c + 1] === 'A' || answerCells.has(`${r}:${c}`)) continue;
+      // клетки ответа — до конца строки: 4 у большинства шаблонов, 5 у taj-cluster (таджикский и английский)
+      const cols: number[] = [];
+      for (let k = c + 1; k < row.length && k <= c + 5; k++) cols.push(k);
+      open.push({ n: +row[c], r, cols });
+      // дальше в строке — клетки ответа (в заполненном ключе в них цифры), а не новые задания
+      break;
     }
   });
   matching.sort((a, b) => a.n - b.n);
@@ -149,6 +156,48 @@ export function openAnswer(snap: any): string | null {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
   return (Number.isFinite(n) ? String(n) : String(v)).replace('.', ',');
+}
+
+/** Ответы, прочитанные из готового ключа одного варианта: по видам, в порядке заданий ('' — клетка пуста или с «?») */
+export interface KeyAnswers { variant: number | null; test: string[]; matching: string[]; open: string[] }
+
+const BLANK = (s: string) => (s === '?' ? '' : s);
+
+/**
+ * Обратное к fillTable: читает ответы из ключа, собранного по шаблону (таблицы «№ — ответ»; соответствия — цифры против A–D;
+ * открытые — по символу в клетке) или из универсальной таблицы «№ — Тип — Ответ». По таблице на вариант, в порядке документа.
+ */
+export function readKeyAnswers(docXml: string): KeyAnswers[] {
+  const out: KeyAnswers[] = [];
+  const tblRe = /<w:tbl>[\s\S]*?<\/w:tbl>/g;
+  const rowRe = /<w:tr[ >][\s\S]*?<\/w:tr>/g;
+  const cellRe = /<w:tc>[\s\S]*?<\/w:tc>/g;
+  let prevEnd = 0;
+  let m: RegExpExecArray | null;
+  while ((m = tblRe.exec(docXml))) {
+    const before = unesc(docXml.slice(prevEnd, m.index).replace(/<\/w:p>/g, ' ').replace(/<[^>]+>/g, ''));
+    prevEnd = m.index + m[0].length;
+    // Номер варианта: «Вариант(и) N» (шаблон) или «Ключи – Вариант N» (универсальный ключ)
+    const vm = [...before.matchAll(/Вариант(?:\(и\))?\s*(\d+)/g)].pop();
+    const variant = vm ? Number(vm[1]) : null;
+    const texts = (m[0].match(rowRe) || []).map((r) => (r.match(cellRe) || []).map(cellText));
+    const res: KeyAnswers = { variant, test: [], matching: [], open: [] };
+    if (texts[0]?.[1] === 'Тип' && texts[0]?.[2] === 'Ответ') {
+      for (const row of texts.slice(1)) {
+        const [, type, ans = ''] = row;
+        if (type === TYPE_LABEL.test) res.test.push(BLANK(ans));
+        else if (type === TYPE_LABEL.open) res.open.push(BLANK(ans));
+        else if (type === TYPE_LABEL.matching) res.matching.push(ans.replace(/[A-E]\s*[–-]\s*/g, '').replace(/\s+/g, '').replace(/\?/g, '·'));
+      }
+    } else {
+      const lay = layoutOf(texts);
+      for (const s of lay.tests) res.test.push(BLANK(texts[s.r]?.[s.c] ?? ''));
+      for (const b of lay.matching) res.matching.push(b.rows.map((r) => BLANK(texts[r]?.[b.col] ?? '') || '·').join(''));
+      for (const b of lay.open) res.open.push(BLANK(b.cols.map((c) => texts[b.r]?.[c] ?? '').join('')));
+    }
+    out.push(res);
+  }
+  return out;
 }
 
 function fillTable(tbl: string, tests: any[], matching: any[], open: any[], stats: KeyStats): string {

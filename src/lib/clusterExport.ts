@@ -468,7 +468,7 @@ export interface ClusterFile { blob: Blob; fileName: string; missingAnswers: num
  *  keys: false — только книжки, без ключей (книжка из готовых билетов) */
 export async function buildClusterZip(settings: ClusterSettings, variants: ClusterVariant[], opts: {
   keys?: boolean;
-  /** Готовые ключи из архивов предметов (по местам предметов в книжке): берутся как есть, меняется только шапка. null — собрать ключ по ответам */
+  /** Готовые ключи из архивов предметов (по местам предметов в книжке): берутся как есть, меняется только шапка. null — ключа нет, пропустить; undefined — собрать по ответам вопросов */
   readyKeys?: Array<Uint8Array | null | undefined>;
 } = {}): Promise<ClusterFile> {
   const withKeys = opts.keys !== false;
@@ -486,9 +486,9 @@ export async function buildClusterZip(settings: ClusterSettings, variants: Clust
   const keys = Promise.all(kinds.map((kind, s) => {
     const slot = CLUSTER_SUBJECTS[kind];
     if (!withKeys || variants.some((v) => v.subjects[s] == null)) return null;
-    // Режим готовых ключей: нет файла у предмета — ключа по нему нет (по снимкам без ответов он вышел бы пустым)
+    // Готовый ключ: bytes — берём файл с новой шапкой; null — у предмета ключа нет, пропускаем; undefined — собираем по ответам вопросов
     const ready = opts.readyKeys?.[s];
-    if (opts.readyKeys && !ready) return null;
+    if (ready === null) return null;
     if (ready) {
       const title = `${settings.code}-${settings.exam} – ${slot.name}`;
       return retitleKeyDocx(ready, title, `к субтесту по ${slot.dative} – ${settings.code}`).then((bytes) => ({

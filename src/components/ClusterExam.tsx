@@ -19,6 +19,7 @@ import { Layers, Loader2, Download, ChevronDown, ChevronRight, CheckCircle2, Arr
 import { CustomSelect } from './CustomSelect';
 import { Button, Card, Field, Hint, PageHeader } from './ui';
 import { ClusterFromTickets } from './ClusterFromTickets';
+import { ClusterHistory } from './ClusterHistory';
 
 // Экзамен-кластер: книжка из 2–4 предметов по образцу; предметы и их порядок выбирает пользователь (только главный админ).
 // Параметры экзамена (код кластера, название, дата) вносятся заранее и запоминаются в браузере.
@@ -410,6 +411,7 @@ export const ClusterExam: React.FC = () => {
       setProgress('Сохранение в архив…');
       await saveClusterBatch({ settings, variants, subjectIds });
       queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
+      queryClient.invalidateQueries({ queryKey: ['cluster_history'] });
       const saved = true;
 
       setProgress('Сборка Word-файлов и ключей…');
@@ -586,6 +588,8 @@ export const ClusterExam: React.FC = () => {
         </div>
       )}
       </>}
+
+      <ClusterHistory />
     </div>
   );
 };

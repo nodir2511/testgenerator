@@ -2,6 +2,8 @@ import { supabase } from './supabase';
 import { fetchAllPages } from './fetchAllPages';
 import { CLUSTER_SUBJECTS, LEGACY_KINDS, type ClusterKind, type ClusterSettings } from './clusterSlots';
 import type { ClusterVariant } from './clusterExport';
+import type { ParsedArchive } from './clusterArchive';
+import { hasAnswer, orderByType } from './clusterTickets';
 
 // Хранение экзамена-кластера в «Сохранённых билетах»: обычная партия (ticket_batches) с пометкой
 // generation_params.source = 'cluster'. Вариант = билет; вопросы лежат снимками с полем cluster_slot
@@ -94,4 +96,56 @@ export async function loadUsedQuestionIds(): Promise<Set<string>> {
     (r.data || []).forEach((row: any) => { if (row.question_id) used.add(row.question_id); });
   }
   return used;
+}
+
+/** Все билеты набора из «Архива билетов» как варианты предмета для книжки кластера (вопросы — снимки из базы, с ответами) */
+export async function loadBatchVariants(batchId: string, title: string): Promise<ParsedArchive> {
+  const { data, error } = await supabase
+    .from('tickets')
+    .select('ticket_number, questions:ticket_questions(order_index, question_snapshot)')
+    .eq('batch_id', batchId)
+    .order('ticket_number');
+  if (error) throw error;
+  const variants = (data || []).map((t: any) => {
+    const qs = [...(t.questions || [])].sort((a: any, b: any) => a.order_index - b.order_index);
+    const snaps = orderByType(qs.map((q: any) => q.question_snapshot).filter((s: any) => s && !s.empty));
+    return { number: t.ticket_number as number, snaps, skipped: [] as string[], noAnswer: snaps.filter((s) => !hasAnswer(s)).length };
+  }).filter((v) => v.snaps.length > 0);
+  if (!variants.length) throw new Error('В наборе нет билетов с вопросами');
+  return { variants, warnings: [], keyBytes: null, source: 'db', kind: null };
+}
+
+/**
+ * Рисунки заданий из Word (временные ссылки blob:) загружаются в хранилище, а ссылки в снимках заменяются на постоянные:
+ * иначе сохранённая книжка потеряла бы картинки. Одна и та же картинка грузится один раз. Меняет снимки на месте.
+ */
+export async function uploadFileImages(variants: ClusterVariant[]): Promise<number> {
+  const done = new Map<string, Promise<string>>();
+  const swap = (url: unknown): Promise<string> | null => {
+    if (typeof url !== 'string' || !url.startsWith('blob:')) return null;
+    if (!done.has(url)) {
+      done.set(url, (async () => {
+        const blob = await (await fetch(url)).blob();
+        const { uploadQuestionImage } = await import('./imageCompression');
+        return uploadQuestionImage(new File([blob], 'image', { type: blob.type || 'image/png' }));
+      })());
+    }
+    return done.get(url)!;
+  };
+  const jobs: Promise<void>[] = [];
+  const visit = (holder: any) => {
+    const p = swap(holder?.image_url);
+    if (p) jobs.push(p.then((u) => { holder.image_url = u; }));
+  };
+  for (const v of variants) {
+    for (const snaps of v.subjects) {
+      for (const q of snaps || []) {
+        visit(q);
+        (q.options || []).forEach(visit);
+        (q.matching_items || []).forEach(visit);
+      }
+    }
+  }
+  await Promise.all(jobs);
+  return done.size;
 }

@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { TicketPreviewPanel } from './TicketPreview';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
 import { notifyError, notifyInfo } from '../lib/errors';
@@ -257,6 +258,8 @@ export const BatchVariants: React.FC<{
   const canEdit = useCanEdit(batch);
   const ed = useBatchEdit(batch, enabled, onChanged);
   const [swap, setSwap] = useState<Slot | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const closePreview = useCallback(() => setPreviewId(null), []);
   // места, входящие в текст (английский): у них кнопка «Заменить текст» вместо «Заменить вопрос»
   const textSlotIds = useMemo(() => {
     const ids = new Set<string>();
@@ -271,10 +274,19 @@ export const BatchVariants: React.FC<{
     <>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3">
         {ed.data.tickets.map((t) => (
-          <div key={t.id} className="p-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 space-y-2">
+          <div
+            key={t.id}
+            role="button"
+            tabIndex={0}
+            aria-label={`Открыть предпросмотр: вариант ${t.ticket_number}`}
+            aria-pressed={previewId === t.id}
+            onClick={() => setPreviewId(t.id)}
+            onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setPreviewId(t.id); } }}
+            className={`p-3 rounded-2xl border bg-slate-50/70 space-y-2 cursor-pointer transition hover:border-indigo-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${previewId === t.id ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-slate-200/80'}`}
+          >
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
               <span className="font-bold text-sm text-slate-900 min-w-0">Вариант {t.ticket_number} <span className="font-normal text-slate-600">· {t.questions.length} вопр.</span></span>
-              {renderActions?.(t)}
+              <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>{renderActions?.(t)}</div>
             </div>
             <div className="space-y-1 text-sm text-slate-700 max-h-60 overflow-y-auto pr-1">
               {t.questions.map((tq, i) => {
@@ -287,7 +299,7 @@ export const BatchVariants: React.FC<{
                       {empty ? <b>Пустое место — нужен вопрос ({TYPE_LABEL[snap.type as keyof typeof TYPE_LABEL] ?? snap.type})</b> : plain(snap?.content ?? '')}
                     </div>
                     {canEdit && <button
-                      onClick={() => setSwap(slotOf.get(tq.id) ?? null)}
+                      onClick={(e) => { e.stopPropagation(); setSwap(slotOf.get(tq.id) ?? null); }}
                       className="w-9 h-9 shrink-0 rounded-lg text-indigo-700 hover:bg-indigo-50 flex items-center justify-center"
                       aria-label={textSlotIds.has(tq.id) ? `Заменить текст (вопрос ${i + 1} варианта ${t.ticket_number})` : `Заменить вопрос ${i + 1} варианта ${t.ticket_number}`}
                       title={textSlotIds.has(tq.id) ? 'Заменить текст' : 'Заменить вопрос'}
@@ -304,6 +316,7 @@ export const BatchVariants: React.FC<{
       {swap && (textSlotIds.has(swap.tqId)
         ? <ReplaceTextModal batch={batch} ed={ed} slot={swap} onClose={() => setSwap(null)} />
         : <ReplaceModal batch={batch} ed={ed} slot={swap} onClose={() => setSwap(null)} />)}
+      {previewId && <TicketPreviewPanel tickets={ed.data.tickets} ticketId={previewId} title={batch.title} onSelect={setPreviewId} onClose={closePreview} />}
     </>
   );
 };

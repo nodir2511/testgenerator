@@ -23,6 +23,7 @@ import {
 import { Badge, Button, Card, EmptyState, PageHeader, Skeleton } from './ui';
 import { BatchTopicsBar, BatchVariants } from './BatchEditor';
 import { CustomSelect } from './CustomSelect';
+import { TicketPreviewPanel } from './TicketPreview';
 
 // Преподаватели, у которых есть наборы (только для главного админа: чужие наборы видит только он)
 interface Teacher { id: string; name: string; count: number }
@@ -351,6 +352,8 @@ const BatchCard: React.FC<{
   const subjName = batch.subject?.name || '';
   const wholeSubject = !(p.chapter_ids?.length || p.topic_ids?.length);
   const [showAllChips, setShowAllChips] = useState(false);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const closePreview = React.useCallback(() => setPreviewId(null), []);
 
   // Грузим напрямую: через loadTickets (fetchQuery с тем же ключом) запрос ждал бы сам себя и крутился бесконечно
   const tickets = useQuery({
@@ -496,7 +499,16 @@ const BatchCard: React.FC<{
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3">
               {(tickets.data || []).map((t: any) => (
-                <div key={t.id} className="p-3 bg-white rounded-xl border border-slate-200 space-y-2">
+                <div
+                  key={t.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Открыть предпросмотр: вариант ${t.ticket_number}`}
+                  aria-pressed={previewId === t.id}
+                  onClick={() => setPreviewId(t.id)}
+                  onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setPreviewId(t.id); } }}
+                  className={`p-3 bg-white rounded-xl border space-y-2 cursor-pointer transition hover:border-indigo-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${previewId === t.id ? 'border-indigo-500 ring-2 ring-indigo-200' : 'border-slate-200'}`}
+                >
                   <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
                     <span className="font-bold text-sm text-slate-900 min-w-0">Вариант {t.ticket_number} <span className="font-normal text-slate-600">· {t.questions?.length} вопр.</span></span>
                     {!cluster && (
@@ -527,6 +539,9 @@ const BatchCard: React.FC<{
             </div>
           )}
         </div>
+      )}
+      {cluster && expanded && previewId && tickets.data && (
+        <TicketPreviewPanel tickets={tickets.data} ticketId={previewId} title={batch.title} onSelect={setPreviewId} onClose={closePreview} />
       )}
     </Card>
   );

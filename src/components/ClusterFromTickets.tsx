@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { saveAs } from 'file-saver';
 import { CheckCircle2, Download, FileText, Archive, Loader2, AlertTriangle, Upload } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { describeError } from '../lib/errors';
-import { isClusterBatch } from '../lib/clusterStore';
-import { CLUSTER_SLOTS, buildClusterZip, type ClusterSettings } from '../lib/clusterExport';
+import { describeError, notifyError } from '../lib/errors';
+import { isClusterBatch, loadBatchVariants, saveClusterBatch, uploadFileImages } from '../lib/clusterStore';
+import { keyKindOf } from '../lib/answerKey';
+import { CLUSTER_SLOTS, buildClusterZip, type ClusterSettings, type ClusterVariant } from '../lib/clusterExport';
 import { checkSlot, orderByType, snapshotFromPaired, type Snap } from '../lib/clusterTickets';
 import type { ParsedArchive } from '../lib/clusterArchive';
 import { CustomSelect } from './CustomSelect';
@@ -51,6 +52,8 @@ interface Slot {
   mode: Mode;
   batchId: string;
   ticketNumber: number;
+  /** Режим «Из архива»: взять все билеты набора (а не один) — получится по книжке на каждый билет */
+  allTickets: boolean;
   ruFile: File | null;
   tgFile: File | null;
   /** ZIP архива предмета из обычного генератора (папки «Русский» и «Тоҷикӣ», ключи) */
@@ -73,7 +76,7 @@ const PRESETS: Array<{ label: string; kinds: string[] }> = [
   { label: 'Химия + биология (ХБ)', kinds: ['bio', 'chem'] },
 ];
 
-const emptySlot = (): Slot => ({ mode: 'archive', batchId: '', ticketNumber: 1, ruFile: null, tgFile: null, zipFile: null, archive: null, snaps: null, label: '', skipped: [], loading: false, error: null });
+const emptySlot = (): Slot => ({ mode: 'archive', batchId: '', ticketNumber: 1, allTickets: false, ruFile: null, tgFile: null, zipFile: null, archive: null, snaps: null, label: '', skipped: [], loading: false, error: null });
 
 // Наборы предмета из архива (без экзаменов-кластеров), новые сверху
 function useBatches(subjectId: string) {
@@ -144,6 +147,11 @@ const SlotCard: React.FC<{
     try {
       if (slot.mode === 'archive') {
         if (!slot.batchId) throw new Error('Выберите набор из архива');
+        if (slot.allTickets) {
+          const archive = await loadBatchVariants(slot.batchId, batch?.title ?? 'Набор');
+          onChange({ archive, snaps: null, skipped: [], label: `${batch?.title ?? 'Набор'} · все билеты`, loading: false });
+          return;
+        }
         const snaps = orderByType(await loadArchiveTicket(slot.batchId, slot.ticketNumber));
         if (!snaps.length) throw new Error('В билете нет вопросов');
         onChange({ snaps, skipped: [], label: `${batch?.title ?? 'Набор'} · билет №${slot.ticketNumber}`, loading: false });
@@ -201,14 +209,24 @@ const SlotCard: React.FC<{
           </Field>
           <Field label="Билет №">
             <input
-              type="number" min={1} max={batch?.count ?? 99}
-              className="w-20 text-sm px-2 py-2 border border-slate-300 rounded-lg text-center"
+              type="number" min={1} max={batch?.count ?? 99} disabled={slot.allTickets}
+              className="w-20 text-sm px-2 py-2 border border-slate-300 rounded-lg text-center disabled:opacity-50"
               value={slot.ticketNumber}
               onChange={(e) => onChange({ ticketNumber: Math.max(1, Math.min(batch?.count ?? 99, Number(e.target.value) || 1)), snaps: null })}
             />
           </Field>
-          <Button variant="primary" size="sm" loading={slot.loading} disabled={!slot.batchId} onClick={load}>Взять билет</Button>
+          <Button variant="primary" size="sm" loading={slot.loading} disabled={!slot.batchId} onClick={load}>{slot.allTickets ? 'Взять все билеты' : 'Взять билет'}</Button>
         </div>
+      )}
+      {slot.mode === 'archive' && (
+        <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer select-none">
+          <input
+            type="checkbox" className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+            checked={slot.allTickets}
+            onChange={(e) => onChange({ allTickets: e.target.checked, snaps: null, archive: null, error: null })}
+          />
+          <span>Все билеты набора: билет N станет книжкой N (для нескольких билетов — несколько книжек, с ключами по ответам из базы)</span>
+        </label>
       )}
 
       {slot.mode === 'zip' && (
@@ -219,11 +237,16 @@ const SlotCard: React.FC<{
           <Button variant="primary" size="sm" loading={slot.loading} disabled={!slot.zipFile} onClick={load}>Разобрать</Button>
         </div>
       )}
-      {slot.mode === 'zip' && slot.archive && (
+      {slot.archive && (
         <div className="space-y-2">
           <p className="text-xs text-slate-700">
             <strong>{slot.label}</strong>: вариантов {slot.archive.variants.length} ({slot.archive.variants.map((v) => v.number).join(', ')}); в варианте тестов {slot.archive.variants[0].snaps.filter((q) => q.type === 'test').length}, соответствий {slot.archive.variants[0].snaps.filter((q) => q.type === 'matching').length}, открытых {slot.archive.variants[0].snaps.filter((q) => q.type === 'open').length}
           </p>
+          {slot.archive.variants.some((v) => v.noAnswer > 0) && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">
+              Без ответа: {slot.archive.variants.filter((v) => v.noAnswer > 0).map((v) => `вариант ${v.number} — ${v.noAnswer}`).join('; ')}. {slot.archive.source === 'zip' ? 'В ключе из архива эти клетки пустые, а в сохранённой книжке ключ по ним будет с красными клетками.' : 'В ключах эти клетки будут красными.'}
+            </p>
+          )}
           {slot.archive.warnings.map((w, i) => (
             <p key={i} className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 flex items-start gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" /><span>{w}</span>
@@ -278,12 +301,42 @@ const SlotCard: React.FC<{
   );
 };
 
+/** Сразу несколько архивов: перетащить или выбрать, предмет каждого сайт определяет сам */
+const BulkZipDrop: React.FC<{ onFiles: (files: File[]) => void; busy: boolean; notes: string[] }> = ({ onFiles, busy, notes }) => {
+  const [over, setOver] = useState(false);
+  const take = (list: FileList | null | undefined) => {
+    const files = Array.from(list || []).filter((f) => f.name.toLowerCase().endsWith('.zip'));
+    if (files.length) onFiles(files);
+  };
+  return (
+    <div className="space-y-2">
+      <label
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files); }}
+        className={`flex flex-col items-center justify-center gap-1 min-h-[84px] px-3 py-3 rounded-xl border-2 border-dashed text-center cursor-pointer transition ${over ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300 bg-white hover:border-indigo-400'}`}
+      >
+        <input type="file" accept=".zip" multiple className="sr-only" disabled={busy} onChange={(e) => { take(e.target.files); e.target.value = ''; }} />
+        {busy ? <Loader2 className="w-5 h-5 animate-spin text-slate-500" /> : <Upload className="w-5 h-5 text-slate-500" />}
+        <span className="text-sm font-semibold text-slate-800">{busy ? 'Разбор архивов…' : 'Все архивы сразу: перетащите несколько ZIP или нажмите, чтобы выбрать'}</span>
+        <span className="text-xs text-slate-600">Предмет каждого архива определится сам (по ключам). Можно и по одному — в карточках ниже.</span>
+      </label>
+      {notes.length > 0 && (
+        <ul className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2 space-y-0.5">
+          {notes.map((n, i) => <li key={i}>{n}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+};
+
 export const ClusterFromTickets: React.FC<{
   settings: ClusterSettings;
   subjects: Array<{ id: string; name: string }>;
   subjectIds: string[];
   onSubject: (index: number, id: string) => void;
 }> = ({ settings, subjects, subjectIds, onSubject }) => {
+  const queryClient = useQueryClient();
   const [slots, setSlots] = useState<Slot[]>(() => CLUSTER_SLOTS.map(emptySlot));
   const [variantNo, setVariantNo] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -306,8 +359,41 @@ export const ClusterFromTickets: React.FC<{
     }));
   };
 
+  // Несколько архивов сразу: предмет каждого определяется по ключу или имени; не определился — грузится в карточке отдельно
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkNotes, setBulkNotes] = useState<string[]>([]);
+  const loadMany = async (files: File[]) => {
+    setBulkBusy(true);
+    setBulkNotes([]);
+    setResult(null);
+    const notes: string[] = [];
+    const taken = new Set<number>();
+    try {
+      const { parseSubjectArchive } = await import('../lib/clusterArchive');
+      for (const f of files) {
+        try {
+          const archive = await parseSubjectArchive(f);
+          const i = archive.kind ? CLUSTER_SLOTS.findIndex((d) => d.kind === archive.kind) : -1;
+          if (i < 0) { notes.push(`«${f.name}»: предмет не определён (нет строки «к субтесту по …» в ключе и названия предмета в имени). Загрузите его в нужной карточке ниже.`); continue; }
+          if (taken.has(i)) { notes.push(`«${f.name}»: тоже определён как «${CLUSTER_SLOTS[i].name}» — уже загружен другой архив. Загрузите этот в нужной карточке отдельно.`); continue; }
+          taken.add(i);
+          setSlots((all) => all.map((sl, j) => (j === i ? { ...sl, mode: 'zip', zipFile: f, archive, snaps: null, skipped: [], label: f.name, loading: false, error: null } : sl)));
+          notes.push(`«${f.name}» → ${CLUSTER_SLOTS[i].name}: вариантов ${archive.variants.length}`);
+        } catch (e) {
+          notes.push(`«${f.name}»: ${describeError(e, 'не удалось разобрать')}`);
+        }
+      }
+      // Предметы, которых не оказалось среди загруженных, выключаются, если архивами заполнено больше одного
+      if (taken.size > 0) setSlots((all) => all.map((sl, j) => (taken.has(j) || sl.mode === 'off' || sl.archive ? sl : { ...sl, mode: 'off' })));
+    } finally {
+      setBulkNotes(notes);
+      setBulkBusy(false);
+    }
+  };
+
   const active = slots.map((s, i) => ({ s, i })).filter(({ s }) => s.mode !== 'off');
-  const ready = active.length > 0 && active.every(({ s }) => (s.mode === 'zip' ? s.archive : s.snaps && s.snaps.length > 0));
+  const multi = active.filter(({ s }) => s.archive);
+  const ready = active.length > 0 && active.every(({ s }) => s.archive || (s.snaps && s.snaps.length > 0));
 
   const build = async () => {
     setError(null);
@@ -317,27 +403,42 @@ export const ClusterFromTickets: React.FC<{
       if (!settings.exam.trim()) throw new Error('Укажите название экзамена (например, Авг)');
       if (!settings.date.trim()) throw new Error('Выберите дату экзамена в календаре');
       if (!active.length) throw new Error('Включите хотя бы один предмет');
-      const notLoaded = active.find(({ s }) => (s.mode === 'zip' ? !s.archive : !s.snaps));
+      const notLoaded = active.find(({ s }) => !s.archive && !s.snaps);
       if (notLoaded) throw new Error(`Предмет «${CLUSTER_SLOTS[notLoaded.i].name}»: сначала возьмите билет (кнопка «Взять билет» или «Разобрать»)`);
-      const zips = active.filter(({ s }) => s.mode === 'zip');
-      if (zips.length && zips.length !== active.length) throw new Error('Архивы ZIP нельзя смешивать с одиночными билетами: у всех включённых предметов выберите «Архив ZIP» или ни у одного');
+      if (multi.length && multi.length !== active.length) throw new Error('Архивы и «все билеты набора» нельзя смешивать с одиночными билетами: у всех включённых предметов выберите архив или набор целиком, либо ни у одного');
       setBusy(true);
-      let variants: Array<{ number: number; subjects: Array<Snap[] | null> }>;
-      if (zips.length) {
-        // Книжка N — вариант N каждого предмета; номера вариантов во всех архивах должны совпасть
+      let variants: ClusterVariant[];
+      if (multi.length) {
+        // Книжка N — вариант N каждого предмета; номера вариантов у всех предметов должны совпасть
         const nums = (a: ParsedArchive) => a.variants.map((v) => v.number).join(', ');
-        const first = nums(zips[0].s.archive!);
-        const diff = zips.find(({ s }) => nums(s.archive!) !== first);
-        if (diff) throw new Error(`Номера вариантов в архивах разные: у «${CLUSTER_SLOTS[zips[0].i].name}» — ${first}, у «${CLUSTER_SLOTS[diff.i].name}» — ${nums(diff.s.archive!)}`);
-        variants = zips[0].s.archive!.variants.map((v) => ({
+        const first = nums(multi[0].s.archive!);
+        const diff = multi.find(({ s }) => nums(s.archive!) !== first);
+        if (diff) throw new Error(`Номера вариантов у предметов разные: у «${CLUSTER_SLOTS[multi[0].i].name}» — ${first}, у «${CLUSTER_SLOTS[diff.i].name}» — ${nums(diff.s.archive!)}`);
+        variants = multi[0].s.archive!.variants.map((v) => ({
           number: v.number,
           subjects: slots.map((s) => (s.mode === 'off' ? null : s.archive!.variants.find((x) => x.number === v.number)!.snaps)),
         }));
       } else {
         variants = [{ number: variantNo, subjects: slots.map((s) => (s.mode === 'off' ? null : s.snaps)) }];
       }
-      // Одиночные билеты — только книжки RU и TJ; из архивов — ещё и ключи: готовые файлы из архивов с новой шапкой (код кластера)
-      const file = await buildClusterZip(settings, variants, { keys: zips.length > 0, readyKeys: slots.map((sl) => (sl.mode === 'zip' ? sl.archive?.keyBytes ?? null : null)) });
+      // Одиночные билеты — только книжки RU и TJ. Из архивов и наборов — ещё и ключи: из архива — готовый файл с новой шапкой
+      // (код кластера), из набора в базе — по ответам вопросов
+      const file = await buildClusterZip(settings, variants, {
+        keys: multi.length > 0,
+        readyKeys: slots.map((sl) => (sl.archive?.source === 'zip' ? sl.archive.keyBytes : undefined)),
+      });
+      // Книжка попадает в «Историю» внизу раздела. Не вышло сохранить — файл всё равно отдаётся
+      try {
+        const ids = CLUSTER_SLOTS.map((def, i) => subjectIds[i] || subjects.find((x) => keyKindOf(x.name) === def.kind)?.id || '');
+        const firstActive = slots.findIndex((sl) => sl.mode !== 'off');
+        if (!ids[firstActive]) throw new Error('не определён предмет в базе: выберите его в карточке «Из архива» или создайте предмет с названием по образцу (Химия, Биология…)');
+        await uploadFileImages(variants);
+        await saveClusterBatch({ settings, variants, subjectIds: ids });
+        queryClient.invalidateQueries({ queryKey: ['cluster_history'] });
+        queryClient.invalidateQueries({ queryKey: ['saved_ticket_batches'] });
+      } catch (saveErr) {
+        notifyError(saveErr, 'Книжка собрана, но в историю не сохранилась');
+      }
       setResult({ blob: file.blob, fileName: file.fileName });
     } catch (e) {
       setError(describeError(e, 'Не удалось собрать книжку'));
@@ -351,7 +452,7 @@ export const ClusterFromTickets: React.FC<{
       <Card padding="none" className="p-5 space-y-4">
         <h3 className="font-bold text-slate-900 text-sm">2. Билеты по предметам</h3>
         <p className="text-xs text-slate-500">
-          Для каждого предмета возьмите один готовый билет из «Архива билетов» или загрузите пару файлов Word — получится один вариант книжки на русском и таджикском, без ключей. Либо загрузите по одному ZIP-архиву на предмет (как скачан из «Архива билетов», с ключами): вариант N каждого предмета станет книжкой N, и для 4 вариантов выйдет 8 книжек (4 русских и 4 таджикских) и готовые ключи из архивов с шапкой кластера.
+          Для каждого предмета возьмите один готовый билет из «Архива билетов» или загрузите пару файлов Word — получится один вариант книжки на русском и таджикском, без ключей. Либо дайте архивы целиком: ZIP предмета (как скачан из «Архива билетов», с ключами — можно все сразу) или все билеты набора из базы. Вариант N каждого предмета станет книжкой N: для 4 вариантов выйдет 8 книжек (4 русских и 4 таджикских) и ключи по предметам. Каждая собранная книжка сохраняется в «Истории» внизу раздела.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-slate-800">Состав книжки:</span>
@@ -365,12 +466,15 @@ export const ClusterFromTickets: React.FC<{
             );
           })}
         </div>
-        <Field label="Номер варианта в книжке" className="max-w-[220px]">
-          <input
-            type="number" min={1} max={99} className="w-24 text-sm px-2 py-2 border border-slate-300 rounded-lg text-center"
-            value={variantNo} onChange={(e) => { setResult(null); setVariantNo(Math.max(1, Math.min(99, Number(e.target.value) || 1))); }}
-          />
-        </Field>
+        {multi.length === 0 && (
+          <Field label="Номер варианта в книжке" className="max-w-[220px]">
+            <input
+              type="number" min={1} max={99} className="w-24 text-sm px-2 py-2 border border-slate-300 rounded-lg text-center"
+              value={variantNo} onChange={(e) => { setResult(null); setVariantNo(Math.max(1, Math.min(99, Number(e.target.value) || 1))); }}
+            />
+          </Field>
+        )}
+        <BulkZipDrop onFiles={loadMany} busy={bulkBusy} notes={bulkNotes} />
         <div className="space-y-3">
           {slots.map((s, i) => (
             <SlotCard key={CLUSTER_SLOTS[i].kind} index={i} slot={s} subjectId={subjectIds[i] ?? ''} subjects={subjects}
@@ -381,6 +485,11 @@ export const ClusterFromTickets: React.FC<{
 
       {error && <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>}
 
+      {ready && multi.length === active.length && multi.length > 0 && (
+        <p className="text-xs text-slate-600">
+          Будет собрано: {multi[0].s.archive!.variants.length * 2} книжек ({multi[0].s.archive!.variants.length} русских и {multi[0].s.archive!.variants.length} таджикских) и ключей: {active.filter(({ s }) => s.archive!.source === 'db' || s.archive!.keyBytes).length}.
+        </p>
+      )}
       <Button variant="primary" className="w-full sm:w-auto disabled:bg-slate-300" onClick={build} disabled={busy || !ready}>
         {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
         <span>{busy ? 'Сборка книжек…' : 'Собрать книжку'}</span>
