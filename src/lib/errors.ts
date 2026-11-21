@@ -74,6 +74,13 @@ export function assertRowsChanged(data: unknown[] | null | undefined, what = 'з
   }
 }
 
+// Текст ошибки сервера для показа как есть; обрыв связи (английское «Failed to fetch») — по-русски
+export function plainError(err: unknown): string {
+  const m = String((err as { message?: unknown } | null)?.message ?? err ?? '');
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(m)) return 'Нет связи с сервером. Проверьте интернет и повторите.';
+  return m || 'Что-то пошло не так. Повторите попытку.';
+}
+
 // Одной строкой для встроенных сообщений в формах: «что не так. Причина. (технический текст)»
 export function describeError(err: unknown, action: string): string {
   const { reason, details } = explainError(err, action);
@@ -105,7 +112,13 @@ export const UNDO_EVENT = 'app:undo';
 export interface UndoToast { id: number; title: string; ms: number; undo: () => void }
 const pendingUndo = new Map<number, () => void>();
 let undoSeq = 0;
-const flushUndo = () => { for (const run of Array.from(pendingUndo.values())) run(); };
+/** Отложенные действия выполнены досрочно: кнопка «Отменить» уже ничего не вернёт, подсказки убираются */
+export const UNDO_FLUSHED_EVENT = 'app:undo-flushed';
+const flushUndo = () => {
+  if (!pendingUndo.size) return;
+  for (const run of Array.from(pendingUndo.values())) run();
+  window.dispatchEvent(new Event(UNDO_FLUSHED_EVENT));
+};
 if (typeof window !== 'undefined') {
   window.addEventListener('pagehide', flushUndo);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushUndo(); });

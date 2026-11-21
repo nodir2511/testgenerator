@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { plainError } from '../lib/errors';
 import { TEAM_RULES } from './content';
 import {
   FALSE_START_MS, QUESTION_SECONDS, beep, inputOf, queueOf, serverNow, serverTimeOfEvent, signed, standings, unlockAudio, useClockInfo, useCountdown, useGameSession,
@@ -127,7 +128,7 @@ const PlayGame: React.FC<{ code: string }> = ({ code }) => {
     e.preventDefault();
     setBusy(true); setErr('');
     const { data, error } = await supabase.rpc('game_join', { p_code: code, p_name: name });
-    if (error) { setBusy(false); setErr(error.message); return; }
+    if (error) { setBusy(false); setErr(plainError(error)); return; }
     await enter(data as Me);
     setBusy(false);
   };

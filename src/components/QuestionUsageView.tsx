@@ -49,7 +49,8 @@ export const QuestionUsageView: React.FC = () => {
   const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
     queryFn: async () => {
-      const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      const { data, error } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Subject[];
     },
   });

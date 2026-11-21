@@ -131,6 +131,9 @@ export const App: React.FC = () => {
         setIsQuestionFormOpen(false);
         setEditingQuestion(null);
       }
+      // «Вперёд» на шаг уже закрытой формы: формы нет, поэтому шаг заменяем адресом раздела,
+      // иначе следующее закрытие формы возвращалось бы на него и форма не закрывалась
+      if (!formOpenRef.current && isFormHash(hash)) window.history.replaceState(null, '', hashOf(tabFromHash(hash) ?? 'questions'));
       const tab = tabFromHash(hash);
       if (tab) setActiveTab(tab);
     };
@@ -196,7 +199,7 @@ export const App: React.FC = () => {
     { id: 'questions', label: 'Банк вопросов', icon: FileQuestion },
     ...(isStaff ? [{ id: 'taxonomy', label: 'Предметы и темы', icon: Layers }] : []),
     { id: 'generator', label: 'Генератор билетов', icon: Sparkles },
-    { id: 'saved_tickets', label: 'Сохраненные билеты', icon: FileCheck2 },
+    { id: 'saved_tickets', label: 'Архив билетов', icon: FileCheck2 },
     ...(isStaff ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }, { id: 'quality', label: 'Качество банка', icon: ShieldCheck }] : []),
     ...(isOwner ? [{ id: 'cluster', label: 'Экзамен-кластер', icon: BookOpen }] : []),
     ...(isAdmin ? [{ id: 'admin', label: 'Администрирование', icon: Users }] : []),

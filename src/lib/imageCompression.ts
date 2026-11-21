@@ -21,6 +21,11 @@ export async function compressImage(file: File): Promise<File> {
   try {
     return await imageCompression(file, options);
   } catch (error) {
+    // Формат, который браузер не читает (EMF/WMF из старых файлов Word), нельзя загружать под видом webp:
+    // в банке и билетах получилась бы битая картинка
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
+      throw new Error('Рисунок в формате, который браузер не открывает (например, EMF/WMF из Word). Сохраните его как PNG или JPEG и вставьте заново.');
+    }
     console.warn('Ошибка сжатия, используем исходный файл:', error);
     return file;
   }

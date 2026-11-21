@@ -37,9 +37,12 @@ export async function linkedUser(sb: any, chat: number) {
   return profile ?? null;
 }
 
-// Предметы, назначенные пользователю с ролью «по предметам»; null — доступны все
+// Предметы, назначенные пользователю с ролью «по предметам»; null — доступны все.
+// Как can_view_subject в базе: весь банк — только у ролей user и admin; у остальных
+// («Учитель игры» и любые новые роли) без назначенных предметов доступа к банку нет.
 export async function allowedSubjectIds(sb: any, user: { id: string; role?: string }): Promise<string[] | null> {
-  if (user.role !== 'subject_teacher' && user.role !== 'subject_admin') return null;
+  if (user.role === 'user' || user.role === 'admin') return null;
+  if (user.role !== 'subject_teacher' && user.role !== 'subject_admin') return [];
   const { data } = await sb.from('user_subjects').select('subject_id').eq('user_id', user.id);
   return (data ?? []).map((r: any) => r.subject_id);
 }

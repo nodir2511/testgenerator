@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'qrcode';
 import './clinic.css';
 import { supabase } from '../lib/supabase';
+import { plainError } from '../lib/errors';
 import { confirmAction } from '../lib/confirm';
 
 interface CaseInfo { key: string; title: string; topic: string; emer: boolean }
@@ -205,7 +206,7 @@ const NewSession: React.FC<{ onCreated: (code: string) => void; onBack: () => vo
       return data as string;
     },
     onSuccess: (code) => onCreated(code),
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => setError(plainError(e)),
   });
 
   const flipMode = (m: string) => setModes((p) => (p.includes(m) ? p.filter((x) => x !== m) : [...p, m]));
@@ -306,7 +307,7 @@ export const ClinicClass: React.FC = () => {
           {sessions.isLoading ? (
             <div className="cl-empty">Загрузка…</div>
           ) : sessions.isError ? (
-            <div className="cl-box cl-err">Занятия пока недоступны: не применены настройки базы (файл clinic_class.sql).</div>
+            <div className="cl-box cl-err">Не удалось загрузить занятия. {plainError(sessions.error)} <button className="cl-btn" type="button" onClick={() => sessions.refetch()}>Повторить</button></div>
           ) : (sessions.data ?? []).length === 0 ? (
             <div className="cl-box cl-empty"><b>Занятий пока нет</b>Нажмите «Новое занятие», выберите режимы и случаи — ординаторы войдут по коду со своих телефонов.</div>
           ) : (

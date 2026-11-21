@@ -51,7 +51,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://ovxrgkyexuudgtqglegk.supabase.co; connect-src 'self' blob: https://ovxrgkyexuudgtqglegk.supabase.co wss://ovxrgkyexuudgtqglegk.supabase.co; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+          "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://ovxrgkyexuudgtqglegk.supabase.co; connect-src 'self' blob: https://ovxrgkyexuudgtqglegk.supabase.co wss://ovxrgkyexuudgtqglegk.supabase.co; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
         },
         {
           "key": "X-Frame-Options",
@@ -76,7 +76,7 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geolocation=(), payment=()"
+          "value": "camera=(self), microphone=(), geolocation=(), payment=()"
         },
         {
           "key": "Content-Security-Policy",
@@ -101,7 +101,7 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geolocation=(), payment=()"
+          "value": "camera=(self), microphone=(), geolocation=(), payment=()"
         },
         {
           "key": "Content-Security-Policy",

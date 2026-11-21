@@ -93,16 +93,24 @@ export const QualityView: React.FC = () => {
   const { data: allSubjects = [] } = useQuery({
     queryKey: ['subjects'],
     queryFn: async () => {
-      const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      const { data, error } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Subject[];
     },
   });
   const subjects = allSubjects.filter((s) => canManage(s.id));
   React.useEffect(() => { if (!subjectId && subjects.length) setSubjectId(subjects[0].id); }, [subjects, subjectId]);
   const loadApproved = async () => {
-    const dis = await supabase.from('duplicate_dismissals').select('a, b').limit(10000);
-    // Нет таблицы (SQL ещё не применён) — работаем без одобренных пар
-    setApproved(new Set(dis.error ? [] : (dis.data ?? []).map((r: { a: string; b: string }) => `${r.a}|${r.b}`)));
+    // Сервер отдаёт не больше 1000 строк за запрос: читаем страницами
+    const rows: Array<{ a: string; b: string }> = [];
+    for (let from = 0; ; from += 1000) {
+      const dis = await supabase.from('duplicate_dismissals').select('a, b').order('a').order('b').range(from, from + 999);
+      // Нет таблицы (SQL ещё не применён) — работаем без одобренных пар
+      if (dis.error) break;
+      rows.push(...((dis.data ?? []) as Array<{ a: string; b: string }>));
+      if ((dis.data?.length ?? 0) < 1000) break;
+    }
+    setApproved(new Set(rows.map((r) => `${r.a}|${r.b}`)));
   };
   // При выборе предмета сразу показываем сохранённую проверку и сверяем её с базой
   React.useEffect(() => {
@@ -236,6 +244,7 @@ export const QualityView: React.FC = () => {
         <select
           value={subjectId}
           onChange={(e) => setSubjectId(e.target.value)}
+          disabled={busy}
           aria-label="Предмет"
           className="min-h-[44px] text-base px-3 border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:w-72"
         >

@@ -31,15 +31,23 @@ const IDS_PER_REQUEST = 100; // идентификаторы идут в адр�
  * Лёгкий пул предмета. Фильтр: темы, иначе главы, иначе весь предмет.
  * Первая страница одна; если она полная, следующие читаются пачками по PARALLEL (порядок строк сохраняется).
  */
+const MAX_IN_IDS = 100;
+
 export async function loadLightPool(sb: any, sel: PoolSelection): Promise<any[]> {
   // Статистика использования (question_usage) — необязательная: если таблицы ещё нет в базе,
   // подбор работает как раньше, без учёта частоты.
   let select = POOL_SELECT;
+  // Список id уходит в адрес запроса: длинный список тем (больше ~100) в него не помещается.
+  // Тогда читаем по главам или весь предмет, а темы отбираем уже здесь.
+  const manyTopics = sel.topicIds.length > MAX_IN_IDS;
+  const topicSet = manyTopics ? new Set(sel.topicIds) : null;
+  const byChapters = sel.chapterIds.length > 0 && sel.chapterIds.length <= MAX_IN_IDS;
+  const pick = (rows: any[]) => (topicSet ? rows.filter((r) => topicSet.has(r.topic_id)) : rows);
   const page = async (from: number): Promise<any[]> => {
     const run = async () => {
       let q = sb.from('questions').select(select).eq('subject_id', sel.subjectId).eq('is_deleted', false);
-      if (sel.topicIds.length) q = q.in('topic_id', sel.topicIds);
-      else if (sel.chapterIds.length) q = q.in('chapter_id', sel.chapterIds);
+      if (sel.topicIds.length && !manyTopics) q = q.in('topic_id', sel.topicIds);
+      else if (byChapters) q = q.in('chapter_id', sel.chapterIds);
       return q.order('id').range(from, from + PAGE - 1);
     };
     let { data, error } = await run();
@@ -56,13 +64,13 @@ export async function loadLightPool(sb: any, sel: PoolSelection): Promise<any[]>
     return data ?? [];
   };
   const all: any[] = await page(0);
-  if (all.length < PAGE) return all;
+  if (all.length < PAGE) return pick(all);
   for (let from = PAGE; ; from += PAGE * PARALLEL) {
     const parts = await Promise.all(Array.from({ length: PARALLEL }, (_, i) => page(from + i * PAGE)));
     for (const p of parts) all.push(...p);
     if (parts.some((p) => p.length < PAGE)) break;
   }
-  return all;
+  return pick(all);
 }
 
 /**

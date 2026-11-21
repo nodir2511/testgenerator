@@ -170,6 +170,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   );
 
   const [uploadingImage, setUploadingImage] = useState(false);
+  // Картинки вариантов и пунктов, которые ещё загружаются: сохранять вопрос в это время нельзя
+  const [pendingUploads, setPendingUploads] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const topRef = React.useRef<HTMLDivElement>(null);
 
@@ -228,28 +230,39 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
     queryFn: async () => {
-      const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      const { data, error } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Subject[];
     },
   });
 
-  const { data: chapters = [] } = useQuery({
+  const { data: chapters = [], isSuccess: chaptersLoaded } = useQuery({
     queryKey: ['chapters', subjectId],
     enabled: Boolean(subjectId),
     queryFn: async () => {
-      const { data } = await supabase.from('chapters').select('*').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
+      const { data, error } = await supabase.from('chapters').select('*').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Chapter[];
     },
   });
 
-  const { data: topics = [] } = useQuery({
+  const { data: topics = [], isSuccess: topicsLoaded } = useQuery({
     queryKey: ['topics', chapterId],
     enabled: Boolean(chapterId),
     queryFn: async () => {
-      const { data } = await supabase.from('topics').select('*').eq('chapter_id', chapterId).eq('is_deleted', false).order('order_index');
+      const { data, error } = await supabase.from('topics').select('*').eq('chapter_id', chapterId).eq('is_deleted', false).order('order_index');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Topic[];
     },
   });
+
+  // Запомненные в браузере глава и тема могли быть удалены (в том числе другим пользователем):
+  // у нового вопроса сбрасываем их, иначе он сохранился бы в удалённую тему
+  React.useEffect(() => {
+    if (initialData) return;
+    if (chapterId && chaptersLoaded && !chapters.some((c) => c.id === chapterId)) { setChapterId(''); setTopicId(''); }
+    else if (topicId && chapterId && topicsLoaded && !topics.some((t) => t.id === topicId)) setTopicId('');
+  }, [initialData, chapterId, topicId, chapters, topics, chaptersLoaded, topicsLoaded]);
 
   // Тексты выбранной темы; без таблицы или без текстов полей «Текст» в форме нет
   const { data: topicPassages = [] } = useQuery({
@@ -262,7 +275,8 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   const { data: sources = [] } = useQuery({
     queryKey: ['sources'],
     queryFn: async () => {
-      const { data } = await supabase.from('sources').select('*').eq('is_deleted', false).order('name');
+      const { data, error } = await supabase.from('sources').select('*').eq('is_deleted', false).order('name');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Source[];
     },
   });
@@ -312,12 +326,14 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
+      setPendingUploads((n) => n + 1);
       const url = await uploadQuestionImage(file);
-      const updated = [...options];
-      updated[index].image_url = url;
-      setOptions(updated);
+      // Берём список на момент окончания загрузки: за это время варианты могли добавить или убрать
+      setOptions((prev) => prev.map((o, i) => (i === index ? { ...o, image_url: url } : o)));
     } catch (err: any) {
       notifyError(err, 'Ошибка загрузки картинки');
+    } finally {
+      setPendingUploads((n) => n - 1);
     }
   };
 
@@ -327,23 +343,20 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
     index: number,
     file: File
   ) => {
+    setPendingUploads((n) => n + 1);
     uploadQuestionImage(file).then(url => {
-      if (side === 'left') {
-        const updated = [...leftItems];
-        updated[index].image_url = url;
-        setLeftItems(updated);
-      } else {
-        const updated = [...rightItems];
-        updated[index].image_url = url;
-        setRightItems(updated);
-      }
-    }).catch(err => notifyError(err, 'Ошибка вставки картинки'));
+      const put = <T extends { image_url?: string | null }>(prev: T[]) => prev.map((it, i) => (i === index ? { ...it, image_url: url } : it));
+      if (side === 'left') setLeftItems(put);
+      else setRightItems(put);
+    }).catch(err => notifyError(err, 'Ошибка вставки картинки'))
+      .finally(() => setPendingUploads((n) => n - 1));
   };
 
   // Сохранение вопроса (Create / Update)
   const saveMutation = useMutation({
     // next — «Сохранить и добавить следующий»: форма остаётся открытой и очищается
     mutationFn: async (_next: boolean = false) => {
+      if (uploadingImage || pendingUploads > 0) throw new Error('Картинка ещё загружается. Дождитесь окончания и сохраните снова.');
       if (!subjectId || !chapterId || !topicId) {
         throw new Error('Пожалуйста, выберите предмет, главу и тему');
       }
@@ -1372,7 +1385,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           <button
             type="button"
             onClick={onCancel}
-            disabled={saveMutation.isPending}
+            disabled={saveMutation.isPending || uploadingImage || pendingUploads > 0}
             className="min-h-[44px] px-4 border border-slate-300 hover:bg-slate-100 text-slate-700 text-sm font-semibold rounded-xl transition"
           >
             Отмена
@@ -1381,7 +1394,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
             <button
               type="button"
               onClick={() => saveMutation.mutate(true)}
-              disabled={saveMutation.isPending}
+              disabled={saveMutation.isPending || uploadingImage || pendingUploads > 0}
               className="min-h-[44px] px-4 border border-indigo-200 bg-white hover:bg-indigo-50 text-indigo-700 text-sm font-semibold rounded-xl transition disabled:opacity-50"
             >
               Сохранить + ещё
@@ -1390,7 +1403,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
           <button
             type="button"
             onClick={() => saveMutation.mutate(false)}
-            disabled={saveMutation.isPending}
+            disabled={saveMutation.isPending || uploadingImage || pendingUploads > 0}
             className={`${initialData ? '' : 'col-span-2 order-first sm:order-none'} min-h-[48px] px-5 bg-indigo-600 hover:bg-indigo-700 text-white text-base sm:text-sm font-bold rounded-xl shadow-sm transition flex items-center justify-center gap-2 disabled:opacity-50`}
           >
             {saveMutation.isPending ? (

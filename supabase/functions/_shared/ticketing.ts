@@ -657,8 +657,11 @@ export function parseNumbers(text: string, max: number): number[] | 'all' | null
   return out.size ? [...out].sort((x, y) => x - y) : null;
 }
 
+// Названия уходят в Telegram с разметкой HTML: знаки < > & в них экранируем, иначе сообщение не отправится
+const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 function numberedList(items: Array<{ id: string; name: string }>, selected: string[]): string {
-  return items.map((c, i) => `${selected.includes(c.id) ? '✅' : '▫️'} ${i + 1}. ${shortName(c.name)}`).join('\n');
+  return items.map((c, i) => `${selected.includes(c.id) ? '✅' : '▫️'} ${i + 1}. ${escHtml(shortName(c.name))}`).join('\n');
 }
 
 export function chaptersText(chapters: Array<{ id: string; name: string }>, selected: string[]): string {
@@ -673,7 +676,7 @@ export function kbChapters(chapters: Array<{ id: string; name: string }>, select
 }
 
 export function topicsText(chapterName: string, pos: number, total: number, topics: Array<{ id: string; name: string }>, selected: string[]): string {
-  const head = `${shortName(chapterName, 40)} — темы (глава ${pos + 1} из ${total})`;
+  const head = `${escHtml(shortName(chapterName, 40))} — темы (глава ${pos + 1} из ${total})`;
   if (!topics.length) return `${head}\n\nВ этой главе нет тем — будут взяты все вопросы главы.`;
   const n = topics.filter((t) => selected.includes(t.id)).length;
   const note = n ? `Выбрано: ${n} из ${topics.length}.` : 'Ничего не выбрано — возьмутся все темы главы.';
@@ -712,8 +715,8 @@ export function toggle(list: string[], id: string): string[] {
 
 export function settingsText(subject: string, chapters: string[], topicCount: number, s: Settings, stats?: ReturnType<typeof poolStats>): string {
   const lines = [
-    `Предмет: ${subject}`,
-    `Главы: ${chapters.join(', ') || '—'}`,
+    `Предмет: ${escHtml(subject)}`,
+    `Главы: ${escHtml(chapters.join(', ')) || '—'}`,
     `Темы: ${topicCount > 0 ? topicCount + ' выбрано' : 'все темы выбранных глав'}`,
   ];
   if (stats) lines.push(`Доступно вопросов: тестов ${stats.test}, соответствий ${stats.matching}, открытых ${stats.open}`);

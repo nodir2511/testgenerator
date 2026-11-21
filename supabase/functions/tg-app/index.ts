@@ -18,6 +18,8 @@ import { MATCHING_ROWS, blankFor, maxPoints, scoreAnswers, type Answers, type Co
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!;
+// Без токена подпись initData проверялась бы пустым ключом, который может вычислить кто угодно
+if (!BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN is not set');
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
@@ -185,7 +187,7 @@ function cleanAnswers(a: any, comp: Composition): Answers | null {
   if (!a.tests.every(isLetter)) return null;
   if (!a.matching.every((r: unknown) => Array.isArray(r) && r.length === MATCHING_ROWS && r.every(isDigit5))) return null;
   if (!a.open.every((v: unknown) => typeof v === 'string' && /^\d{0,5}$/.test(v))) return null;
-  return a as Answers;
+  return { tests: a.tests, matching: a.matching, open: a.open } as Answers; // лишние поля в базу не идут
 }
 
 function cleanKey(k: any, comp: Composition): TicketKey | null {
@@ -194,7 +196,7 @@ function cleanKey(k: any, comp: Composition): TicketKey | null {
   if (!k.tests.every(isLetter)) return null;
   if (!k.matching.every((r: unknown) => Array.isArray(r) && r.length === MATCHING_ROWS && r.every(isDigit5))) return null;
   if (!k.open.every((v: unknown) => v === null || (typeof v === 'string' && /^\d{1,5}$/.test(v)))) return null;
-  return k as TicketKey;
+  return { tests: k.tests, matching: k.matching, open: k.open } as TicketKey;
 }
 
 async function tgSend(chat: number, text: string) {
@@ -316,6 +318,10 @@ Deno.serve(async (req) => {
         if (!key) return json({ error: 'Некорректный ключ' }, 400);
         const score = scoreAnswers(key, answers);
         const student = (typeof body.student === 'string' ? body.student : '').trim().slice(0, 120);
+        // Предел на сутки: одна учётная запись не должна раздувать таблицу
+        const { count: savedToday } = await sb.from('omr_checks').select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id).gte('created_at', new Date(Date.now() - 86400000).toISOString());
+        if ((savedToday ?? 0) >= 2000) return json({ error: 'За сутки сохранено слишком много проверок. Продолжите завтра.' }, 429);
         const { data, error } = await sb.from('omr_checks').insert({
           user_id: user.id, batch_id: batchId, ticket_number: ticketNumber, student, layout,
           score: score.score, max_score: score.max, details: { answers, key, ok: { tests: score.tests, matching: score.matching, open: score.open } },
@@ -368,7 +374,7 @@ Deno.serve(async (req) => {
       }
       // Шаблон бланка в чат с ботом
       case 'blank_send': {
-        const name = typeof body.file === 'string' ? BLANK_FILES[body.file] : undefined;
+        const name = typeof body.file === 'string' && Object.hasOwn(BLANK_FILES, body.file) ? BLANK_FILES[body.file] : undefined;
         if (!name) return json({ error: 'Неизвестный шаблон' }, 400);
         const res = await fetch(`${BLANKS_URL}/${body.file}.pdf`).catch(() => null);
         if (!res?.ok) return json({ error: 'Не удалось получить файл шаблона. Попробуйте ещё раз.' }, 502);

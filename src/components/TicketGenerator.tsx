@@ -88,7 +88,8 @@ const dushanbeDayStart = () => {
 const formatWait = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 const fetchChapters = async (subjectId: string) => {
-  const { data } = await supabase.from('chapters').select('*').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
+  const { data, error } = await supabase.from('chapters').select('*').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
+  if (error) throw error; // ошибку показываем, а не выдаём за пустой список
   return (data || []) as Chapter[];
 };
 
@@ -323,10 +324,16 @@ export const TicketGenerator: React.FC = () => {
   }, [scrollToResult, generatedBatch]);
 
   // 1. Предметы
-  const { data: subjects = [] } = useQuery({
+  const { data: subjects = [], isSuccess: subjectsLoaded } = useQuery({
     queryKey: ['subjects'],
     queryFn: fetchSubjects,
   });
+  // Запомненный предмет удалён или больше не назначен: выбор сбрасывается
+  React.useEffect(() => {
+    if (subjectId && subjectsLoaded && !subjects.some((s) => s.id === subjectId)) {
+      setSubjectId(''); setSelectedChapterIds([]); setSelectedTopicIds([]);
+    }
+  }, [subjectId, subjects, subjectsLoaded]);
 
   const subjectName = subjects.find((s) => s.id === subjectId)?.name || '';
   const standard = standardFor(subjectName);
@@ -390,6 +397,15 @@ export const TicketGenerator: React.FC = () => {
   });
   const chapters = React.useMemo(() => structure?.chapters ?? [], [structure]);
   const allTopics = React.useMemo(() => structure?.topics ?? [], [structure]);
+  // Запомненные главы и темы, которых в предмете уже нет (удалены), из выбора убираем:
+  // иначе «нет вопросов», хотя ни одна глава не отмечена
+  React.useEffect(() => {
+    if (!structure) return;
+    const ch = new Set(structure.chapters.map((c) => c.id));
+    const tp = new Set(structure.topics.map((t) => t.id));
+    setSelectedChapterIds((prev) => (prev.every((id) => ch.has(id)) ? prev : prev.filter((id) => ch.has(id))));
+    setSelectedTopicIds((prev) => (prev.every((id) => tp.has(id)) ? prev : prev.filter((id) => tp.has(id))));
+  }, [structure]);
 
   // Раскрытые главы (список тем). По умолчанию все свёрнуты: на телефоне так короче
   const [expandedChapterIds, setExpandedChapterIds] = useState<Record<string, boolean>>(() =>
@@ -789,6 +805,27 @@ export const TicketGenerator: React.FC = () => {
     const withInfo = await withSelectionInfo(tickets, generatedBatch?.subject_id || subjectId, params);
     setGeneratedBatch((prev: any) => (prev ? { ...prev, generation_params: params, tickets: withInfo } : prev));
   };
+
+  // Карточка «Готово» хранится в браузере. Пока раздел был закрыт, набор могли изменить или удалить
+  // в «Архиве билетов»: при открытии сверяем её с базой, чтобы скачивался нынешний состав.
+  React.useEffect(() => {
+    const id = generatedBatch?.id;
+    if (!id) return;
+    let off = false;
+    (async () => {
+      const { data: row, error } = await supabase.from('ticket_batches').select('id, generation_params').eq('id', id).maybeSingle();
+      if (off || error) return;
+      if (!row) { setGeneratedBatch(null); return; }
+      const { data, error: tErr } = await supabase.from('tickets')
+        .select('id, ticket_number, created_at, questions:ticket_questions(id, order_index, question_snapshot)')
+        .eq('batch_id', id).order('ticket_number');
+      if (off || tErr || !data?.length) return;
+      const tickets = data.map((t: any) => ({ ...t, questions: [...(t.questions || [])].sort((a: any, b: any) => a.order_index - b.order_index) }));
+      await handleBatchChanged(row.generation_params, tickets);
+    })().catch(() => { /* нет связи — остаётся сохранённая копия */ });
+    return () => { off = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Экспорт созданных билетов в Word на выбранном языке (ключи ответов кладутся в тот же архив)
   const handleDownload = async (lang: Lang) => {

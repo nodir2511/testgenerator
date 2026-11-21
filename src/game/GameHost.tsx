@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { plainError } from '../lib/errors';
 import { useAuth } from '../hooks/useAuth';
 import { AuthModal } from '../components/AuthModal';
 import { FormattedText } from '../components/FormulaEditor';
@@ -50,7 +51,7 @@ export const GameHost: React.FC = () => {
   const create = async () => {
     setError('');
     const { data, error: e } = await supabase.rpc('game_create');
-    if (e) { setError(e.message); return; }
+    if (e) { setError(plainError(e)); return; }
     setCode(data as string);
   };
 
@@ -733,11 +734,11 @@ const TieBreak: React.FC<{ teams: GameTeam[]; only: number[]; onAsk: (only: numb
     setLoading(true); setErr('');
     let query = supabase.from('questions')
       .select('id,type,content,content_ru,content_tg,image_url,correct_numeric_answer,options:question_options(text,text_ru,text_tg,is_correct,order_index)')
-      .eq('subject_id', subject).eq('is_deleted', false).in('type', ['test', 'open']).limit(300);
+      .eq('subject_id', subject).eq('is_deleted', false).is('passage_id', null).in('type', ['test', 'open']).limit(300);
     if (chapter) query = query.eq('chapter_id', chapter);
     const { data, error } = await query;
     setLoading(false);
-    if (error) { setErr(error.message); return; }
+    if (error) { setErr(plainError(error)); return; }
     const list = ((data || []) as unknown as BankQuestion[]).filter((x) =>
       x.type === 'open' ? x.correct_numeric_answer != null && String(x.correct_numeric_answer) !== '' : x.options?.some((o) => o.is_correct));
     if (!list.length) { setErr('В этом разделе нет подходящих вопросов (тест с верным ответом или открытый с числовым ответом).'); return; }
@@ -840,10 +841,12 @@ const ReviewView: React.FC<{ rows: ReviewRow[]; onExport: (rows: ReviewRow[]) =>
 
 const HistoryView: React.FC = () => {
   const [rows, setRows] = useState<ResultRow[] | null>(null);
+  const [loadErr, setLoadErr] = useState('');
   useEffect(() => {
     supabase.from('game_results').select('id,code,title,round,finished_at,teams,review').order('finished_at', { ascending: false }).limit(100)
-      .then(({ data }) => setRows((data || []) as ResultRow[]));
+      .then(({ data, error }) => { if (error) setLoadErr(plainError(error)); else setRows((data || []) as ResultRow[]); });
   }, []);
+  if (loadErr) return <p className="queue-empty">Не удалось загрузить сохранённые игры. {loadErr}</p>;
   if (!rows) return <p>Загрузка…</p>;
   if (!rows.length) return <p className="queue-empty"><Bi ru="Пока нет сохранённых игр. Итоги сохраняются по кнопке «Итоги»." tj="Ҳоло бозиҳои сабтшуда нест. Натиҷаҳо бо тугмаи «Натиҷаҳо» сабт мешаванд." /></p>;
   return (

@@ -40,7 +40,15 @@ export const TrashView: React.FC = () => {
 
   const restore = useMutation({
     mutationFn: async (id: string) => {
-      const { data: d, error } = await supabase.from('questions').update({ is_deleted: false }).eq('id', id).select('id');
+      // Вопрос удалённой темы или главы возвращать нельзя: его не найти в банке, но он попадал бы в билеты
+      const { data: parent, error: parentErr } = await supabase.from('questions')
+        .select('topics(is_deleted), chapters(is_deleted)').eq('id', id).maybeSingle();
+      if (parentErr) throw parentErr;
+      const p = parent as unknown as { topics?: { is_deleted?: boolean } | null; chapters?: { is_deleted?: boolean } | null } | null;
+      if (p?.topics?.is_deleted || p?.chapters?.is_deleted) {
+        throw new Error('Тема или глава этого вопроса удалена. Вопрос нельзя вернуть в удалённую тему — создайте тему заново и перенесите его через администратора.');
+      }
+      const { data: d, error } = await supabase.from('questions').update({ is_deleted: false, deleted_at: null, deleted_by: null }).eq('id', id).select('id');
       if (error) throw error;
       assertRowsChanged(d, 'вопрос');
     },

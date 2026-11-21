@@ -23,6 +23,9 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
 }
 
+/** Пользователь вышел: main.tsx по этому событию очищает кэш запросов */
+export const SIGNED_OUT_EVENT = 'auth:signed-out';
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -94,11 +97,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(session?.user ?? null);
         if (session?.user) {
           const same = loadedUserId.current === session.user.id;
+          if (loadedUserId.current && !same) window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
           // Первая сессия уже обработана выше; обновление токена не меняет профиль
           if (event === 'INITIAL_SESSION' || (event === 'TOKEN_REFRESHED' && same)) return;
           loadedUserId.current = session.user.id;
           await loadAccount(session.user.id);
         } else {
+          // Выход: данные прежнего пользователя (кэш запросов, последний набор) следующему не показываем
+          if (loadedUserId.current) window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
           loadedUserId.current = null;
           setProfile(null);
           setAssigned([]);
@@ -112,13 +118,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  // Общий индикатор загрузки здесь не трогаем: он заменил бы форму входа, и сообщение
+  // о неверном пароле пропало бы вместе с ней (у формы свой индикатор).
   const signIn = async (email: string, pass: string) => {
-    setIsLoading(true);
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password: pass,
     });
-    setIsLoading(false);
     return { error: error ? new Error(error.message) : null };
   };
 

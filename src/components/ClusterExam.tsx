@@ -141,7 +141,8 @@ async function pickForSlot(
     qc.fetchQuery({ queryKey: ['question_counts', subjectId], queryFn: () => fetchQuestionCounts(subjectId), staleTime: 60_000 }),
     usedP,
   ]);
-  const selected = cached.map((q) => ({ ...q })); // кэш не меняем
+  // Вопросы к тексту (английский) поодиночке в книжку не идут; кэш не меняем
+  const selected = cached.filter((q) => !q.passage_id).map((q) => ({ ...q }));
 
   const fit = fitSettings(calcPoolStats(selected), {
     testCount: want.test, matchingCount: want.matching, openCount: want.open,
@@ -183,7 +184,8 @@ const TopicPicker: React.FC<{
     queryKey: ['chapters', subjectId],
     enabled: Boolean(subjectId) && open,
     queryFn: async () => {
-      const { data } = await supabase.from('chapters').select('*').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
+      const { data, error } = await supabase.from('chapters').select('*').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as any[];
     },
   });
@@ -191,7 +193,8 @@ const TopicPicker: React.FC<{
     queryKey: ['cluster_topics', subjectId, chapters.length],
     enabled: Boolean(subjectId) && open && chapters.length > 0,
     queryFn: async () => {
-      const { data } = await supabase.from('topics').select('*').in('chapter_id', chapters.map((c: any) => c.id)).eq('is_deleted', false).order('order_index');
+      const { data, error } = await supabase.from('topics').select('*').in('chapter_id', chapters.map((c: any) => c.id)).eq('is_deleted', false).order('order_index');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as any[];
     },
   });
@@ -292,7 +295,8 @@ export const ClusterExam: React.FC = () => {
   const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
     queryFn: async () => {
-      const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      const { data, error } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Subject[];
     },
   });
@@ -419,7 +423,7 @@ export const ClusterExam: React.FC = () => {
       try {
         file = await buildClusterZip(settings, variants);
       } catch (buildErr) {
-        throw new Error(`Экзамен сохранён во вкладке «Сохраненные билеты», но собрать файл не получилось (${describeError(buildErr, 'ошибка сборки')}). Скачайте его оттуда.`);
+        throw new Error(`Экзамен сохранён в разделе «Архив билетов», но собрать файл не получилось (${describeError(buildErr, 'ошибка сборки')}). Скачайте его оттуда.`);
       }
       setResult({ blob: file.blob, fileName: file.fileName, saved });
       if (repeatNotes.length) notifyInfo(`Новых вопросов не хватило, часть вопросов повторяет прошлые экзамены: ${repeatNotes.join('; ')}`);
@@ -579,7 +583,7 @@ export const ClusterExam: React.FC = () => {
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center space-x-2 text-sm text-emerald-800">
             <CheckCircle2 className="w-5 h-5 shrink-0" />
-            <span>Кластер готов: <strong>{result.fileName}</strong> ({(result.blob.size / 1048576).toFixed(1)} МБ){result.saved ? ' · сохранён во вкладке «Сохраненные билеты»' : ''}</span>
+            <span>Кластер готов: <strong>{result.fileName}</strong> ({(result.blob.size / 1048576).toFixed(1)} МБ){result.saved ? ' · сохранён в разделе «Архив билетов»' : ''}</span>
           </div>
           <Button variant="primary" type="button" onClick={() => saveAs(result.blob, result.fileName)}>
             <Download className="w-4 h-4" />

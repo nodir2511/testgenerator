@@ -41,7 +41,7 @@ const PERIODS = [
 const SOURCE_LABEL: Record<string, string> = {
   site: 'Сайт',
   telegram: 'Telegram-бот',
-  'telegram-app': 'Telegram Mini App',
+  'telegram-app': 'Мини-приложение Telegram',
   cluster: 'Экзамен-кластер',
 };
 const ROLE_SHORT: Partial<Record<UserRole, string>> = { admin: 'Админ', subject_admin: 'Админ предмета' };

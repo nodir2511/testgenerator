@@ -104,13 +104,18 @@ export const SavedTicketsView: React.FC = () => {
     if (teacherPref && teachersQ.data && !teachersQ.data.some((t) => t.id === teacherPref)) setTeacherFilter('');
   }, [teacherPref, teachersQ.data]);
 
-  const { data: subjects = [] } = useQuery({
+  const { data: subjects = [], isSuccess: subjectsLoaded } = useQuery({
     queryKey: ['subjects'],
     queryFn: async () => {
-      const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      const { data, error } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Subject[];
     },
   });
+  // Запомненный фильтр по предмету, которого уже нет, сбрасывается
+  React.useEffect(() => {
+    if (subjectFilter && subjectsLoaded && !subjects.some((s) => s.id === subjectFilter)) setSubjectFilter('');
+  }, [subjectFilter, subjects, subjectsLoaded]);
 
   // Описание охвата глав (чипы «Глава 1 · полностью») — общий кэш структуры предметов
   const loaderRef = React.useRef(makeSelectionInfoLoader());
@@ -152,7 +157,10 @@ export const SavedTicketsView: React.FC = () => {
       assertRowsChanged(data, 'набор билетов');
     },
     meta: { action: 'Не удалось удалить набор билетов' },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recent_batches'] }),
+    onSuccess: (_d, id) => {
+      for (const key of ['recent_batches', 'saved_ticket_batches', 'archive_teachers', 'cluster_history', 'cluster_ticket_batches']) queryClient.invalidateQueries({ queryKey: [key] });
+      queryClient.removeQueries({ queryKey: ['batch_tickets', id] });
+    },
     onError: (_e, id) => setHiddenIds((prev) => prev.filter((x) => x !== id)),
   });
 
@@ -201,7 +209,7 @@ export const SavedTicketsView: React.FC = () => {
     try {
       const { buildClusterZip } = await import('../lib/clusterExport');
       const settings = batch.generation_params?.cluster?.settings;
-      if (!settings) throw new Error('В партии нет параметров экзамена');
+      if (!settings) throw new Error('В наборе нет параметров экзамена');
       const file = await buildClusterZip(settings, clusterVariantsFromBatch(await ticketsOf(batch), batch.generation_params));
       saveAs(file.blob, file.fileName);
       if (file.keyUniversal) notifyInfo(`Ключей в универсальной таблице (состав не поместился в шаблон): ${file.keyUniversal}.`);

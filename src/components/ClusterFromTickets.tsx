@@ -202,13 +202,13 @@ const SlotCard: React.FC<{
       {slot.mode === 'archive' && (
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1.6fr_auto_auto] gap-3 items-end">
           <Field label="Предмет в базе">
-            <CustomSelect className="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg" value={subjectId} onChange={(v) => { onSubject(v); onChange({ batchId: '', snaps: null }); }}>
+            <CustomSelect className="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg" value={subjectId} onChange={(v) => { onSubject(v); onChange({ batchId: '', snaps: null, archive: null, error: null }); }}>
               <option value="">— выберите предмет —</option>
               {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </CustomSelect>
           </Field>
           <Field label="Набор билетов">
-            <CustomSelect className="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg" value={slot.batchId} disabled={!subjectId} onChange={(v) => onChange({ batchId: v, ticketNumber: 1, snaps: null })}>
+            <CustomSelect className="w-full text-sm px-3 py-2 border border-slate-300 rounded-lg" value={slot.batchId} disabled={!subjectId} onChange={(v) => onChange({ batchId: v, ticketNumber: 1, snaps: null, archive: null, error: null })}>
               <option value="">{batchesLoading ? 'Загрузка…' : batches.length ? '— выберите набор —' : 'нет наборов'}</option>
               {batches.map((b) => <option key={b.id} value={b.id}>{b.title} · {b.date} · билетов: {b.count}</option>)}
             </CustomSelect>
@@ -381,6 +381,7 @@ export const ClusterFromTickets: React.FC<{
         try {
           const archive = await parseSubjectArchive(f);
           const i = archive.kind ? CLUSTER_SLOTS.findIndex((d) => d.kind === archive.kind) : -1;
+          if (i < 0 && archive.kind) { notes.push(`«${f.name}»: этот предмет в книжку из готовых билетов не входит (только ${CLUSTER_SLOTS.map((d) => d.name.toLowerCase()).join(', ')}).`); continue; }
           if (i < 0) { notes.push(`«${f.name}»: предмет не определён (нет строки «к субтесту по …» в ключе и названия предмета в имени). Загрузите его в нужной карточке ниже.`); continue; }
           if (taken.has(i)) { notes.push(`«${f.name}»: тоже определён как «${CLUSTER_SLOTS[i].name}» — уже загружен другой архив. Загрузите этот в нужной карточке отдельно.`); continue; }
           taken.add(i);

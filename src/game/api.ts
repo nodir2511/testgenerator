@@ -367,14 +367,20 @@ export function useGameSession(code: string | null) {
   const [connected, setConnected] = useState(true);
   const fails = useRef(0);
   const failed = () => { fails.current += 1; if (fails.current >= 2) setConnected(false); };
+  // Ответ опроса, отправленного раньше последнего события или более нового запроса, устарел: его не применяем
+  const reqId = useRef(0);
+  const lastEventAt = useRef(0);
 
   const refetch = useCallback(async () => {
     if (!code) return;
+    const started = performance.now();
+    const id = ++reqId.current;
     try {
       const { data, error } = await supabase.from('game_sessions').select('*').eq('code', code).maybeSingle();
       if (error) { failed(); return; }
       fails.current = 0;
       setConnected(true);
+      if (id !== reqId.current || lastEventAt.current > started) return;
       if (data) { setSession(normalize(data)); setState('ready'); }
       else setState((s) => (s === 'ready' ? s : 'missing'));
     } catch { failed(); }
@@ -396,6 +402,7 @@ export function useGameSession(code: string | null) {
     const ch = supabase
       .channel(`game-${code}-${Math.random().toString(36).slice(2, 8)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'game_sessions', filter: `code=eq.${code}` }, (payload: any) => {
+        lastEventAt.current = performance.now();
         if (payload.eventType === 'DELETE') { setState('missing'); return; }
         if (payload.new && payload.new.board !== undefined) { setSession(normalize(payload.new)); setState('ready'); }
         else refetch();

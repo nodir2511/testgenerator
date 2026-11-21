@@ -7,6 +7,8 @@
 // поэтому параллельный запуск не пришлёт сообщение дважды. Тела запроса функция не читает.
 // Деплой:  supabase functions deploy release-notify --no-verify-jwt
 // Секреты: TELEGRAM_BOT_TOKEN (SUPABASE_URL и SUPABASE_SERVICE_ROLE_KEY задаёт сам Supabase).
+// Необязательно: RELEASE_NOTIFY_SECRET — если задан, вызов принимается только с заголовком x-cron-secret
+// с тем же значением (его же нужно добавить в задание pg_cron).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { chunkLines, itemVisible, rankOf, releaseLines, type ReleaseItem, type ReleaseRow } from '../_shared/releases.ts';
@@ -26,15 +28,31 @@ async function sendMessage(chat: number, text: string): Promise<boolean> {
   return res.ok;
 }
 
-Deno.serve(async () => {
+const CRON_SECRET = Deno.env.get('RELEASE_NOTIFY_SECRET');
+
+Deno.serve(async (req) => {
+  if (CRON_SECRET && req.headers.get('x-cron-secret') !== CRON_SECRET) return new Response('forbidden', { status: 403 });
+
+  // Берём только версии, у которых уже есть пункты: форма «Что нового» пишет версию и пункты двумя
+  // запросами, и версия, занятая в этот промежуток, осталась бы неразосланной навсегда.
+  const { data: fresh, error: freshErr } = await sb.from('site_releases')
+    .select('id, site_release_items!inner(id)').is('notified_at', null);
+  if (freshErr) {
+    console.error('lookup failed', freshErr);
+    return new Response(JSON.stringify({ error: 'lookup failed' }), { status: 500 });
+  }
+  const ids = (fresh ?? []).map((r: any) => r.id);
+  if (!ids.length) return Response.json({ releases: 0, sent: 0 });
+
   // «Занимаем» неразосланные версии: второй параллельный вызов получит пустой список
   const { data: claimed, error } = await sb.from('site_releases')
     .update({ notified_at: new Date().toISOString() })
     .is('notified_at', null)
+    .in('id', ids)
     .select('id, version, title, released_at');
   if (error) {
     console.error('claim failed', error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    return new Response(JSON.stringify({ error: 'claim failed' }), { status: 500 });
   }
   if (!claimed?.length) return Response.json({ releases: 0, sent: 0 });
 

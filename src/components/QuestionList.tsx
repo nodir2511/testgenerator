@@ -105,31 +105,42 @@ export const QuestionList: React.FC<QuestionListProps> = ({
   }, [previewImage]);
 
   // Таксономия для фильтров
-  const { data: subjects = [] } = useQuery({
+  const { data: subjects = [], isSuccess: subjectsLoaded } = useQuery({
     queryKey: ['subjects'],
     queryFn: async () => {
-      const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      const { data, error } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Subject[];
     },
   });
 
-  const { data: chapters = [] } = useQuery({
+  const { data: chapters = [], isSuccess: chaptersLoaded } = useQuery({
     queryKey: ['chapters', filterSubjectId],
     enabled: Boolean(filterSubjectId),
     queryFn: async () => {
-      const { data } = await supabase.from('chapters').select('*').eq('subject_id', filterSubjectId).eq('is_deleted', false).order('order_index');
+      const { data, error } = await supabase.from('chapters').select('*').eq('subject_id', filterSubjectId).eq('is_deleted', false).order('order_index');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Chapter[];
     },
   });
 
-  const { data: topics = [] } = useQuery({
+  const { data: topics = [], isSuccess: topicsLoaded } = useQuery({
     queryKey: ['topics', filterChapterId],
     enabled: Boolean(filterChapterId),
     queryFn: async () => {
-      const { data } = await supabase.from('topics').select('*').eq('chapter_id', filterChapterId).eq('is_deleted', false).order('order_index');
+      const { data, error } = await supabase.from('topics').select('*').eq('chapter_id', filterChapterId).eq('is_deleted', false).order('order_index');
+      if (error) throw error; // ошибку показываем, а не выдаём за пустой список
       return (data || []) as Topic[];
     },
   });
+
+  // Запомненный в браузере фильтр мог указывать на удалённый или недоступный предмет, главу, тему:
+  // сбрасываем его, иначе банк открывается пустым с пустым полем выбора
+  React.useEffect(() => {
+    if (filterSubjectId && subjectsLoaded && !subjects.some((s) => s.id === filterSubjectId)) { setFilterSubjectId(''); setFilterChapterId(''); setFilterTopicId(''); }
+    else if (filterChapterId && filterSubjectId && chaptersLoaded && !chapters.some((c) => c.id === filterChapterId)) { setFilterChapterId(''); setFilterTopicId(''); }
+    else if (filterTopicId && filterChapterId && topicsLoaded && !topics.some((t) => t.id === filterTopicId)) setFilterTopicId('');
+  }, [filterSubjectId, filterChapterId, filterTopicId, subjects, chapters, topics, subjectsLoaded, chaptersLoaded, topicsLoaded]);
 
   // Тексты выбранной темы (английский); без таблицы или без текстов фильтр «Текст» не показывается
   const { data: topicPassages = [] } = useQuery({
@@ -234,8 +245,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
           .eq('is_deleted', false);
         // В выбранной теме — по номерам вопросов, иначе — новые сверху
         query = byNum
-          ? query.order('num', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
-          : query.order('created_at', { ascending: false });
+          ? query.order('num', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true }).order('id')
+          : query.order('created_at', { ascending: false }).order('id');
         query = query.range(pageNo * PAGE_SIZE, (pageNo + 1) * PAGE_SIZE - 1);
 
         return applyFilters(query);
@@ -288,6 +299,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
       queryClient.invalidateQueries({ queryKey: ['questions'] });
       queryClient.invalidateQueries({ queryKey: ['question_counts'] });
       queryClient.invalidateQueries({ queryKey: ['passage_counts'] });
+      queryClient.invalidateQueries({ queryKey: ['trash'] });
     },
     onError: (_e, id) => setHiddenIds((prev) => prev.filter((x) => x !== id)),
   });
@@ -362,7 +374,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               Банк вопросов
             </h2>
             <p className="text-sm text-slate-600 mt-0.5">
-              Всего в базе: <strong className="text-slate-700 font-semibold">{totalCount}</strong> вопросов • Стр. {page + 1} из {Math.max(1, totalPages)}
+              Вопросов: <strong className="text-slate-700 font-semibold">{totalCount}</strong> • Стр. {page + 1} из {Math.max(1, totalPages)}
             </p>
           </div>
         </div>
@@ -1120,7 +1132,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
               disabled={loadingMore}
               className="w-full bento-card p-3.5 rounded-2xl text-sm font-bold text-indigo-700 hover:bg-indigo-50/70 border-indigo-200/80 active:scale-98 transition shadow-xs disabled:opacity-60 min-h-[40px]"
             >
-              {loadingMore ? 'Загрузка…' : `Показать ещё (следующие ${Math.min(PAGE_SIZE, totalCount - (lastShown + 1) * PAGE_SIZE)} вопросов, страница ${lastShown + 2})`}
+              {loadingMore ? 'Загрузка…' : `Показать ещё (вопросов: ${Math.min(PAGE_SIZE, totalCount - (lastShown + 1) * PAGE_SIZE)}, страница ${lastShown + 2})`}
             </button>
           )}
 

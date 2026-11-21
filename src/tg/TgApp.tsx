@@ -338,8 +338,10 @@ export default function TgApp() {
     });
   }, [subjects.length]);
 
+  const submitting = useRef(false);
   const submit = useCallback(async () => {
-    if (!subject) return;
+    if (!subject || submitting.current) return; // двойное нажатие не создаёт второй набор
+    submitting.current = true;
     setBusy(true);
     setError('');
     try {
@@ -356,6 +358,7 @@ export default function TgApp() {
       wa()?.HapticFeedback?.notificationOccurred('error');
       setError((e as Error).message);
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }, [subject, chapterIds, topicIds, lang, settings, nums, title, shuffleOptions, shuffleMatching]);
@@ -436,8 +439,13 @@ export default function TgApp() {
               ? 'Чтобы открыть конструктор билетов, перейдите в чат с ботом и нажмите синюю кнопку «🚀 Конструктор» в левом нижнем углу или отправьте команду /app.'
               : fatal.message}
           </p>
+          {fatal.code === 'network' && (
+            <button className="tg-btn tg-btn-primary" style={{ display: 'block', margin: '0 auto 12px', padding: '12px 24px', borderRadius: '12px', fontWeight: 600 }} onClick={() => window.location.reload()}>
+              Повторить
+            </button>
+          )}
           <a
-            href="https://t.me/testgenerrepbot"
+            href={`https://t.me/${import.meta.env.VITE_TELEGRAM_BOT_USERNAME || 'testgenerrepbot'}`}
             className="tg-btn tg-btn-primary"
             style={{ display: 'inline-block', textDecoration: 'none', padding: '12px 24px', borderRadius: '12px', fontWeight: 600 }}
           >

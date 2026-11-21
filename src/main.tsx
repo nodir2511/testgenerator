@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query';
-import { AuthProvider } from './hooks/useAuth';
+import { AuthProvider, SIGNED_OUT_EVENT } from './hooks/useAuth';
 import App from './App';
 import ErrorToaster from './components/ErrorToaster';
 import UpdateBanner from './components/UpdateBanner';
@@ -73,6 +73,11 @@ if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/
     </React.StrictMode>
   );
 } else {
+  // После выхода следующий пользователь этой вкладки не должен увидеть чужие данные из кэша
+  window.addEventListener(SIGNED_OUT_EVENT, () => {
+    queryClient.clear();
+    try { localStorage.removeItem('examiner_tg_generated_batch'); } catch { /* память недоступна */ }
+  });
   prefetchOnStartup(queryClient);
   root.render(
     <React.StrictMode>

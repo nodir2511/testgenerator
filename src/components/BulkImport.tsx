@@ -3,6 +3,7 @@ import Papa from 'papaparse';
 import { readSheet } from 'read-excel-file/browser';
 import writeExcelFile from 'write-excel-file/browser';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetchAllPages } from '../lib/fetchAllPages';
 import { supabase } from '../lib/supabase';
 import { must, notifyError, notifySuccess } from '../lib/errors';
 import { softDeletePassages } from '../lib/passages';
@@ -158,7 +159,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const { data: subjects = [] } = useQuery({
     queryKey: ['subjects'],
     queryFn: async () => {
-      const { data } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      const { data, error } = await supabase.from('subjects').select('*').eq('is_deleted', false).order('name');
+      if (error) throw error;
       return (data || []) as Subject[];
     },
   });
@@ -166,7 +168,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const { data: chapters = [] } = useQuery({
     queryKey: ['all_chapters'],
     queryFn: async () => {
-      const { data } = await supabase.from('chapters').select('*').eq('is_deleted', false).order('order_index');
+      const { data, error } = await supabase.from('chapters').select('*').eq('is_deleted', false).order('order_index');
+      if (error) throw error;
       return (data || []) as Chapter[];
     },
   });
@@ -174,7 +177,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const { data: topics = [] } = useQuery({
     queryKey: ['all_topics'],
     queryFn: async () => {
-      const { data } = await supabase.from('topics').select('*').eq('is_deleted', false).order('order_index');
+      const { data, error } = await supabase.from('topics').select('*').eq('is_deleted', false).order('order_index');
+      if (error) throw error;
       return (data || []) as Topic[];
     },
   });
@@ -182,7 +186,8 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   const { data: sources = [] } = useQuery({
     queryKey: ['sources'],
     queryFn: async () => {
-      const { data } = await supabase.from('sources').select('*').eq('is_deleted', false);
+      const { data, error } = await supabase.from('sources').select('*').eq('is_deleted', false);
+      if (error) throw error;
       return (data || []) as Source[];
     },
   });
@@ -199,15 +204,14 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
 
   // Найти текущие имена для назначения
   const getTaxonomyNames = () => {
-    const subj = subjects.find(s => s.id === defaultSubjectId) || subjects[0];
-    const chap = availableChapters.find(c => c.id === defaultChapterId) || availableChapters[0] || chapters[0];
-    const top = availableTopics.find(t => t.id === defaultTopicId) || availableTopics[0] || topics[0];
-    return {
-      subjectName: subj?.name || 'Химия',
-      chapterName: chap?.name || 'Общая химия',
-      topicName: top?.name || 'Общие вопросы',
-    };
+    // Только явно выбранные предмет, глава и тема: без подстановки чужих или выдуманных названий
+    const subj = subjects.find(s => s.id === defaultSubjectId);
+    const chap = subj ? chapters.find(c => c.id === defaultChapterId && c.subject_id === subj.id) : undefined;
+    const top = chap ? topics.find(t => t.id === defaultTopicId && t.chapter_id === chap.id) : undefined;
+    return { subjectName: subj?.name || '', chapterName: chap?.name || '', topicName: top?.name || '' };
   };
+  const NEED_TAXONOMY = 'Сначала выберите предмет, главу и тему, в которые попадут вопросы (списки выше). Если списки пусты, подождите загрузки или обновите страницу.';
+  const taxonomyChosen = () => { const n = getTaxonomyNames(); return Boolean(n.subjectName && n.chapterName && n.topicName); };
 
   // Парсинг сырых строковых данных (из CSV или Excel)
   const validateAndProcessRawData = (rows: any[]) => {
@@ -274,7 +278,9 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   // Загрузка файла (.docx / .xlsx / .xls / .csv)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = ''; // тот же файл после правки можно выбрать снова
     if (!file) return;
+    if (file.name.endsWith('.docx') && !taxonomyChosen()) { setGlobalError(NEED_TAXONOMY); return; }
 
     setIsProcessing(true);
     setGlobalError(null);
@@ -377,6 +383,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
   // Пара файлов: русский и таджикский варианты одного документа -> двуязычные вопросы
   const handleParsePair = async () => {
     if (!pairRu || !pairTg) return;
+    if (!taxonomyChosen()) { setGlobalError(NEED_TAXONOMY); return; }
     setIsProcessing(true);
     setGlobalError(null);
     setStatusMessage(null);
@@ -456,6 +463,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
 
   // Применить выбранную таксономию ко всем строкам предпросмотра
   const handleApplyTaxonomyToAll = () => {
+    if (!taxonomyChosen()) { setGlobalError(NEED_TAXONOMY); return; }
     const { subjectName, chapterName, topicName } = getTaxonomyNames();
     setParsedRows(prev =>
       prev.map(r => ({
@@ -531,10 +539,16 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
         .single();
       if (bErr || !batch) throw bErr;
 
-      const localSubjects = [...subjects];
-      const localChapters = [...chapters];
-      const localTopics = [...topics];
-      const localSources = [...sources];
+      // Справочники читаем заново: глава или тема, добавленная в другом разделе за последние минуты,
+      // иначе создалась бы второй раз
+      const fresh = async <T,>(table: string): Promise<T[]> => {
+        const { data, error } = await fetchAllPages<T>(() => supabase.from(table).select('*').eq('is_deleted', false));
+        if (error) throw error;
+        return data || [];
+      };
+      const [localSubjects, localChapters, localTopics, localSources] = await Promise.all([
+        fresh<Subject>('subjects'), fresh<Chapter>('chapters'), fresh<Topic>('topics'), fresh<Source>('sources'),
+      ]);
 
       // Картинки загружаем в хранилище только сейчас (и каждую один раз)
       const uploaded = new Map<string, string>();
@@ -748,8 +762,11 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
       queryClient.invalidateQueries({ queryKey: ['passage_counts'] });
       queryClient.invalidateQueries({ queryKey: ['import_batches'] });
       queryClient.invalidateQueries({ queryKey: ['pool_stats'] });
-      queryClient.invalidateQueries({ queryKey: ['all_chapters'] });
-      queryClient.invalidateQueries({ queryKey: ['all_topics'] });
+      // Импорт мог создать предмет, главу, тему или источник: обновляем списки во всех разделах
+      for (const key of ['all_chapters', 'all_topics', 'subjects', 'chapters', 'topics', 'topics_for_generation', 'sources']) queryClient.invalidateQueries({ queryKey: [key] });
+      // Картинки из Word больше не нужны: освобождаем память
+      imagesRef.current.forEach((_f, url) => { try { URL.revokeObjectURL(url); } catch { /* не страшно */ } });
+      imagesRef.current.clear();
       setImportReport(report);
       if (report.failed.length === 0 && report.skipped === 0) {
         notifySuccess(`Импорт завершён: добавлено вопросов — ${report.inserted}`);
@@ -766,14 +783,15 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     queryKey: ['import_batches'],
     enabled: activeTab === 'history',
     queryFn: async () => {
-      const { data } = await supabase.from('import_batches').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase.from('import_batches').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
       return data || [];
     },
   });
 
   const revertBatchMutation = useMutation({
     mutationFn: async (batchId: string) => {
-      await must(supabase.from('questions').update({ is_deleted: true }).eq('batch_id', batchId));
+      await must(supabase.from('questions').update({ is_deleted: true }).eq('batch_id', batchId).eq('is_deleted', false));
       await softDeletePassages({ batchId }); // тексты партии (английский); без таблицы ничего не делает
       await must(supabase.from('import_batches').update({ is_reverted: true }).eq('id', batchId));
     },
@@ -784,6 +802,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
       queryClient.invalidateQueries({ queryKey: ['question_counts'] });
       queryClient.invalidateQueries({ queryKey: ['passage_counts'] });
       queryClient.invalidateQueries({ queryKey: ['import_batches'] });
+      queryClient.invalidateQueries({ queryKey: ['trash'] });
     },
   });
 

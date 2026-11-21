@@ -236,7 +236,8 @@
       if (d.status !== 'open') { fail('Занятие уже закончилось'); return; }
       enter(d);
     }).catch(function (e) {
-      if (e.status && e.status < 500) { auth = null; try { localStorage.removeItem(AUTH_KEY); } catch (x) { } begin(); }
+      // Вход сбрасываем только при отказе самой функции (400); лимит запросов и прочее — «Повторить»
+      if (e.status === 400) { auth = null; try { localStorage.removeItem(AUTH_KEY); } catch (x) { } begin(); }
       else fail(e.message);
     });
   }

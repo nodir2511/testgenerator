@@ -45,7 +45,7 @@ function saveCustom(list: CustomKey[]) {
 const FAIL_TEXT = 'Не видно четыре чёрных метки по углам бланка. Снимите бланк целиком при хорошем свете, чтобы все метки попали в кадр.';
 const CODE_TEXT = 'Не удалось определить вид бланка. Проверьте, что снят бланк нужного предмета, и переснимите: бланк целиком, без бликов и теней.';
 
-const compText = (c: Composition) => `${c.test} тестов, ${c.matching} соответствий, ${c.open} открытых`;
+const compText = (c: Composition) => `тестов: ${c.test}, соответствий: ${c.matching}, открытых: ${c.open}`;
 const doubtLabel = (d: Doubt) => (d.kind === 'test' ? `Тест ${d.q}` : d.kind === 'matching' ? `Соответствие ${d.q}, пункт ${d.row}` : d.kind === 'variant' ? 'Вариант' : `Открытый ${d.q}`);
 const WHY: Record<Doubt['why'], string> = { multi: 'отмечено несколько — засчитано неверно', unsure: 'неуверенно', empty: 'не отмечено', digit: 'цифры' };
 
@@ -76,11 +76,12 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
   useEffect(() => { void api<{ owner: boolean }>('digits_admin').then((r) => setOwner(!!r.owner)).catch(() => {}); }, [api]);
 
   const upCustom = (fn: (l: CustomKey[]) => CustomKey[]) => setCustom((l) => { const n = fn(l); saveCustom(n); return n; });
-  const go = (v: View) => { setError(''); setDebug(''); setView(v); };
+  const viewName = useRef<View['name']>('home');
+  const go = (v: View) => { viewName.current = v.name; setError(''); setDebug(''); setView(v); };
   const addToQueue = (items: Array<Omit<QItem, 'id'>>) => setQueue((q) => [...q, ...items.map((i) => ({ ...i, id: nextId.current++ }))]);
   const dropFromQueue = (id: number) => setQueue((q) => q.filter((i) => i.id !== id));
   const leaveScan = (to: View) => {
-    if (queue.length && !window.confirm(`В стопке ${queue.length} ${queue.length === 1 ? 'снимок' : 'снимков'} без сохранения. Выйти и потерять их?`)) return;
+    if (queue.length && !window.confirm(`Снимков в стопке без сохранения: ${queue.length}. Выйти и потерять их?`)) return;
     setQueue([]);
     go(to);
   };
@@ -97,7 +98,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
         .catch((e) => { if (!off) fail(e); })
         .finally(() => { if (!off) setBusy(false); });
     }, search ? 300 : 0);
-    return () => { off = true; clearTimeout(id); };
+    return () => { off = true; clearTimeout(id); setBusy(false); };
   }, [view.name, search]); // eslint-disable-line react-hooks/exhaustive-deps
   const openSets = () => go({ name: 'sets' });
 
@@ -107,6 +108,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
       const r = await api<{ title: string; comp: Composition; layouts: string[]; tickets: Array<{ number: number; key: TicketKey }> }>('check_key', { batchId: s.id });
       const keys: Record<number, TicketKey> = {};
       r.tickets.forEach((t) => { keys[t.number] = t.key; });
+      if (viewName.current !== 'sets') return; // пока шёл запрос, пользователь ушёл со списка
       go({ name: 'scan', src: { kind: 'set', id: s.id, batchId: s.id, title: r.title, comp: r.comp, layouts: r.layouts, keys } });
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
@@ -217,7 +219,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '16px 4px 6px' }}>
                   <h2 style={{ margin: 0 }}>Проверено за сеанс: {done.length}</h2>
-                  <button className="tg-link" onClick={() => void exportOmrChecksToExcel(done.map((d) => ({ student: d.student, score: d.score, max_score: d.max, ticket_number: d.ticket, created_at: d.createdAt })), src.title)}>📥 Скачать в Excel</button>
+                  <button className="tg-link" onClick={() => void exportOmrChecksToExcel(done.map((d) => ({ student: d.student, score: d.score, max_score: d.max, ticket_number: d.ticket, created_at: d.createdAt })), src.title).catch(() => fail(new Error('Не удалось сохранить файл Excel. Попробуйте ещё раз.')))}>📥 Скачать в Excel</button>
                 </div>
                 {done.slice(-30).map((d, k) => <p key={k} className="tg-hint">{d.student || 'без имени'} — {d.score} из {d.max}{d.ticket ? ` (вар. ${d.ticket})` : ''}</p>)}
               </>
@@ -317,11 +319,15 @@ const readFile = async (f: File, layouts: string[]): Promise<{ res?: Ok; error?:
 };
 
 // ---------- живой видоискатель камеры ----------
-function LiveCameraModal({ onSnap, onClose, onFallback }: {
+function LiveCameraModal({ onSnap, onClose, onFallback, busy }: {
   onSnap: (file: File) => void;
   onClose: () => void;
   onFallback: () => void;
+  busy: boolean;
 }) {
+  // Родитель передаёт новую функцию на каждый рендер: держим её в ref, чтобы камера не перезапускалась
+  const fallbackRef = useRef(onFallback);
+  fallbackRef.current = onFallback;
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [ready, setReady] = useState(false);
@@ -330,7 +336,7 @@ function LiveCameraModal({ onSnap, onClose, onFallback }: {
   useEffect(() => {
     let active = true;
     if (typeof navigator.mediaDevices?.getUserMedia !== 'function') {
-      onFallback();
+      fallbackRef.current();
       return;
     }
     navigator.mediaDevices.getUserMedia({
@@ -354,7 +360,7 @@ function LiveCameraModal({ onSnap, onClose, onFallback }: {
     }).catch((e) => {
       if (!active) return;
       setErr((e as Error).message || 'Не удалось запустить камеру');
-      onFallback();
+      fallbackRef.current();
     });
 
     return () => {
@@ -364,11 +370,11 @@ function LiveCameraModal({ onSnap, onClose, onFallback }: {
         streamRef.current = null;
       }
     };
-  }, [onFallback]);
+  }, []);
 
   const snap = () => {
     const video = videoRef.current;
-    if (!video || !ready) return;
+    if (!video || !ready || busy) return;
     const w = video.videoWidth || 1280;
     const h = video.videoHeight || 720;
     const canvas = document.createElement('canvas');
@@ -400,7 +406,7 @@ function LiveCameraModal({ onSnap, onClose, onFallback }: {
       </div>
       <div className="tg-viewfinder-controls">
         <button className="tg-link" style={{ color: '#fff' }} onClick={onClose}>✕ Закрыть</button>
-        <button className="tg-viewfinder-shutter" onClick={snap} aria-label="Сделать снимок">📷</button>
+        <button className="tg-viewfinder-shutter" onClick={snap} disabled={busy || !ready} aria-label="Сделать снимок">📷</button>
         <button className="tg-link" style={{ color: '#fff' }} onClick={onFallback}>Обычная камера</button>
       </div>
       {err && <div className="tg-error" style={{ margin: 8 }}>{err}</div>}
@@ -457,6 +463,7 @@ function QueueCapture({ layouts, hasItems, onAdd, onFirstError }: { layouts: str
       <input ref={gal} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => void onFiles(e, false)} />
       {showLive && (
         <LiveCameraModal
+          busy={!!progress}
           onSnap={(file) => {
             void processFile(file, true);
           }}
@@ -748,7 +755,7 @@ function Results({ api, onError }: { api: Api; onError: (e: unknown) => void }) 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>Результаты</h1>
         {rows && rows.length > 0 && (
-          <button className="tg-link" onClick={() => void exportOmrChecksToExcel(rows, 'Все_результаты')}>📥 В Excel</button>
+          <button className="tg-link" onClick={() => void exportOmrChecksToExcel(rows, 'Все_результаты').catch(() => onError(new Error('Не удалось сохранить файл Excel. Попробуйте ещё раз.')))}>📥 В Excel</button>
         )}
       </div>
       {!rows && <p className="tg-hint">Загрузка…</p>}
@@ -829,7 +836,7 @@ function DigitsAdmin({ api, onError }: { api: Api; onError: (e: unknown) => void
       {sel.size > 0 && (
         <div className="tg-card">
           <b>Выбрано: {sel.size}</b>
-          <button className="tg-btn-primary" disabled={busy} onClick={() => { if (window.confirm('Удалить ' + sel.size + ' картинок? Это нельзя отменить.')) void act('digits_admin_delete'); }}>Удалить выбранные</button>
+          <button className="tg-btn-primary" disabled={busy} onClick={() => { if (window.confirm('Удалить выбранные картинки (' + sel.size + ')? Это нельзя отменить.')) void act('digits_admin_delete'); }}>Удалить выбранные</button>
           <p className="tg-hint">Перенести в цифру:</p>
           <div className="tg-chips">
             {Array.from({ length: 10 }, (_, d) => (d === digit ? null : <button key={d} className="tg-chip" disabled={busy} onClick={() => void act('digits_admin_relabel', { digit: d })}>{d}</button>))}

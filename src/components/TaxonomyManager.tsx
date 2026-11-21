@@ -125,7 +125,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
 
   const addChapterMutation = useMutation({
     mutationFn: async ({ subjectId, name }: { subjectId: string; name: string }) => {
-      const order = chapters.length + 1;
+      const order = Math.max(0, ...chapters.map((c) => c.order_index ?? 0)) + 1; // после удаления номер не повторяется
       const { error } = await supabase
         .from('chapters')
         .insert({ subject_id: subjectId, name, order_index: order });
@@ -135,13 +135,14 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chapters', activeSubjectId] });
       queryClient.invalidateQueries({ queryKey: ['topics_for_generation'] });
+      queryClient.invalidateQueries({ queryKey: ['all_chapters'] });
       setNewChapterName('');
     },
   });
 
   const addTopicMutation = useMutation({
     mutationFn: async ({ chapterId, name }: { chapterId: string; name: string }) => {
-      const order = topics.length + 1;
+      const order = Math.max(0, ...topics.map((t) => t.order_index ?? 0)) + 1;
       const { error } = await supabase
         .from('topics')
         .insert({ chapter_id: chapterId, name, order_index: order });
@@ -151,6 +152,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['topics', activeChapterId] });
       queryClient.invalidateQueries({ queryKey: ['topics_for_generation'] });
+      queryClient.invalidateQueries({ queryKey: ['all_topics'] });
       setNewTopicName('');
     },
   });
@@ -212,7 +214,7 @@ export const TaxonomyManager: React.FC<TaxonomyManagerProps> = ({
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: [variables.table] });
       // Справочники и вопросы, закэшированные в других разделах (генератор, импорт, банк вопросов)
-      for (const key of ['passages', 'questions', 'pool_stats', 'topics_for_generation', 'question_counts', 'passage_counts', 'chapters', 'topics', 'all_chapters', 'all_topics']) {
+      for (const key of ['trash', 'passages', 'questions', 'pool_stats', 'topics_for_generation', 'question_counts', 'passage_counts', 'chapters', 'topics', 'all_chapters', 'all_topics']) {
         queryClient.invalidateQueries({ queryKey: [key] });
       }
       // Сохранённые в браузере выбор темы/главы мог указывать на удалённую запись

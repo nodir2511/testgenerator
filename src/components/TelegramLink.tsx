@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send, X, Loader2, Copy, Check, ExternalLink } from 'lucide-react';
@@ -64,7 +64,12 @@ export const TelegramLink: React.FC = () => {
   }, [open, linked]);
 
   useEffect(() => { if (!open) { setCode(null); setError(null); } }, [open]);
-  useEffect(() => { if (linked && code) setCode(null); }, [linked, code]);
+  // Код убираем, когда привязка только что состоялась; при «Привязать другой чат» (уже привязан) он нужен
+  const wasLinked = useRef(linked);
+  useEffect(() => {
+    if (linked && !wasLinked.current && code) setCode(null);
+    wasLinked.current = linked;
+  }, [linked, code]);
 
   const unlink = async () => {
     if (!(await confirmAction({

@@ -349,7 +349,7 @@ async function screenQuick(chat: number, user: any, msgId?: number) {
     }
   });
 
-  kb.push([{ text: '🚀 Открыть полный конструктор (Mini App)', web_app: { url: APP_URL } }]);
+  kb.push([{ text: '🚀 Открыть полный конструктор (мини-приложение)', web_app: { url: APP_URL } }]);
 
   const text = (
     `⚡ <b>Экспресс-генерация билетов</b>\n\n` +
@@ -843,6 +843,7 @@ async function onCallback(cb: any) {
 
   // Настройка параметров билета
   if (data.startsWith('V:')) {
+    if (!['test', 'matching', 'open', 'tickets', 'title'].includes(data.slice(2))) return;
     st.awaiting = data.slice(2) as State['awaiting'];
     await saveState(chat, st);
     return send(chat, prompts(await limitsFor(sb, user))[st.awaiting!]);
@@ -870,6 +871,7 @@ async function onCallback(cb: any) {
   // Генерация билетов с живым прогрессом
   if (data.startsWith('L:')) {
     const lang = data.slice(2) as 'ru' | 'tg' | 'both';
+    if (!['ru', 'tg', 'both'].includes(lang)) return;
     st.busyAt = Date.now();
     await saveState(chat, st);
 

@@ -100,9 +100,17 @@ Deno.serve(async (req) => {
 
     // Триггер on_auth_user_created уже создал профиль с ролью 'user'.
     // Пароль придумал администратор — при первом входе человек сменит его на свой.
-    await adminClient.from('profiles').update({ role, must_change_password: true }).eq('id', created.user.id);
-    if (bySubject) {
-      await adminClient.from('user_subjects').insert(subjectIds.map((subject_id) => ({ user_id: created.user.id, subject_id })));
+    // Роль не применилась — аккаунт остался бы с ролью 'user' и всем банком: удаляем его и сообщаем об ошибке.
+    const { data: roleRows, error: roleErr } = await adminClient.from('profiles')
+      .update({ role, must_change_password: true }).eq('id', created.user.id).select('id');
+    const { error: subjErr } = !roleErr && bySubject
+      ? await adminClient.from('user_subjects').insert(subjectIds.map((subject_id) => ({ user_id: created.user.id, subject_id })))
+      : { error: null };
+    if (roleErr || !roleRows?.length || subjErr) {
+      console.error('role/subjects', roleErr ?? subjErr ?? 'profile row not found');
+      await adminClient.auth.admin.deleteUser(created.user.id);
+      await adminClient.from('account_invites').delete().eq('email', email);
+      return json({ error: 'Не удалось создать пользователя: роль или предметы не сохранились. Повторите попытку.' }, 500);
     }
 
     await adminClient.from('audit_logs').insert({

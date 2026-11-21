@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Info, RotateCcw, Trash2, X } from 'lucide-react';
-import { ERROR_EVENT, SUCCESS_EVENT, INFO_EVENT, UNDO_EVENT, type ExplainedError, type UndoToast } from '../lib/errors';
+import { ERROR_EVENT, SUCCESS_EVENT, INFO_EVENT, UNDO_EVENT, UNDO_FLUSHED_EVENT, type ExplainedError, type UndoToast } from '../lib/errors';
 
 type Item =
   | (ExplainedError & { id: number; kind: 'error' })
@@ -31,7 +31,10 @@ export default function ErrorToaster() {
       push({ kind: 'undo', title: d.title, ms: d.ms, undo: d.undo }, d.ms);
     };
     window.addEventListener(UNDO_EVENT, onUndo);
+    const onFlushed = () => setItems((prev) => prev.filter((p) => p.kind !== 'undo'));
+    window.addEventListener(UNDO_FLUSHED_EVENT, onFlushed);
     return () => {
+      window.removeEventListener(UNDO_FLUSHED_EVENT, onFlushed);
       window.removeEventListener(UNDO_EVENT, onUndo);
       window.removeEventListener(ERROR_EVENT, onError);
       window.removeEventListener(SUCCESS_EVENT, onSuccess);
