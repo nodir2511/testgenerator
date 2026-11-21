@@ -69,8 +69,11 @@ export async function parseSubjectArchive(file: File | Blob): Promise<ParsedArch
     throw new Error(`Варианты русского и таджикского не совпадают: ${onlyRu.length ? `нет таджикского для ${onlyRu.join(', ')}` : ''}${onlyRu.length && onlyTg.length ? '; ' : ''}${onlyTg.length ? `нет русского для ${onlyTg.join(', ')}` : ''}`);
   }
 
-  // Ключи: Word в корне архива, имя начинается с «Ключи»
-  const keyEntry = files.find((e) => !e.name.includes('/') && /^(Ключи|Калид)/i.test(e.name) && /\.docx$/i.test(e.name));
+  // Ключи: Word, имя начинается с «Ключи»
+  // (в корне или в любой папке — архив часто лежит внутри папки «Экзамен 1/»; берётся ближайший к корню)
+  const keyEntry = files
+    .filter((e) => { const b = e.name.split('/').pop() || ''; return /^(Ключи|Калид)/i.test(b) && /\.docx$/i.test(b) && !b.startsWith('~$'); })
+    .sort((a, b) => a.name.split('/').length - b.name.split('/').length)[0];
   const keyBytes = keyEntry ? await keyEntry.file.async('uint8array') : null;
   if (!keyBytes) warnings.push('В архиве нет файла ключей (Ключи – ….docx): ключей по этому предмету в итоговом архиве не будет');
 
