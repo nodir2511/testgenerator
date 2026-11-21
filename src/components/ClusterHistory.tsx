@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { saveAs } from 'file-saver';
-import { Download, History, Loader2 } from 'lucide-react';
+import { Download, History, Loader2, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { notifyError, notifyInfo } from '../lib/errors';
+import { assertRowsChanged, notifyError, notifyInfo, withUndo } from '../lib/errors';
 import { clusterVariantsFromBatch } from '../lib/clusterStore';
 import { Button, Card } from './ui';
 
@@ -16,6 +16,8 @@ const fmtDate = (iso: string) => new Date(iso).toLocaleString('ru-RU', { day: '2
 
 export const ClusterHistory: React.FC = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+  const queryClient = useQueryClient();
   const list = useQuery({
     queryKey: ['cluster_history'],
     staleTime: 30_000,
@@ -31,6 +33,26 @@ export const ClusterHistory: React.FC = () => {
       return (data || []) as any[];
     },
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase.from('ticket_batches').delete().eq('id', id).select('id');
+      if (error) throw error;
+      assertRowsChanged(data, 'кластер в истории');
+    },
+    meta: { action: 'Не удалось удалить кластер из истории' },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cluster_history'] });
+      queryClient.invalidateQueries({ queryKey: ['recent_batches'] });
+    },
+    onError: (_e, id) => setHiddenIds((prev) => prev.filter((x) => x !== id)),
+  });
+
+  // Удаление с отменой: строка сразу пропадает, из базы — через 5 секунд (так же, как в «Архиве билетов»)
+  const remove = (b: any) => {
+    setHiddenIds((prev) => [...prev, b.id]);
+    withUndo('Кластер удалён из истории', () => deleteMutation.mutate(b.id), () => setHiddenIds((prev) => prev.filter((x) => x !== b.id)));
+  };
 
   const download = async (batch: any) => {
     setBusyId(batch.id);
@@ -55,7 +77,7 @@ export const ClusterHistory: React.FC = () => {
     }
   };
 
-  const rows = list.data ?? [];
+  const rows = (list.data ?? []).filter((b) => !hiddenIds.includes(b.id));
   return (
     <Card padding="none" className="p-5 space-y-3">
       <div className="flex items-center gap-2">
@@ -76,10 +98,16 @@ export const ClusterHistory: React.FC = () => {
                   {fmtDate(b.created_at)} · вариантов: {count}{subjects.length ? ` · ${subjects.map((x) => x.name).join(', ')}` : ''}
                 </p>
               </div>
-              <Button variant="secondary" size="sm" onClick={() => download(b)} disabled={busyId !== null} className="shrink-0">
-                {busyId === b.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                <span>Скачать</span>
-              </Button>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button variant="secondary" size="sm" onClick={() => download(b)} disabled={busyId !== null}>
+                  {busyId === b.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  <span>Скачать</span>
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => remove(b)} disabled={busyId === b.id} aria-label="Удалить из истории" title="Удалить из истории">
+                  <Trash2 className="w-4 h-4" />
+                  <span>Удалить</span>
+                </Button>
+              </div>
             </li>
           );
         })}
