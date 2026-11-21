@@ -814,8 +814,14 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
     const maxLen = Math.max(leftItems.length, rightItems.length);
     const grid = opts.matchingGrid;
     const gridSize = grid ? imageSize(grid) : null;
-    const colW = grid ? 3100 : 4424;
-    const spanCols = grid ? 3 : 2;
+    // Таблица ответа стоит справа от пунктов, только если им хватает места; длинные пункты (по ~45 знаков и больше)
+    // сузили бы колонки, слова рвались бы по слогам — тогда таблица ответа ставится ниже задания, на всю ширину
+    const plainLen = (t: any) => String(t || '').replace(/<[^>]+>/g, '').length;
+    const longItems = [...leftItems, ...rightItems].some((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) > 45);
+    const gridBeside = !!(grid && gridSize) && !longItems;
+    const gridBelow = !!(grid && gridSize) && longItems;
+    const colW = gridBeside ? 3100 : 4424;
+    const spanCols = gridBeside ? 3 : 2;
     const leftImgBuffers = await Promise.all(
       leftItems.map((m: any) => m.image_url ? fetchImageBuffer(m.image_url) : Promise.resolve(null))
     );
@@ -934,7 +940,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
               borders: NO_CELL_BORDERS,
               children: rightParas,
             }),
-            ...(grid && gridSize && rowIdx === 0 ? [new TableCell({
+            ...(gridBeside && grid && gridSize && rowIdx === 0 ? [new TableCell({
               rowSpan: maxLen,
               width: { size: 2648, type: WidthType.DXA },
               margins: cm,
@@ -957,9 +963,35 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
       );
     }
 
+    if (gridBelow && grid && gridSize) {
+      rows.push(
+        new TableRow({ cantSplit: true,
+          children: [
+            createEmptyNumCell(cm),
+            new TableCell({
+              columnSpan: 2,
+              width: { size: 8848, type: WidthType.DXA },
+              margins: cm,
+              borders: NO_CELL_BORDERS,
+              children: [
+                ...(opts.matchingGridLabel ? [new Paragraph({
+                  keepNext: true,
+                  spacing: { after: 40 },
+                  children: [new TextRun({ text: opts.matchingGridLabel, bold: true, font: 'Times New Roman', size: 28 })],
+                })] : []),
+                new Paragraph({
+                  children: [new ImageRun({ data: grid, transformation: { width: 140, height: Math.round((140 * gridSize.h) / gridSize.w) }, type: 'png' })],
+                }),
+              ],
+            }),
+          ],
+        })
+      );
+    }
+
     return new Table({
       width: { size: 9348, type: WidthType.DXA },
-      columnWidths: grid ? [500, 3100, 3100, 2648] : [500, 4424, 4424],
+      columnWidths: gridBeside ? [500, 3100, 3100, 2648] : [500, 4424, 4424],
       borders: NO_TABLE_BORDERS,
       rows,
     });

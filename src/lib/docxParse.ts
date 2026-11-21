@@ -114,7 +114,12 @@ export function cleanXmlRunsToFormattedText(xml: string): string {
 
     const tMatches = [...rXml.matchAll(/<w:tab\s*\/>|<w:br\s*\/>|<[wm]:t(?:\s[^>]*)?>([\s\S]*?)<\/[wm]:t>/g)];
     let t = tMatches.map((m) => (m[1] === undefined ? ' ' : m[1])).join('');
-    if (!t.trim()) continue;
+    if (!t.trim()) {
+      // Пробел между словами Word нередко хранит отдельным фрагментом (<w:t xml:space="preserve"> </w:t>, особенно рядом с
+      // proofErr): без него слова склеиваются. Пустые фрагменты, табы и переносы без текста по-прежнему пропускаются.
+      if (tMatches.some((m) => m[1] !== undefined && /^[  ]+$/.test(m[1]))) result += ' ';
+      continue;
+    }
 
     if (isSub) t = `<sub>${t}</sub>`;
     if (isSup) t = `<sup>${t}</sup>`;
@@ -129,7 +134,7 @@ export function cleanXmlRunsToFormattedText(xml: string): string {
   }
 
   // Склеиваем соседние одинаковые теги, возникающие из-за дробления текста на пробежки
-  result = result.replace(/<\/(b|i|u|sub|sup)><\1>/g, '');
+  result = result.replace(/<\/(b|i|u|sub|sup)>([  ]*)<\1>/g, '$2');
 
   // Удаляем внешнее оборачивание всего текста в <b>...</b> если оно сплошное
   result = result.trim();
