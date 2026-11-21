@@ -820,7 +820,13 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
     const longItems = [...leftItems, ...rightItems].some((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) > 100);
     const gridBeside = !!(grid && gridSize) && !longItems;
     const gridBelow = !!(grid && gridSize) && longItems;
-    const colW = gridBeside ? 3100 : 4424;
+    // Ширина колонок гибкая: делится между левой и правой по длине самых длинных пунктов (с маркером «A) »),
+    // но каждой достаётся не меньше ~22 % — короткая колонка «1) 9» не занимает полстраницы, длинная не переносится зря
+    const sideLen = (items: any[]) => Math.max(6, ...items.map((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) + 3));
+    const itemsTotal = gridBeside ? 6200 : 8848;
+    const leftShare = Math.min(0.78, Math.max(0.22, sideLen(leftItems) / (sideLen(leftItems) + sideLen(rightItems))));
+    const leftW = Math.round(itemsTotal * leftShare);
+    const rightW = itemsTotal - leftW;
     const spanCols = gridBeside ? 3 : 2;
     const leftImgBuffers = await Promise.all(
       leftItems.map((m: any) => m.image_url ? fetchImageBuffer(m.image_url) : Promise.resolve(null))
@@ -929,13 +935,13 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
           children: [
             createEmptyNumCell(cm),
             new TableCell({
-              width: { size: colW, type: WidthType.DXA },
+              width: { size: leftW, type: WidthType.DXA },
               margins: cm,
               borders: NO_CELL_BORDERS,
               children: leftParas,
             }),
             new TableCell({
-              width: { size: colW, type: WidthType.DXA },
+              width: { size: rightW, type: WidthType.DXA },
               margins: cm,
               borders: NO_CELL_BORDERS,
               children: rightParas,
@@ -991,7 +997,7 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
 
     return new Table({
       width: { size: 9348, type: WidthType.DXA },
-      columnWidths: gridBeside ? [500, 3100, 3100, 2648] : [500, 4424, 4424],
+      columnWidths: gridBeside ? [500, leftW, rightW, 2648] : [500, leftW, rightW],
       borders: NO_TABLE_BORDERS,
       rows,
     });

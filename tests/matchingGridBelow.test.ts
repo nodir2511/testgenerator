@@ -34,4 +34,29 @@ describe('таблица ответа соответствия', () => {
     expect((xml.match(/<w:tr[ >]/g) || []).length).toBe(1 + 5 + 1);
     expect(xml.indexOf('Ҷавоб:')).toBeGreaterThan(xml.lastIndexOf('кариоплазма'));
   });
+  it('ширина колонок гибкая: длинная левая шире короткой правой', async () => {
+    const q: any = {
+      type: 'matching', content: 'Установите', content_tg: 'Установите',
+      matching_items: [
+        ...['Mg + O2 → MgO', 'Al + HCl → AlCl3 + H2', 'Li + N2 → Li3N', 'Zn + H2SO4 → ZnSO4 + H2'].map((t, i) => item('left', t, i + 1)),
+        ...['9', '7', '4', '5', '13'].map((t, i) => item('right', t, i + 1)),
+      ],
+    };
+    const xml = await xmlOf(q);
+    const cols = [...xml.matchAll(/<w:gridCol w:w="(\d+)"/g)].map((m) => Number(m[1]));
+    expect(cols.length).toBe(4);
+    expect(cols[1]).toBeGreaterThan(cols[2] * 2);
+    expect(cols.slice(1, 3).reduce((a, b) => a + b, 0)).toBe(6200);
+  });
+  it('наоборот: короткая левая уже длинной правой', async () => {
+    const q: any = {
+      type: 'matching', content: 'x', content_tg: 'x',
+      matching_items: [
+        ...['A1', 'B2', 'C3', 'D4'].map((t, i) => item('left', t, i + 1)),
+        ...['участвует в перемещении органоидов и отдельных соединений', 'регулирует обмен веществ', 'хранение информации', 'синтезирует вещества', 'расщепляет глюкозу'].map((t, i) => item('right', t, i + 1)),
+      ],
+    };
+    const cols = [...(await xmlOf(q)).matchAll(/<w:gridCol w:w="(\d+)"/g)].map((m) => Number(m[1]));
+    expect(cols[2]).toBeGreaterThan(cols[1] * 2);
+  });
 });
