@@ -814,18 +814,29 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
     const maxLen = Math.max(leftItems.length, rightItems.length);
     const grid = opts.matchingGrid;
     const gridSize = grid ? imageSize(grid) : null;
-    // Таблица ответа стоит справа от пунктов, только если им хватает места; очень длинные пункты (больше ~100 знаков)
+    // Таблица ответа стоит справа от пунктов, только если им хватает места; очень длинные пункты (больше ~140 знаков)
     // сузили бы колонки, слова рвались бы по слогам — тогда таблица ответа ставится ниже задания, на всю ширину
     const plainLen = (t: any) => String(t || '').replace(/<[^>]+>/g, '').length;
-    const longItems = [...leftItems, ...rightItems].some((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) > 100);
+    const longItems = [...leftItems, ...rightItems].some((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) > 140);
     const gridBeside = !!(grid && gridSize) && !longItems;
     const gridBelow = !!(grid && gridSize) && longItems;
-    // Ширина колонок гибкая: делится между левой и правой по длине самых длинных пунктов (с маркером «A) »),
-    // но каждой достаётся не меньше ~22 % — короткая колонка «1) 9» не занимает полстраницы, длинная не переносится зря
-    const sideLen = (items: any[]) => Math.max(6, ...items.map((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) + 3));
+    // Ширина колонок гибкая. «Нужная» ширина стороны — чтобы самый длинный пункт (с маркером «A) ») встал в одну строку
+    // (~125 twips на знак при 14 pt). Если обе стороны помещаются — делим пропорционально; если нет, то короткая сторона
+    // получает свою нужную ширину (но не меньше 22 % и не больше 42 % места), остальное — длинной
+    const need = (items: any[]) => (Math.max(4, ...items.map((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) + 3))) * 125;
     const itemsTotal = gridBeside ? 6200 : 8848;
-    const leftShare = Math.min(0.78, Math.max(0.22, sideLen(leftItems) / (sideLen(leftItems) + sideLen(rightItems))));
-    const leftW = Math.round(itemsTotal * leftShare);
+    const needL = need(leftItems);
+    const needR = need(rightItems);
+    const clampW = (w: number, lo: number, hi: number) => Math.min(hi * itemsTotal, Math.max(lo * itemsTotal, w));
+    let leftW: number;
+    if (needL + needR <= itemsTotal) {
+      leftW = clampW(itemsTotal * needL / (needL + needR), 0.22, 0.78);
+    } else if (needL <= needR) {
+      leftW = clampW(needL, 0.22, 0.42);
+    } else {
+      leftW = itemsTotal - clampW(needR, 0.22, 0.42);
+    }
+    leftW = Math.round(leftW);
     const rightW = itemsTotal - leftW;
     const spanCols = gridBeside ? 3 : 2;
     const leftImgBuffers = await Promise.all(
