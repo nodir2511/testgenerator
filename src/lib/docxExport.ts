@@ -814,10 +814,10 @@ async function buildQuestionTable(q: any, qNumber: number, isTg: boolean, opts: 
     const maxLen = Math.max(leftItems.length, rightItems.length);
     const grid = opts.matchingGrid;
     const gridSize = grid ? imageSize(grid) : null;
-    // Таблица ответа стоит справа от пунктов, только если им хватает места; длинные пункты (по ~45 знаков и больше)
+    // Таблица ответа стоит справа от пунктов, только если им хватает места; очень длинные пункты (больше ~100 знаков)
     // сузили бы колонки, слова рвались бы по слогам — тогда таблица ответа ставится ниже задания, на всю ширину
     const plainLen = (t: any) => String(t || '').replace(/<[^>]+>/g, '').length;
-    const longItems = [...leftItems, ...rightItems].some((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) > 45);
+    const longItems = [...leftItems, ...rightItems].some((m: any) => plainLen(isTg ? (m.text_tg || m.text) : (m.text_ru || m.text)) > 100);
     const gridBeside = !!(grid && gridSize) && !longItems;
     const gridBelow = !!(grid && gridSize) && longItems;
     const colW = gridBeside ? 3100 : 4424;
