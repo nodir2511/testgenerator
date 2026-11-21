@@ -14,7 +14,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
 import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser as linkedUserOf, userMessage } from '../_shared/generate.ts';
 import { LAW_RE } from '../_shared/answerKey.ts';
-import { chunkLines, itemVisible, rankOf, releaseLines, type ReleaseItem, type ReleaseRow } from '../_shared/releases.ts';
+import { chunkLines, itemVisible, parseReleaseCommand, rankOf, releaseLines, RELEASE_CB, type ReleaseItem, type ReleaseRow } from '../_shared/releases.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -502,7 +502,36 @@ async function screenWhatsNew(chat: number, user: { id: string; role?: string })
       .map((i: any): ReleaseItem => ({ kind: i.kind, scope: 'site', text: i.text, min_rank: i.min_rank, subject_id: i.subject_id })),
   })).filter((r: ReleaseRow) => r.items.length).slice(0, 3);
   if (!rows.length) return send(chat, 'Пока нет обновлений сайта для вашей роли.');
-  const lines = ['🆕 <b>Что нового на сайте</b>', '', ...releaseLines(rows), '', '<i>Полный список — на сайте, во вкладке «Что нового».</i>'];
+  const lines = ['🆕 <b>Что нового на сайте</b>', '', ...releaseLines(rows), '', '<i>Полный список — на сайте, во вкладке «Что нового». Описание любой версии: <code>/release 1.0.0</code></i>'];
+  for (const chunk of chunkLines(lines)) await send(chat, chunk);
+}
+
+// /release 1.0.0 (или «релиз 1.0.0», или кнопка под рассылкой): полное описание версии по всем изменениям
+// (сайт, бот, мини-приложение), как в рассылке, но только то, что доступно роли и предметам пользователя.
+// Без номера — последняя версия.
+async function screenRelease(chat: number, user: { id: string; role?: string }, version: string | null) {
+  const [{ data: prof }, allowed] = await Promise.all([
+    sb.from('profiles').select('is_owner').eq('id', user.id).maybeSingle(),
+    allowedSubjectIds(sb, user),
+  ]);
+  const rank = rankOf(user.role, prof?.is_owner);
+  const q = sb.from('site_releases').select('id, version, title, released_at');
+  const { data: rel } = version
+    ? await q.eq('version', version).maybeSingle()
+    : await q.order('released_at', { ascending: false }).limit(1).maybeSingle();
+  if (!rel) {
+    const { data: recent } = await sb.from('site_releases').select('version').order('released_at', { ascending: false }).limit(5);
+    const list = (recent ?? []).map((r: any) => `<code>/release ${escapeHtml(r.version)}</code>`).join('\n');
+    return send(chat, `Версия ${escapeHtml(version ?? '')} не найдена.${list ? `\n\nПоследние версии:\n${list}` : ''}`);
+  }
+  const { data: itemRows } = await sb.from('site_release_items')
+    .select('kind, scope, text, min_rank, subject_id, order_index')
+    .eq('release_id', rel.id).neq('scope', 'game').lte('min_rank', rank).order('order_index');
+  const items = (itemRows ?? [])
+    .filter((i: any) => itemVisible(i, rank, allowed))
+    .map((i: any): ReleaseItem => ({ kind: i.kind, scope: i.scope ?? 'site', text: i.text, min_rank: i.min_rank, subject_id: i.subject_id }));
+  const lines = releaseLines([{ version: rel.version, title: rel.title, items }]);
+  if (!lines.length) return send(chat, `В версии ${escapeHtml(rel.version)} нет изменений, доступных вашей роли.`);
   for (const chunk of chunkLines(lines)) await send(chat, chunk);
 }
 
@@ -514,7 +543,7 @@ async function screenHelp(chat: number) {
     `1. <b>🚀 Конструктор билетов</b> — полноценное визуальное приложение с фильтрами тем и индикатором запаса вопросов (рекомендуется).\n` +
     `2. <b>⚡ Быстрый билет</b> — экспресс-составление вариантов по стандартам (Физ/Хим 18+2+7, Био/Гос 20+4+2, Право 20+5+0) в 2 клика.\n` +
     `3. <b>📝 Пошагово в чате</b> — выбор предмета, затем глав и тем сообщением с номерами (например 1-4 или 1,2,3,4).\n` +
-    `4. <b>🆕 Что нового</b> — последние обновления сайта для вашей роли. О каждой новой версии бот пишет сам.\n` +
+    `4. <b>🆕 Что нового</b> — последние обновления сайта для вашей роли. О каждой новой версии бот пишет коротко сам; полное описание — <code>/release 1.0.0</code> (или кнопка под сообщением).\n` +
     `5. <b>📂 Мои билеты</b> — доступ к ранее созданным наборам с возможностью повторно скачать файл.\n\n` +
     `<b>Команды:</b>\n` +
     `• /app — открыть конструктор билетов\n` +
@@ -661,6 +690,8 @@ async function onMessage(m: any) {
   if (text === '🆕 Что нового' || text === '/whatsnew') {
     return screenWhatsNew(chat, user);
   }
+  const relCmd = parseReleaseCommand(text);
+  if (relCmd) return screenRelease(chat, user, relCmd.version);
   if (text === '❓ Помощь' || text === '/help') {
     return screenHelp(chat);
   }
@@ -743,6 +774,7 @@ async function onCallback(cb: any) {
 
   if (data.startsWith('L:') && st.busyAt && Date.now() - st.busyAt < 180000) return;
   if (data === 'NOOP') return;
+  if (data.startsWith(RELEASE_CB)) return screenRelease(chat, user, data.slice(RELEASE_CB.length));
 
   // Меню быстрых действий
   if (data === 'ACT:QUICK') {

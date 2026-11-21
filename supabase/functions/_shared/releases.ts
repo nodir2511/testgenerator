@@ -53,3 +53,47 @@ export function chunkLines(lines: string[], limit = 3800): string[] {
   if (cur) out.push(cur);
   return out;
 }
+
+const NEW_WHERE: Record<ReleaseScope, string> = { site: 'на сайте', bot: 'в боте', app: 'в мини-приложении', game: 'в играх' };
+
+/**
+ * Короткая сводка версии для рассылки: заголовок и счётчики —
+ * «Новое на сайте (1)», «Улучшения (2)», «Мелкие исправления (3)». Подробности — по /release.
+ * Версия без пунктов даёт пустой список.
+ */
+export function releaseSummary(r: ReleaseRow): string[] {
+  if (!r.items.length) return [];
+  const lines = [`<b>Версия ${esc(r.version)}</b>${r.title ? ` — ${esc(r.title)}` : ''}`];
+  for (const sc of SCOPE_ORDER) {
+    const n = r.items.filter((i) => i.kind === 'new' && i.scope === sc).length;
+    if (n) lines.push(`🆕 Новое ${NEW_WHERE[sc]} (${n})`);
+  }
+  const improved = r.items.filter((i) => i.kind === 'improved').length;
+  if (improved) lines.push(`✨ Улучшения (${improved})`);
+  const fixed = r.items.filter((i) => i.kind === 'fixed').length;
+  if (fixed) lines.push(`🔧 Мелкие исправления (${fixed})`);
+  return lines;
+}
+
+/** Сводки нескольких версий через пустую строку и подсказка внизу */
+export function releaseSummaryLines(releases: ReleaseRow[]): string[] {
+  const lines: string[] = [];
+  for (const r of releases) {
+    const part = releaseSummary(r);
+    if (!part.length) continue;
+    if (lines.length) lines.push('');
+    lines.push(...part);
+  }
+  if (lines.length) {
+    const last = releases.filter((r) => r.items.length).map((r) => r.version);
+    lines.push('', `Подробнее — кнопки ниже или команда <code>/release ${esc(last[last.length - 1])}</code>`);
+  }
+  return lines;
+}
+
+/** Данные кнопки «описание версии» (callback) и разбор команды /release, «релиз 1.0.0» */
+export const RELEASE_CB = 'RL:';
+export function parseReleaseCommand(text: string): { version: string | null } | null {
+  const m = text.trim().match(/^(?:\/(?:release|realise|relise|релиз)(?:@\w+)?|(?:release|релиз))(?:\s+v?(\S+))?$/i);
+  return m ? { version: m[1] ?? null } : null;
+}

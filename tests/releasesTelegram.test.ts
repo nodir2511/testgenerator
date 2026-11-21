@@ -39,3 +39,36 @@ describe('рассылка обновлений в Telegram', () => {
     expect(chunks.every((c) => c.length <= 100)).toBe(true);
   });
 });
+
+import { parseReleaseCommand, releaseSummary, releaseSummaryLines } from '../supabase/functions/_shared/releases';
+
+describe('короткая сводка версии и команда /release', () => {
+  const it1 = (kind: string, scope: 'site' | 'bot' | 'app') => ({ kind, scope, text: 't', min_rank: 1, subject_id: null });
+
+  it('считает новое по месту, улучшения и исправления', () => {
+    const lines = releaseSummary({ version: '1.0.0', title: 'A&B', items: [
+      it1('new', 'site'), it1('new', 'bot'), it1('improved', 'site'), it1('fixed', 'site'), it1('fixed', 'app'),
+    ] });
+    expect(lines).toEqual([
+      '<b>Версия 1.0.0</b> — A&amp;B', '🆕 Новое на сайте (1)', '🆕 Новое в боте (1)', '✨ Улучшения (1)', '🔧 Мелкие исправления (2)',
+    ]);
+  });
+
+  it('пустая версия не даёт сводки, внизу подсказка с командой', () => {
+    expect(releaseSummary({ version: '1', title: '', items: [] })).toEqual([]);
+    const lines = releaseSummaryLines([
+      { version: '1.0.0', title: '', items: [it1('fixed', 'site')] },
+      { version: '0.9', title: '', items: [] },
+    ]);
+    expect(lines.at(-1)).toContain('/release 1.0.0');
+  });
+
+  it('понимает /release, /release@бот, «релиз» и номер с v', () => {
+    expect(parseReleaseCommand('/release 1.0.0')).toEqual({ version: '1.0.0' });
+    expect(parseReleaseCommand('/release@testgenerrepbot 1.0.0')).toEqual({ version: '1.0.0' });
+    expect(parseReleaseCommand('релиз v1.2')).toEqual({ version: '1.2' });
+    expect(parseReleaseCommand('/realise')).toEqual({ version: null });
+    expect(parseReleaseCommand('/releases')).toBeNull();
+    expect(parseReleaseCommand('Что нового')).toBeNull();
+  });
+});

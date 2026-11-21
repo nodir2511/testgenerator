@@ -7,22 +7,29 @@
 // поэтому параллельный запуск не пришлёт сообщение дважды. Тела запроса функция не читает.
 // Деплой:  supabase functions deploy release-notify --no-verify-jwt
 // Секреты: TELEGRAM_BOT_TOKEN (SUPABASE_URL и SUPABASE_SERVICE_ROLE_KEY задаёт сам Supabase).
+// Сообщение короткое: счётчики по версии («Новое на сайте (1)», «Мелкие исправления (2)»), кнопка «Подробнее»
+// (раздел «Что нового» на сайте, адрес — секрет SITE_URL) и кнопка «/release 1.0.0» — полное описание версии в чате.
 // Необязательно: RELEASE_NOTIFY_SECRET — если задан, вызов принимается только с заголовком x-cron-secret
 // с тем же значением (его же нужно добавить в задание pg_cron).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { chunkLines, itemVisible, rankOf, releaseLines, type ReleaseItem, type ReleaseRow } from '../_shared/releases.ts';
+import { itemVisible, rankOf, releaseSummaryLines, RELEASE_CB, type ReleaseItem, type ReleaseRow } from '../_shared/releases.ts';
 
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 const API = `https://api.telegram.org/bot${Deno.env.get('TELEGRAM_BOT_TOKEN')!}`;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function sendMessage(chat: number, text: string): Promise<boolean> {
+const SITE_URL = (Deno.env.get('SITE_URL') || 'https://testgenerator-3s51.vercel.app').replace(/\/+$/, '');
+
+async function sendMessage(chat: number, text: string, keyboard?: unknown[][]): Promise<boolean> {
   const res = await fetch(`${API}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+    body: JSON.stringify({
+      chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true,
+      ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+    }),
   });
   if (!res.ok) console.error('sendMessage failed', chat, res.status);
   return res.ok;
@@ -89,14 +96,16 @@ Deno.serve(async (req) => {
         .filter((i: any) => i.release_id === r.id && itemVisible(i, rank, allowed))
         .map((i: any): ReleaseItem => ({ kind: i.kind, scope: i.scope ?? 'site', text: i.text, min_rank: i.min_rank, subject_id: i.subject_id })),
     }));
-    const lines = releaseLines(rows);
+    const lines = releaseSummaryLines(rows);
     if (!lines.length) { skipped++; continue; }
 
-    let ok = true;
-    for (const chunk of chunkLines(['🆕 <b>Что нового</b>', '', ...lines])) {
-      ok = (await sendMessage(link.chat_id, chunk)) && ok;
-      await sleep(50);
+    // Внизу: «Подробнее» (на сайт) и по кнопке на каждую версию — описание в чате
+    const keyboard: unknown[][] = [[{ text: '📖 Подробнее', url: `${SITE_URL}/#news` }]];
+    for (const r of rows.filter((x) => x.items.length)) {
+      keyboard.push([{ text: `/release ${r.version}`, callback_data: `${RELEASE_CB}${r.version}`.slice(0, 64) }]);
     }
+    const ok = await sendMessage(link.chat_id, ['🆕 <b>Что нового</b>', '', ...lines].join('\n'), keyboard);
+    await sleep(50);
     if (ok) sent++; else failed++;
   }
   return Response.json({ releases: releases.length, sent, failed, skipped });
