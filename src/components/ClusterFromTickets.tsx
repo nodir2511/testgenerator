@@ -78,7 +78,7 @@ const PRESETS: Array<{ label: string; kinds: string[] }> = [
   { label: 'Химия + биология (ХБ)', kinds: ['bio', 'chem'] },
 ];
 
-const emptySlot = (): Slot => ({ mode: 'archive', batchId: '', ticketNumber: 1, allTickets: false, ruFile: null, tgFile: null, zipFile: null, archive: null, snaps: null, label: '', skipped: [], loading: false, error: null });
+const emptySlot = (): Slot => ({ mode: 'zip', batchId: '', ticketNumber: 1, allTickets: false, ruFile: null, tgFile: null, zipFile: null, archive: null, snaps: null, label: '', skipped: [], loading: false, error: null });
 
 // Наборы предмета из архива (без экзаменов-кластеров), новые сверху
 function useBatches(subjectId: string) {
@@ -360,7 +360,7 @@ export const ClusterFromTickets: React.FC<{
     setSlots((all) => all.map((s, i) => {
       const want = kinds.includes(CLUSTER_SLOTS[i].kind);
       // Выключенный предмет ничего не теряет: загруженные файлы, архив и вопросы остаются до повторного включения
-      if (want && s.mode === 'off') return { ...s, mode: s.prevMode ?? 'archive' };
+      if (want && s.mode === 'off') return { ...s, mode: s.prevMode ?? 'zip' };
       if (!want && s.mode !== 'off') return { ...s, mode: 'off', prevMode: s.mode };
       return s;
     }));
