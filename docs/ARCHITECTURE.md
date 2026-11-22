@@ -43,6 +43,7 @@ supabase/sql/           SQL базы (раздел 5); releases/ — запис�
 templates/key/*.docx    Исходники шаблонов ключей
 scripts/                omr-blanks.mjs (бланки ответов для печати и раскладки), sync-docx-shared.mjs, build-key-templates.mjs, gen-dark-css.mjs, backup-to-telegram.sh, одноразовые import_*.mjs и generate_*
 tests/                  vitest (раздел 14)
+tests-db/               тесты прав доступа (RLS, RPC) на встроенном Postgres, отдельный запуск `npm run test:db` (раздел 14)
 docs/ARCHITECTURE.md    Этот файл
 .github/workflows/      ci.yml — на каждый пуш: `npm audit`, проверка, что копии в `_shared` совпадают с исходниками (`sync-docx-shared.mjs` + `git diff --exit-code`), и `npm run build` (тесты, типы, сборка); backup.yml — копия базы (запуск вручную, ночной cron выключен)
 supabase/config.toml    только `project_id`
@@ -543,6 +544,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - Проверки:
   - `npx tsc -b` и `npx vitest run` — перед каждым коммитом;
   - `npm run build` — тесты, типы и сборка вместе; то же и `npm audit --omit=dev --audit-level=high` запускает GitHub Actions (`ci.yml`) на каждый пуш;
+  - `npm run test:db` — тесты прав доступа на встроенном Postgres (раздел 14); запускайте после правок в `supabase/sql`. В CI пока не входит.
   - после новых цветовых классов Tailwind — `npm run theme:dark` и коммит `src/dark.css`.
 - `.env` в git не хранится, переменные — в `.env.example`:
   - сайт: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_TELEGRAM_BOT_USERNAME`, `VITE_SUPPORT_TELEGRAM` (необязательно);
@@ -593,7 +595,15 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `importParse.test.ts`, `questionDraft.test.ts`, `generatorHelpers.test.ts` | логика, вынесенная из `BulkImport`, `QuestionForm` и `TicketGenerator`: разбор ответа, черновик вопроса, стандарты состава и настройки из `localStorage` |
 | `releases.test.ts`, `batchTitle.test.ts`, `errors.test.ts`, `passwordRules.test.ts`, `fetchAllPages.test.ts`, `spacing.test.ts` | соответствующие модули |
 
-Тесты не обращаются к базе: клиент Supabase подменяется заглушкой (пример — `fakeClient` в `pool.test.ts`).
+Тесты в `tests/` не обращаются к базе: клиент Supabase подменяется заглушкой (пример — `fakeClient` в `pool.test.ts`).
+
+**Тесты прав доступа (`tests-db/`, `npm run test:db`).** Отдельный прогон (`vitest.db.config.ts`; в обычный `npx vitest run` и в `npm run build` не входит — `test.exclude` в `vite.config.ts`). Живая база не затрагивается.
+- `db.ts` — `startTestDb()`: запускает Postgres 17 из пакета `embedded-postgres` (используется только как поставщик сборки; `initdb` и `postgres` запускаются напрямую, на Windows сборка копируется во временную папку с латинским путём — иначе `initdb` падает на кириллице в пути проекта), применяет `bootstrap.sql` и файлы `supabase/sql` по списку `SCHEMA_FILES`. **Новый SQL-файл со схемой допишите в конец `SCHEMA_FILES`**, файл с данными — в `SKIPPED_FILES`.
+- `bootstrap.sql` — заглушки Supabase: роли `anon` / `authenticated` / `service_role`, `auth.users`, `auth.uid()` (читает `request.jwt.claims`), `storage.buckets` / `storage.objects`, публикация `supabase_realtime`, `cron.schedule`, `net.http_post`, права по умолчанию на схему `public`.
+- `helpers.ts` — `seed()` (пять пользователей разных ролей, два предмета, вопросы, в том числе удалённые), `as(admin, userId, fn)` — запросы от имени пользователя в транзакции с откатом, `switchUser`, `rejected` (запрос, который должен быть отклонён).
+- `access.test.ts` — схема применяется с нуля; кто какие вопросы и варианты видит и меняет; защита ролей и `is_owner`; назначение предметов; закрытая регистрация; наборы билетов (видимость, удаление, кластерные, `update_batch_questions`); счётчик `question_usage`; дневной лимит; `client_errors`, `audit_logs`; закрытость таблиц для анонимов.
+- Чего так не проверить: вход (Supabase Auth), хранилище файлов, Realtime, Edge Functions, pg_cron — только RLS, триггеры и функции базы. Тела политик с живой базой не сверяются; 22.11.2026 совпали списки политик (78) и функций (73), в живой базе есть лишняя таблица `bulk_change_backups`, которой нет в `supabase/sql`.
+- Порядок применения отличается от порядка появления файлов: `owner_history.sql` идёт до `generation_limits.sql` (нужна `is_owner()`), `security_round3.sql` — после `question_children_rls_fast.sql` (нужна `can_view_question()`): файлы дописывались позже.
 
 ## 15. Ловушки
 
