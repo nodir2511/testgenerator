@@ -485,7 +485,7 @@ const BatchCard: React.FC<{
             <div className="space-y-3">
               <BatchTopicsBar batch={batch} />
               <BatchVariants
-                batch={batch}
+                batch={{ ...batch, subjectName: subjName }}
                 renderActions={(t) => (
                   <div className="flex items-center gap-1.5 shrink-0">
                     {(exportLang === 'both' ? (['ru', 'tg'] as const) : [exportLang]).map((l) => (

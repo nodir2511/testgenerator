@@ -111,7 +111,7 @@ export const GeneratedBatchPanel: React.FC<GeneratedBatchPanelProps> = ({
       {showVariants && (
         <div className="mt-2">
           <BatchVariants
-            batch={generatedBatch}
+            batch={{ ...generatedBatch, subjectName: generatedSubjectName }}
             onChanged={handleBatchChanged}
             renderActions={(t) => (
               <div className="flex items-center gap-1.5 shrink-0">

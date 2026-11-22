@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Maximize2, Minimize2, X } from 'lucide-react';
 import { FormattedText } from './FormulaEditor';
 import { isEmptySnapshot, TYPE_LABEL } from '../lib/questionSwap';
+// то же правило, что `isEnglishSubject` в docxExport (сам модуль подгружается лениво)
+const isEnglishSubject = (n: string) => /англ|инглис|english/i.test(n || '');
 
 // Предпросмотр билета справа: открывается по нажатию на вариант, ширину можно тянуть мышью или развернуть на весь экран.
 // Показывает снимок вопроса так же, как он попадёт в Word (варианты A–D, соответствие A–D ↔ 1–5).
@@ -19,6 +21,7 @@ const DOCK_FROM = 1280; // с этой ширины окна страница с
 const LS_W = 'examiner_preview_w';
 const LS_LANG = 'examiner_preview_lang';
 const LS_KEYS = 'examiner_preview_answers';
+const LS_VIEW = 'examiner_preview_view';
 
 const safeGet = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 const safeSet = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* память недоступна */ } };
@@ -111,13 +114,17 @@ const QuestionView: React.FC<{ snap: any; n: number; lang: Lang; showAnswers: bo
   );
 };
 
+const WordPreview = React.lazy(() => import('./WordPreview').then((m) => ({ default: m.WordPreview })));
+
 export const TicketPreviewPanel: React.FC<{
   tickets: PreviewTicket[];
   ticketId: string;
   title?: string;
+  subjectName?: string;
   onSelect: (id: string) => void;
   onClose: () => void;
-}> = ({ tickets, ticketId, title, onSelect, onClose }) => {
+}> = ({ tickets, ticketId, title, subjectName, onSelect, onClose }) => {
+  const [wordView, setWordView] = useState(() => safeGet(LS_VIEW) === 'word');
   const index = tickets.findIndex((t) => t.id === ticketId);
   const ticket = tickets[index];
   const [width, setWidth] = useState(() => Math.max(MIN_W, Number(safeGet(LS_W)) || DEFAULT_W));
@@ -176,6 +183,7 @@ export const TicketPreviewPanel: React.FC<{
   if (!ticket) return null;
   const hasTg = tickets.some((t) => t.questions.some((q) => q.question_snapshot?.content_tg));
   const effLang: Lang = hasTg ? lang : 'ru';
+  const inWord = wordView && subjectName !== undefined;
   const prev = tickets[index - 1];
   const next = tickets[index + 1];
 
@@ -222,14 +230,32 @@ export const TicketPreviewPanel: React.FC<{
             ))}
           </div>
         )}
-        <label className="flex items-center gap-2 min-h-[32px] text-slate-700 cursor-pointer">
-          <input type="checkbox" checked={showAnswers} onChange={(e) => { setShowAnswers(e.target.checked); safeSet(LS_KEYS, e.target.checked ? '1' : '0'); }} className="w-4 h-4 accent-indigo-600" />
-          Показать ответы
-        </label>
+        {subjectName !== undefined && (
+          <div className="flex gap-1 p-0.5 bg-slate-100 rounded-lg" role="group" aria-label="Вид">
+            {([false, true] as const).map((w) => (
+              <button
+                key={String(w)}
+                aria-pressed={wordView === w}
+                onClick={() => { setWordView(w); safeSet(LS_VIEW, w ? 'word' : 'screen'); }}
+                className={`min-h-[32px] px-3 rounded-md font-semibold ${wordView === w ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-600'}`}
+              >{w ? 'Как в Word' : 'Экран'}</button>
+            ))}
+          </div>
+        )}
+        {!inWord && (
+          <label className="flex items-center gap-2 min-h-[32px] text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={showAnswers} onChange={(e) => { setShowAnswers(e.target.checked); safeSet(LS_KEYS, e.target.checked ? '1' : '0'); }} className="w-4 h-4 accent-indigo-600" />
+            Показать ответы
+          </label>
+        )}
       </div>
 
-      <div ref={bodyRef} className="flex-1 overflow-y-auto p-4 space-y-5">
-        {ticket.questions.map((tq, i) => (
+      <div ref={bodyRef} className={inWord ? 'flex-1 overflow-y-auto' : 'flex-1 overflow-y-auto p-4 space-y-5'}>
+        {inWord ? (
+          <React.Suspense fallback={null}>
+            <WordPreview ticket={ticket} title={title} subjectName={subjectName!} isTg={effLang === 'tg' && !isEnglishSubject(subjectName!)} />
+          </React.Suspense>
+        ) : ticket.questions.map((tq, i) => (
           <QuestionView
             key={tq.id}
             snap={tq.question_snapshot}

@@ -19,7 +19,7 @@ import { nctTypeName } from '../lib/nctTypes';
 // Замена вопросов в готовом наборе билетов — и сразу после генерации, и в архиве.
 // Все изменения идут одной транзакцией (update_batch_questions); после них набор перечитывается из базы.
 
-export interface EditBatch { id: string; title?: string; subject_id: string; generation_params: any; created_by?: string | null }
+export interface EditBatch { id: string; title?: string; subject_id: string; generation_params: any; created_by?: string | null; subjectName?: string }
 type Changed = (params: any, tickets: BatchSlots['tickets']) => void;
 
 /** Сколько вопросов-кандидатов на странице окна замены */
@@ -316,7 +316,7 @@ export const BatchVariants: React.FC<{
       {swap && (textSlotIds.has(swap.tqId)
         ? <ReplaceTextModal batch={batch} ed={ed} slot={swap} onClose={() => setSwap(null)} />
         : <ReplaceModal batch={batch} ed={ed} slot={swap} onClose={() => setSwap(null)} />)}
-      {previewId && <TicketPreviewPanel tickets={ed.data.tickets} ticketId={previewId} title={batch.title} onSelect={setPreviewId} onClose={closePreview} />}
+      {previewId && <TicketPreviewPanel tickets={ed.data.tickets} ticketId={previewId} title={batch.title} subjectName={batch.subjectName} onSelect={setPreviewId} onClose={closePreview} />}
     </>
   );
 };
