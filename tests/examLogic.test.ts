@@ -1,0 +1,81 @@
+import { describe, it, expect } from 'vitest';
+import {
+  formatRemaining, remainingMs, countAnswered, isAnswered, pickText, normalizeOpen, matchingAnswer, reviewMistakes, nameOk, sortByOrder,
+} from '../src/exam/examLogic';
+
+describe('formatRemaining', () => {
+  it('минуты и секунды', () => {
+    expect(formatRemaining(0)).toBe('0:00');
+    expect(formatRemaining(-5000)).toBe('0:00');
+    expect(formatRemaining(61_000)).toBe('1:01');
+    expect(formatRemaining(29 * 60_000 + 59_900)).toBe('29:59');
+  });
+  it('часы', () => expect(formatRemaining(3_725_000)).toBe('1:02:05'));
+});
+
+describe('remainingMs', () => {
+  it('учитывает смещение часов сервера', () => {
+    const deadline = '2026-01-01T10:30:00.000Z';
+    const serverNow = Date.parse('2026-01-01T10:00:00.000Z');
+    const clientNow = serverNow + 3 * 3600_000; // часы телефона спешат
+    const offset = serverNow - clientNow;
+    expect(remainingMs(deadline, offset, clientNow)).toBe(30 * 60_000);
+  });
+});
+
+describe('ответы', () => {
+  it('isAnswered', () => {
+    expect(isAnswered('test', 'a')).toBe(true);
+    expect(isAnswered('test', null)).toBe(false);
+    expect(isAnswered('open', ' ')).toBe(false);
+    expect(isAnswered('open', '12')).toBe(true);
+    expect(isAnswered('matching', {})).toBe(false);
+    expect(isAnswered('matching', { l1: 'r1' })).toBe(true);
+  });
+  it('countAnswered считает только вопросы билета', () => {
+    const qs = [
+      { tqId: 'a', snapshot: { type: 'test' } },
+      { tqId: 'b', snapshot: { type: 'open' } },
+      { tqId: 'c', snapshot: { empty: true, type: 'test' } },
+    ];
+    expect(countAnswered(qs, { a: 'x', b: '', c: 'y', z: 'q' })).toEqual({ answered: 1, total: 2 });
+  });
+  it('normalizeOpen', () => {
+    expect(normalizeOpen(' 12,5 ')).toBe('12,5');
+    expect(normalizeOpen('abc1-2')).toBe('12');
+    expect(normalizeOpen('-3.5.1')).toBe('-3.51');
+  });
+  it('matchingAnswer', () => {
+    expect(matchingAnswer({ l1: 'r1' }, 'l2', 'r2')).toEqual({ l1: 'r1', l2: 'r2' });
+    expect(matchingAnswer({ l1: 'r1' }, 'l1', null)).toEqual({});
+    expect(matchingAnswer(null, 'l1', 'r1')).toEqual({ l1: 'r1' });
+  });
+  it('nameOk', () => {
+    expect(nameOk('Я')).toBe(false);
+    expect(nameOk('  Ив  ')).toBe(true);
+    expect(nameOk('x'.repeat(81))).toBe(false);
+  });
+});
+
+describe('pickText / sortByOrder', () => {
+  it('язык', () => {
+    const o = { text: 'b', text_ru: 'ру', text_tg: 'тҷ' };
+    expect(pickText(o, 'ru')).toBe('ру');
+    expect(pickText(o, 'tg')).toBe('тҷ');
+    expect(pickText({ text: 'b', text_tg: '' }, 'tg')).toBe('b');
+    expect(pickText({ content_tg: 'к' }, 'tg', 'content')).toBe('к');
+  });
+  it('sortByOrder', () => expect([{ order_index: 2 }, { order_index: 1 }].sort(sortByOrder)[0].order_index).toBe(1));
+});
+
+describe('reviewMistakes', () => {
+  it('только вопросы с потерянными баллами, номера сохраняются', () => {
+    const r = [
+      { tqId: 'a', snapshot: {}, answer: null, points: 1, max: 1 },
+      { tqId: 'b', snapshot: {}, answer: null, points: 0, max: 1 },
+      { tqId: 'c', snapshot: {}, answer: null, points: 1, max: 2 },
+      { tqId: 'd', snapshot: { empty: true }, answer: null, points: 0, max: 0 },
+    ];
+    expect(reviewMistakes(r).map((x) => [x.n, x.item.tqId])).toEqual([[2, 'b'], [3, 'c']]);
+  });
+});

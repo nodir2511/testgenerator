@@ -1,0 +1,88 @@
+/* Страница ученика /tg/exam: цвета берутся из темы Telegram (светлой и тёмной), своя тема сайта не нужна */
+body.exam-body {
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --bg2: var(--tg-theme-secondary-bg-color, #f1f3f5);
+  --fg: var(--tg-theme-text-color, #111827);
+  --hint: var(--tg-theme-hint-color, #6b7280);
+  --btn: var(--tg-theme-button-color, #2481cc);
+  --btn-fg: var(--tg-theme-button-text-color, #ffffff);
+  --line: color-mix(in srgb, var(--hint) 30%, transparent);
+  --ok: #16a34a;
+  --bad: #dc2626;
+  background: var(--bg2);
+  color: var(--fg);
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.exam-app { max-width: 640px; margin: 0 auto; padding: 0 12px 40px; font-size: 16px; line-height: 1.45; color: var(--fg); }
+.exam-app h1 { font-size: 20px; font-weight: 800; margin: 16px 2px 6px; }
+.exam-app .hint { color: var(--hint); font-size: 14px; }
+.exam-center { min-height: 60vh; display: flex; flex-direction: column; justify-content: center; gap: 12px; text-align: center; padding: 24px 8px; }
+.exam-center .big { font-size: 40px; font-weight: 800; }
+
+.exam-card { background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 12px 0; }
+.exam-card.lost { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
+
+.exam-bar {
+  position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--line);
+  margin: 0 -12px; padding: 8px 12px; display: flex; align-items: center; gap: 10px;
+}
+.exam-bar .timer { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 20px; min-width: 64px; }
+.exam-bar .timer.low { color: var(--bad); }
+.exam-bar .count { flex: 1; font-size: 14px; color: var(--hint); min-width: 0; }
+.exam-bar .unsaved { color: var(--bad); font-size: 13px; font-weight: 600; }
+
+.exam-btn {
+  appearance: none; border: 0; border-radius: 12px; background: var(--btn); color: var(--btn-fg);
+  font: inherit; font-weight: 700; min-height: 48px; padding: 0 18px; cursor: pointer;
+}
+.exam-btn.small { min-height: 40px; padding: 0 14px; }
+.exam-btn.ghost { background: transparent; color: var(--btn); border: 1px solid var(--line); }
+.exam-btn:disabled { opacity: 0.5; cursor: default; }
+.exam-btn.full { width: 100%; }
+
+.exam-input {
+  width: 100%; box-sizing: border-box; min-height: 48px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg); font: inherit; font-size: 17px; padding: 0 14px;
+}
+.exam-input:focus { outline: 2px solid var(--btn); outline-offset: 0; }
+
+.q-head { display: flex; gap: 8px; font-weight: 600; }
+.q-head .n { color: var(--hint); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.q-img { max-width: 100%; max-height: 280px; border-radius: 10px; margin-top: 8px; object-fit: contain; background: #fff; }
+.q-passage { background: var(--bg2); border-radius: 12px; padding: 12px; margin: 12px 0 0; white-space: pre-line; font-size: 15px; }
+.q-passage b { display: block; margin-bottom: 4px; }
+.q-unsaved { color: var(--bad); font-size: 13px; font-weight: 600; margin-top: 6px; }
+
+.opts { display: grid; gap: 8px; margin-top: 10px; }
+.opt {
+  appearance: none; text-align: left; font: inherit; color: var(--fg); background: var(--bg); border: 1.5px solid var(--line);
+  border-radius: 12px; min-height: 48px; padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
+}
+.opt .let { font-weight: 800; color: var(--hint); flex-shrink: 0; }
+.opt.on { border-color: var(--btn); background: color-mix(in srgb, var(--btn) 14%, var(--bg)); }
+.opt.on .let { color: var(--btn); }
+.opt.right { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, var(--bg)); }
+.opt.wrong { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--bg)); }
+.opt img { max-height: 90px; max-width: 100%; border-radius: 6px; margin-top: 4px; }
+
+.m-rights { margin: 10px 0 4px; display: grid; gap: 4px; font-size: 15px; }
+.m-rights b { color: var(--hint); margin-right: 4px; }
+.m-row { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
+.m-pick { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.m-pick button {
+  appearance: none; font: inherit; font-weight: 700; color: var(--fg); background: var(--bg); border: 1.5px solid var(--line);
+  border-radius: 10px; width: 48px; height: 48px; cursor: pointer;
+}
+.m-pick button.on { border-color: var(--btn); background: color-mix(in srgb, var(--btn) 18%, var(--bg)); color: var(--btn); }
+
+.rv-line { margin-top: 8px; font-size: 15px; }
+.rv-line .lbl { color: var(--hint); }
+.rv-line.good { color: var(--ok); }
+.rv-line.bad { color: var(--bad); }
+
+.exam-modal { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.5); display: flex; align-items: flex-end; justify-content: center; }
+.exam-modal .sheet { background: var(--bg); width: 100%; max-width: 640px; border-radius: 18px 18px 0 0; padding: 18px 16px 24px; display: grid; gap: 10px; }

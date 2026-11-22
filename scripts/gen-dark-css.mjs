@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SRC = 'src';
-const SKIP_DIRS = new Set(['game', 'tg']); // у игры и Mini App своя тема
+const SKIP_DIRS = new Set(['game', 'tg', 'exam']); // у игры, Mini App и страницы билета ученика (/tg/exam) своя тема
 const files = [];
 (function walk(d) {
   for (const f of readdirSync(d)) {

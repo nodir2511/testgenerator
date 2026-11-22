@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_SETTINGS, TG_LIMITS, checkSettings, fitSettings, shortName } from '../../supabase/functions/_shared/ticketing';
+import { loadTelegramScript } from './telegramScript';
 import './tg.css';
 
 // Telegram Mini App: сбор билетов. Данные и генерация — через Edge Function tg-app,
@@ -110,17 +111,6 @@ function savePrefs(p: Prefs) {
   const raw = JSON.stringify(p);
   try { wa()?.CloudStorage?.setItem(PREFS_KEY, raw); } catch { /* ignore */ }
   try { localStorage.setItem(PREFS_KEY, raw); } catch { /* ignore */ }
-}
-
-function loadTelegramScript(): Promise<void> {
-  if (wa()) return Promise.resolve();
-  return new Promise((resolve) => {
-    const s = document.createElement('script');
-    s.src = 'https://telegram.org/js/telegram-web-app.js';
-    s.onload = () => resolve();
-    s.onerror = () => resolve();
-    document.head.appendChild(s);
-  });
 }
 
 // На некоторых мобильных клиентах Telegram initData может внедряться в WebView с задержкой в несколько миллисекунд

@@ -63,6 +63,16 @@ if (screenMatch || playMatch || path === '/play' || path === '/play/' || path ==
   );
 } else if (clinicMatch) {
   root.render(<React.StrictMode><QueryClientProvider client={queryClient}><React.Suspense fallback={null}><ClinicScreenPage code={clinicMatch[1].toUpperCase()} /></React.Suspense></QueryClientProvider></React.StrictMode>);
+} else // /tg/exam — билет ученика в Telegram (отдельно от мини-приложения преподавателя; до общего /tg)
+if (window.location.pathname === '/tg/exam' || window.location.pathname === '/tg/exam/') {
+  const ExamApp = React.lazy(() => import('./exam/ExamApp'));
+  root.render(
+    <React.StrictMode>
+      <React.Suspense fallback={null}>
+        <ExamApp />
+      </React.Suspense>
+    </React.StrictMode>
+  );
 } else // /tg — Telegram Mini App: лёгкая страница без входа через Supabase Auth
 if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/tg/')) {
   const TgApp = React.lazy(() => import('./tg/TgApp'));
