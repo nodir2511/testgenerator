@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ExamApiError, apiOpen, apiReview, apiStart, waitTelegram, type OpenResponse } from './api';
 import { ExamTicket } from './ExamTicket';
+import { ExamLobby } from './ExamLobby';
 import { langName } from '../lib/examView';
 import { ReviewQuestion } from './ExamQuestion';
-import { nameOk, reviewFailureKind, reviewMistakes, type Lang, type ReviewItem } from './examLogic';
+import { minutesLeft, nameOk, reviewFailureKind, reviewMistakes, type Lang, type ReviewItem } from './examLogic';
 import './exam.css';
 
 // Страница ученика /tg/exam?c=КОД[&review=1]: билет внутри Telegram. Отдельный экран, к мини-приложению преподавателя отношения не имеет.
@@ -43,7 +44,12 @@ function NameForm({ view, onStart }: { view: OpenResponse; onStart: (name: strin
   return (
     <div className="exam-app">
       <h1>{view.title || 'Билет'}</h1>
-      <div className="hint">{view.subject ? `${view.subject}. ` : ''}На прохождение {view.minutes} минут, попытка одна. Таймер пойдёт после нажатия «Начать».</div>
+      <div className="hint">
+        {view.subject ? `${view.subject}. ` : ''}
+        {view.state === 'new' && view.session === 'running' && view.remainingMs != null
+          ? `Сессия уже идёт, осталось ${minutesLeft(view.remainingMs)} мин. Попытка одна.`
+          : 'Время назначит преподаватель, попытка одна.'}
+      </div>
       <div className="exam-card">
         <label htmlFor="exam-name" style={{ fontWeight: 700 }}>Фамилия и имя</label>
         <input
@@ -61,7 +67,7 @@ function NameForm({ view, onStart }: { view: OpenResponse; onStart: (name: strin
         </div>
         {err && <div style={{ color: 'var(--bad)', marginTop: 8 }}>{err}</div>}
         <button type="button" className="exam-btn full" style={{ marginTop: 12 }} disabled={!nameOk(name) || busy} onClick={() => void submit()}>
-          {busy ? 'Начинаем…' : 'Начать билет'}
+          {busy ? 'Входим…' : 'Войти'}
         </button>
       </div>
     </div>
@@ -171,6 +177,9 @@ export default function ExamApp() {
           if (next.state === 'closed') { setScreen({ kind: 'view', view: next }); return; }
           apply(next);
         }} />;
+      }
+      if (v.state === 'waiting' || v.state === 'countdown') {
+        return <ExamLobby code={CODE} initial={v} onLeave={apply} />;
       }
       if (v.state === 'running') {
         return (

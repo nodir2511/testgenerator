@@ -1,4 +1,5 @@
 // Чистая логика страницы /tg/exam (без React и браузера): таймер, формы ответов, разбор.
+import { countdownDigit } from '../../supabase/functions/_shared/exam';
 
 export type Lang = 'ru' | 'tg';
 export type Answer = string | Record<string, string> | null;
@@ -112,3 +113,20 @@ export function reviewFailureKind(e: unknown): 'not_ready' | 'retry' | 'error' {
   if (typeof x?.status === 'number' && (x.status === 0 || x.status >= 500)) return 'retry';
   return 'error';
 }
+
+/** Что показывать в зале по ответу сервера: ждать, отсчёт (3, 2, 1) или идти за билетом. Время — по часам сервера (offset). */
+export type LobbyView = { kind: 'waiting' } | { kind: 'countdown'; digit: number } | { kind: 'run' };
+export function lobbyView(res: { state: string; attempt?: { ticketNumber?: number | null; startsAt?: string } }, offsetMs: number, clientNow: number = Date.now()): LobbyView {
+  if (res.state === 'running') return { kind: 'run' };
+  if (res.state !== 'countdown' || !res.attempt?.startsAt) return { kind: 'waiting' };
+  const startsAt = Date.parse(res.attempt.startsAt);
+  if (Number.isNaN(startsAt)) return { kind: 'waiting' };
+  const digit = countdownDigit(startsAt, clientNow + offsetMs);
+  return digit === 0 ? { kind: 'run' } : { kind: 'countdown', digit };
+}
+
+export const waitText = (res: { state: string }): string =>
+  res.state === 'countdown' ? 'Начинаем!' : 'Ждите, преподаватель начнёт сессию';
+
+/** Сколько минут осталось, для надписи «осталось N мин»: вверх, не меньше 1 */
+export const minutesLeft = (ms: number): number => Math.max(1, Math.ceil(ms / 60_000));
