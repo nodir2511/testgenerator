@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart3, Loader2, Lock } from 'lucide-react';
+import { BarChart3, Loader2, Lock, Send } from 'lucide-react';
 import { ExamExcelButton } from './ExamExcelButton';
 import { QuestionStats } from './QuestionStats';
-import { callExamTeacher, NotLinkedError, closeExamLink, EXAM_LINKS_KEY, examAttemptsKey, examAttemptsFullKey, fetchAttempts, type ExamLinkRow } from '../../lib/examLinks';
-import { linkState, mapAttemptRow } from '../../lib/examView';
+import { callExamTeacher, NotLinkedError, sendReview, closeExamLink, EXAM_LINKS_KEY, examAttemptsKey, examAttemptsFullKey, fetchAttempts, type ExamLinkRow } from '../../lib/examLinks';
+import { linkState, mapAttemptRow, reviewConfirmText, reviewResultText, reviewSendState } from '../../lib/examView';
 import { confirmAction } from '../../lib/confirm';
 import { notifyError, notifyInfo, notifySuccess } from '../../lib/errors';
 import { Button } from '../ui';
@@ -54,6 +54,28 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
     onError: (e) => notifyError(e, 'Не удалось закрыть запуск'),
   });
 
+  const finishedCount = rows.filter((r) => r.status === 'finished').length;
+  const review = reviewSendState(link, finishedCount, now);
+
+  const send = useMutation({
+    mutationFn: () => sendReview(link.code),
+    onSuccess: ({ sent, failed }) => {
+      (failed > 0 ? notifyInfo : notifySuccess)(reviewResultText(sent, failed));
+      queryClient.invalidateQueries({ queryKey: EXAM_LINKS_KEY });
+    },
+    onError: (e) => notifyError(e, 'Не удалось отправить разбор'),
+  });
+
+  const onSendReview = async () => {
+    if (!(await confirmAction({
+      title: review.again ? 'Отправить разбор ещё раз?' : 'Отправить разбор ученикам?',
+      message: reviewConfirmText(finishedCount, review.again),
+      confirmLabel: 'Отправить',
+      cancelLabel: 'Отмена',
+    }))) return;
+    send.mutate();
+  };
+
   const onClose = async () => {
     if (!(await confirmAction({
       title: 'Закрыть запуск?',
@@ -72,9 +94,11 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
         <div className="flex items-center gap-2">
           <Button variant="secondary" size="sm" icon={BarChart3} onClick={() => setShowStats((v) => !v)}>{showStats ? 'Скрыть разбор' : 'Разбор по вопросам'}</Button>
           <ExamExcelButton link={link} />
+          <Button variant="secondary" size="sm" icon={Send} loading={send.isPending} disabled={!review.enabled} title={review.hint || undefined} onClick={onSendReview}>Отправить разбор ученикам</Button>
           {open && <Button variant="danger-soft" size="sm" icon={Lock} loading={close.isPending} onClick={onClose}>Закрыть</Button>}
         </div>
       </div>
+      {!review.enabled && review.hint && !isLoading && <p className="text-xs text-slate-500">{review.hint}</p>}
       {showStats && <QuestionStats code={link.code} batchId={link.batch_id} />}
 
       {isLoading ? (

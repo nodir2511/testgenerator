@@ -87,6 +87,7 @@ export const ExamsView: React.FC = () => {
                     </div>
                   </div>
                   <Badge tone={state === 'open' ? 'success' : 'neutral'}>{state === 'open' ? 'Идёт' : 'Закрыт'}</Badge>
+                  {l.review_sent_at && <Badge tone="info">разбор отправлен</Badge>}
                   <ChevronDown className={`w-5 h-5 text-slate-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                 </button>
                 {expanded && <div className="px-4 pb-4 border-t border-slate-100 pt-3"><ExamBoard link={l} /></div>}

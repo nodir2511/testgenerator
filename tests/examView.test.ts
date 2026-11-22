@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  canLaunchByUser, effectiveDeadline, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, canLaunchBatch, formatScore, summaryText,
+  canLaunchByUser, effectiveDeadline, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, canLaunchBatch, formatScore, summaryText, reviewSendState, reviewConfirmText, reviewResultText,
 } from '../src/lib/examView';
 
 const NOW = Date.parse('2026-11-22T10:00:00.000Z');
@@ -100,4 +100,31 @@ describe('effectiveDeadline и canLaunchByUser', () => {
     expect(canLaunchByUser({ created_by: 'u1', generation_params: { source: 'cluster' } }, 'u1', true)).toBe(false);
     expect(canLaunchByUser({ created_by: 'u1' }, undefined, false)).toBe(false);
   });
+});
+
+describe('reviewSendState', () => {
+  const closed = { closed_at: iso(-5), closes_at: iso(60), review_sent_at: null };
+  it('открытый запуск — нельзя, с подсказкой', () => {
+    const r = reviewSendState({ closed_at: null, closes_at: iso(60), review_sent_at: null }, 3, NOW);
+    expect(r.enabled).toBe(false);
+    expect(r.hint).toBe('Сначала закройте запуск — разбор отправляется после закрытия');
+  });
+  it('закрытый без сданных — нельзя', () => {
+    expect(reviewSendState(closed, 0, NOW).enabled).toBe(false);
+  });
+  it('закрытый со сданными — можно, первый раз', () => {
+    expect(reviewSendState(closed, 2, NOW)).toMatchObject({ enabled: true, again: false });
+  });
+  it('истёкший срок считается закрытым', () => {
+    expect(reviewSendState({ closed_at: null, closes_at: iso(-1), review_sent_at: null }, 1, NOW).enabled).toBe(true);
+  });
+  it('повторная отправка помечается', () => {
+    expect(reviewSendState({ ...closed, review_sent_at: iso(-1) }, 1, NOW)).toMatchObject({ enabled: true, again: true });
+  });
+});
+
+describe('тексты разбора', () => {
+  it('подтверждение', () => expect(reviewConfirmText(5, false)).toBe('Ученики увидят свои ошибки и верные ответы. Отправить 5 ученикам?'));
+  it('повторное подтверждение', () => expect(reviewConfirmText(5, true)).toBe('Разбор уже отправляли. Отправить ещё раз?'));
+  it('итог', () => expect(reviewResultText(4, 1)).toBe('Отправлено: 4, не доставлено: 1'));
 });

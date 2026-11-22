@@ -98,3 +98,27 @@ export function canLaunchByUser(b: { created_by?: string | null; generation_para
 export function canLaunchBatch(b: { generation_params?: any }): boolean {
   return b?.generation_params?.source !== 'cluster';
 }
+
+export const REVIEW_OPEN_HINT = 'Сначала закройте запуск — разбор отправляется после закрытия';
+
+/** Разбор можно слать только после закрытия запуска (иначе ответы увидят те, кто ещё пишет) и если есть сданные */
+export function reviewSendState(
+  l: { closed_at: string | null; closes_at: string; review_sent_at: string | null },
+  finished: number,
+  now: number,
+): { enabled: boolean; again: boolean; hint: string } {
+  const again = !!l.review_sent_at;
+  if (linkState(l, now) === 'open') return { enabled: false, again, hint: REVIEW_OPEN_HINT };
+  if (finished <= 0) return { enabled: false, again, hint: 'Пока никто не сдал билет' };
+  return { enabled: true, again, hint: '' };
+}
+
+export function reviewConfirmText(finished: number, again: boolean): string {
+  return again
+    ? 'Разбор уже отправляли. Отправить ещё раз?'
+    : `Ученики увидят свои ошибки и верные ответы. Отправить ${finished} ученикам?`;
+}
+
+export function reviewResultText(sent: number, failed: number): string {
+  return `Отправлено: ${sent}, не доставлено: ${failed}`;
+}

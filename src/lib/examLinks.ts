@@ -148,3 +148,21 @@ export async function callExamTeacher(action: 'link_send' | 'notify_closed', cod
   if (!msg) return;
   throw /Привяжите Telegram/.test(msg) ? new NotLinkedError(msg) : new Error(msg);
 }
+
+/** Рассылка разбора сдавшим ученикам (только для закрытого запуска). Ответ сервера: { sent, failed } */
+export async function sendReview(code: string): Promise<{ sent: number; failed: number }> {
+  const { data, error } = await supabase.functions.invoke('tg-exam', { body: { action: 'review_send', code } });
+  let msg = '';
+  if (error) msg = await functionErrorMessage(error);
+  else if (data?.error) msg = String(data.error);
+  if (msg) throw new Error(friendlyReviewError(msg, error));
+  return { sent: Number(data?.sent ?? 0), failed: Number(data?.failed ?? 0) };
+}
+
+function friendlyReviewError(msg: string, error: unknown): string {
+  const status = (error as { context?: Response } | null)?.context?.status;
+  if (status === 403 || /доступ|Нет прав|forbidden/i.test(msg)) return 'Нет доступа: разбор может отправить автор запуска или главный админ.';
+  if (status === 409 || /Сначала закройте/.test(msg)) return 'Сначала закройте запуск — разбор отправляется после закрытия.';
+  if (/Failed to send|fetch|network/i.test(msg)) return 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.';
+  return msg;
+}
