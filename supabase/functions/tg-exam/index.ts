@@ -149,6 +149,7 @@ async function finishExpired(l: Link, now: Date, cache: QCache) {
 /** Ответ ученику: только снимки без ответов (publicSnapshot), свои ответы и срок */
 async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache) {
   const base = {
+    now: Date.now(), // часы сервера (мс): клиент считает по ним остаток времени
     title: l.batch?.title ?? '',
     subject: l.batch?.subject?.name ?? '',
     minutes: l.duration_min,
@@ -309,10 +310,10 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
     }
 
     case 'save': {
-      if (!a) return json({ ok: false, state: linkOpen(l, now) ? 'new' : 'closed' });
+      if (!a) return json({ ok: false, state: linkOpen(l, now) ? 'new' : 'closed', now: Date.now() });
       if (stateOf(a, l, now) !== 'running') {
         await finalize(a, cache);
-        return json({ ok: false, state: 'finished' });
+        return json({ ok: false, state: 'finished', now: Date.now() });
       }
       if (!isId(body.tqId)) return json({ error: 'bad_question', message: 'Некорректный вопрос.' }, 400);
       const questions = await ticketQuestions(a.ticket_id, cache);
@@ -324,19 +325,19 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       // (не сдана, срок не прошёл, ссылка не закрыта) — иначе ничего не пишется
       const { data: saved, error } = await sb.rpc('exam_attempt_save', { p_attempt_id: a.id, p_tq_id: q.tqId, p_answer: ans });
       if (error) throw error;
-      if (saved === true) return json({ ok: true });
+      if (saved === true) return json({ ok: true, now: Date.now() });
       // Отказ: попытку сдали, срок прошёл или ссылку только что закрыли — сдаём с тем, что сохранено
       const fresh = (await loadLink(code)) ?? l;
       await finishExpired(fresh, new Date(), cache);
       const cur = await readAttemptById(a.id);
-      return json({ ok: false, state: cur?.finished_at ? 'finished' : 'closed' });
+      return json({ ok: false, state: cur?.finished_at ? 'finished' : 'closed', now: Date.now() });
     }
 
     case 'submit': {
       if (!a) return json({ error: 'not_started', message: 'Билет ещё не начат.' }, 409);
       // После срока тоже сдаёт — с теми ответами, что успели сохраниться
       const done = await finalize(a, cache);
-      return json({ score: done.score ?? 0, max: done.max_score ?? 0 });
+      return json({ score: done.score ?? 0, max: done.max_score ?? 0, now: Date.now() });
     }
 
     case 'review': {

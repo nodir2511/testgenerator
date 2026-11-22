@@ -67,6 +67,7 @@ function OpenField({ value, onChange }: { value: string; onChange: (v: string) =
       className="exam-input"
       inputMode="decimal"
       autoComplete="off"
+      maxLength={20}
       placeholder="Число"
       value={draft}
       onChange={(e) => {

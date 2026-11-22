@@ -1,4 +1,5 @@
 import { loadTelegramScript } from '../tg/telegramScript';
+import { serverOffset } from './examLogic';
 import type { Answer, Answers, ExamQ, Lang, ReviewItem } from './examLogic';
 
 // Клиент Edge Function tg-exam (действия ученика). Подлинность — подпись initData в заголовке.
@@ -33,8 +34,13 @@ export class ExamApiError extends Error {
 
 const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tg-exam`;
 
+/** Смещение часов сервера относительно телефона (мс); null — сервер ещё не ответил со своим временем. Обновляется с каждым ответом. */
+let serverOffsetMs: number | null = null;
+export const getServerOffset = (): number | null => serverOffsetMs;
+
 export async function examApi<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {
   let res: Response;
+  const sentAt = Date.now();
   try {
     res = await fetch(FN_URL, {
       method: 'POST',
@@ -45,11 +51,12 @@ export async function examApi<T>(action: string, body: Record<string, unknown> =
     throw new ExamApiError('network', 'Нет связи с сервером. Проверьте интернет.', 0);
   }
   const data = await res.json().catch(() => ({}));
+  if (typeof data.now === 'number') serverOffsetMs = serverOffset(data.now, sentAt, Date.now());
   if (!res.ok) throw new ExamApiError(data.error || 'error', data.message || (typeof data.error === 'string' ? data.error : '') || `Ошибка ${res.status}`, res.status);
   return data as T;
 }
 
-export interface ViewBase { title: string; subject: string; minutes: number; lang: Lang }
+export interface ViewBase { now?: number; title: string; subject: string; minutes: number; lang: Lang }
 export type OpenResponse =
   | (ViewBase & { state: 'new' | 'closed' })
   | (ViewBase & { state: 'finished'; attempt: { score: number; max: number; review: boolean } })
@@ -58,6 +65,6 @@ export type OpenResponse =
 export const apiOpen = (code: string) => examApi<OpenResponse>('open', { code });
 export const apiStart = (code: string, name: string) => examApi<OpenResponse>('start', { code, name });
 export const apiSave = (code: string, tqId: string, answer: Answer) =>
-  examApi<{ ok: boolean; state?: 'new' | 'closed' | 'finished' }>('save', { code, tqId, answer });
-export const apiSubmit = (code: string) => examApi<{ score: number; max: number }>('submit', { code });
+  examApi<{ ok: boolean; state?: 'new' | 'closed' | 'finished'; now?: number }>('save', { code, tqId, answer });
+export const apiSubmit = (code: string) => examApi<{ score: number; max: number; now?: number }>('submit', { code });
 export const apiReview = (code: string) => examApi<{ questions: ReviewItem[] }>('review', { code });

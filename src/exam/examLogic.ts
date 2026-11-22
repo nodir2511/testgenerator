@@ -76,3 +76,7 @@ export function reviewMistakes(items: ReviewItem[]): Array<{ n: number; item: Re
   items.forEach((item, i) => { if (item.points < item.max) out.push({ n: i + 1, item }); });
   return out;
 }
+
+/** Смещение часов: серверное время минус середина интервала «отправили — получили» (задержка сети делится пополам) */
+export const serverOffset = (serverNow: number, sentAt: number, receivedAt: number): number =>
+  serverNow - (sentAt + receivedAt) / 2;

@@ -9,7 +9,7 @@ import './exam.css';
 
 type Screen =
   | { kind: 'loading' }
-  | { kind: 'message'; title: string; text?: string; retry?: boolean }
+  | { kind: 'message'; title: string; text?: string; retry?: boolean; back?: Screen }
   | { kind: 'view'; view: OpenResponse }
   | { kind: 'result'; score: number; max: number; review: boolean; lang: Lang; title: string }
   | { kind: 'review'; lang: Lang; title: string; items: ReviewItem[] };
@@ -18,12 +18,13 @@ const params = new URLSearchParams(window.location.search);
 const CODE = (params.get('c') ?? '').trim().toUpperCase();
 const WANT_REVIEW = params.get('review') === '1';
 
-function Message({ title, text, onRetry }: { title: string; text?: string; onRetry?: () => void }) {
+function Message({ title, text, onRetry, onBack }: { title: string; text?: string; onRetry?: () => void; onBack?: () => void }) {
   return (
     <div className="exam-app exam-center">
       <div className="big">{title}</div>
       {text && <div className="hint">{text}</div>}
       {onRetry && <button type="button" className="exam-btn" onClick={onRetry}>Повторить</button>}
+      {onBack && <button type="button" className="exam-btn ghost" onClick={onBack}>Назад к результату</button>}
     </div>
   );
 }
@@ -83,12 +84,12 @@ export default function ExamApp() {
     return () => document.body.classList.remove('exam-body');
   }, []);
 
-  const showReview = useCallback(async (lang: Lang, title: string) => {
+  const showReview = useCallback(async (lang: Lang, title: string, back?: Screen) => {
     try {
       const r = await apiReview(CODE);
       setScreen({ kind: 'review', lang, title, items: r.questions });
     } catch (e) {
-      setScreen({ kind: 'message', title: 'Разбор недоступен', text: errText(e), retry: e instanceof ExamApiError && e.retryable });
+      setScreen({ kind: 'message', title: 'Разбор недоступен', text: errText(e), retry: false, back });
     }
   }, []);
 
@@ -127,14 +128,14 @@ export default function ExamApp() {
     case 'loading':
       return <Message title="Загрузка…" />;
     case 'message':
-      return <Message title={screen.title} text={screen.text} onRetry={screen.retry ? () => void load() : undefined} />;
+      return <Message title={screen.title} text={screen.text} onRetry={screen.retry ? () => void load() : undefined} onBack={screen.back ? () => setScreen(screen.back!) : undefined} />;
     case 'result':
       return (
         <div className="exam-app exam-center">
           <div className="hint">Билет сдан</div>
           <div className="big">Вы набрали {screen.score} из {screen.max}</div>
           {screen.review
-            ? <button type="button" className="exam-btn" onClick={() => void showReview(screen.lang, screen.title)}>Посмотреть разбор</button>
+            ? <button type="button" className="exam-btn" onClick={() => void showReview(screen.lang, screen.title, screen)}>Посмотреть разбор</button>
             : <div className="hint">Разбор ошибок появится, когда преподаватель его отправит.</div>}
         </div>
       );
@@ -153,7 +154,7 @@ export default function ExamApp() {
       if (v.state === 'running') {
         return (
           <ExamTicket
-            code={CODE} lang={v.lang} minutes={v.minutes} deadline={v.attempt.deadline}
+            code={CODE} lang={v.lang} deadline={v.attempt.deadline}
             questions={v.attempt.questions} initialAnswers={v.attempt.answers}
             onFinished={(r) => void onFinished(r, v.lang, v.title)}
           />

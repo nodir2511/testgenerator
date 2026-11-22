@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ExamApiError, apiSave, apiSubmit } from './api';
+import { ExamApiError, apiOpen, apiSave, apiSubmit, getServerOffset } from './api';
 import { ExamQuestion } from './ExamQuestion';
 import { countAnswered, formatRemaining, remainingMs, type Answer, type Answers, type ExamQ, type Lang } from './examLogic';
 
 const RETRY_MS = 4000;
 
 /** Экран билета: все вопросы подряд, сверху таймер, счётчик и «Сдать». Каждый ответ сразу уходит на сервер. */
-export function ExamTicket({ code, lang, minutes, deadline, questions, initialAnswers, onFinished }: {
-  code: string; lang: Lang; minutes: number; deadline: string; questions: ExamQ[]; initialAnswers: Answers;
+export function ExamTicket({ code, lang, deadline, questions, initialAnswers, onFinished }: {
+  code: string; lang: Lang; deadline: string; questions: ExamQ[]; initialAnswers: Answers;
   onFinished: (r: { score: number; max: number }) => void;
 }) {
   const [answers, setAnswers] = useState<Answers>(initialAnswers);
@@ -18,6 +18,8 @@ export function ExamTicket({ code, lang, minutes, deadline, questions, initialAn
   const [now, setNow] = useState(Date.now());
 
   const answersRef = useRef(answers);
+  const unsavedRef = useRef(unsaved);
+  unsavedRef.current = unsaved;
   const ver = useRef<Record<string, number>>({});
   const flying = useRef(new Set<string>());
   const submittingRef = useRef(false);
@@ -25,8 +27,9 @@ export function ExamTicket({ code, lang, minutes, deadline, questions, initialAn
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
 
-  // Срок задаёт сервер; часы телефона могут уходить, поэтому остаток не больше длительности билета
-  const left = Math.min(remainingMs(deadline, 0, now), minutes * 60_000);
+  // Срок задаёт сервер; остаток считаем по часам сервера (смещение обновляется с каждым ответом)
+  const offset = getServerOffset();
+  const left = remainingMs(deadline, offset ?? 0, now);
   const { answered, total } = useMemo(() => countAnswered(questions, answers), [questions, answers]);
 
   const markUnsaved = (tqId: string, on: boolean) =>
@@ -45,7 +48,7 @@ export function ExamTicket({ code, lang, minutes, deadline, questions, initialAn
     try {
       // Сначала дослать то, что не успело сохраниться (одна попытка), затем сдать
       for (const tqId of Object.keys(ver.current)) {
-        if (!unsavedRef.current.has(tqId)) continue;
+        if (!unsavedRef.current.has(tqId) || flying.current.has(tqId)) continue; // в полёте — досылает сам send
         try { await apiSave(code, tqId, answersRef.current[tqId] ?? null); } catch { /* сервер сдаст с тем, что сохранено */ }
       }
       const r = await apiSubmit(code);
@@ -60,10 +63,7 @@ export function ExamTicket({ code, lang, minutes, deadline, questions, initialAn
     }
   }, [code]);
 
-  const unsavedRef = useRef(unsaved);
-  unsavedRef.current = unsaved;
-
-  const send = useCallback(async (tqId: string) => {
+    const send = useCallback(async (tqId: string) => {
     if (flying.current.has(tqId) || doneRef.current) return;
     flying.current.add(tqId);
     try {
@@ -74,7 +74,8 @@ export function ExamTicket({ code, lang, minutes, deadline, questions, initialAn
         if ((ver.current[tqId] ?? 0) === v) { markUnsaved(tqId, false); setNotice(''); return; }
       }
     } catch (e) {
-      if (e instanceof ExamApiError && !e.retryable) { markUnsaved(tqId, false); setNotice(e.message); }
+      if (e instanceof ExamApiError && e.status === 401) setNotice('Сессия Telegram устарела: ответ не сохранён. Закройте страницу и откройте ссылку на билет заново.');
+      else if (e instanceof ExamApiError && !e.retryable) { markUnsaved(tqId, false); setNotice(e.message); }
       // сеть: остаётся «не сохранено», повтор по таймеру
     } finally {
       flying.current.delete(tqId);
@@ -95,13 +96,21 @@ export function ExamTicket({ code, lang, minutes, deadline, questions, initialAn
     const t = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(t);
   }, []);
+  // Авто-сдача только когда по часам сервера время вышло. Времени сервера нет — сначала спрашиваем сервер (open), он же сдаёт просроченную попытку.
   const expired = left <= 0;
   useEffect(() => {
     if (!expired) return;
-    void finish(true);
-    const t = setInterval(() => void finish(true), RETRY_MS); // сдача не прошла (сеть) — повторяем
+    const tick = async () => {
+      if (getServerOffset() !== null) { void finish(true); return; }
+      try {
+        const v = await apiOpen(code);
+        if (v.state === 'finished' && !doneRef.current) { doneRef.current = true; onFinishedRef.current(v.attempt); }
+      } catch { /* повторим по таймеру */ }
+    };
+    void tick();
+    const t = setInterval(() => void tick(), RETRY_MS);
     return () => clearInterval(t);
-  }, [expired, finish]);
+  }, [expired, finish, code]);
 
   // Повтор неотправленных ответов
   useEffect(() => {

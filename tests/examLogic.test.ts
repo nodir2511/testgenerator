@@ -79,3 +79,23 @@ describe('reviewMistakes', () => {
     expect(reviewMistakes(r).map((x) => [x.n, x.item.tqId])).toEqual([[2, 'b'], [3, 'c']]);
   });
 });
+
+import { serverOffset } from '../src/exam/examLogic';
+
+describe('serverOffset', () => {
+  it('середина запроса: offset = serverNow − (sent+received)/2', () => {
+    expect(serverOffset(10_000, 1_000, 1_200)).toBe(10_000 - 1_100);
+  });
+  it('телефон спешит на 5 минут: остаток не уменьшается', () => {
+    const serverNow = Date.parse('2026-01-01T10:00:00Z');
+    const phone = serverNow + 5 * 60_000;
+    const off = serverOffset(serverNow, phone - 100, phone + 100);
+    expect(remainingMs('2026-01-01T10:30:00Z', off, phone)).toBe(30 * 60_000);
+  });
+  it('телефон отстаёт на 5 минут: остаток не завышается', () => {
+    const serverNow = Date.parse('2026-01-01T10:00:00Z');
+    const phone = serverNow - 5 * 60_000;
+    const off = serverOffset(serverNow, phone - 100, phone + 100);
+    expect(remainingMs('2026-01-01T10:30:00Z', off, phone)).toBe(30 * 60_000);
+  });
+});
