@@ -24,6 +24,10 @@ jobs:
       - run: npm ci
       - name: Уязвимости зависимостей
         run: npm audit --omit=dev --audit-level=high
+      - name: Копии кода для Edge Functions совпадают с исходниками
+        run: |
+          node scripts/sync-docx-shared.mjs
+          git diff --exit-code -- supabase/functions/_shared || (echo 'Запустите node scripts/sync-docx-shared.mjs и закоммитьте supabase/functions/_shared' && exit 1)
       - name: Тесты, типы и сборка
         run: npm run build
         env:
