@@ -99,3 +99,32 @@ describe('serverOffset', () => {
     expect(remainingMs('2026-01-01T10:30:00Z', off, phone)).toBe(30 * 60_000);
   });
 });
+
+import { navIndexes, progressFraction, stepNav, firstUnansweredPos } from '../src/exam/examLogic';
+
+describe('постраничная навигация', () => {
+  const qs = [
+    { tqId: 'a', snapshot: { type: 'test' } },
+    { tqId: 'e', snapshot: { empty: true, type: 'test' } },
+    { tqId: 'b', snapshot: { type: 'open' } },
+    { tqId: 'c', snapshot: { type: 'test' } },
+  ];
+  it('navIndexes пропускает пустые места', () => expect(navIndexes(qs)).toEqual([0, 2, 3]));
+  it('progressFraction', () => {
+    expect(progressFraction(0, 0)).toBe(0);
+    expect(progressFraction(1, 4)).toBe(0.25);
+    expect(progressFraction(9, 4)).toBe(1);
+  });
+  it('stepNav не выходит за границы', () => {
+    expect(stepNav(3, 0, 1)).toBe(1);
+    expect(stepNav(3, 2, 1)).toBe(2);
+    expect(stepNav(3, 0, -1)).toBe(0);
+    expect(stepNav(3, 2, -1)).toBe(1);
+  });
+  it('firstUnansweredPos — позиция в списке навигации', () => {
+    expect(firstUnansweredPos(qs, { a: 'x' })).toBe(1);
+    expect(firstUnansweredPos(qs, { a: 'x', b: '5', c: 'y' })).toBe(0);
+    expect(firstUnansweredPos(qs, {})).toBe(0);
+    expect(firstUnansweredPos(qs, { a: 'x', b: '5' })).toBe(2);
+  });
+});

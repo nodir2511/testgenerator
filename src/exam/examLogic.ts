@@ -80,3 +80,22 @@ export function reviewMistakes(items: ReviewItem[]): Array<{ n: number; item: Re
 /** Смещение часов: серверное время минус середина интервала «отправили — получили» (задержка сети делится пополам) */
 export const serverOffset = (serverNow: number, sentAt: number, receivedAt: number): number =>
   serverNow - (sentAt + receivedAt) / 2;
+
+/** Индексы вопросов, по которым ходит ученик: пустые места пропускаются */
+export const navIndexes = (questions: ExamQ[]): number[] =>
+  questions.flatMap((q, i) => (isEmptyQ(q.snapshot) ? [] : [i]));
+
+/** Доля заполнения полосы прогресса, 0..1 */
+export const progressFraction = (answered: number, total: number): number =>
+  total <= 0 ? 0 : Math.min(1, Math.max(0, answered / total));
+
+/** Шаг по позиции в списке навигации с остановкой на краях */
+export const stepNav = (count: number, pos: number, dir: 1 | -1): number =>
+  Math.min(Math.max(0, count - 1), Math.max(0, pos + dir));
+
+/** С какой позиции начинать: первый вопрос без ответа, иначе первый */
+export function firstUnansweredPos(questions: ExamQ[], answers: Answers): number {
+  const nav = navIndexes(questions);
+  const p = nav.findIndex((i) => !isAnswered(questions[i].snapshot.type, answers[questions[i].tqId]));
+  return p < 0 ? 0 : p;
+}

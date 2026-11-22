@@ -60,7 +60,9 @@ function OpenField({ value, onChange }: { value: string; onChange: (v: string) =
     clearTimeout(timer.current);
     if (v !== sent.current) { sent.current = v; latest.current(v); }
   };
-  useEffect(() => () => clearTimeout(timer.current), []);
+  const draftRef = useRef(value);
+  draftRef.current = draft;
+  useEffect(() => () => flush(draftRef.current), []); // уход к другому вопросу не теряет набранное
 
   return (
     <input

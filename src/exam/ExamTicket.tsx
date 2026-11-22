@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExamApiError, apiOpen, apiSave, apiSubmit, getServerOffset } from './api';
 import { ExamQuestion } from './ExamQuestion';
-import { countAnswered, formatRemaining, remainingMs, type Answer, type Answers, type ExamQ, type Lang } from './examLogic';
+import { isAnswered as isAnsweredQ } from './examLogic';
+import { countAnswered, firstUnansweredPos, formatRemaining, navIndexes, progressFraction, remainingMs, stepNav, type Answer, type Answers, type ExamQ, type Lang } from './examLogic';
 
 const RETRY_MS = 4000;
 
@@ -16,6 +17,8 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
   const [confirm, setConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const nav = useMemo(() => navIndexes(questions), [questions]);
+  const [pos, setPos] = useState(() => firstUnansweredPos(questions, initialAnswers));
 
   const answersRef = useRef(answers);
   const unsavedRef = useRef(unsaved);
@@ -119,40 +122,57 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
     return () => clearInterval(t);
   }, [unsaved.size, send]);
 
-  let prevPassage: string | null = null;
+  useEffect(() => {
+    document.getElementById(`strip-${pos}`)?.scrollIntoView({ block: 'nearest', inline: 'center' });
+    window.scrollTo({ top: 0 });
+  }, [pos]);
+
+  const qi = nav[pos];
+  const q = qi === undefined ? undefined : questions[qi];
+  const last = pos >= nav.length - 1;
+  const unanswered = total - answered;
   return (
-    <div className="exam-app">
-      <div className="exam-bar">
+    <div className="exam-app" style={{ paddingBottom: 100 }}>
+      <div className="exam-bar" style={{ flexWrap: 'wrap' }}>
         <span className={`timer${left < 60_000 ? ' low' : ''}`}>{formatRemaining(left)}</span>
         <span className="count">
-          отвечено {answered} из {total}
+          Вопрос {pos + 1} из {total} · отвечено {answered}
           {unsaved.size > 0 && <span className="unsaved"> · не сохранено: {unsaved.size}</span>}
         </span>
-        <button type="button" className="exam-btn small" disabled={submitting} onClick={() => setConfirm(true)}>Сдать</button>
+        <div className="exam-progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={answered}>
+          <div style={{ width: `${Math.round(progressFraction(answered, total) * 100)}%` }} />
+        </div>
+        <div className="exam-strip">
+          {nav.map((idx, p) => (
+            <button
+              key={questions[idx].tqId} id={`strip-${p}`} type="button" aria-label={`Вопрос ${p + 1}`}
+              className={`${p === pos ? 'cur ' : ''}${isAnsweredQ(questions[idx].snapshot.type, answers[questions[idx].tqId]) ? 'done' : ''}`}
+              onClick={() => setPos(p)}
+            >{p + 1}</button>
+          ))}
+        </div>
       </div>
 
       {notice && <div className="exam-card lost">{notice}</div>}
 
-      {questions.map((q, i) => {
-        const snap = q.snapshot;
-        const node = (
-          <ExamQuestion
-            key={q.tqId} snap={snap} n={i + 1} lang={lang} prevPassageId={prevPassage}
-            answer={answers[q.tqId]} unsaved={unsaved.has(q.tqId)} onAnswer={(a) => onAnswer(q.tqId, a)}
-          />
-        );
-        prevPassage = snap?.passage?.id ?? null;
-        return node;
-      })}
+      {q && (
+        <ExamQuestion
+          key={q.tqId} snap={q.snapshot} n={pos + 1} lang={lang} prevPassageId={null}
+          answer={answers[q.tqId]} unsaved={unsaved.has(q.tqId)} onAnswer={(a) => onAnswer(q.tqId, a)}
+        />
+      )}
 
-      <button type="button" className="exam-btn full" style={{ marginTop: 16 }} disabled={submitting} onClick={() => setConfirm(true)}>Сдать билет</button>
+      <div className="exam-nav">
+        <button type="button" className="exam-btn ghost" disabled={pos === 0} onClick={() => setPos(stepNav(nav.length, pos, -1))}>Назад</button>
+        <button type="button" className="exam-btn" disabled={submitting} onClick={() => (last ? setConfirm(true) : setPos(stepNav(nav.length, pos, 1)))}>{last ? 'Сдать' : 'Далее'}</button>
+      </div>
 
       {confirm && (
         <div className="exam-modal" onClick={() => !submitting && setConfirm(false)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <b style={{ fontSize: 18 }}>Сдать билет?</b>
+            <b style={{ fontSize: 18 }}>{unanswered > 0 ? `Не отвечено: ${unanswered}. Сдать?` : 'Сдать билет?'}</b>
             <div className="hint">
-              Отвечено {answered} из {total}.{answered < total ? ' Вопросы без ответа получат 0 баллов.' : ''} После сдачи изменить ответы нельзя.
+              Отвечено {answered} из {total}.{unanswered > 0 ? ' Вопросы без ответа получат 0 баллов.' : ''} После сдачи изменить ответы нельзя.
             </div>
             {notice && <div style={{ color: 'var(--bad)' }}>{notice}</div>}
             <button type="button" className="exam-btn" disabled={submitting} onClick={() => void finish(false)}>{submitting ? 'Сдаём…' : 'Да, сдать'}</button>
