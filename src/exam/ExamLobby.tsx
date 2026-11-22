@@ -13,6 +13,8 @@ export function ExamLobby({ code, initial, onLeave }: { code: string; initial: L
   const onLeaveRef = useRef(onLeave);
   onLeaveRef.current = onLeave;
 
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const lv = lobbyView(view, getServerOffset() ?? 0, now);
   const fastRef = useRef(false);
   fastRef.current = lv.kind === 'run'; // отсчёт по нашим часам закончился — спрашиваем билет чаще
@@ -22,7 +24,16 @@ export function ExamLobby({ code, initial, onLeave }: { code: string; initial: L
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
-    const next = () => { timer = setTimeout(poll, fastRef.current ? FAST_POLL_MS : EXAM_POLL_MS); };
+    const next = () => {
+      let delay = fastRef.current ? FAST_POLL_MS : EXAM_POLL_MS;
+      // идёт отсчёт: спросим сервер ровно к моменту старта, а не через полный интервал
+      const startsAt = (viewRef.current.attempt as { startsAt?: string } | undefined)?.startsAt;
+      if (viewRef.current.state === 'countdown' && startsAt) {
+        const left = Date.parse(startsAt) - (Date.now() + (getServerOffset() ?? 0));
+        if (Number.isFinite(left)) delay = Math.min(delay, Math.max(0, left) + 100);
+      }
+      timer = setTimeout(poll, delay);
+    };
     const poll = async () => {
       try {
         const v = await apiOpen(code);
@@ -47,7 +58,7 @@ export function ExamLobby({ code, initial, onLeave }: { code: string; initial: L
         <>
           <div className="lobby-title">{view.title || 'Билет'}</div>
           <div className="lobby-label">Ваш вариант</div>
-          <div className="lobby-digit">{view.attempt.ticketNumber ?? '—'}</div>
+          <div className="lobby-digit">{view.attempt?.ticketNumber ?? '—'}</div>
           <div className="lobby-wait">{lv.kind === 'run' ? 'Начинаем!' : waitText(view)}</div>
         </>
       )}

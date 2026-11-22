@@ -106,7 +106,7 @@ body.exam-body {
 .exam-lobby { min-height: 80vh; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; text-align: center; padding: 24px 8px; }
 .exam-lobby .lobby-title { font-size: 20px; font-weight: 800; }
 .exam-lobby .lobby-label { color: var(--hint); font-size: 18px; margin-top: 12px; }
-.exam-lobby .lobby-digit { font-size: min(52vw, 260px); line-height: 1; font-weight: 800; color: var(--btn); font-variant-numeric: tabular-nums; }
+.exam-lobby .lobby-digit { font-size: min(34vw, 260px); line-height: 1; font-weight: 800; color: var(--btn); font-variant-numeric: tabular-nums; }
 .exam-lobby .lobby-wait { font-size: 18px; font-weight: 600; }
 .exam-lobby .lobby-offline { color: var(--bad); font-size: 14px; font-weight: 600; min-height: 20px; }
 .exam-lobby .lobby-count { font-size: min(70vw, 340px); line-height: 1; font-weight: 800; color: var(--btn); animation: lobby-pop 0.5s ease-out; }
