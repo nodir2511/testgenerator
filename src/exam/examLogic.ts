@@ -159,3 +159,14 @@ export function saveOutcome(r: SaveResponse): 'saved' | 'retry' | 'finish' | 'ke
 
 /** Сколько минут осталось, для надписи «осталось N мин»: вверх, не меньше 1 */
 export const minutesLeft = (ms: number): number => Math.max(1, Math.ceil(ms / 60_000));
+
+/** Что показать ученику про сохранение ответа: saving — отправляем (жёлтое), failed — отправить не вышло, повторяем (красное), saved — записано (зелёное), none — ответа ещё нет */
+export type SaveStatus = 'saving' | 'failed' | 'saved' | 'none';
+export function saveStatus(tqId: string, unsaved: ReadonlySet<string>, failed: ReadonlySet<string>, saved: ReadonlySet<string>): SaveStatus {
+  if (unsaved.has(tqId)) return failed.has(tqId) ? 'failed' : 'saving';
+  return saved.has(tqId) ? 'saved' : 'none';
+}
+
+/** Открытый ответ: до OPEN_CELLS цифр (как клетки на бланке); всё, кроме цифр, отбрасывается */
+export const OPEN_CELLS = 4;
+export const openDigits = (raw: string): string => raw.replace(/\D/g, '').slice(0, OPEN_CELLS);

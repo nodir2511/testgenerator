@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { FormattedText } from '../components/FormulaEditor';
-import { isEmptyQ, matchingAnswer, normalizeOpen, pickText, sortByOrder, type Answer, type Lang } from './examLogic';
+import { isEmptyQ, matchingAnswer, openDigits, OPEN_CELLS, pickText, sortByOrder, type Answer, type Lang, type SaveStatus } from './examLogic';
 
 const LETTERS = 'ABCDEFGH';
 
@@ -48,30 +48,57 @@ function OptionBody({ o, lang }: { o: any; lang: Lang }) {
   );
 }
 
-/** Поле числа: каждое изменение сразу идёт наверх (там ответ учитывается в счётчике и сдаче), отправка на сервер — с паузой или по blur */
-function OpenField({ value, onChange }: { value: string; onChange: (v: string, deferred: boolean) => void }) {
-  const [draft, setDraft] = useState(value);
+/** Поле числа: 4 клетки по одной цифре, как на бланке. Каждое изменение сразу идёт наверх (там ответ учитывается в счётчике и сдаче), отправка на сервер — с паузой или по blur */
+function OpenField({ value, onChange, onEnter }: { value: string; onChange: (v: string, deferred: boolean) => void; onEnter?: () => void }) {
+  const [draft, setDraft] = useState(openDigits(value));
+  const refs = React.useRef<Array<HTMLInputElement | null>>([]);
+  const focusAt = (i: number) => setTimeout(() => refs.current[Math.max(0, Math.min(OPEN_CELLS - 1, i))]?.focus(), 0);
+  const set = (v: string, at: number) => { setDraft(v); onChange(v, true); focusAt(at); };
   return (
-    <input
-      className="exam-input"
-      inputMode="decimal"
-      autoComplete="off"
-      maxLength={20}
-      placeholder="Число"
-      value={draft}
-      onChange={(e) => {
-        const v = normalizeOpen(e.target.value);
-        setDraft(v);
-        onChange(v, true);
-      }}
-      onBlur={() => onChange(draft, false)}
-    />
+    <div className="open-cells" role="group" aria-label="Ответ — число, по одной цифре в клетке" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onChange(draft, false); }}>
+      {Array.from({ length: OPEN_CELLS }, (_, i) => (
+        <input
+          key={i}
+          ref={(el) => { refs.current[i] = el; }}
+          className="open-cell"
+          inputMode="numeric"
+          autoComplete="off"
+          aria-label={`Цифра ${i + 1}`}
+          value={draft[i] ?? ''}
+          // клик в любую клетку ведёт к первой свободной: цифры идут слева направо без пропусков
+          onFocus={(e) => { const t = Math.min(draft.length, OPEN_CELLS - 1); if (i !== t) { refs.current[t]?.focus(); } else e.target.select(); }}
+          onChange={(e) => {
+            const d = openDigits(e.target.value);
+            if (!d) return;
+            // вставка нескольких цифр или ввод в заполненную клетку: пишем с этой позиции
+            const next = openDigits(draft.slice(0, i) + d + draft.slice(i + 1));
+            set(next, next.length);
+          }}
+          onKeyDown={(e) => {
+            // Enter: ответ принят (уходит на сервер сразу) и идём к следующему вопросу
+            if (e.key === 'Enter') { e.preventDefault(); onChange(draft, false); onEnter?.(); return; }
+            if (e.key === 'Backspace' || e.key === 'Delete') {
+              e.preventDefault();
+              if (draft.length === 0) return;
+              const cut = e.key === 'Backspace' && i === draft.length && draft[i] === undefined ? draft.length - 1 : Math.min(i, draft.length - 1);
+              const next = draft.slice(0, cut) + draft.slice(cut + 1);
+              set(next, next.length);
+            }
+          }}
+          onPaste={(e) => {
+            e.preventDefault();
+            const d = openDigits(e.clipboardData.getData('text'));
+            if (d) set(d, d.length);
+          }}
+        />
+      ))}
+    </div>
   );
 }
 
 /** Вопрос для ответа: варианты, пары, число. Каждое изменение сразу уходит наверх (там сохраняется на сервере). */
-export function ExamQuestion({ snap, n, lang, prevPassageId, answer, unsaved, onAnswer }: CommonProps & {
-  answer: Answer | undefined; unsaved: boolean; onAnswer: (a: Answer, deferred?: boolean) => void;
+export function ExamQuestion({ snap, n, lang, prevPassageId, answer, saveState, onAnswer, onEnter }: CommonProps & {
+  answer: Answer | undefined; saveState: SaveStatus; onAnswer: (a: Answer, deferred?: boolean) => void; onEnter?: () => void;
 }) {
   if (isEmptyQ(snap)) {
     return <div className="exam-card"><b>{n}.</b> <span className="hint">Это место в билете пустое — пропустите его.</span></div>;
@@ -129,11 +156,13 @@ export function ExamQuestion({ snap, n, lang, prevPassageId, answer, unsaved, on
 
       {snap.type === 'open' && (
         <div style={{ marginTop: 10 }}>
-          <OpenField value={typeof answer === 'string' ? answer : ''} onChange={(v, deferred) => onAnswer(v === '' ? null : v, deferred)} />
+          <OpenField value={typeof answer === 'string' ? answer : ''} onChange={(v, deferred) => onAnswer(v === '' ? null : v, deferred)} onEnter={onEnter} />
         </div>
       )}
 
-      {unsaved && <div className="q-unsaved">не сохранено — повторяем отправку…</div>}
+      {saveState === 'saving' && <div className="q-saving">сохраняем…</div>}
+      {saveState === 'failed' && <div className="q-unsaved">не сохранено — повторяем отправку…</div>}
+      {saveState === 'saved' && <div className="q-saved">✓ сохранено</div>}
     </div>
   );
 }

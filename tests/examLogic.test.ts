@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   formatRemaining, remainingMs, countAnswered, isAnswered, pickText, normalizeOpen, matchingAnswer, reviewMistakes, nameOk, sortByOrder, lobbyView, waitText, minutesLeft,
-  lobbyWaitText, lobbyMinutesText, saveOutcome, SAVE_WAIT_RETRY_MS, SAVE_WAIT_MAX_TRIES,
-} from '../src/exam/examLogic';
+  lobbyWaitText, lobbyMinutesText, saveOutcome, SAVE_WAIT_RETRY_MS, SAVE_WAIT_MAX_TRIES, saveStatus, openDigits, OPEN_CELLS } from '../src/exam/examLogic';
 
 describe('saveOutcome: что делать по ответу save', () => {
   it('ok — сохранено', () => expect(saveOutcome({ ok: true })).toBe('saved'));
@@ -208,4 +207,20 @@ describe('waitText / minutesLeft', () => {
     expect(minutesLeft(5)).toBe(1);
     expect(minutesLeft(-1)).toBe(1);
   });
+});
+
+describe('saveStatus', () => {
+  const e = new Set<string>();
+  it('нет ответа — ничего не показываем', () => expect(saveStatus('a', e, e, e)).toBe('none'));
+  it('ответ в полёте — «сохраняем» (жёлтое), а не ошибка', () => expect(saveStatus('a', new Set(['a']), e, e)).toBe('saving'));
+  it('отправка не удалась — «не сохранено»', () => expect(saveStatus('a', new Set(['a']), new Set(['a']), e)).toBe('failed'));
+  it('записано — «сохранено»', () => expect(saveStatus('a', e, e, new Set(['a']))).toBe('saved'));
+  it('другой вопрос не влияет', () => expect(saveStatus('b', new Set(['a']), new Set(['a']), new Set(['a']))).toBe('none'));
+});
+
+describe('openDigits', () => {
+  it('4 клетки по одной цифре', () => expect(OPEN_CELLS).toBe(4));
+  it('оставляет только цифры', () => expect(openDigits('1a2,5')).toBe('125'));
+  it('не больше четырёх', () => expect(openDigits('123456')).toBe('1234'));
+  it('пусто', () => expect(openDigits('')).toBe(''));
 });

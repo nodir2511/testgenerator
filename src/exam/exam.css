@@ -33,6 +33,7 @@ body.exam-body {
 .exam-bar .timer { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 20px; min-width: 64px; }
 .exam-bar .timer.low { color: var(--bad); }
 .exam-bar .count { flex: 1; font-size: 14px; color: var(--hint); min-width: 0; }
+.exam-bar .saving { color: #ca8a04; font-size: 13px; font-weight: 600; }
 .exam-bar .unsaved { color: var(--bad); font-size: 13px; font-weight: 600; }
 
 .exam-btn {
@@ -55,6 +56,8 @@ body.exam-body {
 .q-img { max-width: 100%; max-height: 280px; border-radius: 10px; margin-top: 8px; object-fit: contain; background: #fff; }
 .q-passage { background: var(--bg2); border-radius: 12px; padding: 12px; margin: 12px 0 0; white-space: pre-line; font-size: 15px; }
 .q-passage b { display: block; margin-bottom: 4px; }
+.q-saving { color: #ca8a04; font-size: 13px; font-weight: 600; margin-top: 6px; }
+.q-saved { color: var(--ok); font-size: 13px; font-weight: 600; margin-top: 6px; }
 .q-unsaved { color: var(--bad); font-size: 13px; font-weight: 600; margin-top: 6px; }
 
 .opts { display: grid; gap: 8px; margin-top: 10px; }
@@ -111,3 +114,10 @@ body.exam-body {
 .exam-lobby .lobby-offline { color: var(--bad); font-size: 14px; font-weight: 600; min-height: 20px; }
 .exam-lobby .lobby-count { font-size: min(70vw, 340px); line-height: 1; font-weight: 800; color: var(--btn); animation: lobby-pop 0.5s ease-out; }
 @keyframes lobby-pop { from { transform: scale(1.35); opacity: 0.3; } to { transform: scale(1); opacity: 1; } }
+
+.open-cells { display: flex; gap: 10px; margin-top: 12px; }
+.open-cell {
+  width: 56px; height: 64px; text-align: center; font: inherit; font-size: 28px; font-weight: 800; color: var(--fg);
+  background: var(--bg); border: 2px solid var(--line); border-radius: 12px; padding: 0; caret-color: transparent;
+}
+.open-cell:focus { outline: none; border-color: var(--btn); }

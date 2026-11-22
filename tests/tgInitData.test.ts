@@ -22,7 +22,7 @@ describe('verifyInitData', () => {
     const raw = signed({ auth_date: now(), user });
     expect(await verifyInitData(raw, 'other', 3600)).toBeNull();
     expect(await verifyInitData(raw, '', 3600)).toBeNull();
-    expect(await verifyInitData(raw.replace(/hash=./, 'hash=0'), TOKEN, 3600)).toBeNull();
+    expect(await verifyInitData(raw.replace(/hash=(.)/, (_m, c) => `hash=${c === '0' ? '1' : '0'}`), TOKEN, 3600)).toBeNull();
     expect(await verifyInitData('', TOKEN, 3600)).toBeNull();
   });
   it('старая, будущая, нечисловая или отсутствующая auth_date → null', async () => {

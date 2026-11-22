@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExamApiError, apiOpen, apiSave, apiSubmit, getServerOffset } from './api';
 import { ExamQuestion } from './ExamQuestion';
-import { isAnswered as isAnsweredQ, saveOutcome, SAVE_WAIT_MAX_TRIES, SAVE_WAIT_RETRY_MS } from './examLogic';
+import { isAnswered as isAnsweredQ, saveOutcome, saveStatus, SAVE_WAIT_MAX_TRIES, SAVE_WAIT_RETRY_MS } from './examLogic';
 import { countAnswered, firstUnansweredPos, formatRemaining, navIndexes, progressFraction, remainingMs, stepNav, type Answer, type Answers, type ExamQ, type Lang } from './examLogic';
 
 const RETRY_MS = 4000;
@@ -13,6 +13,16 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
 }) {
   const [answers, setAnswers] = useState<Answers>(initialAnswers);
   const [unsaved, setUnsaved] = useState<Set<string>>(new Set());
+  const [failed, setFailed] = useState<Set<string>>(new Set()); // последняя отправка не удалась (красное)
+  const [saved, setSaved] = useState<Set<string>>(new Set()); // сервер подтвердил запись (зелёное)
+  const flag = (set: 'failed' | 'saved', tqId: string, on: boolean) => {
+    (set === 'failed' ? setFailed : setSaved)((prev) => {
+      if (prev.has(tqId) === on) return prev;
+      const next = new Set(prev);
+      if (on) next.add(tqId); else next.delete(tqId);
+      return next;
+    });
+  };
   const [notice, setNotice] = useState('');
   const [confirm, setConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -80,17 +90,19 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
           if (out === 'finish') { void finish(true); return; } // срок вышел или запуск закрыт — сдаём то, что сохранено
           // Часы сервера на границе старта ещё «до начала»: ответ не записан — повторяем, не сдаём
           if (out === 'retry') {
-            if (++waits > SAVE_WAIT_MAX_TRIES || doneRef.current) return; // остаётся «не сохранено», повтор по таймеру
+            if (++waits > SAVE_WAIT_MAX_TRIES || doneRef.current) { flag('failed', tqId, true); return; } // остаётся «не сохранено», повтор по таймеру
             await new Promise((res) => setTimeout(res, SAVE_WAIT_RETRY_MS));
             continue;
           }
-          if (out === 'keep') return; // остаётся «не сохранено»
-          if ((ver.current[tqId] ?? 0) === v) { markUnsaved(tqId, false); setNotice(''); return; }
+          if (out === 'keep') { flag('failed', tqId, true); return; } // остаётся «не сохранено»
+          flag('failed', tqId, false);
+          if ((ver.current[tqId] ?? 0) === v) { markUnsaved(tqId, false); flag('saved', tqId, true); setNotice(''); return; }
         }
       } catch (e) {
         if (e instanceof ExamApiError && e.status === 401) setNotice('Сессия Telegram устарела: ответ не сохранён. Закройте страницу и откройте ссылку на билет заново.');
         else if (e instanceof ExamApiError && !e.retryable) { markUnsaved(tqId, false); setNotice(e.message); }
         // сеть: остаётся «не сохранено», повтор по таймеру
+        else flag('failed', tqId, true);
       } finally {
         flying.current.delete(tqId);
       }
@@ -109,6 +121,8 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
     setAnswers(next);
     ver.current[tqId] = (ver.current[tqId] ?? 0) + 1;
     markUnsaved(tqId, true);
+    flag('saved', tqId, false);
+    flag('failed', tqId, false);
     clearTimeout(timers.current.get(tqId));
     timers.current.delete(tqId);
     if (deferred) timers.current.set(tqId, setTimeout(() => { timers.current.delete(tqId); void send(tqId); }, 700));
@@ -158,7 +172,9 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
         <span className={`timer${left < 60_000 ? ' low' : ''}`}>{formatRemaining(left)}</span>
         <span className="count">
           Вопрос {pos + 1} из {total} · отвечено {answered}
-          {unsaved.size > 0 && <span className="unsaved"> · не сохранено: {unsaved.size}</span>}
+          {unsaved.size > 0 && (failed.size > 0
+            ? <span className="unsaved"> · не сохранено: {failed.size}</span>
+            : <span className="saving"> · сохраняем…</span>)}
         </span>
         <div className="exam-progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={answered}>
           <div style={{ width: `${Math.round(progressFraction(answered, total) * 100)}%` }} />
@@ -179,7 +195,8 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
       {q && (
         <ExamQuestion
           key={q.tqId} snap={q.snapshot} n={pos + 1} lang={lang} prevPassageId={null}
-          answer={answers[q.tqId]} unsaved={unsaved.has(q.tqId)} onAnswer={(a, d) => onAnswer(q.tqId, a, d)}
+          answer={answers[q.tqId]} saveState={saveStatus(q.tqId, unsaved, failed, saved)} onAnswer={(a, d) => onAnswer(q.tqId, a, d)}
+          onEnter={() => (last ? setConfirm(true) : setPos(stepNav(nav.length, pos, 1)))}
         />
       )}
 
