@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BarChart3, Loader2, Lock, Send } from 'lucide-react';
 import { ExamExcelButton } from './ExamExcelButton';
+import { SessionLobby } from './SessionLobby';
 import { QuestionStats } from './QuestionStats';
 import { callExamTeacher, NotLinkedError, sendReview, closeExamLink, EXAM_LINKS_KEY, examAttemptsKey, examAttemptsFullKey, fetchAttempts, type ExamLinkRow } from '../../lib/examLinks';
 import { linkState, mapAttemptRow, reviewConfirmText, reviewResultText, reviewSendState } from '../../lib/examView';
@@ -22,16 +23,20 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
     return () => clearInterval(t);
   }, []);
 
-  const open = linkState(link, now) === 'open';
+  const state = linkState(link, now);
+  const waiting = state === 'waiting';
+  const open = state === 'open' || waiting;
   const { data, isLoading } = useQuery({
     queryKey: examAttemptsKey(link.code),
     queryFn: () => fetchAttempts(link.code),
-    refetchInterval: open ? 5000 : false,
+    // В ожидании список опрашивает SessionLobby (каждые 3 с)
+    refetchInterval: waiting ? false : open ? 5000 : false,
+    enabled: !waiting,
     meta: { action: 'Не удалось загрузить попытки учеников' },
   });
   useEffect(() => { setNow(Date.now()); }, [data]);
 
-  const rows = (data ?? []).map((a) => mapAttemptRow(a, now, link.closed_at ?? link.closes_at));
+  const rows = (data ?? []).map((a) => mapAttemptRow(a, now, link));
 
   const close = useMutation({
     mutationFn: async () => {
@@ -98,7 +103,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-slate-600">{open ? 'Таблица обновляется сама.' : 'Запуск закрыт.'}</p>
+        <p className="text-sm text-slate-600">{waiting ? 'Ждём учеников: начните, когда все придут.' : open ? 'Таблица обновляется сама.' : 'Запуск закрыт.'}</p>
         <div className="flex items-center gap-2">
           <Button variant="secondary" size="sm" icon={BarChart3} onClick={() => setShowStats((v) => !v)}>{showStats ? 'Скрыть разбор' : 'Разбор по вопросам'}</Button>
           <ExamExcelButton link={link} />
@@ -109,7 +114,9 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
       {!review.enabled && review.hint && !isLoading && <p className="text-xs text-slate-500">{review.hint}</p>}
       {showStats && <QuestionStats code={link.code} batchId={link.batch_id} />}
 
-      {isLoading ? (
+      {waiting ? (
+        <SessionLobby link={link} />
+      ) : isLoading ? (
         <div className="flex items-center text-sm text-slate-500 py-4"><Loader2 className="w-4 h-4 mr-2 animate-spin" />Загружаю…</div>
       ) : rows.length === 0 ? (
         <p className="text-sm text-slate-500 py-4">Пока никто не начал. Ученики появятся здесь, как только откроют ссылку и нажмут «Начать билет».</p>

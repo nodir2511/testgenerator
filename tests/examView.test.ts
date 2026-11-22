@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  canLaunchByUser, effectiveDeadline, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, canLaunchBatch, formatScore, summaryText, reviewSendState, reviewConfirmText, reviewResultText,
+  canLaunchByUser, sessionEndOf, canStartSession, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, canLaunchBatch, formatScore, summaryText, reviewSendState, reviewConfirmText, reviewResultText,
 } from '../src/lib/examView';
 
 const NOW = Date.parse('2026-11-22T10:00:00.000Z');
@@ -11,16 +11,35 @@ describe('buildExamUrl', () => {
   it('без имени бота — пустая строка', () => expect(buildExamUrl(undefined, 'AB23CD')).toBe(''));
 });
 
+const L = (over: Partial<{ closed_at: string | null; closes_at: string; session_start_at: string | null; duration_min: number }> = {}) =>
+  ({ closed_at: null, closes_at: iso(600), session_start_at: null, duration_min: 30, ...over });
+
 describe('linkState', () => {
-  it('открыт, пока не закрыт и срок не вышел', () => expect(linkState({ closed_at: null, closes_at: iso(60) }, NOW)).toBe('open'));
-  it('закрыт вручную', () => expect(linkState({ closed_at: iso(-1), closes_at: iso(60) }, NOW)).toBe('closed'));
-  it('срок вышел', () => expect(linkState({ closed_at: null, closes_at: iso(-1) }, NOW)).toBe('expired'));
+  it('без старта — ждёт учеников', () => expect(linkState(L(), NOW)).toBe('waiting'));
+  it('со стартом — идёт', () => expect(linkState(L({ session_start_at: iso(-5) }), NOW)).toBe('open'));
+  it('закрыт вручную', () => expect(linkState(L({ closed_at: iso(-1) }), NOW)).toBe('closed'));
+  it('срок ссылки вышел', () => expect(linkState(L({ closes_at: iso(-1) }), NOW)).toBe('expired'));
+});
+
+describe('sessionEndOf', () => {
+  it('нет старта — нет конца', () => expect(sessionEndOf(L())).toBeNull());
+  it('старт + минуты', () => expect(sessionEndOf(L({ session_start_at: iso(-5), duration_min: 30 }))).toBe(iso(25)));
+  it('закрыт раньше конца — конец по закрытию', () => expect(sessionEndOf(L({ session_start_at: iso(-5), closed_at: iso(-1) }))).toBe(iso(-1)));
+  it('закрыт позже конца — конец по времени', () => expect(sessionEndOf(L({ session_start_at: iso(-5), closed_at: iso(40) }))).toBe(iso(25)));
+});
+
+describe('canStartSession', () => {
+  it('ждёт и есть ученики', () => expect(canStartSession(L(), 1, NOW)).toBe(true));
+  it('без учеников нельзя', () => expect(canStartSession(L(), 0, NOW)).toBe(false));
+  it('уже начат', () => expect(canStartSession(L({ session_start_at: iso(-1) }), 5, NOW)).toBe(false));
+  it('закрыт', () => expect(canStartSession(L({ closed_at: iso(-1) }), 5, NOW)).toBe(false));
 });
 
 describe('attemptState и остаток', () => {
-  it('сдана', () => expect(attemptState({ finished_at: iso(-5), deadline_at: iso(10) }, NOW)).toBe('finished'));
-  it('идёт', () => expect(attemptState({ finished_at: null, deadline_at: iso(10) }, NOW)).toBe('running'));
-  it('время вышло, не сдана', () => expect(attemptState({ finished_at: null, deadline_at: iso(-1) }, NOW)).toBe('timeout'));
+  it('сдана', () => expect(attemptState({ finished_at: iso(-5) }, NOW, iso(10))).toBe('finished'));
+  it('идёт', () => expect(attemptState({ finished_at: null }, NOW, iso(10))).toBe('running'));
+  it('время вышло, не сдана', () => expect(attemptState({ finished_at: null }, NOW, iso(-1))).toBe('timeout'));
+  it('сессия не начата — не «вышло»', () => expect(attemptState({ finished_at: null }, NOW, null)).toBe('running'));
   it('остаток округляется вверх и не уходит в минус', () => {
     expect(remainingMinutes(iso(10.2), NOW)).toBe(11);
     expect(remainingMinutes(iso(-3), NOW)).toBe(0);
@@ -28,17 +47,18 @@ describe('attemptState и остаток', () => {
 });
 
 describe('сводка', () => {
-  const attempts = [
-    { finished_at: iso(-1), deadline_at: iso(5) },
-    { finished_at: null, deadline_at: iso(5) },
-    { finished_at: null, deadline_at: iso(-5) },
-  ];
-  it('считает сдавших и идущих; вышедшее время не считается «идёт»', () => {
-    expect(countAttempts(attempts, NOW)).toEqual({ finished: 1, running: 1, timeout: 1 });
+  const attempts = [{ finished_at: iso(-1) }, { finished_at: null }, { finished_at: null }];
+  it('идущая сессия: сдали и идут', () => {
+    expect(countAttempts(attempts, NOW, L({ session_start_at: iso(-5) }))).toEqual({ finished: 1, running: 2, timeout: 0 });
+  });
+  it('сессия закончилась: несданные — «вышло», не «идут»', () => {
+    expect(countAttempts(attempts, NOW, L({ session_start_at: iso(-40) }))).toEqual({ finished: 1, running: 0, timeout: 2 });
   });
   it('текст', () => {
     expect(summaryText({ finished: 3, running: 2, timeout: 0 })).toBe('сдали 3, идут 2');
     expect(summaryText({ finished: 0, running: 0, timeout: 0 })).toBe('пока никто не начал');
+    expect(summaryText({ finished: 0, running: 4, timeout: 0 }, 'waiting')).toBe('ждут: 4');
+    expect(summaryText({ finished: 0, running: 0, timeout: 0 }, 'waiting')).toBe('ждут: 0');
   });
 });
 
@@ -49,28 +69,37 @@ describe('sortLinks', () => {
       { code: 'B', closed_at: null, closes_at: iso(60), created_at: iso(-20) },
       { code: 'C', closed_at: null, closes_at: iso(60), created_at: iso(-5) },
       { code: 'D', closed_at: null, closes_at: iso(-60), created_at: iso(-1) },
-    ];
+    ].map((r) => ({ session_start_at: iso(-1), duration_min: 30, ...r }));
     expect(sortLinks(rows, NOW).map((r) => r.code)).toEqual(['C', 'B', 'D', 'A']);
   });
 });
 
 describe('строка таблицы', () => {
-  const base = { id: '1', student_name: 'Алиев Тимур', tg_username: 'timur', tg_name: 'Timur A', ticket: { ticket_number: 7 }, finished_at: iso(-2), deadline_at: iso(10), score: 31, max_score: 40 };
+  const link = L({ session_start_at: iso(-18), duration_min: 30 }); // конец через 12 минут
+  const base = { id: '1', student_name: 'Алиев Тимур', tg_username: 'timur', tg_name: 'Timur A', ticket: { ticket_number: 7 }, ticket_id: 't7', finished_at: iso(-2), deadline_at: null, score: 31 as number | null, max_score: 40 as number | null };
+  const run = { ...base, finished_at: null, score: null, max_score: null };
   it('сданная', () => {
-    const r = mapAttemptRow(base, NOW);
+    const r = mapAttemptRow(base, NOW, link);
     expect(r).toMatchObject({ name: 'Алиев Тимур', account: '@timur', variant: '7', score: '31 / 40', status: 'finished' });
   });
-  it('без username — имя в Telegram', () => expect(mapAttemptRow({ ...base, tg_username: null }, NOW).account).toBe('Timur A'));
-  it('идущая', () => {
-    const r = mapAttemptRow({ ...base, finished_at: null, score: null, max_score: null, deadline_at: iso(12) }, NOW);
+  it('без username — имя в Telegram', () => expect(mapAttemptRow({ ...base, tg_username: null }, NOW, link).account).toBe('Timur A'));
+  it('идущая: остаток от конца сессии, deadline_at пуст', () => {
+    const r = mapAttemptRow(run, NOW, link);
     expect(r.status).toBe('running');
     expect(r.score).toBe('');
     expect(r.note).toBe('идёт, осталось 12 мин');
   });
-  it('время вышло', () => expect(mapAttemptRow({ ...base, finished_at: null, score: null, max_score: null, deadline_at: iso(-3) }, NOW).note).toBe('время вышло, баллы появятся после подсчёта'));
-  it('запуск закрыт раньше срока попытки: не «идёт»', () => {
-    const r = mapAttemptRow({ ...base, finished_at: null, score: null, max_score: null, deadline_at: iso(12) }, NOW, iso(-1));
-    expect(r.status).toBe('timeout');
+  it('остаток не берётся из deadline_at попытки', () => {
+    expect(mapAttemptRow({ ...run, deadline_at: iso(1) }, NOW, link).note).toBe('идёт, осталось 12 мин');
+  });
+  it('время вышло', () => expect(mapAttemptRow(run, NOW, L({ session_start_at: iso(-40) })).note).toBe('время вышло, баллы появятся после подсчёта'));
+  it('запуск закрыт раньше конца: не «идёт»', () => {
+    expect(mapAttemptRow(run, NOW, L({ session_start_at: iso(-18), closed_at: iso(-1) })).status).toBe('timeout');
+  });
+  it('до старта: ждёт, не «вышло»', () => {
+    const r = mapAttemptRow(run, NOW, L());
+    expect(r.status).toBe('running');
+    expect(r.note).toBe('ждёт начала');
   });
 });
 
@@ -87,12 +116,7 @@ describe('canLaunchBatch', () => {
   });
 });
 
-describe('effectiveDeadline и canLaunchByUser', () => {
-  it('берёт раньший срок', () => {
-    expect(effectiveDeadline(iso(10), iso(5))).toBe(iso(5));
-    expect(effectiveDeadline(iso(10), null)).toBe(iso(10));
-    expect(effectiveDeadline(iso(10), iso(20))).toBe(iso(10));
-  });
+describe('canLaunchByUser', () => {
   it('автор или главный админ', () => {
     expect(canLaunchByUser({ created_by: 'u1' }, 'u1', false)).toBe(true);
     expect(canLaunchByUser({ created_by: 'u2' }, 'u1', false)).toBe(false);
