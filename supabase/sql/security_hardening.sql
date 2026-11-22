@@ -59,9 +59,11 @@ update storage.buckets
  where id = 'question-images';
 
 drop policy if exists "Публичный доступ к просмотру изображений" on storage.objects;
+drop policy if exists "Просмотр изображений авторизованными" on storage.objects;
 create policy "Просмотр изображений авторизованными" on storage.objects
   for select to authenticated using (bucket_id = 'question-images');
 
 drop policy if exists "Авторизованные пользователи могут загружать картинки" on storage.objects;
+drop policy if exists "Загрузка картинок администраторами" on storage.objects;
 create policy "Загрузка картинок администраторами" on storage.objects
   for insert to authenticated with check (bucket_id = 'question-images' and public.is_admin());
