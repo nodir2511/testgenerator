@@ -1,29 +1,24 @@
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { notifyError, describeError, must } from '../lib/errors';
+import { notifyError, describeError } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Source } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
-import { nctTypesFor } from '../lib/nctTypes';
-import { NCT_DIFFICULTIES } from '../lib/nctDifficulty';
-import { FormulaEditor } from './FormulaEditor';
 import { QuestionPreview } from './QuestionPreview';
 import { QuestionProgress, type ProgressStep } from './QuestionProgress';
-import { CustomSelect } from './CustomSelect';
 import { uploadQuestionImage } from '../lib/imageCompression';
-import { fetchPassages, passageLabel, PASSAGE_QUESTIONS } from '../lib/passages';
-import { 
-  CheckCircle2, 
-  AlertCircle, 
-  Plus, 
-  Trash2, 
-  Image as ImageIcon, 
-  Upload, 
-  Loader2,
-  X,
-  Languages
-} from 'lucide-react';
-import { Badge, Field, IconButton } from './ui';
+import { fetchPassages, PASSAGE_QUESTIONS } from '../lib/passages';
+import { DRAFT_KEY, readDraft, ruOf, emptyOptions, emptySide, type Draft, type TestOptionState, type MatchingItemState } from '../lib/questionDraft';
+import { AlertCircle, X } from 'lucide-react';
+import { DraftBanner } from './question-form/DraftBanner';
+import { TaxonomyFields } from './question-form/TaxonomyFields';
+import { TypeAndLangBar } from './question-form/TypeAndLangBar';
+import { QuestionTextFields } from './question-form/QuestionTextFields';
+import { TestOptionsEditor } from './question-form/TestOptionsEditor';
+import { MatchingEditor } from './question-form/MatchingEditor';
+import { OpenAnswerEditor } from './question-form/OpenAnswerEditor';
+import { FormActions } from './question-form/FormActions';
+import { useSaveQuestion } from './question-form/useSaveQuestion';
 
 interface QuestionFormProps {
   initialData?: Question | null;
@@ -33,60 +28,13 @@ interface QuestionFormProps {
   onDirtyChange?: (dirty: boolean) => void;
 }
 
-interface TestOptionState {
-  id?: string;
-  text: string;
-  text_ru?: string;
-  text_tg?: string;
-  image_url?: string | null;
-  is_correct?: boolean;
-}
-
-interface MatchingItemState {
-  id?: string;
-  side: 'left' | 'right';
-  text: string;
-  text_ru?: string;
-  text_tg?: string;
-  image_url?: string | null;
-  /** Только для левой колонки: индекс подходящего элемента правой колонки (ответ) */
-  match?: number | null;
-}
-
-// Русское поле: если вопрос только на таджикском, base (= content) совпадает с таджикским текстом — в русское его не копируем
-const ruOf = (ru?: string | null, base?: string | null, tg?: string | null): string =>
-  ru || (base && base !== tg ? base : '') || '';
-
-// Пустые варианты для нового вопроса
-const emptyOptions = (): TestOptionState[] => [
-  { text: '', text_ru: '', text_tg: '', is_correct: true },
-  { text: '', text_ru: '', text_tg: '', is_correct: false },
-  { text: '', text_ru: '', text_tg: '', is_correct: false },
-  { text: '', text_ru: '', text_tg: '', is_correct: false },
-];
-const emptySide = (side: 'left' | 'right', n: number): MatchingItemState[] =>
-  Array.from({ length: n }, () => ({ side, text: '', text_ru: '', text_tg: '' }));
-
-// Черновик нового вопроса: переживает случайное закрытие вкладки или перезагрузку
-const DRAFT_KEY = 'examiner_qf_draft';
-interface Draft { savedAt: number; type: QuestionType; contentRu: string; contentTg: string; imageUrl: string | null; correctNumeric: string; options: TestOptionState[]; leftItems: MatchingItemState[]; rightItems: MatchingItemState[]; passageId?: string; passageOrder?: string }
-const readDraft = (): Draft | null => {
-  try {
-    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
-    return d && typeof d.savedAt === 'number' ? d : null;
-  } catch {
-    return null;
-  }
-};
-
 export const QuestionForm: React.FC<QuestionFormProps> = ({
   initialData,
   onSuccess,
   onCancel,
   onDirtyChange,
 }) => {
-  const queryClient = useQueryClient();
-  const { user, isOwner } = useAuth();
+  const { isOwner } = useAuth();
 
   // Режим редактора: 'both' (двойной RU + TG), 'ru' (только русский), 'tg' (только таджикский)
   const [formMode, setFormMode] = useState<'both' | 'ru' | 'tg'>('both');
@@ -353,228 +301,13 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   };
 
   // Сохранение вопроса (Create / Update)
-  const saveMutation = useMutation({
-    // next — «Сохранить и добавить следующий»: форма остаётся открытой и очищается
-    mutationFn: async (_next: boolean = false) => {
-      if (uploadingImage || pendingUploads > 0) throw new Error('Картинка ещё загружается. Дождитесь окончания и сохраните снова.');
-      if (!subjectId || !chapterId || !topicId) {
-        throw new Error('Пожалуйста, выберите предмет, главу и тему');
-      }
-      // Вопрос к тексту может быть без условия: пропуск в тексте с пропусками
-      if (!withPassage && !contentRu.trim() && !contentTg.trim()) {
-        throw new Error('Пожалуйста, заполните текст вопроса (хотя бы на одном языке)');
-      }
-      if (withPassage && passageOrder && !(Number(passageOrder) >= 1 && Number(passageOrder) <= PASSAGE_QUESTIONS)) {
-        throw new Error(`Место в тексте — число от 1 до ${PASSAGE_QUESTIONS}`);
-      }
-
-      if (type === 'test') {
-        const validOptions = options.filter(
-          o => (o.text_ru?.trim() || o.text_tg?.trim() || o.text?.trim() || o.image_url)
-        );
-        if (validOptions.length < 2) {
-          throw new Error('Тестовый вопрос должен содержать минимум 2 варианта ответа');
-        }
-      }
-
-      if (type === 'matching') {
-        const validLeft = leftItems.filter(
-          l => (l.text_ru?.trim() || l.text_tg?.trim() || l.text?.trim() || l.image_url)
-        );
-        const validRight = rightItems.filter(
-          r => (r.text_ru?.trim() || r.text_tg?.trim() || r.text?.trim() || r.image_url)
-        );
-        if (validLeft.length === 0 || validRight.length === 0) {
-          throw new Error('Заполните элементы в обеих колонках задания на соответствие');
-        }
-        const filledRight = (k: number | null | undefined) => k != null && !!rightItems[k] && !!(rightItems[k].text_ru?.trim() || rightItems[k].text_tg?.trim() || rightItems[k].text?.trim() || rightItems[k].image_url);
-        if (validLeft.some(l => !filledRight(l.match))) {
-          throw new Error('Укажите правильный ответ (номер из правой колонки) для каждого элемента левой колонки');
-        }
-        if (new Set(validLeft.map(l => l.match)).size !== validLeft.length) {
-          throw new Error('Два элемента левой колонки не могут иметь один и тот же ответ');
-        }
-      }
-
-      const numericVal = type === 'open' && correctNumeric.trim() !== '' ? Number(correctNumeric) : null;
-      const primaryContent = contentRu.trim() || contentTg.trim();
-
-      const buildOptionRows = (qid: string) =>
-        options
-          .filter(o => o.text_ru?.trim() || o.text_tg?.trim() || o.text?.trim() || o.image_url)
-          .map((o, idx) => {
-            const rText = (o.text_ru || o.text || '').trim();
-            const tText = (o.text_tg || '').trim();
-            return {
-              question_id: qid,
-              text: rText || tText,
-              text_ru: rText || null,
-              text_tg: tText || null,
-              image_url: o.image_url,
-              is_correct: o.is_correct || false,
-              order_index: idx + 1,
-            };
-          });
-
-      const buildItemRows = (qid: string) => {
-        const map = (side: 'left' | 'right') => (x: MatchingItemState, idx: number) => {
-          const rText = (x.text_ru || x.text || '').trim();
-          const tText = (x.text_tg || '').trim();
-          return {
-            question_id: qid,
-            side,
-            text: rText || tText,
-            text_ru: rText || null,
-            text_tg: tText || null,
-            image_url: x.image_url,
-            order_index: idx + 1,
-          };
-        };
-        const filled = (x: MatchingItemState) => x.text_ru?.trim() || x.text_tg?.trim() || x.text?.trim() || x.image_url;
-        return [...leftItems.filter(filled).map(map('left')), ...rightItems.filter(filled).map(map('right'))];
-      };
-
-      // Записывает ответы (correct_match_id) для только что вставленных элементов соответствия
-      const applyMatches = async (rows: any[]) => {
-        const filled = (x: MatchingItemState) => x.text_ru?.trim() || x.text_tg?.trim() || x.text?.trim() || x.image_url;
-        const lefts = leftItems.map((x, i) => ({ x, i })).filter(({ x }) => filled(x));
-        const rights = rightItems.map((x, i) => ({ x, i })).filter(({ x }) => filled(x));
-        for (let p = 0; p < lefts.length; p++) {
-          const k = lefts[p].x.match;
-          const rp = rights.findIndex(({ i }) => i === k);
-          if (rp < 0) continue;
-          const leftRow = rows.find(r => r.side === 'left' && r.order_index === p + 1);
-          const rightRow = rows.find(r => r.side === 'right' && r.order_index === rp + 1);
-          if (!leftRow || !rightRow) throw new Error('Не удалось сохранить ответы соответствия');
-          await must(supabase.from('matching_items').update({ correct_match_id: rightRow.id }).eq('id', leftRow.id));
-        }
-      };
-
-      const questionFields = {
-        subject_id: subjectId,
-        chapter_id: chapterId,
-        topic_id: topicId,
-        source_id: sourceId || null,
-        // метку типа НЦТ меняет только главный админ; у остальных поле не трогаем
-        ...(isOwner ? { nct_type: nctType || null } : {}),
-        ...(isOwner ? { nct_difficulty: nctDifficulty ? Number(nctDifficulty) : null } : {}),
-        type,
-        content: primaryContent,
-        content_ru: contentRu.trim() || null,
-        content_tg: contentTg.trim() || null,
-        image_url: imageUrl,
-        correct_numeric_answer: numericVal,
-        // Колонки текста пишем, только если они нужны: на базе без миграции остальные предметы сохраняются как прежде
-        ...(withPassage || initialData?.passage_id
-          ? { passage_id: withPassage ? passageId : null, passage_order: withPassage && passageOrder ? Number(passageOrder) : null }
-          : {}),
-      };
-
-      if (initialData?.id) {
-        // Обновление существующего вопроса. Порядок защищает от потери данных при сбое связи:
-        // 1) вставляем новые варианты, 2) обновляем вопрос (проверка версии), 3) только потом удаляем старые.
-        const oldOptionIds = (initialData.options || []).map(o => o.id);
-        const oldItemIds = (initialData.matching_items || []).map(m => m.id);
-
-        const insertRows = async (table: 'question_options' | 'matching_items', rows: any[]): Promise<any[]> => {
-          const { data, error } = await supabase.from(table).insert(rows).select('*');
-          if (error) throw error;
-          return (data || []) as any[];
-        };
-        const newOptions = type === 'test' ? await insertRows('question_options', buildOptionRows(initialData.id)) : [];
-        const newItems = type === 'matching' ? await insertRows('matching_items', buildItemRows(initialData.id)) : [];
-        if (type === 'matching') {
-          try {
-            await applyMatches(newItems);
-          } catch (e) {
-            await supabase.from('matching_items').delete().in('id', newItems.map(x => x.id));
-            throw e;
-          }
-        }
-        const dropNew = async () => {
-          const o = newOptions;
-          const m = newItems;
-          if (o.length) await supabase.from('question_options').delete().in('id', o.map(x => x.id));
-          if (m.length) await supabase.from('matching_items').delete().in('id', m.map(x => x.id));
-        };
-
-        const { data: updatedQuestion, error: qErr } = await supabase
-          .from('questions')
-          .update({ ...questionFields, updated_by: user?.id, version: initialData.version + 1 })
-          .eq('id', initialData.id)
-          .eq('version', initialData.version)
-          .select()
-          .single();
-
-        if (qErr || !updatedQuestion) {
-          await dropNew();
-          if (qErr && qErr.code !== 'PGRST116') throw qErr;
-          throw new Error(
-            'Конфликт одновременного редактирования! Вопрос был изменен другим пользователем. Обновите страницу.'
-          );
-        }
-
-        // Старые варианты и элементы (и оставшиеся от прежнего типа вопроса) удаляем в последнюю очередь
-        try {
-          const oldOpts = type === 'test' ? oldOptionIds : null;
-          const oldMatch = type === 'matching' ? oldItemIds : null;
-          if (type === 'test') {
-            if (oldOpts && oldOpts.length) await must(supabase.from('question_options').delete().in('id', oldOpts));
-            await must(supabase.from('matching_items').delete().eq('question_id', initialData.id));
-          } else if (type === 'matching') {
-            if (oldMatch && oldMatch.length) await must(supabase.from('matching_items').delete().in('id', oldMatch));
-            await must(supabase.from('question_options').delete().eq('question_id', initialData.id));
-          } else {
-            await must(supabase.from('question_options').delete().eq('question_id', initialData.id));
-            await must(supabase.from('matching_items').delete().eq('question_id', initialData.id));
-          }
-        } catch (cleanupErr) {
-          await dropNew();
-          throw new Error('Вопрос сохранён, но варианты не обновились (ошибка связи). Обновите страницу и сохраните ещё раз.');
-        }
-      } else {
-        // Создание нового вопроса
-        const { data: newQ, error: qErr } = await supabase
-          .from('questions')
-          .insert({ ...questionFields, created_by: user?.id, version: 1 })
-          .select()
-          .single();
-
-        if (qErr || !newQ) throw qErr;
-
-        try {
-          if (type === 'test') await must(supabase.from('question_options').insert(buildOptionRows(newQ.id)));
-          if (type === 'matching') {
-            const { data: created, error: insErr } = await supabase.from('matching_items').insert(buildItemRows(newQ.id)).select('*');
-            if (insErr) throw insErr;
-            await applyMatches(created || []);
-          }
-        } catch (childErr) {
-          // Не оставляем вопрос без вариантов
-          await supabase.from('questions').update({ is_deleted: true, deleted_at: new Date().toISOString() }).eq('id', newQ.id);
-          throw childErr;
-        }
-
-        // Запоминаем таксономию для следующего добавления
-        localStorage.setItem('examiner_last_new_subject_id', subjectId);
-        localStorage.setItem('examiner_last_new_chapter_id', chapterId);
-        localStorage.setItem('examiner_last_new_topic_id', topicId);
-        if (sourceId) localStorage.setItem('examiner_last_new_source_id', sourceId);
-        localStorage.setItem('examiner_last_new_type', type);
-      }
-    },
-    meta: { success: initialData?.id ? 'Изменения вопроса сохранены в базе' : 'Новый вопрос добавлен в базу' },
-    onSuccess: (_data, next) => {
-      queryClient.invalidateQueries({ queryKey: ['questions'] });
-      queryClient.invalidateQueries({ queryKey: ['question_counts'] });
-      queryClient.invalidateQueries({ queryKey: ['passage_counts'] });
-      clearDraft();
-      if (next) resetForNext();
-      else onSuccess();
-    },
-    onError: (err: any) => {
-      setErrorMsg(describeError(err, 'Ошибка сохранения вопроса'));
-    },
+  const saveMutation = useSaveQuestion({
+    initialData, uploadingImage, pendingUploads,
+    subjectId, chapterId, topicId, sourceId, nctType, nctDifficulty,
+    type, withPassage, passageId, passageOrder,
+    contentRu, contentTg, imageUrl, correctNumeric,
+    options, leftItems, rightItems,
+    clearDraft, resetForNext, onSuccess, setErrorMsg,
   });
 
   // Готовность вопроса — те же правила, что при сохранении, плюс рекомендации
@@ -626,19 +359,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       </div>
 
       <div className="p-4 sm:p-6 space-y-6">
-        {draft && !dirty && (
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex flex-wrap items-center gap-2 text-sm text-amber-900">
-            <span className="flex-1 min-w-[12rem]">
-              Есть несохранённый черновик от {new Date(draft.savedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-            </span>
-            <button type="button" onClick={() => restoreDraft(draft)} className="min-h-[40px] px-3 rounded-lg bg-amber-600 text-white font-semibold">
-              Восстановить
-            </button>
-            <button type="button" onClick={clearDraft} className="min-h-[40px] px-3 rounded-lg bg-white border border-amber-200 font-semibold">
-              Удалить
-            </button>
-          </div>
-        )}
+        <DraftBanner draft={draft} dirty={dirty} restoreDraft={restoreDraft} clearDraft={clearDraft} />
         {errorMsg && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-3 text-sm text-red-700">
             <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
@@ -652,115 +373,18 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
         <div className="space-y-6 xl:space-y-0 xl:grid xl:grid-cols-[minmax(0,1fr)_360px] xl:gap-8 xl:items-start">
         <aside className="xl:order-2 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto space-y-4">
         {/* 1. Таксономия */}
-        <div id="qf-taxonomy" className="scroll-mt-24 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-1 gap-4">
-          <Field label="Предмет" required>
-<CustomSelect
-              value={subjectId}
-              onChange={(val) => {
-                setSubjectId(val);
-                setChapterId('');
-                setTopicId('');
-                setPassageId(''); setPassageOrder('');
-              }}
-              className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-            >
-              <option value="">-- Выберите предмет --</option>
-              {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </CustomSelect>
-</Field>
-
-          <Field label="Глава" required>
-<CustomSelect
-              disabled={!subjectId}
-              value={chapterId}
-              onChange={(val) => {
-                setChapterId(val);
-                setTopicId('');
-                setPassageId(''); setPassageOrder('');
-              }}
-              className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium disabled:bg-slate-100"
-            >
-              <option value="">-- Выберите главу --</option>
-              {chapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </CustomSelect>
-</Field>
-
-          <Field label="Тема" required>
-<CustomSelect
-              disabled={!chapterId}
-              value={topicId}
-              onChange={(val) => { setTopicId(val); setPassageId(''); setPassageOrder(''); }}
-              className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium disabled:bg-slate-100"
-            >
-              <option value="">-- Выберите тему --</option>
-              {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </CustomSelect>
-</Field>
-
-          <Field label="Источник / Сборник">
-<CustomSelect
-              value={sourceId}
-              onChange={(val) => setSourceId(val)}
-              className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-            >
-              <option value="">-- Без источника --</option>
-              {sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </CustomSelect>
-</Field>
-
-          {isOwner && (
-            <Field label="Тип задания НЦТ (метка)">
-              <CustomSelect
-                value={nctType}
-                onChange={(val) => setNctType(val)}
-                className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-              >
-                <option value="">-- Без метки --</option>
-                {nctTypesFor((subjects as any[]).find((x: any) => x.id === subjectId)?.name).map(t => <option key={t.code} value={t.code}>{t.name} ({t.code})</option>)}
-              </CustomSelect>
-            </Field>
-          )}
-
-          {isOwner && (
-            <Field label="Сложность для НЦТ">
-              <CustomSelect
-                value={nctDifficulty}
-                onChange={(val) => setNctDifficulty(val)}
-                className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-              >
-                <option value="">-- Не указана --</option>
-                {NCT_DIFFICULTIES.map(d => <option key={d.value} value={String(d.value)}>{d.name}</option>)}
-              </CustomSelect>
-            </Field>
-          )}
-
-          {type === 'test' && topicPassages.length > 0 && (
-            <>
-              <Field label="Текст (необязательно)" hint="Вопрос к тексту для чтения или с пропусками; текст добавляется в списке вопросов темы">
-                <CustomSelect
-                  value={passageId}
-                  onChange={(val) => { setPassageId(val); if (!val) setPassageOrder(''); }}
-                  className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-                >
-                  <option value="">-- Без текста --</option>
-                  {topicPassages.map(p => <option key={p.id} value={p.id}>{passageLabel(p)}</option>)}
-                </CustomSelect>
-              </Field>
-              {passageId && (
-                <Field label="Место в тексте" hint={`Номер вопроса к этому тексту, от 1 до ${PASSAGE_QUESTIONS}; у текста с пропусками совпадает с меткой {{номер}}`}>
-                  <CustomSelect
-                    value={passageOrder}
-                    onChange={(val) => setPassageOrder(val)}
-                    className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-                  >
-                    <option value="">-- Не указано --</option>
-                    {Array.from({ length: PASSAGE_QUESTIONS }, (_, i) => <option key={i + 1} value={String(i + 1)}>{i + 1}</option>)}
-                  </CustomSelect>
-                </Field>
-              )}
-            </>
-          )}
-        </div>
+        <TaxonomyFields
+          subjects={subjects} chapters={chapters} topics={topics} sources={sources}
+          topicPassages={topicPassages} isOwner={isOwner} type={type}
+          subjectId={subjectId} setSubjectId={setSubjectId}
+          chapterId={chapterId} setChapterId={setChapterId}
+          topicId={topicId} setTopicId={setTopicId}
+          sourceId={sourceId} setSourceId={setSourceId}
+          nctType={nctType} setNctType={setNctType}
+          nctDifficulty={nctDifficulty} setNctDifficulty={setNctDifficulty}
+          passageId={passageId} setPassageId={setPassageId}
+          passageOrder={passageOrder} setPassageOrder={setPassageOrder}
+        />
 
         <div className="hidden xl:block"><QuestionProgress steps={progressSteps} /></div>
 
@@ -775,645 +399,47 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
         <div className="space-y-6 min-w-0 xl:order-1">
         {/* 2. Переключатель типа вопроса */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
-            Тип вопроса *
-          </label>
-          <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-3">
-            {[
-              { id: 'test', title: 'Тестовый', desc: 'С вариантами ответа' },
-              { id: 'matching', title: 'Соответствие', desc: 'Два списка (левый и правый)' },
-              { id: 'open', title: 'Открытый', desc: 'Числовой ответ' },
-            ].map(t => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setType(t.id as QuestionType)}
-                className={`p-3 text-left rounded-xl border transition ${
-                  type === t.id
-                    ? 'border-indigo-600 bg-indigo-50/60 ring-2 ring-indigo-500'
-                    : 'border-slate-200 hover:border-slate-300'
-                } min-h-[40px]`}
-              >
-                <div className="font-bold text-sm text-slate-900 break-words">{t.title}</div>
-                <div className="text-xs text-slate-500 break-words">{t.desc}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* ПЕРЕКЛЮЧАТЕЛЬ ДВУЯЗЫЧНОГО РЕЖИМА */}
-        <div className="flex flex-wrap items-center justify-between border-b border-slate-100 pb-3 gap-2">
-          <div className="flex items-center space-x-2">
-            <Languages className="w-4 h-4 text-purple-600" />
-            <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-              Языковой режим редактора:
-            </span>
-          </div>
-          <div role="radiogroup" aria-label="Языковой режим редактора" className="inline-flex rounded-xl border border-slate-200 p-0.5 bg-slate-100 text-xs font-semibold">
-            <button
-              type="button"
-              onClick={() => setFormMode('both')}
-              role="radio"
-              aria-checked={formMode === 'both'}
-              className={`px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 ${
-                formMode === 'both'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              } min-h-[40px]`}
-            >
-              <span>🌐 Двойной (RU + TJ)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setFormMode('ru')}
-              role="radio"
-              aria-checked={formMode === 'ru'}
-              className={`px-3 py-1.5 rounded-lg transition ${
-                formMode === 'ru'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              } min-h-[40px]`}
-            >
-              <span>Русский</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setFormMode('tg')}
-              role="radio"
-              aria-checked={formMode === 'tg'}
-              className={`px-3 py-1.5 rounded-lg transition ${
-                formMode === 'tg'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              } min-h-[40px]`}
-            >
-              <span>Тоҷикӣ</span>
-            </button>
-          </div>
-        </div>
+        <TypeAndLangBar type={type} setType={setType} formMode={formMode} setFormMode={setFormMode} />
 
         {/* 3. Текст вопроса */}
-        <div id="qf-text" className="scroll-mt-24 space-y-4">
-          {formMode === 'both' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormulaEditor
-                label="Текст вопроса (Русский) *"
-                value={contentRu}
-                onChange={setContentRu}
-                placeholder="Например: Укажите формулу серной кислоты или решите уравнение реакции..."
-                rows={4}
-              />
-              <FormulaEditor
-                label="Матни савол (Тоҷикӣ)"
-                value={contentTg}
-                onChange={setContentTg}
-                placeholder="Масалан: Формулаи кислотаи сулфатро муайян намоед..."
-                rows={4}
-              />
-            </div>
-          ) : formMode === 'ru' ? (
-            <FormulaEditor
-              label="Текст вопроса (Русский) *"
-              value={contentRu}
-              onChange={setContentRu}
-              placeholder="Например: Укажите формулу серной кислоты или решите уравнение реакции..."
-              rows={4}
-            />
-          ) : (
-            <FormulaEditor
-              label="Матни савол (Тоҷикӣ) *"
-              value={contentTg}
-              onChange={setContentTg}
-              placeholder="Масалан: Формулаи кислотаи сулфатро муайян намоед..."
-              rows={4}
-            />
-          )}
-
-          {/* Картинка к вопросу + вставка из буфера (Ctrl+V) */}
-          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:gap-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-            <div className="flex-1 min-w-0 flex items-center space-x-3">
-              {imageUrl ? (
-                <div className="relative group h-20 w-auto min-w-[80px] max-w-[200px] rounded-lg overflow-hidden border border-slate-300 bg-white shrink-0 p-1">
-                  <img loading="lazy" decoding="async" src={imageUrl} alt="Вопрос" className="h-full w-full object-contain" />
-                  <button
-                    type="button"
-                    onClick={() => setImageUrl(null)}
-                    className="absolute inset-0 bg-red-600/80 text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 flex items-center justify-center transition"
-                    title="Удалить картинку"
-                    aria-label="Удалить картинку"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <div className="w-12 h-12 rounded-lg bg-slate-200 text-slate-400 flex items-center justify-center shrink-0">
-                  <ImageIcon className="w-6 h-6" />
-                </div>
-              )}
-              <div className="text-xs min-w-0 flex-1">
-                <span className="font-medium text-slate-700 block">
-                  {imageUrl ? 'Изображение прикреплено' : 'Добавить схему, рисунок или формулу'}
-                </span>
-                <span className="text-slate-500">
-                  Можно нажать Ctrl+V для вставки скриншота или загрузить файл (WebP, PNG, JPG)
-                </span>
-              </div>
-            </div>
-
-            <label className="cursor-pointer shrink-0 min-h-[40px] px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 flex items-center space-x-1 transition shadow-sm">
-              {uploadingImage ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
-              ) : (
-                <Upload className="w-3.5 h-3.5 mr-1" />
-              )}
-              <span>{imageUrl ? 'Заменить' : 'Загрузить файл'}</span>
-              <input
-                type="file"
-                accept="image/*"
-                disabled={uploadingImage}
-                onChange={handleMainImageUpload}
-                className="hidden"
-              />
-            </label>
-          </div>
-        </div>
+        <QuestionTextFields
+          formMode={formMode}
+          contentRu={contentRu} setContentRu={setContentRu}
+          contentTg={contentTg} setContentTg={setContentTg}
+          imageUrl={imageUrl} setImageUrl={setImageUrl}
+          uploadingImage={uploadingImage} handleMainImageUpload={handleMainImageUpload}
+        />
 
         {/* 4. ТИП: ТЕСТОВЫЙ С ВАРИАНТАМИ */}
         {type === 'test' && (
-          <div id="qf-answers" className="scroll-mt-24 space-y-3 pt-3 border-t border-slate-200">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
-                Варианты ответа (A, B, C, D...)
-              </label>
-              <button
-                type="button"
-                onClick={() => setOptions([...options, { text: '', text_ru: '', text_tg: '', is_correct: false }])}
-                className="text-sm text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded-lg font-semibold flex items-center space-x-1 transition min-h-[40px]"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Добавить вариант</span>
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {options.map((opt, idx) => {
-                const optLetter = ['A', 'B', 'C', 'D', 'E', 'F'][idx] || String.fromCharCode(65 + idx);
-
-                return (
-                  <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <span className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-800 text-xs font-bold flex items-center justify-center shrink-0">
-                          {optLetter}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = [...options];
-                            updated[idx].is_correct = !updated[idx].is_correct;
-                            setOptions(updated);
-                          }}
-                          className={`px-2 py-0.5 rounded text-sm font-semibold border flex items-center space-x-1 transition ${
-                            opt.is_correct
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                          } min-h-[40px]`}
-                        >
-                          <CheckCircle2 className={`w-3.5 h-3.5 ${opt.is_correct ? 'text-emerald-600' : 'text-slate-500'}`} />
-                          <span>{opt.is_correct ? 'Верный ответ' : 'Отметить как верный'}</span>
-                        </button>
-                      </div>
-
-                      <div className="flex items-center space-x-1">
-                        <label 
-                          className="cursor-pointer p-1.5 bg-white hover:bg-slate-100 text-slate-500 rounded-lg border border-slate-300 transition" 
-                          title="Прикрепить изображение формулы к варианту"
-                        >
-                          <ImageIcon className="w-3.5 h-3.5" />
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => handleOptionImageUpload(idx, e)}
-                            className="hidden"
-                          />
-                        </label>
-                        {options.length > 2 && (
-                          <IconButton
-                            icon={Trash2}
-                            label="Удалить вариант"
-                            onClick={() => setOptions(options.filter((_, i) => i !== idx))}
-                            className="w-10 h-10 text-slate-500 hover:text-red-600 hover:bg-red-50"
-                          />
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Поля ввода варианта в зависимости от выбранного режима */}
-                    {formMode === 'both' ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <Field label="Русский (RU)">
-<input
-                            type="text"
-                            value={opt.text_ru ?? opt.text ?? ''}
-                            onChange={(e) => {
-                              const updated = [...options];
-                              updated[idx].text_ru = e.target.value;
-                              updated[idx].text = e.target.value;
-                              setOptions(updated);
-                            }}
-                            placeholder={`Вариант ${optLetter} (RU)`}
-                            className="w-full text-sm p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-                          />
-</Field>
-                        <Field label="Тоҷикӣ (TJ)">
-<input
-                            type="text"
-                            value={opt.text_tg ?? ''}
-                            onChange={(e) => {
-                              const updated = [...options];
-                              updated[idx].text_tg = e.target.value;
-                              setOptions(updated);
-                            }}
-                            placeholder={`Варианти ${optLetter} (TJ)`}
-                            className="w-full text-sm p-2 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
-                          />
-</Field>
-                      </div>
-                    ) : formMode === 'ru' ? (
-                      <div>
-                        <input
-                          type="text"
-                          value={opt.text_ru ?? opt.text ?? ''}
-                          onChange={(e) => {
-                            const updated = [...options];
-                            updated[idx].text_ru = e.target.value;
-                            updated[idx].text = e.target.value;
-                            setOptions(updated);
-                          }}
-                          placeholder={`Вариант ${optLetter} (RU)`}
-                          className="w-full text-sm p-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-                        />
-                      </div>
-                    ) : (
-                      <div>
-                        <input
-                          type="text"
-                          value={opt.text_tg ?? ''}
-                          onChange={(e) => {
-                            const updated = [...options];
-                            updated[idx].text_tg = e.target.value;
-                            setOptions(updated);
-                          }}
-                          placeholder={`Варианти ${optLetter} (TJ)`}
-                          className="w-full text-sm p-2 bg-white border border-emerald-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
-                        />
-                      </div>
-                    )}
-
-                    {/* Превью картинки варианта */}
-                    {opt.image_url && (
-                      <div className="flex items-center space-x-2 pt-1">
-                        <img loading="lazy" decoding="async" 
-                          src={opt.image_url} 
-                          alt="Превью" 
-                          className="h-16 w-auto max-w-[150px] object-contain rounded border bg-white p-1" 
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = [...options];
-                            updated[idx].image_url = null;
-                            setOptions(updated);
-                          }}
-                          className="text-sm text-red-500 hover:underline min-h-[40px]"
-                        >
-                          Удалить картинку
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <TestOptionsEditor
+            options={options} setOptions={setOptions}
+            formMode={formMode} handleOptionImageUpload={handleOptionImageUpload}
+          />
         )}
 
         {/* 5. ТИП: СООТВЕТСТВИЕ С ДВОЙНЫМ РЕДАКТОРОМ */}
         {type === 'matching' && (
-          <div id="qf-answers" className="scroll-mt-24 space-y-4 pt-3 border-t border-slate-200">
-            <p className="text-xs text-slate-500">
-              Левая колонка маркируется буквами (A, B, C, D), правая колонка — цифрами (1, 2, 3, 4, 5). В двойном режиме можно заполнять русский и таджикский варианты параллельно.
-            </p>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Левая колонка (A, B, C, D) */}
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs uppercase tracking-wider text-slate-700">Левая часть (A, B, C, D...)</span>
-                  <button
-                    type="button"
-                    onClick={() => setLeftItems([...leftItems, { side: 'left', text: '', text_ru: '', text_tg: '' }])}
-                    className="text-sm text-indigo-600 hover:text-indigo-700 font-semibold flex items-center space-x-1 min-h-[40px]"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Добавить</span>
-                  </button>
-                </div>
-
-                {leftItems.map((item, idx) => {
-                  const letter = ['A', 'B', 'C', 'D', 'E', 'F'][idx] || String.fromCharCode(65 + idx);
-                  return (
-                    <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Badge tone="primary" className="px-1.5 font-bold">
-                            {letter}
-                          </Badge>
-                          <label className="flex items-center gap-1 text-xs text-slate-500">
-                            <span>ответ →</span>
-                            <CustomSelect
-                              value={item.match ?? ''}
-                              onChange={(val) => {
-                                const updated = [...leftItems];
-                                updated[idx] = { ...updated[idx], match: val === '' ? null : Number(val) };
-                                setLeftItems(updated);
-                              }}
-                              className={`text-sm font-bold px-2 py-0.5 border rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 min-w-[54px] ${item.match == null ? 'border-red-300 bg-red-50 text-red-600' : 'border-emerald-300 bg-emerald-50 text-emerald-700'}`}
-                            >
-                              <option value="">—</option>
-                              {rightItems.map((_, k) => (
-                                <option key={k} value={k}>{k + 1}</option>
-                              ))}
-                            </CustomSelect>
-                          </label>
-                        </div>
-                        <div className="flex items-center space-x-1">
-                          <label className="cursor-pointer min-w-[40px] min-h-[40px] inline-flex items-center justify-center text-slate-500 hover:text-slate-600 rounded-lg border border-slate-200" title="Прикрепить картинку" aria-label="Прикрепить картинку">
-                            <ImageIcon className="w-3 h-3" />
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={(e) => e.target.files?.[0] && handleMatchingImageUpload('left', idx, e.target.files[0])}
-                              className="hidden"
-                            />
-                          </label>
-                          {leftItems.length > 1 && (
-                            <IconButton
-                              icon={Trash2}
-                              label="Удалить элемент левой колонки"
-                              onClick={() => setLeftItems(leftItems.filter((_, i) => i !== idx))}
-                              className="w-10 h-10 text-slate-500 hover:text-red-600 hover:bg-red-50"
-                            />
-                          )}
-                        </div>
-                      </div>
-
-                      {formMode === 'both' ? (
-                        <div className="space-y-1">
-                          <input
-                            type="text"
-                            value={item.text_ru ?? item.text ?? ''}
-                            onChange={(e) => {
-                              const updated = [...leftItems];
-                              updated[idx].text_ru = e.target.value;
-                              updated[idx].text = e.target.value;
-                              setLeftItems(updated);
-                            }}
-                            placeholder={`Элемент ${letter} (RU)`}
-                            className="w-full text-sm p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
-                          <input
-                            type="text"
-                            value={item.text_tg ?? ''}
-                            onChange={(e) => {
-                              const updated = [...leftItems];
-                              updated[idx].text_tg = e.target.value;
-                              setLeftItems(updated);
-                            }}
-                            placeholder={`Элементи ${letter} (TJ)`}
-                            className="w-full text-sm p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                          />
-                        </div>
-                      ) : formMode === 'ru' ? (
-                        <input
-                          type="text"
-                          value={item.text_ru ?? item.text ?? ''}
-                          onChange={(e) => {
-                            const updated = [...leftItems];
-                            updated[idx].text_ru = e.target.value;
-                            updated[idx].text = e.target.value;
-                            setLeftItems(updated);
-                          }}
-                          placeholder={`Элемент ${letter} (RU)`}
-                          className="w-full text-sm p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        />
-                      ) : (
-                        <input
-                          type="text"
-                          value={item.text_tg ?? ''}
-                          onChange={(e) => {
-                            const updated = [...leftItems];
-                            updated[idx].text_tg = e.target.value;
-                            setLeftItems(updated);
-                          }}
-                          placeholder={`Элементи ${letter} (TJ)`}
-                          className="w-full text-sm p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                        />
-                      )}
-
-                      {item.image_url && (
-                        <div className="flex items-center space-x-1 pt-1">
-                          <img loading="lazy" decoding="async" src={item.image_url} alt="" className="h-10 w-auto object-contain rounded border" />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = [...leftItems];
-                              updated[idx].image_url = null;
-                              setLeftItems(updated);
-                            }}
-                            className="text-sm text-red-500 hover:underline min-h-[40px]"
-                          >
-                            Удалить
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Правая колонка (1, 2, 3, 4, 5) */}
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs uppercase tracking-wider text-slate-700">Правая часть (1, 2, 3...)</span>
-                  <button
-                    type="button"
-                    onClick={() => setRightItems([...rightItems, { side: 'right', text: '', text_ru: '', text_tg: '' }])}
-                    className="text-sm text-indigo-600 hover:text-indigo-700 font-semibold flex items-center space-x-1 min-h-[40px]"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Добавить</span>
-                  </button>
-                </div>
-
-                {rightItems.map((item, idx) => (
-                  <div key={idx} className="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <Badge tone="neutral" className="px-1.5 font-bold">
-                        {idx + 1}
-                      </Badge>
-                      <div className="flex items-center space-x-1">
-                        <label className="cursor-pointer min-w-[40px] min-h-[40px] inline-flex items-center justify-center text-slate-500 hover:text-slate-600 rounded-lg border border-slate-200" title="Прикрепить картинку" aria-label="Прикрепить картинку">
-                          <ImageIcon className="w-3 h-3" />
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={(e) => e.target.files?.[0] && handleMatchingImageUpload('right', idx, e.target.files[0])}
-                            className="hidden"
-                          />
-                        </label>
-                        {rightItems.length > 1 && (
-                          <IconButton
-                            icon={Trash2}
-                            label="Удалить элемент правой колонки"
-                            onClick={() => {
-                              setRightItems(rightItems.filter((_, i) => i !== idx));
-                              setLeftItems(leftItems.map(l => ({ ...l, match: l.match == null ? null : l.match === idx ? null : l.match > idx ? l.match - 1 : l.match })));
-                            }}
-                            className="w-10 h-10 text-slate-500 hover:text-red-600 hover:bg-red-50"
-                          />
-                        )}
-                      </div>
-                    </div>
-
-                    {formMode === 'both' ? (
-                      <div className="space-y-1">
-                        <input
-                          type="text"
-                          value={item.text_ru ?? item.text ?? ''}
-                          onChange={(e) => {
-                            const updated = [...rightItems];
-                            updated[idx].text_ru = e.target.value;
-                            updated[idx].text = e.target.value;
-                            setRightItems(updated);
-                          }}
-                          placeholder={`Элемент ${idx + 1} (RU)`}
-                          className="w-full text-sm p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        />
-                        <input
-                          type="text"
-                          value={item.text_tg ?? ''}
-                          onChange={(e) => {
-                            const updated = [...rightItems];
-                            updated[idx].text_tg = e.target.value;
-                            setRightItems(updated);
-                          }}
-                          placeholder={`Элементи ${idx + 1} (TJ)`}
-                          className="w-full text-sm p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                        />
-                      </div>
-                    ) : formMode === 'ru' ? (
-                      <input
-                        type="text"
-                        value={item.text_ru ?? item.text ?? ''}
-                        onChange={(e) => {
-                          const updated = [...rightItems];
-                          updated[idx].text_ru = e.target.value;
-                          updated[idx].text = e.target.value;
-                          setRightItems(updated);
-                        }}
-                        placeholder={`Элемент ${idx + 1} (RU)`}
-                        className="w-full text-sm p-1.5 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      />
-                    ) : (
-                      <input
-                        type="text"
-                        value={item.text_tg ?? ''}
-                        onChange={(e) => {
-                          const updated = [...rightItems];
-                          updated[idx].text_tg = e.target.value;
-                          setRightItems(updated);
-                        }}
-                        placeholder={`Элементи ${idx + 1} (TJ)`}
-                        className="w-full text-sm p-1.5 border border-emerald-300 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                      />
-                    )}
-
-                    {item.image_url && (
-                      <div className="flex items-center space-x-1 pt-1">
-                        <img loading="lazy" decoding="async" src={item.image_url} alt="" className="h-10 w-auto object-contain rounded border" />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = [...rightItems];
-                            updated[idx].image_url = null;
-                            setRightItems(updated);
-                          }}
-                          className="text-sm text-red-500 hover:underline min-h-[40px]"
-                        >
-                          Удалить
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          <MatchingEditor
+            leftItems={leftItems} setLeftItems={setLeftItems}
+            rightItems={rightItems} setRightItems={setRightItems}
+            formMode={formMode} handleMatchingImageUpload={handleMatchingImageUpload}
+          />
         )}
 
         {/* 6. ТИП: ОТКРЫТЫЙ */}
         {type === 'open' && (
-          <Field label="Правильный числовой ответ (необязательно)" className="pt-3 border-t border-slate-200 space-y-2">
-<input
-              type="number"
-              step="any"
-              value={correctNumeric}
-              onChange={(e) => setCorrectNumeric(e.target.value)}
-              placeholder="Например: 42 или -5"
-              className="w-full sm:w-64 text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-            />
-</Field>
+          <OpenAnswerEditor correctNumeric={correctNumeric} setCorrectNumeric={setCorrectNumeric} />
         )}
 
         </div>
         </div>
 
         {/* Действия: на телефоне закреплены над нижним меню */}
-        <div className="sticky bottom-0 z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:pb-3 bg-white/95 backdrop-blur border-t border-slate-200 rounded-b-2xl grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={saveMutation.isPending || uploadingImage || pendingUploads > 0}
-            className="min-h-[44px] px-4 border border-slate-300 hover:bg-slate-100 text-slate-700 text-sm font-semibold rounded-xl transition"
-          >
-            Отмена
-          </button>
-          {!initialData && (
-            <button
-              type="button"
-              onClick={() => saveMutation.mutate(true)}
-              disabled={saveMutation.isPending || uploadingImage || pendingUploads > 0}
-              className="min-h-[44px] px-4 border border-indigo-200 bg-white hover:bg-indigo-50 text-indigo-700 text-sm font-semibold rounded-xl transition disabled:opacity-50"
-            >
-              Сохранить + ещё
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => saveMutation.mutate(false)}
-            disabled={saveMutation.isPending || uploadingImage || pendingUploads > 0}
-            className={`${initialData ? '' : 'col-span-2 order-first sm:order-none'} min-h-[48px] px-5 bg-indigo-600 hover:bg-indigo-700 text-white text-base sm:text-sm font-bold rounded-xl shadow-sm transition flex items-center justify-center gap-2 disabled:opacity-50`}
-          >
-            {saveMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4" />
-            )}
-            <span>{initialData ? 'Сохранить' : 'Создать вопрос'}</span>
-          </button>
-        </div>
+        <FormActions
+          initialData={initialData} onCancel={onCancel} saveMutation={saveMutation}
+          uploadingImage={uploadingImage} pendingUploads={pendingUploads}
+        />
       </div>
     </div>
   );
