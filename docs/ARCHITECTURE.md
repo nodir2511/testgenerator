@@ -134,6 +134,8 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `site_releases(id, version, title, released_at, notified_at)` — `notified_at`: когда версия разослана в Telegram
 - `site_release_items(release_id, kind new|fixed|improved, scope site|bot|app|game (game — пункты видны только на странице «Игры» (`GamesView`), в окно «Что нового», бота и рассылку не попадают), text, min_rank 1–4, order_index, subject_id)`
 - `site_release_reads(user_id, release_id, read_at)`
+- `site_tips(id, version, text, target, tab, min_rank 1–4, subject_id, released_at)`, уникально `(version, text)` — подсказки «А вы знали?» (`site_tips.sql`): `target` — ключ якоря `data-tip` в интерфейсе, `tab` — раздел, где он живёт
+- `site_tip_seen(user_id, tip_id, seen_at)` — какие подсказки пользователю уже показаны
 
 **Пользователи**:
 - `profiles(id = auth.users.id, email, full_name, role, is_owner, must_change_password)`
@@ -175,6 +177,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | | `questions_linking_to(p_ids uuid[])` → `{id, type, num, linked_ids}`: неудалённые вопросы, которые ссылаются (`linked_ids`) на переданные; security definer — ищет по индексу `idx_questions_linked_ids` и сама отбирает видимые (`can_view_question`) |
 | Статистика | `admin_usage_stats_v3(p_days, p_no_admins)` (используется), `admin_usage_stats(p_days)` (старая, запасной вариант), `usage_scope(p_no_admins)` |
 | Что нового | `add_site_release(p_version, p_title, p_items jsonb, p_released_at)` — повторный вызов с той же версией безопасен; пункт принимает `scope`; `unread_site_releases()` → `setof site_releases`: версии, которые пользователь ещё не закрыл, с пунктами не из раздела «Игры» (security invoker) |
+| Подсказки | `add_site_tip(p_version, p_text, p_target, p_tab, p_min_rank, p_released_at)` — главный админ или service role, повторный вызов с той же парой (версия, текст) безопасен; `next_site_tips()` → `setof site_tips` (security definer, до 50 строк, от новых к старым): не показанные вызывающему, по `my_rank()` и предмету, без подсказок версии, окно «Что нового» которой у него ещё не закрыто (есть видимые ему пункты не из «Игр» и нет `site_release_reads`) |
 | Наборы | `update_batch_questions(p_batch_id, p_changes jsonb, p_params jsonb)` — **набор с запуском классу (любая строка `exam_links` с этим `batch_id`, даже закрытая) менять нельзя: исключение «У набора есть запуск классу — менять вопросы нельзя. Сделайте копию набора.»** (проверка стоит и в `update_batch_questions.sql`, и в итоговом определении в `security_round5.sql`, через `to_regclass`, чтобы не зависеть от порядка файлов); одна транзакция: меняет `question_id` и снимок у билетов набора, при необходимости `generation_params`; автор набора или главный админ, кластерные партии нельзя |
 | Билеты классу | `exam_link_create(p_batch_id)` → строка `exam_links` (security definer; автор набора или главный админ; кластерный набор — отказ; код подбирается заново при совпадении) · `exam_link_close(p_code)` → `void` (автор запуска или главный админ) — оба для `authenticated` |
 | | `exam_attempt_save(p_attempt_id, p_tq_id, p_answer jsonb)` → `bool` — один атомарный `update`: дописывает ответ к `answers` (`null` стирает), только пока попытка идёт (не сдана, срок и ссылка не вышли) · `exam_attempt_close(p_attempt_id)` → `jsonb` (ответы) — ставит `finished_at` = раньшее из «сейчас», срока попытки и закрытия ссылки; уже сданную не меняет — оба только `service_role` (зовёт `tg-exam`) |
@@ -220,6 +223,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
   - UPDATE — себя; owner — всех; админ — не-админов.
 - **user_subjects**: SELECT — своё или админ; INSERT и DELETE — только owner.
 - **site_releases, site_release_items**: SELECT по `my_rank()` и предмету; запись — owner.
+- **site_tips**: SELECT по `my_rank()` и предмету; прямой записи нет ни у кого (права INSERT/UPDATE/DELETE отозваны) — только `add_site_tip`. **site_tip_seen**: SELECT и INSERT — только свои строки.
 - **audit_logs**: SELECT — админ.
 - **generation_usage**: SELECT — своё или админ.
 - **generation_settings**: SELECT — все, UPDATE — админ.
@@ -269,7 +273,8 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `deleted_question_options.sql` | `can_view_question` учитывает `is_deleted`: варианты и пары соответствия удалённого вопроса видит только тот, кто видит сам вопрос (релиз 1.0.2) |
 | `bulk_change_backups.sql` | журнал отката разовых массовых правок банка (`id, created_at, kind, payload`): RLS включён, политик и прав у ролей API нет — пишет только сервисный ключ |
 | `perf_round1.sql` | ускорение (22 ноября 2026), права не меняются: индексы `idx_questions_linked_ids` (GIN, связи вопросов), `idx_questions_subject_id` (`subject_id, id` — чтение окнами по id), `idx_questions_subject_updated`; политики чтения вариантов, пар соответствия, билетов и «Что нового» без вызова функций на каждую строку; политики записи «Что нового» разделены по действиям; функции `questions_with_issue`, `questions_linking_to`, `unread_site_releases`. **Применяется после `deleted_question_options.sql`** |
-| `exam_links.sql` | «Билеты классу»: таблицы `exam_links` и `exam_attempts` с RLS, RPC `exam_link_create`, `exam_link_close`, `exam_attempt_save`, `exam_attempt_close`. **Применяется до деплоя `tg-exam`** (раздел 13); в `tests-db/db.ts` (`SCHEMA_FILES`) стоит последним |
+| `exam_links.sql` | «Билеты классу»: таблицы `exam_links` и `exam_attempts` с RLS, RPC `exam_link_create`, `exam_link_close`, `exam_attempt_save`, `exam_attempt_close`. **Применяется до деплоя `tg-exam`** (раздел 13); в `tests-db/db.ts` (`SCHEMA_FILES`) стоит после него только `site_tips.sql` |
+| `site_tips.sql` | подсказки «А вы знали?»: таблицы `site_tips`, `site_tip_seen` с RLS, `add_site_tip`, `next_site_tips` и сами подсказки к функциям 0.97+. **Применяется после `site_releases.sql` и `telegram_release_notify.sql`**, до деплоя сайта (без него сайт просто не показывает подсказки); в `SCHEMA_FILES` стоит последним |
 | `game.sql`, `game_v2.sql` … `game_v6.sql`, `game_pack_chemistry.sql` (пакет вопросов по химии) | «Своя игра» по версиям; все применены (v6 — 1 ноября 2026) |
 
 
@@ -335,6 +340,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `SideNav.tsx`, `ThemeToggle.tsx`, `UpdateBanner.tsx`, `ConfirmDialog.tsx`, `CustomSelect.tsx`, `Logo.tsx`, `AppErrorBoundary.tsx` | Навигация, тема, баннер новой версии, окно подтверждения, выпадающий список, логотип, граница ошибок | — |
 | `ReleasesView.tsx` | История «Что нового»; owner добавляет и правит записи (в том числе `scope`) | Т site_releases, site_release_items, subjects |
 | `WhatsNewModal.tsx`, `ReleaseCard.tsx` | Окно непрочитанных версий; карточка версии | через `useReleases` |
+| `TipPopup.tsx` | Подсказка «А вы знали?»: затемнение с вырезом вокруг якоря `data-tip`, пульсирующая рамка, стрелка от карточки к якорю; кнопки «Понятно», «Показать» (переход в `tab`), крестик | через `useTips` · RPC next_site_tips · Т site_tip_seen |
 | `TelegramLink.tsx` | Привязка Telegram: код и ссылка `t.me/<бот>?start=КОД`, отвязка | RPC create_telegram_link_code · Т telegram_links · EF send-to-telegram (`action: 'bot'` — имя бота) |
 | `SendToTelegramButton.tsx` | Отправка готового файла в свой Telegram | EF send-to-telegram |
 | `DownloadButton.tsx` | Кнопка «Скачать · язык» (ru, tg, both); язык запоминается | LS |
@@ -346,6 +352,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `useAuth()` возвращает `{user, profile, session, isLoading, isAdmin, isOwner, isStaff, subjectIds, canManage, signIn, signUp, signOut, refreshProfile}`. Профиль и `user_subjects` читаются одновременно. События `INITIAL_SESSION` и `TOKEN_REFRESHED` (для того же пользователя) профиль не перечитывают.
 - `useReleases()` возвращает `{releases, gameNotes, unread, rank, isLoading, markRead}` — вся история версий; используется в разделах «Что нового» и «Игры».
 - `useUnreadReleases()` возвращает `{unread, markRead}` — только непрочитанные версии (RPC `unread_site_releases`); его вызывает `App` при каждом входе для окна «Что нового» и счётчика в шапке, поэтому вся история на старте не загружается.
+- `useTips(enabled)` возвращает `{tips, markSeen}` — подсказки из `next_site_tips` (нет функции в базе или ошибка — пустой список, без сообщения) и отметка «показано» (upsert в `site_tip_seen` с `ignoreDuplicates`).
 
 ## 7. Модули `src/lib`
 
@@ -377,6 +384,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `batchTitle.ts` | `autoBatchTitle(subject, chapterNums)`, `compressRanges`, `DEFAULT_BATCH_TITLE` | «Химия — гл. 1–3, 5 — 26.10» |
 | `questionIssues.ts` | `questionIssues`, `ISSUE_LABELS`, `matchesIssueFilter`, `STD` | проверка вопроса: тест — 4 варианта и 1 верный, соответствие — 4 слева и 5 справа |
 | `releases.ts` | `rankOf`, `visibleReleases`, `unreadReleases`, `compareSemver` | логика «Что нового» (для рассылки есть копия `_shared/releases.ts`) |
+| `tips.ts` | `shouldShowTip`, `pickTip`, `anchorKeys`, `tipKeyOfTab`, `showTabButton`, `placeTip`, `readLastShown`/`writeLastShown`, `readSessionShown`/`writeSessionShown` | подсказки «А вы знали?»: когда показывать, какую, где поставить карточку и стрелку |
 | `questionChecks.ts` | `CheckCode`, `CHECK_LABELS`, `contentChecks`, `checkInputFromBank`, `formatProblem` | локальные проверки вопроса: пустые тексты, одинаковые варианты, сломанная разметка, подозрительные картинки |
 | `duplicates.ts` | `buildIndex`, `findSimilar`, `findPairs`, `normalizeText` | поиск дублей по триграммам символов, без ИИ; отмечает пары с разным верным ответом |
 | `bankScan.ts`, `scanCache.ts` | `loadBankQuestions`, `bankIssues`, `answerView` / `readScanCache`, `writeScanCache`, `subjectFingerprint` | загрузка и проверка банка; кэш результата с быстрой сверкой с базой |
@@ -528,6 +536,14 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 4. Закрытие окна пишет `site_release_reads`.
 5. pg_cron раз в минуту вызывает `release-notify`, если есть версии без `notified_at`: рассылка в Telegram по роли пользователя. Кнопка «Что нового» в боте показывает только пункты `scope = site`.
 
+**Подсказки «А вы знали?»:**
+1. Файл `releases/*.sql` (или `site_tips.sql`) → `add_site_tip(версия, текст, якорь, раздел, min_rank)`.
+2. `TipPopup` (в `App` рядом с `WhatsNewModal`) берёт список `next_site_tips` и при смене раздела и раз в 2 с проверяет условия `shouldShowTip`: не раньше 8 с после входа, одна за заход (флаг в памяти и `sessionStorage`), одна в сутки (`localStorage` `examiner_tip_last:<userId>`), не при открытом или уже показанном в этот заход «Что нового», не поверх окон (`[aria-modal=true]`, форма вопроса, меню «Ещё»), не в разделе «Что нового» и не у `game_teacher`.
+3. Показывается самая новая подсказка, чей якорь сейчас виден (`[data-tip=ключ]` с размером, не скрыт стилями; берётся первый видимый — пункт меню есть в нескольких меню; для `nav-*` запасной якорь — кнопка «Ещё» `nav-more` на телефоне). Якоря нет — подсказка ждёт и не отмечается. Якорь за краем экрана прокручивается в центр.
+4. В момент показа пишется `site_tip_seen` (и отметки в браузере): подсказка больше не повторится, даже если её проигнорировали.
+5. Вырез над якорем открыт для кликов: нажатие на якорь работает как обычно и закрывает подсказку. Клик по затемнению, Esc, «Понятно» и крестик закрывают; якорь пропал (смена раздела) — подсказка закрывается без повтора. Позиция пересчитывается на scroll/resize, `ResizeObserver` и по таймеру 400 мс.
+6. Ключи якорей: `nav-<раздел>` (`tipKeyOfTab`: `nav-saved-tickets`, `nav-exams`, `nav-cluster`…; боковое меню, полоса разделов, меню «Ещё», нижнее меню), `nav-more`, `archive-variants` («Посмотреть варианты» в карточке набора), `telegram-link` (кнопка бота в шапке), `cluster-zip-drop` (все ZIP сразу), `cluster-history` («История» кластеров). Для функций внутри окон якорь — видимый без окна элемент, текст «откройте … — …».
+
 **Новая версия сайта у открытого окна:** сборка кладёт `version.json`; `UpdateBanner` замечает другой идентификатор и предлагает обновиться.
 
 **Ошибки интерфейса:** `installGlobalErrorReporting` и `AppErrorBoundary` → `report_client_error` → `client_errors` (читает owner). Игра «Приём пациента» пишет туда же без входа (`window.gameReport` в начале `games-src/priem-patsienta/app.js`, анонимным ключом из `config.js`): необработанные ошибки и разовый отчёт «главный экран не виден» (через 2,5 с после загрузки проверяет, что заголовок главного экрана действительно на экране; в отчёте размеры, стили и шрифты; один раз на браузер и версию случаев, флаг `priem-diag-…` в `localStorage`). Сообщения начинаются с `[игра priem]`, `app_version = 'game'`, в `stack` — строка `UA:` с браузером.
@@ -565,6 +581,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `['generation_settings']` | лимиты | 60 с | StatsView |
 | `['site-releases', userId]`, `['site-release-reads', userId]` | useReleases (разделы «Что нового», «Игры») | 5 мин | ReleasesView, markRead |
 | `['site-releases-unread', userId]` | useUnreadReleases (App, при входе) | 5 мин | markRead |
+| `['site-tip', userId]` | useTips (TipPopup, при входе) | 30 мин | после отметки «показано» |
 
 Добавляете запись данных — добавьте сброс всех ключей, которые эти данные показывают.
 
@@ -602,6 +619,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
   3. Поднять версию в `package.json` и в двух первых `"version"` в `package-lock.json`.
   4. Создать `supabase/sql/releases/ГГГГ-ММ-ДД_<версия>.sql`.
   5. Пункты с `min_rank` и `kind` писать одной понятной фразой.
+  6. К новой функции сайта для преподавателей — `select public.add_site_tip(…)` с якорем `data-tip` (раздел «Подсказки» выше); если якоря нет, поставьте атрибут на элемент.
 - **SQL:** `npx supabase db query --linked -f supabase/sql/<файл>.sql` (проект привязан), либо SQL Editor. Политики и функции пишите идемпотентно (`create or replace`, `drop policy if exists`).
 - **Edge Functions:** `npx supabase functions deploy <имя> --project-ref ovxrgkyexuudgtqglegk` (`telegram-bot`, `tg-app` и `tg-exam` с `--no-verify-jwt`).
   - **Любая правка `_shared/*` требует передеплоя `telegram-bot`, `tg-app` и `tg-exam`.** `send-to-telegram` и `admin-*` от `_shared` не зависят.
@@ -642,6 +660,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `exam.test.ts`, `examStart.test.ts`, `tgInitData.test.ts` | «Билеты классу» (серверная логика `_shared`): `publicSnapshot` и `reviewSnapshot` (ключи не попадают в снимок ученика, разбор — только три поля ключа), баллы, срок попытки, код запуска и `/start exam_КОД`, `tgPlain`, `reviewLines`, `chunkLines`; ограничитель промахов бота; проверка подписи `initData` |
 | `examLogic.test.ts`, `examView.test.ts`, `examStats.test.ts` | «Билеты классу» (интерфейс): остаток времени по часам сервера, ответы и навигация страницы ученика; состояния запуска и попыток, строка таблицы, сводка, можно ли запускать и отправлять разбор; разбор по вопросам и лист Excel |
 | `releasesTelegram.test.ts` | текст рассылки «Что нового» по ролям |
+| `tips.test.ts` | подсказки «А вы знали?»: условия показа, выбор по видимым якорям, кнопка «Показать», размещение карточки и стрелки (углы, телефон, якорь вверху/внизу/по центру), хранилище в браузере |
 | `errorDigest.test.ts` | сводка ошибок в Telegram: периоды по Душанбе, склейка одинаковых ошибок, текст сообщения |
 | `importParse.test.ts`, `questionDraft.test.ts`, `generatorHelpers.test.ts` | логика, вынесенная из `BulkImport`, `QuestionForm` и `TicketGenerator`: разбор ответа, черновик вопроса, стандарты состава и настройки из `localStorage` |
 | `releases.test.ts`, `batchTitle.test.ts`, `errors.test.ts`, `passwordRules.test.ts`, `fetchAllPages.test.ts` (чтение окнами по id: порядок, ни одна строка не читается дважды, неравномерные и не-uuid идентификаторы), `spacing.test.ts` | соответствующие модули |
