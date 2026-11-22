@@ -2,42 +2,27 @@ import React, { useState } from 'react';
 import Papa from 'papaparse';
 import { readSheet } from 'read-excel-file/browser';
 import writeExcelFile from 'write-excel-file/browser';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchAllPages } from '../lib/fetchAllPages';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { must, notifyError, notifySuccess } from '../lib/errors';
-import { softDeletePassages } from '../lib/passages';
+import { notifyError } from '../lib/errors';
 import { Subject, Chapter, Topic, Source, QuestionType } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { parseDocxFile } from '../lib/docxImport';
 import { pairBilingual } from '../lib/docxPair';
-import { uploadQuestionImage } from '../lib/imageCompression';
-import { FormattedText } from './FormulaEditor';
-import { CustomSelect } from './CustomSelect';
-import { 
-  Upload, 
-  FileSpreadsheet, 
-  FileText, 
-  AlertTriangle, 
-  CheckCircle2, 
-  Download, 
-  Trash2, 
-  Loader2,
-  Undo2,
-  Image as ImageIcon,
-  X,
-  Sparkles,
-  Layers
-} from 'lucide-react';
-import { confirmAction } from '../lib/confirm';
+import { Upload, FileText, Download } from 'lucide-react';
 import { checkImportRows, type RowCheck } from '../lib/importCheck';
-import { CHECK_LABELS } from '../lib/questionChecks';
-import { Badge, Button, Field, Hint, IconButton, PageHeader } from './ui';
-
-import { answerWarning, isCorrectLetter, langFields, normText, parseNumericAnswer, type ImportLang, type ImportReport, type ParsedRow } from '../lib/importParse';
+import { Button, PageHeader } from './ui';
+import { answerWarning, type ImportLang, type ImportReport, type ParsedRow } from '../lib/importParse';
+import { DefaultTaxonomyBar } from './bulk-import/DefaultTaxonomyBar';
+import { FileTab } from './bulk-import/FileTab';
+import { TextTab } from './bulk-import/TextTab';
+import { HistoryTab } from './bulk-import/HistoryTab';
+import { ImportReportCard } from './bulk-import/ImportReportCard';
+import { PreviewTable } from './bulk-import/PreviewTable';
+import { ImageLightbox } from './bulk-import/ImageLightbox';
+import { useImportMutations } from './bulk-import/useImportMutations';
 
 export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
-  const queryClient = useQueryClient();
   const { user, isStaff: isAdmin, isOwner } = useAuth();
 
   const [activeTab, setActiveTab] = useState<'file' | 'text' | 'history'>('file');
@@ -451,262 +436,7 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
     void writeExcelFile(sheetData as any, { sheet: 'Шаблон', columns: columns.map(() => ({ width: 30 })) } as any).toFile('shablon_voprosov.xlsx');
   };
 
-  // Сохранение проверенной партии в базу данных Supabase.
-  // Каждая строка сохраняется независимо: ошибка одной не останавливает остальные и попадает в отчёт.
-  // Уже имеющиеся в теме вопросы (тот же текст и варианты) пропускаются — повторный запуск не плодит дубли.
-  const importMutation = useMutation({
-    mutationFn: async (rowsToImport: ParsedRow[]): Promise<ImportReport> => {
-      const report: ImportReport = { total: rowsToImport.length, inserted: 0, skipped: 0, failed: [] };
-
-      const { data: batch, error: bErr } = await supabase
-        .from('import_batches')
-        .insert({
-          created_by: user?.id,
-          filename: `Партия от ${new Date().toLocaleDateString('ru-RU')} (${rowsToImport.length} вопр.)`,
-          items_count: rowsToImport.length,
-        })
-        .select()
-        .single();
-      if (bErr || !batch) throw bErr;
-
-      // Справочники читаем заново: глава или тема, добавленная в другом разделе за последние минуты,
-      // иначе создалась бы второй раз
-      const fresh = async <T,>(table: string): Promise<T[]> => {
-        const { data, error } = await fetchAllPages<T>(() => supabase.from(table).select('*').eq('is_deleted', false));
-        if (error) throw error;
-        return data || [];
-      };
-      const [localSubjects, localChapters, localTopics, localSources] = await Promise.all([
-        fresh<Subject>('subjects'), fresh<Chapter>('chapters'), fresh<Topic>('topics'), fresh<Source>('sources'),
-      ]);
-
-      // Картинки загружаем в хранилище только сейчас (и каждую один раз)
-      const uploaded = new Map<string, string>();
-      const resolveImage = async (url?: string | null): Promise<string | null> => {
-        if (!url) return null;
-        if (!url.startsWith('blob:')) return url;
-        const cached = uploaded.get(url);
-        if (cached) return cached;
-        const file = imagesRef.current.get(url);
-        if (!file) throw new Error('Рисунок документа потерян — разберите файл заново');
-        const publicUrl = await uploadQuestionImage(file);
-        uploaded.set(url, publicUrl);
-        return publicUrl;
-      };
-
-      // Отпечатки уже имеющихся в теме вопросов
-      const fingerprints = new Map<string, Set<string>>();
-      const fingerprint = (content: string, opts: string[], items: string[]) =>
-        [normText(content), opts.map(normText).join('|'), items.map(normText).join('|')].join('#');
-      const loadFingerprints = async (topicId: string): Promise<Set<string>> => {
-        const known = fingerprints.get(topicId);
-        if (known) return known;
-        const set = new Set<string>();
-        for (let from = 0; ; from += 1000) {
-          const { data, error } = await supabase
-            .from('questions')
-            .select('id, content, options:question_options(text, order_index), matching_items:matching_items(text, side, order_index)')
-            .eq('topic_id', topicId)
-            .eq('is_deleted', false)
-            .order('id')
-            .range(from, from + 999);
-          if (error) throw error;
-          for (const q of (data || []) as any[]) {
-            const opts = [...(q.options || [])].sort((x, y) => x.order_index - y.order_index).map(o => o.text);
-            const items = [...(q.matching_items || [])]
-              .sort((x, y) => (x.side === y.side ? x.order_index - y.order_index : x.side < y.side ? -1 : 1))
-              .map(m => m.text);
-            set.add(fingerprint(q.content, opts, items));
-          }
-          if (!data || data.length < 1000) break;
-        }
-        fingerprints.set(topicId, set);
-        return set;
-      };
-
-      const createTaxonomy = async <T,>(what: string, req: PromiseLike<{ data: T | null; error: any }>): Promise<T> => {
-        const { data, error } = await req;
-        if (error || !data) throw new Error(`не удалось создать ${what}: ${error?.message || 'нет прав'}`);
-        return data;
-      };
-
-      interface Prepared {
-        row: ParsedRow;
-        topicId: string;
-        key: string;
-        question: Record<string, unknown>;
-        options: Record<string, unknown>[];
-        items: Record<string, unknown>[];
-      }
-
-      // Разбираем строку: раздел, источник, рисунки, строки вопроса/вариантов
-      const prepare = async (row: ParsedRow): Promise<Prepared | null> => {
-        const subj: Subject =
-          localSubjects.find(s => s.name.toLowerCase() === row.subjectName.toLowerCase()) ||
-          (await createTaxonomy<Subject>('предмет', supabase.from('subjects').insert({ name: row.subjectName }).select().single()).then(x => { localSubjects.push(x); return x; }));
-        const chap: Chapter =
-          localChapters.find(c => c.subject_id === subj.id && c.name.toLowerCase() === row.chapterName.toLowerCase()) ||
-          (await createTaxonomy<Chapter>('главу', supabase.from('chapters').insert({ subject_id: subj.id, name: row.chapterName }).select().single()).then(x => { localChapters.push(x); return x; }));
-        const top: Topic =
-          localTopics.find(t => t.chapter_id === chap.id && t.name.toLowerCase() === row.topicName.toLowerCase()) ||
-          (await createTaxonomy<Topic>('тему', supabase.from('topics').insert({ chapter_id: chap.id, name: row.topicName }).select().single()).then(x => { localTopics.push(x); return x; }));
-        let src: Source | undefined = row.sourceName ? localSources.find(s => s.name.toLowerCase() === row.sourceName!.toLowerCase()) : undefined;
-        if (row.sourceName && !src) {
-          src = await createTaxonomy<Source>('источник', supabase.from('sources').insert({ name: row.sourceName }).select().single());
-          localSources.push(src);
-        }
-
-        // Тексты вариантов/элементов в порядке документа
-        let optionDefs: { text: string; textTg?: string; imageUrl?: string | null }[] = [];
-        if (row.type === 'test') {
-          optionDefs = row.rawOptions && row.rawOptions.length > 0
-            ? row.rawOptions
-            : (row.optionsText || '').split(/[|;]/).map(t => t.trim()).filter(Boolean).map(t => ({ text: t }));
-        }
-        let itemDefs: { side: 'left' | 'right'; text: string; text_tg?: string; image_url?: string | null; order_index: number }[] = [];
-        if (row.type === 'matching') {
-          if (row.rawMatchingItems && row.rawMatchingItems.length > 0) {
-            itemDefs = row.rawMatchingItems;
-          } else if (row.matchingText) {
-            const [leftPart, rightPart] = row.matchingText.split('||');
-            const split = (x?: string) => (x || '').split(';').map(t => t.trim()).filter(Boolean);
-            itemDefs = [
-              ...split(leftPart).map((l, i) => ({ side: 'left' as const, text: l.replace(/^[А-ЯA-Z]:\s*/i, ''), order_index: i + 1 })),
-              ...split(rightPart).map((r, i) => ({ side: 'right' as const, text: r.replace(/^[0-9]+:\s*/, ''), order_index: i + 1 })),
-            ];
-          }
-        }
-
-        const set = await loadFingerprints(top.id);
-        const key = fingerprint(
-          row.content,
-          optionDefs.map(o => o.text),
-          [...itemDefs].sort((x, y) => (x.side === y.side ? x.order_index - y.order_index : x.side < y.side ? -1 : 1)).map(m => m.text)
-        );
-        if (set.has(key)) return null; // дубль
-
-        const bilingual = row.contentTg !== undefined;
-        const lang: ImportLang = row.lang || 'ru';
-        const imageUrl = await resolveImage(row.imageUrl);
-        const optionRows: Record<string, unknown>[] = [];
-        for (let i = 0; i < optionDefs.length; i++) {
-          const o = optionDefs[i];
-          optionRows.push({
-            ...langFields(lang, o.text, bilingual ? (o.textTg ?? '') : undefined),
-            image_url: await resolveImage(o.imageUrl),
-            is_correct: isCorrectLetter(row.correctAnswer, i),
-            order_index: i + 1,
-          });
-        }
-        const itemRows: Record<string, unknown>[] = [];
-        for (const m of itemDefs) {
-          itemRows.push({
-            side: m.side,
-            ...langFields(lang, m.text, bilingual ? (m.text_tg ?? '') : undefined),
-            image_url: await resolveImage(m.image_url),
-            order_index: m.order_index,
-          });
-        }
-
-        return {
-          row,
-          topicId: top.id,
-          key,
-          question: {
-            batch_id: batch.id,
-            subject_id: subj.id,
-            chapter_id: chap.id,
-            topic_id: top.id,
-            source_id: src?.id || null,
-            type: row.type,
-            content: row.content || row.contentTg || '',
-            content_ru: lang === 'tg' && !bilingual ? null : row.content || null,
-            content_tg: bilingual ? row.contentTg || null : lang === 'tg' ? row.content : null,
-            image_url: imageUrl,
-            correct_numeric_answer: row.type === 'open' ? parseNumericAnswer(row.correctAnswer) : null,
-            created_by: user?.id,
-            version: 1,
-          },
-          options: optionRows,
-          items: itemRows,
-        };
-      };
-
-      // Пишем пачку вопросов одним запросом; при любой ошибке откатываем пачку и повторяем по одному
-      const writeChunk = async (chunk: Prepared[]): Promise<void> => {
-        const { data: ins, error } = await supabase.from('questions').insert(chunk.map(c => c.question)).select('id');
-        let ids: string[] = [];
-        try {
-          if (error || !ins || ins.length !== chunk.length) throw error || new Error('база вернула не все строки');
-          ids = ins.map((x: any) => x.id);
-          const opts = chunk.flatMap((c, i) => c.options.map(o => ({ ...o, question_id: ids[i] })));
-          const items = chunk.flatMap((c, i) => c.items.map(o => ({ ...o, question_id: ids[i] })));
-          if (opts.length) await must(supabase.from('question_options').insert(opts));
-          if (items.length) await must(supabase.from('matching_items').insert(items));
-        } catch (e: any) {
-          const toDrop = ids.length ? ids : (ins || []).map((x: any) => x.id);
-          if (toDrop.length) {
-            await supabase.from('questions').update({ is_deleted: true, deleted_at: new Date().toISOString() }).in('id', toDrop);
-          }
-          if (chunk.length === 1) throw e;
-          for (const one of chunk) await writeChunk([one]).catch((err: any) => {
-            report.failed.push({ rowNum: one.row.rowNum, message: err?.message || String(err) });
-          });
-          return;
-        }
-        chunk.forEach(c => fingerprints.get(c.topicId)?.add(c.key));
-        report.inserted += chunk.length;
-      };
-
-      const pending: Prepared[] = [];
-      const flush = async () => {
-        const chunk = pending.splice(0, pending.length);
-        if (chunk.length) {
-          await writeChunk(chunk).catch((err: any) => {
-            report.failed.push({ rowNum: chunk[0].row.rowNum, message: err?.message || String(err) });
-          });
-        }
-      };
-
-      for (const row of rowsToImport) {
-        try {
-          const prepared = await prepare(row);
-          if (!prepared) { report.skipped++; continue; }
-          // Одинаковые строки внутри самого файла тоже считаем дублями
-          if (pending.some(p => p.key === prepared.key && p.topicId === prepared.topicId)) { report.skipped++; continue; }
-          pending.push(prepared);
-          if (pending.length >= 50) await flush();
-        } catch (e: any) {
-          report.failed.push({ rowNum: row.rowNum, message: e?.message || String(e) });
-        }
-      }
-      await flush();
-
-      await supabase.from('import_batches').update({ items_count: report.inserted }).eq('id', batch.id);
-      return report;
-    },
-    meta: { action: 'Не удалось выполнить импорт' },
-    onSuccess: (report) => {
-      queryClient.invalidateQueries({ queryKey: ['questions'] });
-      queryClient.invalidateQueries({ queryKey: ['question_counts'] });
-      queryClient.invalidateQueries({ queryKey: ['passage_counts'] });
-      queryClient.invalidateQueries({ queryKey: ['import_batches'] });
-      queryClient.invalidateQueries({ queryKey: ['pool_stats'] });
-      // Импорт мог создать предмет, главу, тему или источник: обновляем списки во всех разделах
-      for (const key of ['all_chapters', 'all_topics', 'subjects', 'chapters', 'topics', 'topics_for_generation', 'sources']) queryClient.invalidateQueries({ queryKey: [key] });
-      // Картинки из Word больше не нужны: освобождаем память
-      imagesRef.current.forEach((_f, url) => { try { URL.revokeObjectURL(url); } catch { /* не страшно */ } });
-      imagesRef.current.clear();
-      setImportReport(report);
-      if (report.failed.length === 0 && report.skipped === 0) {
-        notifySuccess(`Импорт завершён: добавлено вопросов — ${report.inserted}`);
-        onSuccess();
-      } else {
-        // Есть пропуски или ошибки — остаёмся на странице, показываем отчёт
-        setParsedRows([]);
-      }
-    },
-  });
+  const { importMutation, revertBatchMutation } = useImportMutations({ user, imagesRef, setImportReport, setParsedRows, onSuccess });
 
   // История партий и откат для администратора
   const { data: batches = [] } = useQuery({
@@ -716,23 +446,6 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
       const { data, error } = await supabase.from('import_batches').select('*').order('created_at', { ascending: false });
       if (error) throw error;
       return data || [];
-    },
-  });
-
-  const revertBatchMutation = useMutation({
-    mutationFn: async (batchId: string) => {
-      await must(supabase.from('questions').update({ is_deleted: true }).eq('batch_id', batchId).eq('is_deleted', false));
-      await softDeletePassages({ batchId }); // тексты партии (английский); без таблицы ничего не делает
-      await must(supabase.from('import_batches').update({ is_reverted: true }).eq('id', batchId));
-    },
-    meta: { action: 'Не удалось откатить импорт', success: 'Импорт отменён: вопросы партии удалены из базы' },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['passages'] });
-      queryClient.invalidateQueries({ queryKey: ['questions'] });
-      queryClient.invalidateQueries({ queryKey: ['question_counts'] });
-      queryClient.invalidateQueries({ queryKey: ['passage_counts'] });
-      queryClient.invalidateQueries({ queryKey: ['import_batches'] });
-      queryClient.invalidateQueries({ queryKey: ['trash'] });
     },
   });
 
@@ -815,455 +528,40 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
 
         {/* Панель выбора раздела по умолчанию (для документов Word и общих таблиц) */}
         {activeTab !== 'history' && (
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center">
-                <Layers className="w-3.5 h-3.5 mr-1.5 text-indigo-600" />
-                Раздел для вопросов (по умолчанию):
-              </span>
-              {parsedRows.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleApplyTaxonomyToAll}
-                  className="text-sm text-indigo-600 hover:text-indigo-800 font-semibold underline min-h-[40px]"
-                >
-                  Применить ко всем ({parsedRows.length})
-                </button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <Field label="Предмет">
-<CustomSelect
-                  value={defaultSubjectId}
-                  onChange={(val) => {
-                    setDefaultSubjectId(val);
-                    setDefaultChapterId('');
-                    setDefaultTopicId('');
-                  }}
-                  className="w-full text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </CustomSelect>
-</Field>
-
-              <Field label="Глава">
-<CustomSelect
-                  value={defaultChapterId}
-                  onChange={(val) => {
-                    setDefaultChapterId(val);
-                    setDefaultTopicId('');
-                  }}
-                  className="w-full text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="">-- Выберите главу --</option>
-                  {availableChapters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </CustomSelect>
-</Field>
-
-              <Field label="Тема">
-<CustomSelect
-                  value={defaultTopicId}
-                  onChange={(val) => setDefaultTopicId(val)}
-                  className="w-full text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="">-- Выберите тему --</option>
-                  {availableTopics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </CustomSelect>
-</Field>
-            </div>
-          </div>
+          <DefaultTaxonomyBar parsedRows={parsedRows} handleApplyTaxonomyToAll={handleApplyTaxonomyToAll} subjects={subjects} availableChapters={availableChapters} availableTopics={availableTopics} defaultSubjectId={defaultSubjectId} defaultChapterId={defaultChapterId} defaultTopicId={defaultTopicId} setDefaultSubjectId={setDefaultSubjectId} setDefaultChapterId={setDefaultChapterId} setDefaultTopicId={setDefaultTopicId} />
         )}
 
         {/* Вкладка 1: Файл (Word / Excel / CSV) */}
         {activeTab === 'file' && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-              <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setPairMode(false)}
-                  className={`px-3 py-1.5 font-semibold ${!pairMode ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} min-h-[40px]`}
-                >
-                  Один файл
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPairMode(true)}
-                  className={`px-3 py-1.5 font-semibold border-l border-slate-300 ${pairMode ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'} min-h-[40px]`}
-                >
-                  Пара файлов: русский + таджикский
-                </button>
-              </div>
-              {!pairMode && (
-                <div className="flex items-center gap-2 text-slate-600">
-                  <span className="font-semibold">Язык файла:</span>
-                  <CustomSelect
-                    value={fileLang}
-                    onChange={(val) => setFileLang(val as ImportLang)}
-                    className="text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  >
-                    <option value="ru">Русский</option>
-                    <option value="tg">Таджикский</option>
-                  </CustomSelect>
-                </div>
-              )}
-            </div>
-
-            {pairMode ? (
-              <div className="rounded-2xl border border-slate-300 bg-slate-50 p-5 space-y-4">
-                <p className="text-xs text-slate-600">
-                  Загрузите два варианта одного документа Word. Вопросы сопоставляются по разделу (§) и номеру,
-                  варианты ответов — по ключу ответов и по формулам/числам (порядок вариантов в файлах разный).
-                  Получатся двуязычные вопросы; несовпадения будут показаны в предпросмотре.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {([['Русский файл (.docx)', pairRu, setPairRu], ['Таджикский файл (.docx)', pairTg, setPairTg]] as const).map(([label, file, setFile]) => (
-                    <Field key={label} label={label} hint={file ? <span className="block truncate">{file.name}</span> : undefined}>
-                      <input
-                        type="file"
-                        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        onChange={(e) => setFile(e.target.files?.[0] || null)}
-                        disabled={isProcessing}
-                        className="block w-full text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-indigo-600 file:text-white file:font-semibold"
-                      />
-                    </Field>
-                  ))}
-                </div>
-                <Button variant="primary" onClick={handleParsePair} disabled={!pairRu || !pairTg || isProcessing}>
-                  {isProcessing && <Loader2 className="w-4 h-4 animate-spin" />}
-                  <span>Распознать пару и сопоставить</span>
-                </Button>
-                {isProcessing && statusMessage && <p className="text-xs text-indigo-600 font-medium">{statusMessage}</p>}
-              </div>
-            ) : (
-          <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center bg-slate-50 hover:bg-slate-100/60 transition cursor-pointer relative">
-            <input
-              type="file"
-              accept=".docx, .xlsx, .xls, .csv, application/vnd.openxmlformats-officedocument.wordprocessingml.document, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-              onChange={handleFileUpload}
-              disabled={isProcessing}
-              aria-label="Файл с вопросами: Word, Excel или CSV"
-              className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
-            />
-            {isProcessing ? (
-              <div className="space-y-2 py-4">
-                <Loader2 className="w-10 h-10 text-indigo-600 mx-auto animate-spin" />
-                <p className="font-bold text-slate-800 text-sm">Обработка документа...</p>
-                {statusMessage && <p className="text-xs text-indigo-600 font-medium">{statusMessage}</p>}
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-center space-x-3 mb-3">
-                  <div className="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
-                    <FileText className="w-6 h-6" />
-                  </div>
-                  <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 shadow-sm">
-                    <FileSpreadsheet className="w-6 h-6" />
-                  </div>
-                </div>
-                <p className="font-bold text-slate-800 text-sm">
-                  Нажмите для выбора файла Word (.docx), Excel или CSV
-                </p>
-                <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                  Картинки из файлов Word (.docx) извлекаются, сжимаются и прикрепляются к вопросам автоматически!
-                </p>
-              </>
-            )}
-          </div>
-            )}
-          </div>
+          <FileTab pairMode={pairMode} setPairMode={setPairMode} fileLang={fileLang} setFileLang={setFileLang} pairRu={pairRu} setPairRu={setPairRu} pairTg={pairTg} setPairTg={setPairTg} isProcessing={isProcessing} statusMessage={statusMessage} handleParsePair={handleParsePair} handleFileUpload={handleFileUpload} />
         )}
 
         {/* Вкладка 2: Текст */}
         {activeTab === 'text' && (
-          <div className="space-y-3">
-            <textarea
-              rows={6}
-              value={pastedText}
-              onChange={(e) => setPastedText(e.target.value)}
-              placeholder="Вставьте таблицу с заголовками (например, скопированную из Excel или CSV)..."
-              className="w-full p-3 font-mono text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            <Button variant="primary" onClick={handleParseText} disabled={!pastedText.trim() || isProcessing}>
-              Распознать и проверить текст
-            </Button>
-          </div>
+          <TextTab pastedText={pastedText} setPastedText={setPastedText} handleParseText={handleParseText} isProcessing={isProcessing} />
         )}
 
         {/* Вкладка 3: История партий (для админа) */}
         {activeTab === 'history' && (
-          <div className="space-y-3">
-            <h3 className="font-semibold text-slate-900 text-sm flex items-center gap-1">
-              Ранее загруженные партии вопросов
-              <Hint label="Что такое партия">Партия — один загруженный файл или вставленный текст. «Откатить партию» скроет из банка все вопросы из неё, остальные вопросы не затрагиваются.</Hint>
-            </h3>
-            <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
-              {batches.map((b: any) => (
-                <div key={b.id} className="p-4 flex items-center justify-between bg-white hover:bg-slate-50">
-                  <div>
-                    <div className="font-medium text-xs text-slate-900">{b.filename}</div>
-                    <div className="text-xs text-slate-500">
-                      Вопросов: {b.items_count} • Дата: {new Date(b.created_at).toLocaleString('ru-RU')}
-                    </div>
-                  </div>
-                  <div>
-                    {b.is_reverted ? (
-                      <span className="text-xs text-slate-500 font-medium">Откачено</span>
-                    ) : (
-                      <button
-                        onClick={async () => {
-                          if (await confirmAction({
-                            title: 'Откатить эту партию импорта?',
-                            message: 'Все вопросы партии будут скрыты из банка.',
-                            details: [`Вопросов: ${b.items_count}`],
-                            confirmLabel: 'Откатить партию', cancelLabel: 'Оставить', tone: 'danger',
-                          })) {
-                            revertBatchMutation.mutate(b.id);
-                          }
-                        }}
-                        className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 border border-red-200 rounded-lg flex items-center space-x-1 font-semibold min-h-[40px]"
-                      >
-                        <Undo2 className="w-3.5 h-3.5" />
-                        <span>Откатить партию</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <HistoryTab batches={batches} revertBatchMutation={revertBatchMutation} />
         )}
 
         {/* Итог последнего импорта */}
         {importReport && activeTab !== 'history' && (
-          <div className={`p-4 rounded-xl border text-xs space-y-2 ${importReport.failed.length ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="font-bold text-slate-900">
-                Итог импорта: добавлено {importReport.inserted} из {importReport.total}
-                {importReport.skipped > 0 && <> • пропущено как дубли: {importReport.skipped}</>}
-                {importReport.failed.length > 0 && <> • не удалось: <span className="text-red-600">{importReport.failed.length}</span></>}
-              </div>
-              <IconButton icon={X} label="Закрыть отчёт" onClick={() => setImportReport(null)} className="w-10 h-10 -m-2 text-slate-500 hover:text-slate-700" />
-            </div>
-            {importReport.skipped > 0 && (
-              <p className="text-slate-600">Дубли — вопросы с тем же текстом и вариантами, которые уже есть в этой теме. Повторный запуск импорта безопасен.</p>
-            )}
-            {importReport.failed.length > 0 && (
-              <ul className="max-h-40 overflow-y-auto space-y-0.5 text-red-700">
-                {importReport.failed.map((f, i) => (
-                  <li key={i}>№ {f.rowNum}: {f.message}</li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <ImportReportCard importReport={importReport} setImportReport={setImportReport} />
         )}
 
         </div>
 
         {/* Предпросмотр распознанных строк: на широком экране — справа от настроек */}
         {parsedRows.length > 0 && activeTab !== 'history' && (
-          <div className="space-y-4 pt-4 border-t border-slate-200 xl:border-t-0 xl:pt-0 min-w-0">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="font-bold text-slate-900 text-sm">Предварительный просмотр перед сохранением</h3>
-                <p className="text-xs text-slate-500">
-                  Готово к импорту: <span className="font-bold text-emerald-600">{validRows.length}</span> • 
-                  Ошибок: <span className="font-bold text-red-600">{errorRowsCount}</span>
-                  {warningRowsCount > 0 && (
-                    <> • С предупреждениями: <span className="font-bold text-amber-600">{warningRowsCount}</span></>
-                  )}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="ghost" onClick={() => setParsedRows([])} className="text-slate-600">Очистить</Button>
-                <Button
-                  variant="primary"
-                  icon={CheckCircle2}
-                  loading={importMutation.isPending}
-                  disabled={validRows.length === 0}
-                  onClick={() => importMutation.mutate(validRows)}
-                  className="whitespace-nowrap"
-                >
-                  Импортировать в базу ({validRows.length})
-                </Button>
-              </div>
-            </div>
-
-            {isOwner && (
-              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                <Button variant="secondary" onClick={runChecks} loading={checking} className="whitespace-nowrap">
-                  {rowChecks ? 'Проверить заново' : 'Проверить на дубли и ошибки'}
-                </Button>
-                {rowChecks && (
-                  <>
-                    <span className="text-slate-700">
-                      {flaggedCount === 0 ? 'Замечаний нет' : <>С замечаниями: <b>{flaggedCount}</b> из {parsedRows.length}</>}
-                    </span>
-                    {flaggedCount > 0 && (
-                      <label className="flex items-center gap-2 cursor-pointer select-none text-slate-800">
-                        <input type="checkbox" checked={onlyFlagged} onChange={(e) => setOnlyFlagged(e.target.checked)} className="w-4 h-4 rounded text-indigo-600" />
-                        Только с замечаниями
-                      </label>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-
-            {sectionNames.length > 1 && (
-              <div className="flex items-center gap-2 text-xs">
-                <label className="font-semibold text-slate-600 shrink-0">Раздел документа:</label>
-                <CustomSelect
-                  value={sectionFilter}
-                  onChange={(val) => setSectionFilter(val)}
-                  className="flex-1 min-w-0 text-sm px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                >
-                  <option value="">Все разделы ({parsedRows.length} вопр.)</option>
-                  {sectionNames.map(name => (
-                    <option key={name} value={name}>
-                      {name} ({parsedRows.filter(r => r.section === name).length})
-                    </option>
-                  ))}
-                </CustomSelect>
-              </div>
-            )}
-
-            <div className="max-h-96 xl:max-h-[calc(100vh-18rem)] overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-sm">
-              {visibleRows.map((r, i) => (
-                <div key={i} className={`p-3 ${r.errors.length > 0 ? 'bg-red-50/50' : 'bg-white'}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center space-x-2">
-                        <span className="font-mono text-slate-500 font-semibold">#{r.rowNum}</span>
-                        <Badge tone={r.type === 'test' ? 'primary' : r.type === 'matching' ? 'purple' : 'success'} className="px-1.5 font-bold uppercase">
-                          {r.type === 'test' ? 'Тест' : r.type === 'matching' ? 'Соответствие' : 'Открытый'}
-                        </Badge>
-                        <div className="font-semibold text-slate-800 leading-snug">
-                          <FormattedText text={r.content} />
-                          {r.lang === 'tg' && r.contentTg === undefined && (
-                            <Badge tone="warning" className="ml-2 px-1 font-bold">ТЖ</Badge>
-                          )}
-                        </div>
-                      </div>
-                      {r.contentTg && (
-                        <div className="pl-8 text-slate-600 leading-snug">
-                          <Badge tone="warning" className="mr-1.5 px-1 font-bold">ТЖ</Badge>
-                          <FormattedText text={r.contentTg} />
-                        </div>
-                      )}
-
-                      {r.errors.length > 0 ? (
-                        <div className="mt-1 text-red-600 text-xs flex items-center space-x-1">
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                          <span>{r.errors.join('; ')}</span>
-                        </div>
-                      ) : (
-                        <div className="mt-1 text-slate-500 text-xs">
-                          {r.type === 'test' && r.rawOptions && (
-                            <div className="flex flex-wrap gap-2 pt-0.5">
-                              {r.rawOptions.map((opt, oIdx) => (
-                                <Badge tone="neutral" className="font-normal" key={oIdx}>
-                                  <strong className="mr-1">{['A', 'B', 'C', 'D', 'E'][oIdx] || String(oIdx + 1)})</strong>
-                                  <FormattedText text={opt.text} />
-                                  {opt.textTg && opt.textTg !== opt.text && (
-                                    <span className="ml-1 text-slate-500">/ <FormattedText text={opt.textTg} /></span>
-                                  )}
-                                  {opt.imageUrl && <ImageIcon className="w-3 h-3 text-indigo-500 ml-1 inline" />}
-                                </Badge>
-                              ))}
-                            </div>
-                          )}
-                          {r.type === 'test' && !r.rawOptions && r.optionsText && (
-                            <span>Варианты: {r.optionsText}</span>
-                          )}
-                          {r.type === 'test' && r.correctAnswer && (
-                            <div className="pt-0.5">Ответ: <strong className="text-slate-700">{r.correctAnswer}</strong></div>
-                          )}
-                          {r.type === 'matching' && r.rawMatchingItems && (
-                            <span className="text-purple-700 font-medium">
-                              Элементов соответствия: {r.rawMatchingItems.length} (ABCD / 12345)
-                            </span>
-                          )}
-                          {r.type === 'open' && (
-                            <span>Ответ: <strong className="text-slate-700">{r.correctAnswer || 'не указан'}</strong></span>
-                          )}
-                        </div>
-                      )}
-                      {r.errors.length === 0 && r.warnings && r.warnings.length > 0 && (
-                        <div className="mt-1 text-amber-700 text-xs flex items-start space-x-1">
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
-                          <span>{r.warnings.join('; ')}</span>
-                        </div>
-                      )}
-                      {rowChecks?.[r.rowNum] && (() => {
-                        const c = rowChecks[r.rowNum];
-                        return (
-                          <div className="mt-1 space-y-1 text-xs">
-                            {c.codes.length > 0 && (
-                              <div className="flex flex-wrap gap-1">{c.codes.map((k) => <Badge key={k} tone="warning">{CHECK_LABELS[k]}</Badge>)}</div>
-                            )}
-                            {c.inFile.map((d) => (
-                              <div key={d.rowNum} className={'text-amber-700'}>
-                                {d.answerDiffers ? 'Те же варианты, но верный ответ другой, чем в строке' : d.exact ? 'Повторяет строку' : `Похож на ${Math.round(d.score * 100)}% на строку`} #{d.rowNum} этого файла
-                              </div>
-                            ))}
-                            {c.bank.map((d) => (
-                              <div key={d.id} className={'text-amber-700'}>
-                                {d.answerDiffers ? 'Такой вопрос с теми же вариантами есть в банке, но верный ответ другой — проверьте' : d.exact ? 'Уже есть в банке' : `Похож на ${Math.round(d.score * 100)}% на вопрос из банка`}: «{d.text}» <span className="text-slate-500">({d.where})</span>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    <div className="flex items-center space-x-3 shrink-0">
-                      {r.imageUrl && (
-                        <img loading="lazy" decoding="async"
-                          src={r.imageUrl}
-                          alt="Изображение"
-                          onClick={() => setPreviewImage(r.imageUrl || null)}
-                          className="w-12 h-12 object-contain rounded-lg border border-slate-200 bg-slate-50 p-0.5 cursor-pointer hover:opacity-90 hover:scale-105 transition shadow-sm"
-                          title="Нажмите для просмотра"
-                        />
-                      )}
-                      <div className="text-xs text-slate-500 text-right">
-                        <div>{r.subjectName}</div>
-                        <div className="text-xs text-slate-500">{r.chapterName}</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <PreviewTable parsedRows={parsedRows} setParsedRows={setParsedRows} validRows={validRows} errorRowsCount={errorRowsCount} warningRowsCount={warningRowsCount} importMutation={importMutation} isOwner={isOwner} runChecks={runChecks} checking={checking} rowChecks={rowChecks} flaggedCount={flaggedCount} onlyFlagged={onlyFlagged} setOnlyFlagged={setOnlyFlagged} sectionNames={sectionNames} sectionFilter={sectionFilter} setSectionFilter={setSectionFilter} visibleRows={visibleRows} setPreviewImage={setPreviewImage} />
         )}
       </div>
 
       {/* Модальное окно увеличения картинки (Lightbox) */}
       {previewImage && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-          onClick={() => setPreviewImage(null)}
-          role="dialog" aria-modal="true" aria-label="Увеличенное изображение"
-        >
-          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
-            <button
-              onClick={() => setPreviewImage(null)}
-              className="absolute -top-11 right-0 text-white hover:text-slate-300 p-2 rounded-full bg-black/50 hover:bg-black/75 transition"
-              title="Закрыть (Esc)" aria-label="Закрыть"
-            >
-              <X className="w-6 h-6" />
-            </button>
-            <img
-              src={previewImage}
-              alt="Увеличенное изображение"
-              className="max-h-[85vh] max-w-full rounded-2xl shadow-2xl object-contain border border-white/20 bg-white p-2"
-            />
-          </div>
-        </div>
+        <ImageLightbox previewImage={previewImage} setPreviewImage={setPreviewImage} />
       )}
     </div>
   );
