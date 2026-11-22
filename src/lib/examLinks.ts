@@ -49,7 +49,7 @@ export async function closeExamLink(code: string): Promise<void> {
   if (error) throw error;
 }
 
-/** «Начать»: старт через 3 секунды у всех сразу, minutes — 5..45; проверяет база */
+/** «Начать»: старт через несколько секунд у всех сразу, minutes — 5..45; проверяет база. Уже начатая сессия возвращается как есть (duration_min может отличаться) */
 export async function startSession(code: string, minutes: number): Promise<ExamLink> {
   const { data, error } = await supabase.rpc('exam_session_start', { p_code: code, p_minutes: minutes });
   if (error) throw error;
@@ -114,6 +114,20 @@ export async function fetchAttempts(code: string): Promise<Attempt[]> {
 export const examAttemptsFullKey = (code: string) => ['exam_attempts_full', code] as const;
 export const examTicketsKey = (batchId: string) => ['exam_tickets', batchId] as const;
 export type AttemptWithAnswers = SheetAttempt & { id: string; code: string };
+
+export const examTicketNumbersKey = (batchId: string) => ['exam_ticket_numbers', batchId] as const;
+
+/** Номера билетов набора, без снимков вопросов — для выбора варианта в зале ожидания */
+export async function fetchExamTicketNumbers(batchId: string): Promise<Array<{ id: string; ticket_number: number }>> {
+  const { data, error } = await supabase
+    .from('tickets')
+    .select('id, ticket_number')
+    .eq('batch_id', batchId)
+    .order('ticket_number')
+    .limit(1000);
+  if (error) throw error;
+  return (data ?? []) as Array<{ id: string; ticket_number: number }>;
+}
 
 /** Билеты набора со снимками вопросов — для разбора по вопросам (читает автор набора или главный админ) */
 export async function fetchExamTickets(batchId: string): Promise<StatTicket[]> {

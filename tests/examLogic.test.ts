@@ -1,7 +1,27 @@
 import { describe, it, expect } from 'vitest';
 import {
   formatRemaining, remainingMs, countAnswered, isAnswered, pickText, normalizeOpen, matchingAnswer, reviewMistakes, nameOk, sortByOrder, lobbyView, waitText, minutesLeft,
+  lobbyWaitText, lobbyMinutesText, saveOutcome, SAVE_WAIT_RETRY_MS, SAVE_WAIT_MAX_TRIES,
 } from '../src/exam/examLogic';
+
+describe('saveOutcome: что делать по ответу save', () => {
+  it('ok — сохранено', () => expect(saveOutcome({ ok: true })).toBe('saved'));
+  it('waiting (расхождение часов на границе старта) — повторить, не сдавать', () => {
+    expect(saveOutcome({ ok: false, state: 'waiting' })).toBe('retry');
+  });
+  it('закрыто или уже сдано — сдать', () => {
+    expect(saveOutcome({ ok: false, state: 'closed' })).toBe('finish');
+    expect(saveOutcome({ ok: false, state: 'finished' })).toBe('finish');
+  });
+  it('прочее (нет попытки, неизвестное состояние) — не сдавать', () => {
+    expect(saveOutcome({ ok: false, state: 'new' })).toBe('keep');
+    expect(saveOutcome({ ok: false })).toBe('keep');
+  });
+  it('повтор ~700 мс, до 5 раз', () => {
+    expect(SAVE_WAIT_RETRY_MS).toBe(700);
+    expect(SAVE_WAIT_MAX_TRIES).toBe(5);
+  });
+});
 
 describe('formatRemaining', () => {
   it('минуты и секунды', () => {
@@ -132,24 +152,33 @@ describe('постраничная навигация', () => {
 });
 
 describe('lobbyView', () => {
-  const startsAt = '2026-01-01T10:00:03.000Z';
+  // Сервер ставит старт на «сейчас + 6 с»; цифры 3-2-1 — только последние 3 секунды
+  const startsAt = '2026-01-01T10:00:06.000Z';
   const server = (ms: number) => Date.parse('2026-01-01T10:00:00.000Z') + ms;
   const cd = { state: 'countdown' as const, attempt: { ticketNumber: 4, startsAt } };
   it('ожидание — без отсчёта', () => expect(lobbyView({ state: 'waiting', attempt: { ticketNumber: 4 } }, 0, 0)).toEqual({ kind: 'waiting' }));
+  it('до старта больше 3 с — «скоро начнём», цифры нет', () => {
+    expect(lobbyView(cd, 0, server(0))).toEqual({ kind: 'soon' });
+    expect(lobbyView(cd, 0, server(500))).toEqual({ kind: 'soon' }); // осталось 5,5 с
+    expect(lobbyView(cd, 0, server(1000))).toEqual({ kind: 'soon' }); // 5 с
+    expect(lobbyView(cd, 0, server(2999))).toEqual({ kind: 'soon' }); // чуть больше 3 с
+  });
   it('отсчёт 3, 2, 1 по серверному времени', () => {
-    expect(lobbyView(cd, 0, server(500))).toEqual({ kind: 'countdown', digit: 3 });
-    expect(lobbyView(cd, 0, server(1500))).toEqual({ kind: 'countdown', digit: 2 });
-    expect(lobbyView(cd, 0, server(2500))).toEqual({ kind: 'countdown', digit: 1 });
+    expect(lobbyView(cd, 0, server(3000))).toEqual({ kind: 'countdown', digit: 3 });
+    expect(lobbyView(cd, 0, server(3500))).toEqual({ kind: 'countdown', digit: 3 });
+    expect(lobbyView(cd, 0, server(4500))).toEqual({ kind: 'countdown', digit: 2 });
+    expect(lobbyView(cd, 0, server(5500))).toEqual({ kind: 'countdown', digit: 1 });
   });
   it('в момент старта и позже — запуск', () => {
-    expect(lobbyView(cd, 0, server(3000))).toEqual({ kind: 'run' });
-    expect(lobbyView(cd, 0, server(9000))).toEqual({ kind: 'run' });
+    expect(lobbyView(cd, 0, server(6000))).toEqual({ kind: 'run' });
+    expect(lobbyView(cd, 0, server(12000))).toEqual({ kind: 'run' });
   });
   it('телефон спешит или отстаёт на минуту — те же цифры', () => {
     for (const skew of [60_000, -60_000]) {
       // часы телефона = серверные + skew, смещение = −skew
-      expect(lobbyView(cd, -skew, server(1500) + skew)).toEqual({ kind: 'countdown', digit: 2 });
-      expect(lobbyView(cd, -skew, server(3000) + skew)).toEqual({ kind: 'run' });
+      expect(lobbyView(cd, -skew, server(1000) + skew)).toEqual({ kind: 'soon' });
+      expect(lobbyView(cd, -skew, server(4500) + skew)).toEqual({ kind: 'countdown', digit: 2 });
+      expect(lobbyView(cd, -skew, server(6000) + skew)).toEqual({ kind: 'run' });
     }
   });
   it('running сразу (опоздавший) — запуск без отсчёта', () => {
@@ -162,6 +191,16 @@ describe('waitText / minutesLeft', () => {
   it('тексты', () => {
     expect(waitText({ state: 'waiting' })).toBe('Ждите, преподаватель начнёт сессию');
     expect(waitText({ state: 'countdown' })).toBe('Начинаем!');
+  });
+  it('lobbyWaitText по виду зала', () => {
+    expect(lobbyWaitText({ kind: 'waiting' })).toBe('Ждите, преподаватель начнёт сессию');
+    expect(lobbyWaitText({ kind: 'soon' })).toBe('Скоро начнём…');
+    expect(lobbyWaitText({ kind: 'run' })).toBe('Начинаем!');
+  });
+  it('lobbyMinutesText — время сессии, если сервер его назвал', () => {
+    expect(lobbyMinutesText({ minutes: 30 })).toBe('Время: 30 мин');
+    expect(lobbyMinutesText({ minutes: null })).toBe('');
+    expect(lobbyMinutesText({})).toBe('');
   });
   it('minutesLeft округляет вверх и не уходит ниже 1', () => {
     expect(minutesLeft(29 * 60_000 + 1)).toBe(30);

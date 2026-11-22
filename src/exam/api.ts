@@ -73,6 +73,7 @@ export type LobbyResponse = Extract<OpenResponse, { state: 'waiting' | 'countdow
 export const apiOpen =(code: string) => examApi<OpenResponse>('open', { code });
 export const apiStart = (code: string, name: string, lang: Lang = 'ru') => examApi<OpenResponse>('start', { code, name, lang });
 export const apiSave = (code: string, tqId: string, answer: Answer) =>
-  examApi<{ ok: boolean; state?: 'new' | 'closed' | 'finished'; now?: number }>('save', { code, tqId, answer });
+  // waiting — по часам сервера сессия ещё не началась (граница старта): ответ не записан, повторить
+  examApi<{ ok: boolean; state?: 'new' | 'closed' | 'finished' | 'waiting'; now?: number }>('save', { code, tqId, answer });
 export const apiSubmit = (code: string) => examApi<{ score: number; max: number; now?: number }>('submit', { code });
 export const apiReview = (code: string) => examApi<{ questions: ReviewItem[] }>('review', { code });

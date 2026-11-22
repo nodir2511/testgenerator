@@ -12,7 +12,7 @@ export const ExamExcelButton: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
     setBusy(true);
     try {
       const [attempts, tickets] = await Promise.all([fetchAttemptsWithAnswers(link.code), fetchExamTickets(link.batch_id)]);
-      await exportExamToExcel(link.batch?.title ?? 'набор', attempts, tickets);
+      await exportExamToExcel(link.batch?.title ?? 'набор', attempts, tickets, link.session_start_at);
     } catch (e) {
       notifyError(e, 'Не удалось выгрузить в Excel');
     } finally {

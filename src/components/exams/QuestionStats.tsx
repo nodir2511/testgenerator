@@ -7,7 +7,7 @@ import { questionStats } from '../../lib/examStats';
 const barColor = (pct: number) => (pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-rose-500');
 
 /** Разбор по вопросам: от самых проваленных; считаются только сданные работы */
-export const QuestionStats: React.FC<{ code: string; batchId: string }> = ({ code, batchId }) => {
+export const QuestionStats: React.FC<{ code: string; batchId: string; sessionStartAt: string | null }> = ({ code, batchId, sessionStartAt }) => {
   const tickets = useQuery({
     queryKey: examTicketsKey(batchId),
     queryFn: () => fetchExamTickets(batchId),
@@ -19,7 +19,7 @@ export const QuestionStats: React.FC<{ code: string; batchId: string }> = ({ cod
     queryFn: () => fetchAttemptsWithAnswers(code),
     meta: { action: 'Не удалось загрузить ответы учеников' },
   });
-  const stats = useMemo(() => questionStats(tickets.data ?? [], attempts.data ?? []), [tickets.data, attempts.data]);
+  const stats = useMemo(() => questionStats(tickets.data ?? [], attempts.data ?? [], sessionStartAt), [tickets.data, attempts.data, sessionStartAt]);
 
   if (tickets.isLoading || attempts.isLoading) {
     return <div className="flex items-center text-sm text-slate-500 py-3"><Loader2 className="w-4 h-4 mr-2 animate-spin" />Считаю…</div>;

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExamApiError, apiOpen, apiSave, apiSubmit, getServerOffset } from './api';
 import { ExamQuestion } from './ExamQuestion';
-import { isAnswered as isAnsweredQ } from './examLogic';
+import { isAnswered as isAnsweredQ, saveOutcome, SAVE_WAIT_MAX_TRIES, SAVE_WAIT_RETRY_MS } from './examLogic';
 import { countAnswered, firstUnansweredPos, formatRemaining, navIndexes, progressFraction, remainingMs, stepNav, type Answer, type Answers, type ExamQ, type Lang } from './examLogic';
 
 const RETRY_MS = 4000;
@@ -72,10 +72,19 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
     if (flying.current.has(tqId) || doneRef.current) return flying.current.get(tqId) ?? Promise.resolve();
     const p = (async () => {
       try {
+        let waits = 0;
         for (;;) {
           const v = ver.current[tqId] ?? 0;
           const r = await apiSave(code, tqId, answersRef.current[tqId] ?? null);
-          if (!r.ok) { void finish(true); return; } // срок вышел или запуск закрыт — сдаём то, что сохранено
+          const out = saveOutcome(r);
+          if (out === 'finish') { void finish(true); return; } // срок вышел или запуск закрыт — сдаём то, что сохранено
+          // Часы сервера на границе старта ещё «до начала»: ответ не записан — повторяем, не сдаём
+          if (out === 'retry') {
+            if (++waits > SAVE_WAIT_MAX_TRIES || doneRef.current) return; // остаётся «не сохранено», повтор по таймеру
+            await new Promise((res) => setTimeout(res, SAVE_WAIT_RETRY_MS));
+            continue;
+          }
+          if (out === 'keep') return; // остаётся «не сохранено»
           if ((ver.current[tqId] ?? 0) === v) { markUnsaved(tqId, false); setNotice(''); return; }
         }
       } catch (e) {

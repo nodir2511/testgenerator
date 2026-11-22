@@ -2,9 +2,21 @@
 
 type Finishable = { finished_at: string | null };
 /** Поля запуска, от которых зависит время: старт и длительность задаёт преподаватель, конец общий для класса */
-export interface SessionLinkTimes { session_start_at: string | null; duration_min: number; closed_at: string | null }
+export interface SessionLinkTimes { session_start_at: string | null; duration_min: number; closed_at: string | null; closes_at: string }
 export type LinkState = 'waiting' | 'open' | 'closed' | 'expired';
-export type AttemptState = 'finished' | 'running' | 'timeout';
+/** not_started — попытку закрыли в ожидании (до старта сессии): ученик не писал билет */
+export type AttemptState = 'finished' | 'running' | 'timeout' | 'not_started';
+
+/** Попытка закончена внутри сессии (как inSession на сервере): закрытые до старта «сдали» не считаются */
+export function finishedInSession(finishedAt: string | null | undefined, sessionStartAt: string | null | undefined): boolean {
+  if (!finishedAt || !sessionStartAt) return false;
+  return Date.parse(finishedAt) > Date.parse(sessionStartAt);
+}
+
+/** «Начать» вернуло другую длительность (сессию уже запустили, например из другой вкладки) */
+export function startedMinutesNotice(chosen: number, returned: number | null | undefined): string | null {
+  return typeof returned === 'number' && returned !== chosen ? `Сессия уже запущена на ${returned} мин` : null;
+}
 
 export function buildExamUrl(bot: string | undefined, code: string): string {
   return bot ? `https://t.me/${bot}?start=exam_${code}` : '';
@@ -17,14 +29,17 @@ export function linkState(l: { closed_at: string | null; closes_at: string; sess
   return l.session_start_at ? 'open' : 'waiting';
 }
 
-/** Конец сессии класса: старт + минуты, но не позже закрытия; null, пока сессия не начата */
+/** Конец сессии класса: старт + минуты, но не позже закрытия и срока ссылки; null, пока сессия не начата */
 export function sessionEndOf(l: SessionLinkTimes): string | null {
   if (!l.session_start_at) return null;
   const start = Date.parse(l.session_start_at);
   if (Number.isNaN(start)) return null;
   const end = start + l.duration_min * 60_000;
-  const closed = l.closed_at ? Date.parse(l.closed_at) : Infinity;
-  return new Date(Math.min(end, closed)).toISOString();
+  const at = (v: string | null | undefined) => {
+    const t = v ? Date.parse(v) : NaN;
+    return Number.isNaN(t) ? Infinity : t;
+  };
+  return new Date(Math.min(end, at(l.closed_at), at(l.closes_at))).toISOString();
 }
 
 /** Начать можно, пока запуск ждёт старта и в зале есть хотя бы один ученик */
@@ -32,9 +47,9 @@ export function canStartSession(l: { closed_at: string | null; closes_at: string
   return linkState(l, now) === 'waiting' && attemptsCount >= 1;
 }
 
-/** end — конец сессии (sessionEndOf); null — сессия не начата, работа ещё не «вышла» */
-export function attemptState(a: Finishable, now: number, end: string | null): AttemptState {
-  if (a.finished_at) return 'finished';
+/** end — конец сессии (sessionEndOf); null — сессия не начата, работа ещё не «вышла». start — session_start_at запуска */
+export function attemptState(a: Finishable, now: number, end: string | null, start: string | null): AttemptState {
+  if (a.finished_at) return finishedInSession(a.finished_at, start) ? 'finished' : 'not_started';
   if (end === null) return 'running';
   return Date.parse(end) > now ? 'running' : 'timeout';
 }
@@ -43,19 +58,23 @@ export function remainingMinutes(deadline: string, now: number): number {
   return Math.max(0, Math.ceil((Date.parse(deadline) - now) / 60_000));
 }
 
-export interface AttemptCounts { finished: number; running: number; timeout: number }
+export interface AttemptCounts { finished: number; running: number; timeout: number; notStarted: number }
 
 export function countAttempts(attempts: Finishable[], now: number, link: SessionLinkTimes): AttemptCounts {
-  const c: AttemptCounts = { finished: 0, running: 0, timeout: 0 };
+  const c: AttemptCounts = { finished: 0, running: 0, timeout: 0, notStarted: 0 };
   const end = sessionEndOf(link);
-  for (const a of attempts) c[attemptState(a, now, end)]++;
+  for (const a of attempts) {
+    const s = attemptState(a, now, end, link.session_start_at);
+    if (s === 'not_started') c.notStarted++; else c[s]++;
+  }
   return c;
 }
 
 /** Для запуска в ожидании — «ждут: N» (все, кто пришёл) */
 export function summaryText(c: AttemptCounts, state?: LinkState): string {
-  if (state === 'waiting') return `ждут: ${c.finished + c.running + c.timeout}`;
-  if (c.finished + c.running + c.timeout === 0) return 'пока никто не начал';
+  const all = c.finished + c.running + c.timeout + c.notStarted;
+  if (state === 'waiting') return `ждут: ${all}`;
+  if (all === 0) return 'пока никто не начал';
   return `сдали ${c.finished}, идут ${c.running}`;
 }
 
@@ -97,16 +116,17 @@ export interface AttemptRowView {
 
 export function mapAttemptRow(a: AttemptInput, now: number, link: SessionLinkTimes): AttemptRowView {
   const end = sessionEndOf(link);
-  const status = attemptState(a, now, end);
+  const status = attemptState(a, now, end, link.session_start_at);
   // Не сдана, но время вышло: сервер засчитывает такую попытку по сохранённым ответам при ближайшем обращении
   const note = status === 'running' ? (end ? `идёт, осталось ${remainingMinutes(end, now)} мин` : 'ждёт начала')
-    : status === 'timeout' ? 'время вышло, баллы появятся после подсчёта' : '';
+    : status === 'timeout' ? 'время вышло, баллы появятся после подсчёта'
+    : status === 'not_started' ? 'не начал' : '';
   return {
     id: a.id,
     name: a.student_name,
     account: a.tg_username ? `@${a.tg_username}` : (a.tg_name ?? ''),
     variant: a.ticket ? String(a.ticket.ticket_number) : '',
-    score: formatScore(a.score, a.max_score),
+    score: status === 'finished' ? formatScore(a.score, a.max_score) : '',
     status,
     note,
     finishedAt: a.finished_at,

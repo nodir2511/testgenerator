@@ -112,7 +112,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
         </div>
       </div>
       {!review.enabled && review.hint && !isLoading && <p className="text-xs text-slate-500">{review.hint}</p>}
-      {showStats && <QuestionStats code={link.code} batchId={link.batch_id} />}
+      {showStats && <QuestionStats code={link.code} batchId={link.batch_id} sessionStartAt={link.session_start_at} />}
 
       {waiting ? (
         <SessionLobby link={link} />
@@ -144,7 +144,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
                       <td className="px-2 py-2.5 text-slate-600 whitespace-nowrap">{fmtTime(r.finishedAt)}</td>
                     </>
                   ) : (
-                    <td colSpan={2} className={r.status === 'running' ? 'px-2 py-2.5 text-indigo-700' : 'px-2 py-2.5 text-amber-700'}>{r.note}</td>
+                    <td colSpan={2} className={r.status === 'running' ? 'px-2 py-2.5 text-indigo-700' : r.status === 'not_started' ? 'px-2 py-2.5 text-slate-500' : 'px-2 py-2.5 text-amber-700'}>{r.note}</td>
                   )}
                 </tr>
               ))}
