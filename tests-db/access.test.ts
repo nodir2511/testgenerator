@@ -228,6 +228,21 @@ describe('служебные таблицы', () => {
     expect(await count(s.users.admin)).toBe(0);
     expect(await count(s.users.owner)).toBe(1);
   });
+  it('журнал ошибок хранит записи 400 дней (нужно годовой сводке) и сохраняет лимит на отправителя', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      await q('reset role');
+      await q(`insert into public.client_errors (created_at, user_id, message) values
+        (now() - interval '100 days', null, 'сто дней назад'), (now() - interval '500 days', null, 'полтора года назад')`);
+      await switchUser(q, s.users.teacher);
+      for (let i = 0; i < 15; i++) await q('select public.report_client_error($1)', [`ошибка ${i}`]);
+      await q('reset role');
+      const old = (await q("select message from public.client_errors where message like '%назад' order by message")).map((r) => r.message);
+      const mine = (await q("select count(*)::int as n from public.client_errors where user_id = $1", [s.users.teacher]))[0].n;
+      return { old, mine };
+    });
+    expect(res.old).toEqual(['сто дней назад']);
+    expect(res.mine).toBe(10); // не больше 10 записей в минуту от одного отправителя
+  });
   it('журнал аудита преподавателю не виден и из приложения не пополняется', async () => {
     const res = await as(db.admin, s.users.teacher, async (q) => ({
       insertErr: await rejected(q, "insert into public.audit_logs (user_id, action, entity_type) values ($1, 'x', 'y')", [s.users.teacher]),

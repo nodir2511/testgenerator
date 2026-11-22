@@ -83,8 +83,9 @@ begin
   if (select count(*) from public.client_errors) >= 20000 then return; end if;
   insert into public.client_errors (user_id, message, stack, url, app_version)
   values (auth.uid(), left(p_message, 1000), left(p_stack, 4000), left(p_url, 500), left(p_version, 32));
-  -- Хранить не дольше 30 дней
-  delete from public.client_errors where created_at < now() - interval '30 days';
+  -- Хранить не дольше 400 дней: по журналу строится годовая сводка ошибок (error-digest).
+  -- Это итоговое определение функции: срок меняйте здесь, а не только в client_errors.sql
+  delete from public.client_errors where created_at < now() - interval '400 days';
 end;
 $$;
 revoke all on function public.report_client_error(text, text, text, text) from public;

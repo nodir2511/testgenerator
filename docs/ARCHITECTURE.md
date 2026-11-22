@@ -250,7 +250,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `fix_release_dates_and_missing.sql` | исправление дат и пропущенных релизов |
 | `telegram_bot.sql` | привязка Telegram, сессии бота |
 | `telegram_release_notify.sql` | `scope` у пунктов, `notified_at`, задание pg_cron раз в минуту вызывает `release-notify` |
-| `error_digest.sql` | `error_digest_runs` (отправленные сводки ошибок), задание pg_cron раз в сутки в 03:00 UTC вызывает `error-digest`; вместе с ним заново применяется `client_errors.sql` (журнал хранится 400 дней вместо 30) |
+| `error_digest.sql` | `error_digest_runs` (отправленные сводки ошибок), задание pg_cron раз в сутки в 03:00 UTC вызывает `error-digest`; журнал ошибок хранится 400 дней вместо 30 — срок задан в `report_client_error`, итоговое определение которой лежит в `security_round5.sql` (с лимитом 10 записей в минуту на отправителя); `client_errors.sql` отдельно не применяйте: он вернёт функцию без этого лимита |
 | `user_prefs.sql` | `user_prefs` |
 | `omr_checks.sql` | `omr_checks`: результаты проверки бланков (пишет только `tg-app`) |
 | `omr_digit_samples.sql` | `omr_digit_samples`: собранные картинки цифр из клеток (только `tg-app`) |
