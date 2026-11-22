@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
 import { notifyError, notifyInfo } from '../lib/errors';
 import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../lib/supabase';
 import { fetchBatchSlots, fetchFullQuestions, fetchNctSourceIds, fetchSubjectPool, fetchTopicInfos, fetchTopicPool, saveBatchChanges, type BatchSlots, type TopicInfo } from '../lib/batchEdit';
 import {
   applyToSlots, blockCandidates, blocksWithoutLinkClash, blockSlots, blockSwapChanges, buildLinks, buildRowChanges, candidatesFor, isEmptySnapshot, isPermutedBatch, mirrorChanges, mirrorPlan,
@@ -38,10 +39,27 @@ const plural = (n: number, one: string, few: string, many: string) => {
 };
 
 // Менять набор может его автор или главный админ (так же проверяет база). Свежесозданный набор без created_by — свой.
+// Набор, который запускали классу, менять нельзя: снимки вопросов лежат под теми же id, что в ответах учеников (база тоже откажет)
+function useBatchLaunched(batchId: string): boolean {
+  const { data } = useQuery({
+    queryKey: ['batch_has_launch', batchId],
+    queryFn: async () => {
+      const { data: rows, error } = await supabase.from('exam_links').select('code').eq('batch_id', batchId).limit(1);
+      if (error) throw error;
+      return (rows ?? []).length > 0;
+    },
+    staleTime: 60_000,
+  });
+  return data === true;
+}
+
 function useCanEdit(batch: EditBatch): boolean {
   const { isOwner, user } = useAuth();
-  return isOwner || !batch.created_by || batch.created_by === user?.id;
+  const launched = useBatchLaunched(batch.id);
+  return !launched && (isOwner || !batch.created_by || batch.created_by === user?.id);
 }
+
+const LAUNCHED_HINT = 'У набора есть запуск классу — менять вопросы нельзя. Сделайте копию набора.';
 
 // ---------- Данные набора ----------
 
@@ -255,6 +273,7 @@ export const BatchVariants: React.FC<{
   renderActions?: (t: BatchSlots['tickets'][number]) => React.ReactNode;
 }> = ({ batch, enabled = true, onChanged, renderActions }) => {
   const canEdit = useCanEdit(batch);
+  const launched = useBatchLaunched(batch.id);
   const ed = useBatchEdit(batch, enabled, onChanged);
   const [swap, setSwap] = useState<Slot | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -272,6 +291,7 @@ export const BatchVariants: React.FC<{
 
   return (
     <>
+      {launched && <p className="text-sm text-amber-700 mb-2" data-testid="batch-launched-hint">{LAUNCHED_HINT}</p>}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-3">
         {ed.data.tickets.map((t) => (
           <div

@@ -104,3 +104,11 @@ export function firstUnansweredPos(questions: ExamQ[], answers: Answers): number
   const p = nav.findIndex((i) => !isAnswered(questions[i].snapshot.type, answers[questions[i].tqId]));
   return p < 0 ? 0 : p;
 }
+
+/** Что делать, когда не удалось получить разбор: показать результат (разбор не готов), предложить «Повторить» или показать ошибку */
+export function reviewFailureKind(e: unknown): 'not_ready' | 'retry' | 'error' {
+  const x = e as { status?: number; code?: string } | null;
+  if (x?.code === 'review_not_ready') return 'not_ready';
+  if (typeof x?.status === 'number' && (x.status === 0 || x.status >= 500)) return 'retry';
+  return 'error';
+}

@@ -8,7 +8,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { useDialog } from '../../hooks/useDialog';
 import { notifyError, notifySuccess } from '../../lib/errors';
 import { callExamTeacher, createExamLink, examUrl, EXAM_LINKS_KEY, type ExamLink } from '../../lib/examLinks';
-import { canLaunchBatch, canLaunchByUser } from '../../lib/examView';
+import { canLaunchBatch, canLaunchByUser, needsRelaunchConfirm, RELAUNCH_WARNING } from '../../lib/examView';
+import { confirmAction } from '../../lib/confirm';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui';
 
@@ -30,6 +31,7 @@ export const LaunchDialog: React.FC<{ initialBatchId?: string | null; onClose: (
   const [link, setLink] = useState<ExamLink | null>(null);
   const [qr, setQr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const launching = useRef(false);
 
   // Свои последние наборы, кроме кластерных; поиск по названию
   const options = useQuery({
@@ -79,6 +81,26 @@ export const LaunchDialog: React.FC<{ initialBatchId?: string | null; onClose: (
       onCreated?.(l);
     },
   });
+
+  // Ответы набора уже у другого класса (разбор разослан): без отдельного подтверждения новый запуск не создаём
+  const onLaunch = async () => {
+    if (!selectedId || launching.current || create.isPending) return;
+    launching.current = true;
+    try {
+      let sent: Array<{ batch_id: string; review_sent_at: string | null }> = [];
+      try {
+        const { data } = await supabase.from('exam_links').select('batch_id, review_sent_at').eq('batch_id', selectedId).not('review_sent_at', 'is', null).limit(1);
+        sent = (data ?? []) as typeof sent;
+      } catch { /* предупреждение — дополнение: без него запуск не блокируем */ }
+      if (needsRelaunchConfirm(sent, selectedId)) {
+        const ok = await confirmAction({ title: 'Набор уже разбирали с другим классом', message: RELAUNCH_WARNING, confirmLabel: 'Запустить всё равно', cancelLabel: 'Отмена', tone: 'danger' });
+        if (!ok) return;
+      }
+      create.mutate();
+    } finally {
+      launching.current = false;
+    }
+  };
 
   const url = link ? examUrl(link.code) : '';
   useEffect(() => {
@@ -160,7 +182,7 @@ export const LaunchDialog: React.FC<{ initialBatchId?: string | null; onClose: (
             {initialBatchId && !preselected.isLoading && !pre && !selected && (
               <p className="text-xs text-amber-700">Этот набор нельзя запустить: он не найден, это экзамен-кластер или создан не вами. Выберите свой набор из списка.</p>
             )}
-            <Button variant="primary" size="lg" className="w-full" disabled={!selected} loading={create.isPending} onClick={() => create.mutate()}>
+            <Button variant="primary" size="lg" className="w-full" disabled={!selected} loading={create.isPending} onClick={() => void onLaunch()}>
               Запустить{selected ? `: ${batchLabel(selected)}` : ''}
             </Button>
           </>

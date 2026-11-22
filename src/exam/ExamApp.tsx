@@ -1,18 +1,19 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ExamApiError, apiOpen, apiReview, apiStart, waitTelegram, type OpenResponse } from './api';
 import { ExamTicket } from './ExamTicket';
+import { langName } from '../lib/examView';
 import { ReviewQuestion } from './ExamQuestion';
-import { nameOk, reviewMistakes, type Lang, type ReviewItem } from './examLogic';
+import { nameOk, reviewFailureKind, reviewMistakes, type Lang, type ReviewItem } from './examLogic';
 import './exam.css';
 
 // Страница ученика /tg/exam?c=КОД[&review=1]: билет внутри Telegram. Отдельный экран, к мини-приложению преподавателя отношения не имеет.
 
 type Screen =
   | { kind: 'loading' }
-  | { kind: 'message'; title: string; text?: string; retry?: boolean; back?: Screen }
+  | { kind: 'message'; title: string; text?: string; retry?: boolean; onRetry?: () => void; back?: Screen }
   | { kind: 'view'; view: OpenResponse }
-  | { kind: 'result'; score: number; max: number; review: boolean; lang: Lang; title: string }
-  | { kind: 'review'; lang: Lang; title: string; items: ReviewItem[] };
+  | { kind: 'result'; score: number; max: number; review: boolean; lang: Lang; title: string; note?: string }
+  | { kind: 'review'; lang: Lang; title: string; items: ReviewItem[]; back?: Screen };
 
 const params = new URLSearchParams(window.location.search);
 const CODE = (params.get('c') ?? '').trim().toUpperCase();
@@ -29,14 +30,15 @@ function Message({ title, text, onRetry, onBack }: { title: string; text?: strin
   );
 }
 
-function NameForm({ view, onStart }: { view: OpenResponse; onStart: (name: string) => Promise<void> }) {
+function NameForm({ view, onStart }: { view: OpenResponse; onStart: (name: string, lang: Lang) => Promise<void> }) {
   const [name, setName] = useState('');
+  const [lang, setLang] = useState<Lang>('ru');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const submit = async () => {
     if (!nameOk(name) || busy) return;
     setBusy(true); setErr('');
-    try { await onStart(name.replace(/\s+/g, ' ').trim()); } catch (e) { setErr(e instanceof Error ? e.message : 'Ошибка'); setBusy(false); }
+    try { await onStart(name.replace(/\s+/g, ' ').trim(), lang); } catch (e) { setErr(e instanceof Error ? e.message : 'Ошибка'); setBusy(false); }
   };
   return (
     <div className="exam-app">
@@ -49,6 +51,14 @@ function NameForm({ view, onStart }: { view: OpenResponse; onStart: (name: strin
           placeholder="Например, Расулов Алишер" onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
         />
+        <div role="radiogroup" aria-label="Язык билета" style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          {(['ru', 'tg'] as const).map((l) => (
+            <button
+              key={l} type="button" role="radio" aria-checked={lang === l}
+              className={lang === l ? 'exam-btn full' : 'exam-btn ghost full'} onClick={() => setLang(l)}
+            >{langName(l)}</button>
+          ))}
+        </div>
         {err && <div style={{ color: 'var(--bad)', marginTop: 8 }}>{err}</div>}
         <button type="button" className="exam-btn full" style={{ marginTop: 12 }} disabled={!nameOk(name) || busy} onClick={() => void submit()}>
           {busy ? 'Начинаем…' : 'Начать билет'}
@@ -58,11 +68,12 @@ function NameForm({ view, onStart }: { view: OpenResponse; onStart: (name: strin
   );
 }
 
-function ReviewScreen({ title, lang, items }: { title: string; lang: Lang; items: ReviewItem[] }) {
+function ReviewScreen({ title, lang, items, onBack }: { title: string; lang: Lang; items: ReviewItem[]; onBack?: () => void }) {
   const mistakes = reviewMistakes(items);
   let prev: string | null = null;
   return (
     <div className="exam-app">
+      {onBack && <button type="button" className="exam-btn ghost" onClick={onBack}>Назад к результату</button>}
       <h1>Разбор{title ? `: ${title}` : ''}</h1>
       {mistakes.length === 0 && <div className="exam-card"><b>Ошибок нет</b></div>}
       {mistakes.map(({ n, item }) => {
@@ -84,19 +95,28 @@ export default function ExamApp() {
     return () => document.body.classList.remove('exam-body');
   }, []);
 
-  const showReview = useCallback(async (lang: Lang, title: string, back?: Screen) => {
+  // back — экран результата: с него пришли (или к нему возвращаем, если разбор недоступен)
+  const showReview = useCallback(async (lang: Lang, title: string, back: Extract<Screen, { kind: 'result' }>) => {
     try {
       const r = await apiReview(CODE);
-      setScreen({ kind: 'review', lang, title, items: r.questions });
+      setScreen({ kind: 'review', lang, title, items: r.questions, back });
     } catch (e) {
-      setScreen({ kind: 'message', title: 'Разбор недоступен', text: errText(e), retry: false, back });
+      const kind = reviewFailureKind(e);
+      if (kind === 'not_ready') {
+        setScreen({ ...back, review: false, note: 'Разбор пока не отправлен: он появится, когда преподаватель его отправит.' });
+      } else if (kind === 'retry') {
+        setScreen({ kind: 'message', title: 'Не удалось загрузить разбор', text: errText(e), onRetry: () => { setScreen({ kind: 'loading' }); void showReview(lang, title, back); }, back });
+      } else {
+        setScreen({ kind: 'message', title: 'Разбор недоступен', text: errText(e), back });
+      }
     }
   }, []);
 
   const apply = useCallback((view: OpenResponse) => {
-    if (view.state === 'finished' && WANT_REVIEW) { void showReview(view.lang, view.title); return; }
     if (view.state === 'finished') {
-      setScreen({ kind: 'result', score: view.attempt.score, max: view.attempt.max, review: view.attempt.review, lang: view.lang, title: view.title });
+      const result: Extract<Screen, { kind: 'result' }> = { kind: 'result', score: view.attempt.score, max: view.attempt.max, review: view.attempt.review, lang: view.lang, title: view.title };
+      if (WANT_REVIEW) { void showReview(view.lang, view.title, result); return; }
+      setScreen(result);
       return;
     }
     setScreen({ kind: 'view', view });
@@ -128,25 +148,26 @@ export default function ExamApp() {
     case 'loading':
       return <Message title="Загрузка…" />;
     case 'message':
-      return <Message title={screen.title} text={screen.text} onRetry={screen.retry ? () => void load() : undefined} onBack={screen.back ? () => setScreen(screen.back!) : undefined} />;
+      return <Message title={screen.title} text={screen.text} onRetry={screen.onRetry ?? (screen.retry ? () => void load() : undefined)} onBack={screen.back ? () => setScreen(screen.back!) : undefined} />;
     case 'result':
       return (
         <div className="exam-app exam-center">
           <div className="hint">Билет сдан</div>
           <div className="big">Вы набрали {screen.score} из {screen.max}</div>
+          {screen.note && <div className="hint">{screen.note}</div>}
           {screen.review
             ? <button type="button" className="exam-btn" onClick={() => void showReview(screen.lang, screen.title, screen)}>Посмотреть разбор</button>
-            : <div className="hint">Разбор ошибок появится, когда преподаватель его отправит.</div>}
+            : !screen.note && <div className="hint">Разбор ошибок появится, когда преподаватель его отправит.</div>}
         </div>
       );
     case 'review':
-      return <ReviewScreen title={screen.title} lang={screen.lang} items={screen.items} />;
+      return <ReviewScreen title={screen.title} lang={screen.lang} items={screen.items} onBack={screen.back ? () => setScreen(screen.back!) : undefined} />;
     case 'view': {
       const v = screen.view;
-      if (v.state === 'closed') return <Message title="Экзамен закрыт" text="Приём ответов по этой ссылке завершён." />;
+      if (v.state === 'closed') return <Message title="Приём ответов закрыт" text="Билет по этой ссылке закрыт. Спросите новую ссылку у преподавателя." />;
       if (v.state === 'new') {
-        return <NameForm view={v} onStart={async (name) => {
-          const next = await apiStart(CODE, name);
+        return <NameForm view={v} onStart={async (name, lang) => {
+          const next = await apiStart(CODE, name, lang);
           if (next.state === 'closed') { setScreen({ kind: 'view', view: next }); return; }
           apply(next);
         }} />;

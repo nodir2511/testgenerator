@@ -63,7 +63,7 @@ export type OpenResponse =
   | (ViewBase & { state: 'running'; attempt: { ticketNumber: number | null; deadline: string; questions: ExamQ[]; answers: Answers } });
 
 export const apiOpen = (code: string) => examApi<OpenResponse>('open', { code });
-export const apiStart = (code: string, name: string) => examApi<OpenResponse>('start', { code, name });
+export const apiStart = (code: string, name: string, lang: Lang = 'ru') => examApi<OpenResponse>('start', { code, name, lang });
 export const apiSave = (code: string, tqId: string, answer: Answer) =>
   examApi<{ ok: boolean; state?: 'new' | 'closed' | 'finished'; now?: number }>('save', { code, tqId, answer });
 export const apiSubmit = (code: string) => examApi<{ score: number; max: number; now?: number }>('submit', { code });

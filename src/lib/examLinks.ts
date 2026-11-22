@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import { fetchAllPages } from './fetchAllPages';
 import type { SheetAttempt, StatTicket } from './examStats';
-import { buildExamUrl, countAttempts, sortLinks, type AttemptCounts, type AttemptInput } from './examView';
+import { buildExamUrl, countAttempts, friendlyReviewError, sortLinks, type AttemptCounts, type AttemptInput } from './examView';
 
 // Билеты классу: запуск набора, список запусков и попытки учеников. Запись — только через RPC и функцию tg-exam.
 
@@ -155,14 +155,6 @@ export async function sendReview(code: string): Promise<{ sent: number; failed: 
   let msg = '';
   if (error) msg = await functionErrorMessage(error);
   else if (data?.error) msg = String(data.error);
-  if (msg) throw new Error(friendlyReviewError(msg, error));
+  if (msg) throw new Error(friendlyReviewError(msg, (error as { context?: Response } | null)?.context?.status));
   return { sent: Number(data?.sent ?? 0), failed: Number(data?.failed ?? 0) };
-}
-
-function friendlyReviewError(msg: string, error: unknown): string {
-  const status = (error as { context?: Response } | null)?.context?.status;
-  if (status === 403 || /доступ|Нет прав|forbidden/i.test(msg)) return 'Нет доступа: разбор может отправить автор запуска или главный админ.';
-  if (status === 409 || /Сначала закройте/.test(msg)) return 'Сначала закройте запуск — разбор отправляется после закрытия.';
-  if (/Failed to send|fetch|network/i.test(msg)) return 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.';
-  return msg;
 }

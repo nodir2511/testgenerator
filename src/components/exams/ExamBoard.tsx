@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { BarChart3, Loader2, Lock, Send } from 'lucide-react';
 import { ExamExcelButton } from './ExamExcelButton';
@@ -66,7 +66,15 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
     onError: (e) => notifyError(e, 'Не удалось отправить разбор'),
   });
 
-  const onSendReview = async () => {
+  // Быстрый двойной щелчок не должен открыть два окна подтверждения (и отправить разбор дважды)
+  const busyAction = useRef(false);
+  const guarded = (fn: () => Promise<void>) => async () => {
+    if (busyAction.current) return;
+    busyAction.current = true;
+    try { await fn(); } finally { busyAction.current = false; }
+  };
+
+  const onSendReview = guarded(async () => {
     if (!(await confirmAction({
       title: review.again ? 'Отправить разбор ещё раз?' : 'Отправить разбор ученикам?',
       message: reviewConfirmText(finishedCount, review.again),
@@ -74,9 +82,9 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
       cancelLabel: 'Отмена',
     }))) return;
     send.mutate();
-  };
+  });
 
-  const onClose = async () => {
+  const onClose = guarded(async () => {
     if (!(await confirmAction({
       title: 'Закрыть запуск?',
       message: 'Новые ученики больше не смогут начать билет, а работы тех, кто не успел сдать, будут засчитаны по сохранённым ответам. Если Telegram привязан, итог придёт вам туда.',
@@ -85,7 +93,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
       tone: 'danger',
     }))) return;
     close.mutate();
-  };
+  });
 
   return (
     <div className="space-y-3">

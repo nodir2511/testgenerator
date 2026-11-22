@@ -122,3 +122,24 @@ export function reviewConfirmText(finished: number, again: boolean): string {
 export function reviewResultText(sent: number, failed: number): string {
   return `Отправлено: ${sent}, не доставлено: ${failed}`;
 }
+
+export type ExamLang = 'ru' | 'tg';
+
+export const langName = (lang: string | null | undefined): string => (lang === 'tg' ? 'Тоҷикӣ' : 'Русский');
+
+export const RELAUNCH_WARNING = 'Ответы этого набора уже отправлены другому классу. Запустить всё равно?';
+
+/** У набора уже есть запуск, которому разослали разбор (верные ответы у прежнего класса): перед новым запуском нужно подтверждение */
+export function needsRelaunchConfirm(links: Array<{ batch_id: string; review_sent_at: string | null }> | null | undefined, batchId: string | null | undefined): boolean {
+  if (!batchId) return false;
+  return (links ?? []).some((l) => l.batch_id === batchId && !!l.review_sent_at);
+}
+
+/** Понятный текст ошибки рассылки разбора; status — код ответа функции (если был) */
+export function friendlyReviewError(msg: string, status?: number): string {
+  if (/только что отправлен/.test(msg)) return 'Разбор только что отправлен — повторно не отправляем. Подождите несколько секунд.';
+  if (status === 403 || /доступ|Нет прав|forbidden/i.test(msg)) return 'Нет доступа: разбор может отправить автор запуска или главный админ.';
+  if (status === 409 || /Сначала закройте/.test(msg)) return 'Сначала закройте запуск — разбор отправляется после закрытия.';
+  if (/Failed to send|fetch|network/i.test(msg)) return 'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.';
+  return msg;
+}
