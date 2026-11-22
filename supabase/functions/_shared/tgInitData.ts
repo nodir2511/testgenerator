@@ -28,8 +28,11 @@ export async function verifyInitData(raw: string, botToken: string, maxAgeSec: n
   let diff = 0;
   for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ hash.charCodeAt(i);
   if (diff !== 0) return null;
-  const age = Math.floor(Date.now() / 1000) - Number(params.get('auth_date') || 0);
-  if (age < -300 || age > maxAgeSec) return null;
+  // Нечисловая auth_date дала бы NaN, а NaN не меньше и не больше границ — проверка прошла бы
+  const authDate = Number(params.get('auth_date'));
+  if (!params.get('auth_date') || !Number.isFinite(authDate)) return null;
+  const age = Math.floor(Date.now() / 1000) - authDate;
+  if (!(age >= -300 && age <= maxAgeSec)) return null;
   try {
     const u = JSON.parse(params.get('user') || '');
     if (typeof u?.id !== 'number') return null;

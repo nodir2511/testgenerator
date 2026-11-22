@@ -32,6 +32,20 @@ export function publicSnapshot(snap: any): any {
   return out;
 }
 
+/** Снимок для разбора (после сдачи и отправки разбора): publicSnapshot плюс только три поля ключа. Пустое место — признак и тип. */
+export function reviewSnapshot(snap: any): any {
+  if (isEmpty(snap)) return snap ? { empty: true, type: snap.type ?? null } : snap;
+  const out = publicSnapshot(snap);
+  if (snap.correct_numeric_answer !== undefined) out.correct_numeric_answer = snap.correct_numeric_answer;
+  if (Array.isArray(snap.options)) {
+    out.options = snap.options.map((o: any) => ({ ...pickKeys(o, TEXT_KEYS), is_correct: o?.is_correct === true }));
+  }
+  if (Array.isArray(snap.matching_items)) {
+    out.matching_items = snap.matching_items.map((m: any) => ({ ...pickKeys(m, [...TEXT_KEYS, 'side']), ...pickKeys(m, ['correct_match_id']) }));
+  }
+  return out;
+}
+
 /** «12,5» → 12.5; не число → null */
 export function parseOpen(raw: string | null | undefined): number | null {
   const s = (raw ?? '').trim().replace(',', '.');

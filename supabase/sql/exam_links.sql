@@ -1,6 +1,7 @@
 -- Билеты классу в Telegram: запуск набора (exam_links) и попытки учеников (exam_attempts).
 -- Преподаватель запускает свой набор билетов -> получает 6-значный код; ученики проходят билет в боте.
 -- Запись идёт только через функции exam_link_create / exam_link_close и сервисный ключ (бот);
+-- ответы и сдачу попытки tg-exam пишет функциями exam_attempt_save / exam_attempt_close (только service_role);
 -- из приложения таблицы можно только читать: свой запуск (created_by = auth.uid()) или всё — главный админ.
 -- Ученики попытки через RLS не читают никогда (только сервисный ключ). У anon прав нет.
 -- Кластерные наборы (generation_params.source = 'cluster') классу запускать нельзя.
@@ -119,6 +120,68 @@ begin
   update public.exam_links set closed_at = now() where code = p_code and closed_at is null;
 end;
 $$;
+
+-- Сохранить один ответ ученика (вызывает только tg-exam сервисным ключом).
+-- Одно атомарное обновление: ответ дописывается к уже сохранённым (два сохранения подряд не теряют друг друга),
+-- и только пока попытка идёт: не сдана, срок не прошёл, ссылка не закрыта и не истекла. null стирает ответ.
+-- Возвращает, записан ли ответ.
+create or replace function public.exam_attempt_save(p_attempt_id uuid, p_tq_id text, p_answer jsonb)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n int;
+begin
+  update public.exam_attempts a
+     set answers = case
+       when p_answer is null or p_answer = 'null'::jsonb then a.answers - p_tq_id
+       else a.answers || jsonb_build_object(p_tq_id, p_answer)
+     end
+    from public.exam_links l
+   where a.id = p_attempt_id
+     and l.code = a.code
+     and a.finished_at is null
+     and a.deadline_at > now()
+     and l.closed_at is null
+     and l.closes_at > now();
+  get diagnostics n = row_count;
+  return n > 0;
+end;
+$$;
+
+-- Сдать попытку (вызывает только tg-exam сервисным ключом): finished_at = раньшее из «сейчас», срока попытки
+-- и закрытия ссылки. После этого exam_attempt_save ответы не меняет, поэтому балл, посчитанный по возвращённым
+-- ответам, всегда соответствует сохранённым. Уже сданная попытка не меняется — возвращаются её ответы;
+-- нет попытки — null.
+create or replace function public.exam_attempt_close(p_attempt_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  r jsonb;
+begin
+  update public.exam_attempts a
+     set finished_at = least(now(), a.deadline_at, coalesce(l.closed_at, 'infinity'::timestamptz))
+    from public.exam_links l
+   where a.id = p_attempt_id
+     and l.code = a.code
+     and a.finished_at is null
+  returning a.answers into r;
+  if not found then
+    select answers into r from public.exam_attempts where id = p_attempt_id;
+  end if;
+  return r;
+end;
+$$;
+
+revoke all on function public.exam_attempt_save(uuid, text, jsonb) from public, anon, authenticated;
+grant execute on function public.exam_attempt_save(uuid, text, jsonb) to service_role;
+revoke all on function public.exam_attempt_close(uuid) from public, anon, authenticated;
+grant execute on function public.exam_attempt_close(uuid) to service_role;
 
 revoke all on function public.exam_link_create(uuid) from public, anon;
 grant execute on function public.exam_link_create(uuid) to authenticated;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  EXAM_MINUTES, EXAM_LINK_HOURS, publicSnapshot, parseOpen, scoreAttempt, pickVariant, examCode,
+  EXAM_MINUTES, EXAM_LINK_HOURS, publicSnapshot, reviewSnapshot, parseOpen, scoreAttempt, pickVariant, examCode,
   parseStartPayload, deadlineOf, attemptState, tgPlain, reviewLines, chunkLines,
 } from '../supabase/functions/_shared/exam';
 
@@ -54,7 +54,27 @@ describe('publicSnapshot', () => {
   });
 });
 
-describe('scoreAttempt', () => {
+describe("reviewSnapshot", () => {
+  it("как publicSnapshot плюс только три поля ключа", () => {
+    const s: any = test();
+    s.explanation = "секрет"; s.options[0].hint = "x"; s.chapter_name = "Гл";
+    const t = reviewSnapshot(s);
+    expect(t.options.map((o: any) => o.is_correct)).toEqual([false, true, false]);
+    expect(t.correct_numeric_answer).toBeNull();
+    const j = JSON.stringify(t);
+    for (const bad of ["explanation", "hint", "секрет", "chapter_name"]) expect(j).not.toContain(bad);
+    expect(t.passage).toEqual(publicSnapshot(s).passage);
+    const m = reviewSnapshot(matching());
+    expect(m.matching_items[0]).toMatchObject({ id: "l1", side: "left", correct_match_id: "r1" });
+    expect(reviewSnapshot(open(16)).correct_numeric_answer).toBe(16);
+    expect(reviewLines([{ tqId: "a", snapshot: reviewSnapshot(test()) }], { a: "o1" }, "ru")).toEqual(reviewLines([{ tqId: "a", snapshot: test() }], { a: "o1" }, "ru"));
+  });
+  it("пустое место — только признак и тип", () => {
+    expect(reviewSnapshot({ empty: true, type: "test", content: "x", topic_name: "Т" })).toEqual({ empty: true, type: "test" });
+  });
+});
+
+describe("scoreAttempt", () => {
   const q = (snapshot: any, tqId = snapshot.id) => ({ tqId, snapshot });
   it('тест', () => {
     const r = scoreAttempt([q(test('a')), q(test('b')), q(test('c'))], { a: 'o2', b: 'o1', c: null });

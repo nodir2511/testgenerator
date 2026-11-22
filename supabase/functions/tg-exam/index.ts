@@ -11,7 +11,8 @@
 //   Доступ: автор запуска (exam_links.created_by) или главный админ (profiles.is_owner).
 //
 // Таблицы exam_links и exam_attempts (supabase/sql/exam_links.sql) пишет только эта функция
-// сервисным ключом; запуск создаёт и закрывает сайт через RPC exam_link_create / exam_link_close.
+// сервисным ключом; ответы и сдача — только через RPC exam_attempt_save / exam_attempt_close (атомарно в базе);
+// запуск создаёт и закрывает сайт через RPC exam_link_create / exam_link_close.
 //
 // Деплой:  supabase functions deploy tg-exam --no-verify-jwt
 // Секреты: TELEGRAM_BOT_TOKEN (тот же, что у telegram-bot);
@@ -21,7 +22,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
-  attemptState, chunkLines, deadlineOf, pickVariant, publicSnapshot, reviewLines, scoreAttempt, tgPlain,
+  attemptState, chunkLines, deadlineOf, pickVariant, publicSnapshot, reviewLines, reviewSnapshot, scoreAttempt, tgPlain,
   type ExamAnswer, type ExamAnswers, type ExamQuestion,
 } from '../_shared/exam.ts';
 import { verifyInitData, type TgInitUser } from '../_shared/tgInitData.ts';
@@ -102,39 +103,47 @@ async function readAttemptById(id: string): Promise<Attempt | null> {
 }
 
 /**
- * Сдать попытку с сохранёнными ответами. Балл считается по тем ответам, что лежат в базе:
- * запись идёт, только если ответы не изменились с момента чтения (иначе перечитываем).
- * Уже сданную попытку не трогает (finished_at is null), поэтому две сдачи одновременно безопасны.
+ * Сдать попытку с сохранёнными ответами. exam_attempt_close атомарно ставит finished_at и возвращает
+ * итоговые ответы — после этого exam_attempt_save их уже не меняет, поэтому балл всегда соответствует
+ * сохранённым ответам. Повторная или одновременная сдача безопасна: ответы те же, балл тот же.
+ * Сданная попытка без балла (сбой между двумя шагами) досчитывается при следующем обращении.
  */
-async function finalize(a0: Attempt, l: Link, now: Date, cache: QCache): Promise<Attempt> {
-  const questions = await ticketQuestions(a0.ticket_id, cache);
-  let a = a0;
-  for (let i = 0; i < 4; i++) {
-    if (a.finished_at) return a;
-    const answers = (a.answers ?? {}) as ExamAnswers;
-    const r = scoreAttempt(questions, answers);
-    const finishedAt = new Date(Math.min(now.getTime(), effDeadline(a, l))).toISOString();
-    let q = sb.from('exam_attempts').update({ finished_at: finishedAt, score: r.score, max_score: r.max })
-      .eq('id', a.id).is('finished_at', null);
-    // Последняя попытка — без сверки ответов, чтобы сдача не застряла
-    if (i < 3) q = q.eq('answers', JSON.stringify(a.answers ?? {}));
-    const { data, error } = await q.select(ATTEMPT_COLS).maybeSingle();
-    if (error) throw error;
-    if (data) return data as Attempt;
-    const cur = await readAttemptById(a.id);
-    if (!cur) return { ...a, finished_at: finishedAt, score: r.score, max_score: r.max };
-    a = cur;
-  }
-  return a;
+async function finalize(a: Attempt, cache: QCache): Promise<Attempt> {
+  if (a.finished_at && a.score != null) return a;
+  const { data: answers, error } = await sb.rpc('exam_attempt_close', { p_attempt_id: a.id });
+  if (error) throw error;
+  if (answers == null) return a; // попытку удалили вместе с набором
+  const r = scoreAttempt(await ticketQuestions(a.ticket_id, cache), answers as ExamAnswers);
+  const { data, error: uErr } = await sb.from('exam_attempts').update({ score: r.score, max_score: r.max })
+    .eq('id', a.id).not('finished_at', 'is', null).select(ATTEMPT_COLS).maybeSingle();
+  if (uErr) throw uErr;
+  return (data as Attempt) ?? { ...a, answers: answers as ExamAnswers, score: r.score, max_score: r.max };
 }
 
-/** При любом обращении к запуску: просроченные (или оборванные закрытием ссылки) попытки сдаются сами */
+/**
+ * При любом обращении к запуску: просроченные (или оборванные закрытием ссылки) попытки сдаются сами,
+ * сданные без балла досчитываются. Сбой на одной попытке не ломает запуск: пишем в журнал и идём дальше.
+ */
 async function finishExpired(l: Link, now: Date, cache: QCache) {
-  let q = sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', l.code).is('finished_at', null);
-  if (!(l.closed_at && ms(l.closed_at) <= now.getTime())) q = q.lte('deadline_at', now.toISOString());
-  const { data, error } = await q.limit(500);
-  if (error) throw error;
-  for (const a of (data ?? []) as Attempt[]) await finalize(a, l, now, cache);
+  try {
+    let q = sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', l.code).is('finished_at', null);
+    if (!(l.closed_at && ms(l.closed_at) <= now.getTime())) q = q.lte('deadline_at', now.toISOString());
+    const [open, unscored] = await Promise.all([
+      q.limit(500),
+      sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', l.code).not('finished_at', 'is', null).is('score', null).limit(500),
+    ]);
+    if (open.error) throw open.error;
+    if (unscored.error) throw unscored.error;
+    for (const a of [...(open.data ?? []), ...(unscored.data ?? [])] as Attempt[]) {
+      try {
+        await finalize(a, cache);
+      } catch (e) {
+        console.error('tg-exam finalize', a.id, e instanceof Error ? e.message : (e as any)?.message ?? e);
+      }
+    }
+  } catch (e) {
+    console.error('tg-exam finishExpired', e instanceof Error ? e.message : (e as any)?.message ?? e);
+  }
 }
 
 /** Ответ ученику: только снимки без ответов (publicSnapshot), свои ответы и срок */
@@ -146,6 +155,7 @@ async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache)
     lang: langOf(l),
   };
   if (a?.finished_at) {
+    if (a.score == null) a = await finalize(a, cache); // сдана, но балл не записан (сбой) — досчитываем
     return { ...base, state: 'finished' as const, attempt: { score: a.score ?? 0, max: a.max_score ?? 0, review: !!l.review_sent_at } };
   }
   if (a && stateOf(a, l, now) === 'running') {
@@ -301,7 +311,7 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
     case 'save': {
       if (!a) return json({ ok: false, state: linkOpen(l, now) ? 'new' : 'closed' });
       if (stateOf(a, l, now) !== 'running') {
-        if (!a.finished_at) await finalize(a, l, now, cache);
+        await finalize(a, cache);
         return json({ ok: false, state: 'finished' });
       }
       if (!isId(body.tqId)) return json({ error: 'bad_question', message: 'Некорректный вопрос.' }, 400);
@@ -310,34 +320,22 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       if (!q) return json({ error: 'bad_question', message: 'Этого вопроса нет в вашем билете.' }, 400);
       const ans = cleanAnswer(q.snapshot, body.answer);
       if (ans === undefined) return json({ error: 'bad_answer', message: 'Некорректный ответ.' }, 400);
-      // Запись только пока попытка идёт (не сдана и срок не прошёл) и только поверх тех ответов,
-      // что прочитаны (иначе два быстрых сохранения затёрли бы друг друга) — при расхождении перечитываем
-      for (let i = 0; i < 5; i++) {
-        const old = (a.answers ?? {}) as ExamAnswers;
-        const next: ExamAnswers = { ...old };
-        if (ans === null) delete next[q.tqId];
-        else next[q.tqId] = ans;
-        const nowIso = new Date().toISOString();
-        const { data, error } = await sb.from('exam_attempts').update({ answers: next })
-          .eq('id', a.id).is('finished_at', null).gt('deadline_at', nowIso).eq('answers', JSON.stringify(old))
-          .select('id').maybeSingle();
-        if (error) throw error;
-        if (data) return json({ ok: true });
-        const cur = await readAttemptById(a.id);
-        if (!cur) return json({ ok: false, state: 'closed' });
-        if (stateOf(cur, l, new Date()) !== 'running') {
-          if (!cur.finished_at) await finalize(cur, l, new Date(), cache);
-          return json({ ok: false, state: 'finished' });
-        }
-        a = cur;
-      }
-      return json({ error: 'busy', message: 'Не удалось сохранить ответ. Попробуйте ещё раз.' }, 409);
+      // Одно атомарное обновление в базе: ответ дописывается к сохранённым и только пока попытка идёт
+      // (не сдана, срок не прошёл, ссылка не закрыта) — иначе ничего не пишется
+      const { data: saved, error } = await sb.rpc('exam_attempt_save', { p_attempt_id: a.id, p_tq_id: q.tqId, p_answer: ans });
+      if (error) throw error;
+      if (saved === true) return json({ ok: true });
+      // Отказ: попытку сдали, срок прошёл или ссылку только что закрыли — сдаём с тем, что сохранено
+      const fresh = (await loadLink(code)) ?? l;
+      await finishExpired(fresh, new Date(), cache);
+      const cur = await readAttemptById(a.id);
+      return json({ ok: false, state: cur?.finished_at ? 'finished' : 'closed' });
     }
 
     case 'submit': {
       if (!a) return json({ error: 'not_started', message: 'Билет ещё не начат.' }, 409);
       // После срока тоже сдаёт — с теми ответами, что успели сохраниться
-      const done = a.finished_at ? a : await finalize(a, l, now, cache);
+      const done = await finalize(a, cache);
       return json({ score: done.score ?? 0, max: done.max_score ?? 0 });
     }
 
@@ -350,7 +348,8 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       const items = scoreAttempt(questions, answers).items;
       return json({
         questions: questions.map((q, i) => ({
-          tqId: q.tqId, snapshot: q.snapshot, answer: answers[q.tqId] ?? null, points: items[i].points, max: items[i].max,
+          // Без лишних полей снимка: тексты, картинки и только три поля ключа
+          tqId: q.tqId, snapshot: reviewSnapshot(q.snapshot), answer: answers[q.tqId] ?? null, points: items[i].points, max: items[i].max,
         })),
       });
     }

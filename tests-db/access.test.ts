@@ -335,6 +335,95 @@ describe('билеты классу', () => {
     expect(res.links).toBe(0);
     expect(res.attempts).toBe(0);
   });
+
+  // Ответы и сдачу пишет только tg-exam сервисным ключом через exam_attempt_save / exam_attempt_close
+  const withAttempt = <T>(fn: (q: Q, a: { id: string; code: string }) => Promise<T>) =>
+    as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      const ticket = (await q('select id from public.tickets where batch_id = $1', [r.batch.id]))[0].id;
+      await q('reset role');
+      const id = (await q(`insert into public.exam_attempts (code, tg_user_id, student_name, ticket_id, deadline_at)
+        values ($1, 2002, 'Ученик', $2, now() + interval '30 minutes') returning id`, [link.code, ticket]))[0].id;
+      await q('set local role service_role');
+      return fn(q, { id, code: link.code });
+    });
+  const save = async (q: Q, id: string, tq: string, ans: unknown) =>
+    (await q('select public.exam_attempt_save($1, $2, $3::jsonb) as ok', [id, tq, JSON.stringify(ans)]))[0].ok as boolean;
+  const answersOf = async (q: Q, id: string) => (await q('select answers from public.exam_attempts where id = $1', [id]))[0].answers;
+
+  it('exam_attempt_save дописывает ответ, не теряя другие; null стирает ответ', async () => {
+    const res = await withAttempt(async (q, a) => {
+      const ok1 = await save(q, a.id, 'q1', 'opt1');
+      const ok2 = await save(q, a.id, 'q2', { l1: 'r2' });
+      const ok3 = await save(q, a.id, 'q3', '12,5');
+      const both = await answersOf(q, a.id);
+      await save(q, a.id, 'q3', null);
+      return { ok: [ok1, ok2, ok3], both, after: await answersOf(q, a.id) };
+    });
+    expect(res.ok).toEqual([true, true, true]);
+    expect(res.both).toEqual({ q1: 'opt1', q2: { l1: 'r2' }, q3: '12,5' });
+    expect(res.after).toEqual({ q1: 'opt1', q2: { l1: 'r2' } });
+  });
+
+  it('exam_attempt_save после срока, после сдачи и после закрытия ссылки ничего не меняет', async () => {
+    const res = await withAttempt(async (q, a) => {
+      await save(q, a.id, 'q1', 'opt1');
+      await q('reset role');
+      await q("update public.exam_attempts set deadline_at = now() - interval '1 second' where id = $1", [a.id]);
+      await q('set local role service_role');
+      const late = await save(q, a.id, 'q1', 'late');
+      await q('reset role');
+      await q("update public.exam_attempts set deadline_at = now() + interval '30 minutes' where id = $1", [a.id]);
+      await q('update public.exam_links set closed_at = now() where code = $1', [a.code]);
+      await q('set local role service_role');
+      const closed = await save(q, a.id, 'q2', 'closed');
+      await q('reset role');
+      await q('update public.exam_links set closed_at = null, closes_at = now() - interval \'1 second\' where code = $1', [a.code]);
+      await q('set local role service_role');
+      const expiredLink = await save(q, a.id, 'q2', 'expired');
+      return { late, closed, expiredLink, answers: await answersOf(q, a.id) };
+    });
+    expect(res).toEqual({ late: false, closed: false, expiredLink: false, answers: { q1: 'opt1' } });
+  });
+
+  it('exam_attempt_close сдаёт один раз и возвращает итоговые ответы; после этого save отклоняется', async () => {
+    const res = await withAttempt(async (q, a) => {
+      await save(q, a.id, 'q1', 'opt1');
+      const first = (await q('select public.exam_attempt_close($1) as r', [a.id]))[0].r;
+      const row1 = (await q('select finished_at from public.exam_attempts where id = $1', [a.id]))[0];
+      const after = await save(q, a.id, 'q2', 'opt2');
+      const again = (await q('select public.exam_attempt_close($1) as r', [a.id]))[0].r;
+      const row2 = (await q('select finished_at from public.exam_attempts where id = $1', [a.id]))[0];
+      const missing = (await q("select public.exam_attempt_close('00000000-0000-0000-0000-000000000000') as r"))[0].r;
+      return { first, after, again, same: row1.finished_at.getTime() === row2.finished_at.getTime(), finished: !!row1.finished_at, missing };
+    });
+    expect(res).toEqual({ first: { q1: 'opt1' }, after: false, again: { q1: 'opt1' }, same: true, finished: true, missing: null });
+  });
+
+  it('exam_attempt_close после срока ставит finished_at = срок попытки', async () => {
+    const res = await withAttempt(async (q, a) => {
+      await q('reset role');
+      await q("update public.exam_attempts set deadline_at = now() - interval '5 minutes' where id = $1", [a.id]);
+      await q('set local role service_role');
+      await q('select public.exam_attempt_close($1)', [a.id]);
+      return (await q('select finished_at = deadline_at as eq from public.exam_attempts where id = $1', [a.id]))[0].eq;
+    });
+    expect(res).toBe(true);
+  });
+
+  it('exam_attempt_save и exam_attempt_close доступны только сервисному ключу', async () => {
+    const id = '00000000-0000-0000-0000-000000000000';
+    const call = async (q: Q) => [
+      await rejected(q, "select public.exam_attempt_save($1, 'q', '\"x\"'::jsonb)", [id]),
+      await rejected(q, 'select public.exam_attempt_close($1)', [id]),
+    ];
+    const teacher = await as(db.admin, s.users.teacher, call);
+    const anon = await as(db.admin, null, call);
+    const service = await as(db.admin, null, async (q) => { await q('reset role'); await q('set local role service_role'); return call(q); });
+    for (const e of [...teacher, ...anon]) expect(e).toMatch(/permission denied/);
+    expect(service).toEqual([null, null]);
+  });
 });
 
 describe('лимиты генерации', () => {
