@@ -252,13 +252,14 @@ declare
 begin
   select * into a from public.exam_attempts where id = p_attempt_id for update;
   if not found then raise exception 'Попытка не найдена'; end if;
-  select * into l from public.exam_links where code = a.code;
+  select * into l from public.exam_links where code = a.code for share;
   if l.created_by is distinct from auth.uid() and not public.is_owner() then
     raise exception 'Сменить вариант может только автор запуска';
   end if;
   if l.session_start_at is not null or a.finished_at is not null then
     raise exception 'Сменить вариант можно только до начала сессии';
   end if;
+  if l.closed_at is not null or l.closes_at <= now() then raise exception 'Запуск закрыт'; end if;
   if not exists (select 1 from public.tickets t where t.id = p_ticket_id and t.batch_id = l.batch_id) then
     raise exception 'Этого билета нет в наборе';
   end if;

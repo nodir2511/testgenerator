@@ -637,6 +637,42 @@ describe('билеты классу', () => {
     expect(out.afterStart).toMatch(/Сменить вариант можно только до начала сессии/);
   });
 
+  it('exam_attempt_set_variant: владелец запуска меняет вариант ученику до старта', async () => {
+    const out = await withLobby(async (q, c) => {
+      await q('reset role');
+      const t2 = (await q('insert into public.tickets (batch_id, ticket_number) values ($1, 2) returning id', [c.batch]))[0].id;
+      await switchUser(q, s.users.owner);
+      await q('select public.exam_attempt_set_variant($1, $2)', [c.attempt, t2]);
+      await q('reset role');
+      const changed = (await q('select ticket_id from public.exam_attempts where id = $1', [c.attempt]))[0].ticket_id;
+      return { t2, changed };
+    });
+    expect(out.changed).toBe(out.t2);
+  });
+
+  it('exam_attempt_set_variant: закрытый запуск без старта — отказ', async () => {
+    const out = await withLobby(async (q, c) => {
+      await q('reset role');
+      const t2 = (await q('insert into public.tickets (batch_id, ticket_number) values ($1, 2) returning id', [c.batch]))[0].id;
+      await switchUser(q, s.users.teacher);
+      await q('select public.exam_link_close($1)', [c.code]);
+      const closed = await rejected(q, 'select public.exam_attempt_set_variant($1, $2)', [c.attempt, t2]);
+      await q('reset role');
+      const ticket = (await q('select ticket_id from public.exam_attempts where id = $1', [c.attempt]))[0].ticket_id;
+      return { closed, same: ticket === c.ticket };
+    });
+    expect(out.closed).toMatch(/Запуск закрыт/);
+    expect(out.same).toBe(true);
+  });
+
+  it('exam_attempt_save: граница окна сессии — при now = старт + длительность отклоняется, на секунду раньше принимается', async () => {
+    // now() в транзакции неподвижен, поэтому конец окна выставляем ровно в now()
+    const atEnd = await withAttempt((q, a) => save(q, a.id, 'q1', 'x'), "now() - interval '30 minutes'");
+    const secondBefore = await withAttempt((q, a) => save(q, a.id, 'q1', 'x'), "now() - interval '30 minutes' + interval '1 second'");
+    expect(atEnd).toBe(false);
+    expect(secondBefore).toBe(true);
+  });
+
   it('exam_session_start и exam_attempt_set_variant недоступны без входа', async () => {
     const id = '00000000-0000-0000-0000-000000000000';
     const anon = await as(db.admin, null, async (q) => [
