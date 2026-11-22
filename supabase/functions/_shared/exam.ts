@@ -15,17 +15,20 @@ const POINTS = { test: 1, matchingRow: 1, open: 2 } as const;
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const isEmpty = (snap: any) => !snap || snap.empty === true;
 
-/** Снимок для ученика: без is_correct, correct_match_id и correct_numeric_answer. Исходный не меняется. */
+const pickKeys = (o: any, keys: string[]) => {
+  const r: any = {};
+  for (const k of keys) if (o?.[k] !== undefined) r[k] = o[k];
+  return r;
+};
+const TEXT_KEYS = ['id', 'text', 'text_ru', 'text_tg', 'image_url', 'order_index'];
+
+/** Снимок для ученика: только перечисленные поля (список разрешённых), поэтому ключи ответов и любые будущие поля не попадут. Исходный не меняется. */
 export function publicSnapshot(snap: any): any {
   if (isEmpty(snap)) return snap;
-  const out: any = { ...snap };
-  delete out.correct_numeric_answer;
-  if (Array.isArray(snap.options)) {
-    out.options = snap.options.map((o: any) => { const { is_correct, ...rest } = o; return rest; });
-  }
-  if (Array.isArray(snap.matching_items)) {
-    out.matching_items = snap.matching_items.map((m: any) => { const { correct_match_id, ...rest } = m; return rest; });
-  }
+  const out = pickKeys(snap, ['id', 'type', 'content', 'content_ru', 'content_tg', 'image_url', 'order_index', 'passage_order']);
+  if (Array.isArray(snap.options)) out.options = snap.options.map((o: any) => pickKeys(o, TEXT_KEYS));
+  if (Array.isArray(snap.matching_items)) out.matching_items = snap.matching_items.map((m: any) => pickKeys(m, [...TEXT_KEYS, 'side']));
+  if (snap.passage && typeof snap.passage === 'object') out.passage = pickKeys(snap.passage, ['id', 'kind', 'title', 'content']);
   return out;
 }
 
@@ -118,7 +121,7 @@ export function tgPlain(text: string): string {
 
 // ---------- разбор ошибок ----------
 type Lang = 'ru' | 'tg';
-const pick = (o: any, lang: Lang, base = 'text') => String((lang === 'tg' ? o?.[`${base}_tg`] : o?.[`${base}_ru`]) ?? o?.[base] ?? '');
+const pick = (o: any, lang: Lang, base = 'text') => String((lang === 'tg' ? o?.[`${base}_tg`] : o?.[`${base}_ru`]) || o?.[base] || '');
 const NONE = '—';
 
 function givenAndRight(snap: any, ans: ExamAnswer | undefined, lang: Lang): { given: string; right: string } {
@@ -153,17 +156,32 @@ export function reviewLines(questions: ExamQuestion[], answers: ExamAnswers, lan
   return out.length ? out : ['Ошибок нет'];
 }
 
-/** Сообщения не длиннее limit знаков; строка длиннее limit режется. */
+/** Где резать слишком длинную строку: по пробелу, не внутри «&...;». */
+function cutAt(line: string, limit: number): number {
+  if (line.length <= limit) return line.length;
+  let cut = limit;
+  const sp = line.lastIndexOf(' ', limit);
+  if (sp > limit / 2) cut = sp + 1;
+  const amp = line.lastIndexOf('&', cut - 1);
+  if (amp >= 0 && amp > cut - 12 && !line.slice(amp, cut).includes(';')) cut = amp;
+  return cut > 0 ? cut : limit;
+}
+
+/** Сообщения не длиннее limit знаков; строка длиннее limit режется по пробелу, не внутри HTML-сущности. */
 export function chunkLines(lines: string[], limit = 3800): string[] {
   const parts: string[] = [];
   let cur = '';
   const flush = () => { if (cur) { parts.push(cur); cur = ''; } };
   for (const line of lines) {
-    for (let from = 0; from === 0 || from < line.length; from += limit) {
-      const piece = line.slice(from, from + limit);
+    let rest = line;
+    do {
+      const n = cutAt(rest, limit);
+      const piece = rest.slice(0, n);
+      rest = rest.slice(n);
       if (cur && cur.length + 1 + piece.length > limit) flush();
-      cur = cur ? `${cur}\n${piece}` : piece;
-    }
+      cur = cur ? `${cur}
+${piece}` : piece;
+    } while (rest.length);
   }
   flush();
   return parts;

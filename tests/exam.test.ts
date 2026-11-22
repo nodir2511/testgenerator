@@ -6,7 +6,7 @@ import {
 
 const test = (id = 'q1', right = 'o2') => ({
   id, type: 'test', content: 'Формула воды', content_ru: 'Формула воды', content_tg: 'Формулаи об', image_url: null, order_index: 1,
-  passage: 'Текст', passage_order: 1, chapter_name: 'Гл', correct_numeric_answer: null,
+  passage: { id: 'ps1', kind: 'text', title: 'Заголовок', content: 'Текст' }, passage_id: 'ps1', passage_order: 1, chapter_name: 'Гл', correct_numeric_answer: null,
   options: ['o1', 'o2', 'o3'].map((o, i) => ({ id: o, text: o.toUpperCase(), text_ru: `R${o}`, text_tg: `T${o}`, image_url: null, is_correct: o === right, order_index: i + 1 })),
 });
 const matching = () => ({
@@ -32,11 +32,21 @@ describe('publicSnapshot', () => {
       expect(out.type).toBe(s.type);
     }
     const t = publicSnapshot(test());
-    expect(t.passage).toBe('Текст');
+    expect(t.passage).toEqual({ id: 'ps1', kind: 'text', title: 'Заголовок', content: 'Текст' });
     expect(t.passage_order).toBe(1);
     expect(t.order_index).toBe(1);
     expect(t.options[1]).toMatchObject({ id: 'o2', text: 'O2', text_ru: 'Ro2', text_tg: 'To2', image_url: null, order_index: 2 });
     expect(publicSnapshot(matching()).matching_items[0]).toMatchObject({ id: 'l1', side: 'left', text_ru: 'Л1' });
+  });
+  it('неизвестные поля не попадают к ученику (список разрешённых)', () => {
+    const s: any = test();
+    s.explanation = 'секрет'; s.correct_foo = 1; s.options[0].correct_bar = true; s.options[0].hint = 'x';
+    s.passage.correct_baz = 1;
+    const j = JSON.stringify(publicSnapshot(s));
+    for (const bad of ['explanation', 'correct_foo', 'correct_bar', 'hint', 'correct_baz', 'секрет']) expect(j).not.toContain(bad);
+  });
+  it('в реальном снимке нет ни одного ключа со словом correct', () => {
+    for (const s of [test(), matching(), open()]) expect(JSON.stringify(publicSnapshot(s))).not.toMatch(/correct/);
   });
   it('пустое место возвращается как есть', () => {
     const e = { empty: true, type: 'test' };
@@ -129,6 +139,9 @@ describe('tgPlain', () => {
     expect(tgPlain('a<sub>n</sub>')).toBe('a_n');
     expect(tgPlain('x<sup>n</sup>')).toBe('x^n');
     expect(tgPlain('<frac>1/2</frac>')).toBe('1/2');
+    expect(tgPlain('A & B > C')).toBe('A &amp; B &gt; C');
+    expect(tgPlain('&amp;lt;')).toBe('&amp;lt;');
+    expect(tgPlain('&amp;')).toBe('&amp;');
   });
 });
 
