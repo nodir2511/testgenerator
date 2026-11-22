@@ -80,7 +80,7 @@ export const ClusterHistory: React.FC = () => {
   const rows = (list.data ?? []).filter((b) => !hiddenIds.includes(b.id));
   return (
     <Card padding="none" className="p-5 space-y-3">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 w-fit" data-tip="cluster-history">
         <History className="w-4 h-4 text-slate-500" />
         <h3 className="font-bold text-slate-900 text-sm">История</h3>
       </div>

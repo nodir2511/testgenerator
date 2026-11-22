@@ -55,6 +55,11 @@ export function shouldShowTip(g: TipGate): boolean {
   return true;
 }
 
+/** Ключ якоря пункта меню раздела: saved_tickets → nav-saved-tickets */
+export function tipKeyOfTab(tab: string): string {
+  return `nav-${tab.replace(/_/g, '-')}`;
+}
+
 /** Какие якоря подходят для ключа: у пункта меню запасной — кнопка «Ещё» нижнего меню на телефоне */
 export function anchorKeys(target: string): string[] {
   return target.startsWith('nav-') && target !== 'nav-more' ? [target, 'nav-more'] : [target];
@@ -91,7 +96,7 @@ export interface TipPlacement {
 /** Отступ выреза вокруг якоря */
 export const TIP_HOLE_PAD = 6;
 /** Расстояние от выреза до карточки — место для стрелки */
-const GAP = 28;
+const GAP = 44;
 /** Поля у краёв экрана */
 const MARGIN = 8;
 

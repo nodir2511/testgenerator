@@ -477,6 +477,7 @@ const BatchCard: React.FC<{
 
         <button
           onClick={onToggle}
+          data-tip="archive-variants"
           aria-expanded={expanded}
           className="w-full min-h-[44px] -mb-2 border-t border-slate-100 flex items-center justify-between text-sm font-semibold text-slate-800"
         >

@@ -8,6 +8,7 @@ import {
   readLastShown,
   shouldShowTip,
   showTabButton,
+  tipKeyOfTab,
   writeLastShown,
   type Rect,
   type SiteTip,
@@ -77,6 +78,10 @@ describe('pickTip', () => {
     expect(anchorKeys('nav-exams')).toEqual(['nav-exams', 'nav-more']);
     expect(anchorKeys('archive-variants')).toEqual(['archive-variants']);
     expect(pickTip([tip('a', 'nav-exams')], (k) => k === 'nav-more')?.id).toBe('a');
+  });
+  it('ключ пункта меню по разделу', () => {
+    expect(tipKeyOfTab('saved_tickets')).toBe('nav-saved-tickets');
+    expect(tipKeyOfTab('exams')).toBe('nav-exams');
   });
 });
 

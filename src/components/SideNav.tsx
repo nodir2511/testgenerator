@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import { ChevronsLeft, ChevronsRight, ExternalLink } from 'lucide-react';
 import { cn } from '../lib/cn';
+import { tipKeyOfTab } from '../lib/tips';
 
 export interface SideNavItem {
   id: string;
@@ -42,6 +43,7 @@ export function SideNav({ groups, activeId, onSelect, collapsed, onToggle }: {
                     <button
                       type="button"
                       onClick={() => onSelect(item)}
+                      data-tip={tipKeyOfTab(item.id)}
                       aria-current={active ? 'page' : undefined}
                       aria-label={collapsed ? item.label : undefined}
                       title={collapsed ? item.label : undefined}

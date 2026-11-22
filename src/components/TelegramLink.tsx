@@ -91,6 +91,7 @@ export const TelegramLink: React.FC = () => {
     <>
       <button
         onClick={() => setOpen(true)}
+        data-tip="telegram-link"
         className="p-2 text-slate-500 hover:text-indigo-600 rounded-xl transition min-h-[40px]"
         title="Telegram-бот"
         aria-label="Telegram-бот"

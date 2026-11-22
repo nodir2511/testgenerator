@@ -317,6 +317,7 @@ const BulkZipDrop: React.FC<{ onFiles: (files: File[]) => void; busy: boolean; n
   return (
     <div className="space-y-2">
       <label
+        data-tip="cluster-zip-drop"
         onDragOver={(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files); }}

@@ -23,6 +23,8 @@ import { ChangePasswordScreen } from './components/ChangePasswordScreen';
 import { TelegramLink } from './components/TelegramLink';
 import { useDialog } from './hooks/useDialog';
 import { WhatsNewModal } from './components/WhatsNewModal';
+import { TipPopup } from './components/TipPopup';
+import { tipKeyOfTab } from './lib/tips';
 import { confirmAction } from './lib/confirm';
 import { SideNav, type SideNavGroup } from './components/SideNav';
 import { ThemeButton, ThemeSegmented } from './components/ThemeToggle';
@@ -197,6 +199,15 @@ export const App: React.FC = () => {
   };
   const openReleases = () => {
     goTab('releases');
+  };
+
+  // Подсказки «А вы знали?»: не в тот заход, когда показывали «Что нового»; «Показать» — только в доступный раздел
+  const [newsShownThisSession, setNewsShownThisSession] = useState(false);
+  React.useEffect(() => { if (showNews) setNewsShownThisSession(true); }, [showNews]);
+  const canOpenTab = (tab: string) => {
+    const t = tab as TabType;
+    if (isGameOnly || !(t in TAB_HASH)) return false;
+    return !((!isAdmin && adminOnlyTabs.includes(t)) || (!isStaff && staffOnlyTabs.includes(t)) || (!isOwner && ownerOnlyTabs.includes(t)));
   };
 
   // Навигационные ссылки
@@ -397,6 +408,7 @@ export const App: React.FC = () => {
               return (
                 <button
                   key={item.id}
+                  data-tip={tipKeyOfTab(item.id)}
                   onClick={() => {
                     if (item.id === 'game') { window.open('/game', '_blank'); return; }
                     goTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
@@ -465,6 +477,7 @@ export const App: React.FC = () => {
                 return (
                   <button
                     key={item.id}
+                    data-tip={tipKeyOfTab(item.id)}
                     onClick={() => {
                       if (item.id === 'game') { window.open('/game', '_blank'); closeSheet(); return; }
                       goTab(item.id === 'admin' ? (isAdminSection ? currentTab : 'users') : (item.id as TabType));
@@ -588,6 +601,15 @@ export const App: React.FC = () => {
       </div>
 
       {showNews && <WhatsNewModal releases={unread} onClose={closeNews} onOpenHistory={() => { closeNews(); openReleases(); }} />}
+      <TipPopup
+        currentTab={currentTab}
+        canOpenTab={canOpenTab}
+        goTab={(tab) => { if (canOpenTab(tab)) goTab(tab as TabType); }}
+        newsOpen={showNews}
+        newsShownThisSession={newsShownThisSession}
+        blocked={isQuestionFormOpen || mobileMenuOpen}
+        gameOnly={isGameOnly}
+      />
 
       {/* Футер (десктоп) */}
       <footer className="hidden md:block bg-white/70 border-t border-slate-200/80 py-4 text-center text-xs text-slate-500">
@@ -601,6 +623,7 @@ export const App: React.FC = () => {
           {/* Генератор */}
           <button
             onClick={() => goTab('generator')}
+            data-tip={tipKeyOfTab('generator')}
             className={`flex flex-col items-center justify-center py-1 transition-transform active:scale-90 ${
               currentTab === 'generator' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
@@ -618,6 +641,7 @@ export const App: React.FC = () => {
           {/* Банк вопросов */}
           <button
             onClick={() => goTab('questions')}
+            data-tip={tipKeyOfTab('questions')}
             className={`flex flex-col items-center justify-center py-1 transition-transform active:scale-90 ${
               currentTab === 'questions' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
@@ -635,6 +659,7 @@ export const App: React.FC = () => {
           {/* Сохраненные билеты */}
           <button
             onClick={() => goTab('saved_tickets')}
+            data-tip={tipKeyOfTab('saved_tickets')}
             className={`flex flex-col items-center justify-center py-1 transition-transform active:scale-90 ${
               currentTab === 'saved_tickets' && !isQuestionFormOpen
                 ? 'text-indigo-600 font-bold'
@@ -652,6 +677,7 @@ export const App: React.FC = () => {
           {/* Меню "Ещё" */}
           <button
             onClick={openSheet}
+            data-tip="nav-more"
             className={`flex flex-col items-center justify-center py-1 transition-transform active:scale-90 ${
               mobileMenuOpen || (!['generator', 'questions', 'saved_tickets'].includes(currentTab) && !isQuestionFormOpen)
                 ? 'text-indigo-600 font-bold'
