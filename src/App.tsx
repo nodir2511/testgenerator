@@ -15,6 +15,7 @@ const GamesView = lazy(() => import('./components/GamesView').then((m) => ({ def
 const ReleasesView = lazy(() => import('./components/ReleasesView').then((m) => ({ default: m.ReleasesView })));
 const QuestionUsageView = lazy(() => import('./components/QuestionUsageView').then((m) => ({ default: m.QuestionUsageView })));
 const QualityView = lazy(() => import('./components/QualityView').then((m) => ({ default: m.QualityView })));
+const ExamsView = lazy(() => import('./components/ExamsView').then((m) => ({ default: m.ExamsView })));
 const StatsView = lazy(() => import('./components/StatsView').then((m) => ({ default: m.StatsView })));
 import { AuthModal } from './components/AuthModal';
 import { Logo } from './components/Logo';
@@ -46,16 +47,17 @@ import {
   FileQuestion,
   Loader2,
   MoreHorizontal,
+  Rocket,
   ChevronRight
 } from 'lucide-react';
 import { IconButton } from './components/ui';
 
-type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'usage' | 'quality' | 'trash' | 'cluster' | 'releases' | 'games';
+type TabType = 'questions' | 'taxonomy' | 'generator' | 'saved_tickets' | 'bulk_import' | 'users' | 'stats' | 'usage' | 'quality' | 'trash' | 'cluster' | 'releases' | 'games' | 'exams';
 
 // Раздел виден в адресе (#archive и т. п.): работает кнопка «Назад» на телефоне, на раздел можно дать ссылку
 const TAB_HASH: Record<TabType, string> = {
   generator: 'generator', saved_tickets: 'archive', questions: 'questions', taxonomy: 'taxonomy',
-  bulk_import: 'import', users: 'users', stats: 'stats', usage: 'usage', quality: 'quality', trash: 'trash', cluster: 'cluster', releases: 'news', games: 'games',
+  bulk_import: 'import', users: 'users', stats: 'stats', usage: 'usage', quality: 'quality', trash: 'trash', cluster: 'cluster', releases: 'news', games: 'games', exams: 'exams',
 };
 const tabFromHash = (hash: string): TabType | null => {
   const key = hash.replace(/^#/, '').split('/')[0];
@@ -77,7 +79,7 @@ export const App: React.FC = () => {
     const fromHash = tabFromHash(window.location.hash);
     if (fromHash) return fromHash;
     const saved = localStorage.getItem('examiner_active_tab');
-    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats', 'usage', 'quality', 'trash', 'cluster', 'releases', 'games'];
+    const validTabs: TabType[] = ['questions', 'taxonomy', 'generator', 'saved_tickets', 'bulk_import', 'users', 'stats', 'usage', 'quality', 'trash', 'cluster', 'releases', 'games', 'exams'];
     return (validTabs.includes(saved as TabType)) ? (saved as TabType) : 'generator';
   });
   const adminOnlyTabs: TabType[] = ['users', 'stats', 'trash'];
@@ -203,6 +205,7 @@ export const App: React.FC = () => {
     ...(isStaff ? [{ id: 'taxonomy', label: 'Предметы и темы', icon: Layers }] : []),
     { id: 'generator', label: 'Генератор билетов', icon: Sparkles },
     { id: 'saved_tickets', label: 'Архив билетов', icon: FileCheck2 },
+    { id: 'exams', label: 'Билеты классу', icon: Rocket },
     ...(isStaff ? [{ id: 'bulk_import', label: 'Массовый импорт', icon: Upload }, { id: 'quality', label: 'Качество банка', icon: ShieldCheck }] : []),
     ...(isOwner ? [{ id: 'cluster', label: 'Экзамен-кластер', icon: BookOpen }] : []),
     ...(isAdmin ? [{ id: 'admin', label: 'Администрирование', icon: Users }] : []),
@@ -213,6 +216,7 @@ export const App: React.FC = () => {
     { title: 'Билеты', items: [
       { id: 'generator', label: 'Генератор билетов', icon: Sparkles },
       { id: 'saved_tickets', label: 'Архив билетов', icon: FileCheck2 },
+      { id: 'exams', label: 'Билеты классу', icon: Rocket },
     ] },
     { title: 'Вопросы', items: [
       { id: 'questions', label: 'Банк вопросов', icon: FileQuestion },
@@ -574,6 +578,7 @@ export const App: React.FC = () => {
             {currentTab === 'quality' && isStaff && <QualityView />}
             {currentTab === 'trash' && <TrashView />}
             {currentTab === 'cluster' && isOwner && <ClusterExam />}
+            {currentTab === 'exams' && <ExamsView />}
             {currentTab === 'releases' && <ReleasesView />}
             {currentTab === 'games' && <GamesView isOwner={isOwner} canHost={isGameOnly || isAdmin} />}
           </>

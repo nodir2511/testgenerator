@@ -12,6 +12,7 @@ import { saveAs } from 'file-saver';
 import { isClusterBatch, clusterVariantsFromBatch } from '../lib/clusterStore';
 import {
   FileCheck2,
+  Rocket,
   Download,
   Trash2,
   ChevronDown,
@@ -459,6 +460,11 @@ const BatchCard: React.FC<{
                 return buildTicketsFile(batch.title, ts, subjName || 'Экзамен', lang, await keyArchiveExtras(batch.title, ts, subjName, { subjectId: batch.subject_id, params: p }, lang));
               }}
             />
+          )}
+          {!cluster && (
+            <Button variant="secondary" className="bg-white" icon={Rocket} onClick={() => { window.location.hash = `exams/${batch.id}`; }}>
+              Запустить классу
+            </Button>
           )}
           {!cluster && hasKeyTemplate(subjName) && (
             <Button variant="secondary" className="bg-white" onClick={onKey} disabled={busyId === `${batch.id}-key`}>

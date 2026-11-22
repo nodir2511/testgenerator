@@ -1,10 +1,11 @@
 import React from 'react';
-import { CheckCircle2, Loader2, Download, ChevronDown, Share2, X } from 'lucide-react';
+import { Rocket, CheckCircle2, Loader2, Download, ChevronDown, Share2, X } from 'lucide-react';
 import { buildTicketsFile, keyArchiveExtras } from '../../lib/exportLazy';
 import { isEnglishName, plural } from '../../lib/generatorHelpers';
 import { SendToTelegramButton } from '../SendToTelegramButton';
 import { DownloadButton, type Lang } from '../DownloadButton';
 import { Button } from '../ui';
+import { canLaunchBatch } from '../../lib/examView';
 import { BatchTopicsBar, BatchVariants } from '../BatchEditor';
 
 interface GeneratedBatchPanelProps {
@@ -83,6 +84,11 @@ export const GeneratedBatchPanel: React.FC<GeneratedBatchPanelProps> = ({
           await keyArchiveExtras(generatedBatch.title, generatedBatch.tickets, generatedSubjectName, selectionOf(), lang)
         )}
       />
+      {canLaunchBatch(generatedBatch) && (
+        <Button variant="secondary" className="bg-white" icon={Rocket} onClick={() => { window.location.hash = `exams/${generatedBatch.id}`; }}>
+          Запустить классу
+        </Button>
+      )}
       {canShare && (
         <Button variant="secondary" className="bg-white" onClick={handleShareTickets} disabled={isSharing}>
           {isSharing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}

@@ -1,0 +1,88 @@
+// Чистые функции раздела «Билеты классу»: состояние запуска, сводка, строки таблицы. Без обращений к базе.
+
+type Dated = { finished_at: string | null; deadline_at: string };
+export type LinkState = 'open' | 'closed' | 'expired';
+export type AttemptState = 'finished' | 'running' | 'timeout';
+
+export function buildExamUrl(bot: string | undefined, code: string): string {
+  return bot ? `https://t.me/${bot}?start=exam_${code}` : '';
+}
+
+export function linkState(l: { closed_at: string | null; closes_at: string }, now: number): LinkState {
+  if (l.closed_at) return 'closed';
+  return Date.parse(l.closes_at) > now ? 'open' : 'expired';
+}
+
+export function attemptState(a: Dated, now: number): AttemptState {
+  if (a.finished_at) return 'finished';
+  return Date.parse(a.deadline_at) > now ? 'running' : 'timeout';
+}
+
+export function remainingMinutes(deadline: string, now: number): number {
+  return Math.max(0, Math.ceil((Date.parse(deadline) - now) / 60_000));
+}
+
+export interface AttemptCounts { finished: number; running: number; timeout: number }
+
+export function countAttempts(attempts: Dated[], now: number): AttemptCounts {
+  const c: AttemptCounts = { finished: 0, running: 0, timeout: 0 };
+  for (const a of attempts) c[attemptState(a, now)]++;
+  return c;
+}
+
+export function summaryText(c: AttemptCounts): string {
+  if (c.finished + c.running + c.timeout === 0) return 'пока никто не начал';
+  return `сдали ${c.finished}, идут ${c.running}`;
+}
+
+/** Открытые запуски сверху, внутри групп — новые сверху */
+export function sortLinks<T extends { closed_at: string | null; closes_at: string; created_at: string }>(rows: T[], now: number): T[] {
+  const rank = (r: T) => (linkState(r, now) === 'open' ? 0 : 1);
+  return [...rows].sort((a, b) => rank(a) - rank(b) || Date.parse(b.created_at) - Date.parse(a.created_at));
+}
+
+export function formatScore(score: number | null, max: number | null): string {
+  return score == null || max == null ? '' : `${score} / ${max}`;
+}
+
+export interface AttemptInput extends Dated {
+  id: string;
+  student_name: string;
+  tg_username: string | null;
+  tg_name: string | null;
+  ticket: { ticket_number: number } | null;
+  score: number | null;
+  max_score: number | null;
+}
+export interface AttemptRowView {
+  id: string;
+  name: string;
+  account: string;
+  variant: string;
+  score: string;
+  status: AttemptState;
+  /** Для идущих и просроченных — пояснение вместо баллов */
+  note: string;
+  finishedAt: string | null;
+}
+
+export function mapAttemptRow(a: AttemptInput, now: number): AttemptRowView {
+  const status = attemptState(a, now);
+  const note = status === 'running' ? `идёт, осталось ${remainingMinutes(a.deadline_at, now)} мин`
+    : status === 'timeout' ? 'время вышло, не сдал' : '';
+  return {
+    id: a.id,
+    name: a.student_name,
+    account: a.tg_username ? `@${a.tg_username}` : (a.tg_name ?? ''),
+    variant: a.ticket ? String(a.ticket.ticket_number) : '',
+    score: formatScore(a.score, a.max_score),
+    status,
+    note,
+    finishedAt: a.finished_at,
+  };
+}
+
+/** Кластерные наборы классу запускать нельзя */
+export function canLaunchBatch(b: { generation_params?: any }): boolean {
+  return b?.generation_params?.source !== 'cluster';
+}
