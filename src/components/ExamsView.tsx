@@ -39,7 +39,7 @@ export const ExamsView: React.FC = () => {
     queryKey: [...EXAM_LINKS_KEY, isOwner],
     queryFn: () => fetchExamLinks(isOwner),
     // пока есть открытые запуски, цифры «сдали / идут» обновляются сами
-    refetchInterval: (q) => ((q.state.data as ExamLinkRow[] | undefined)?.some((l) => linkState(l, Date.now()) === 'open') ? 10_000 : false),
+    refetchInterval: (q) => ((q.state.data as ExamLinkRow[] | undefined)?.some((l) => ['open', 'waiting'].includes(linkState(l, Date.now()))) ? 10_000 : false),
     meta: { action: 'Не удалось загрузить запуски' },
   });
 
@@ -82,11 +82,11 @@ export const ExamsView: React.FC = () => {
                     <div className="text-sm text-slate-600 flex flex-wrap gap-x-3">
                       {l.batch?.subject?.name && <span>{l.batch.subject.name}</span>}
                       <span>до {fmtDate(l.closes_at)}</span>
-                      <span>{summaryText(l.counts)}</span>
+                      <span>{summaryText(l.counts, state)}</span>
                       {isOwner && l.creator && <span>Автор: {l.creator.full_name || l.creator.email}</span>}
                     </div>
                   </div>
-                  <Badge tone={state === 'open' ? 'success' : 'neutral'}>{state === 'open' ? 'Идёт' : 'Закрыт'}</Badge>
+                  <Badge tone={state === 'open' ? 'success' : state === 'waiting' ? 'info' : 'neutral'}>{state === 'open' ? 'Идёт' : state === 'waiting' ? 'Ожидание' : 'Закрыт'}</Badge>
                   {l.review_sent_at && <Badge tone="info">разбор отправлен</Badge>}
                   <ChevronDown className={`w-5 h-5 text-slate-500 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                 </button>

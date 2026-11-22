@@ -17,6 +17,8 @@ export interface ExamLink {
   closed_at: string | null;
   duration_min: number;
   review_sent_at: string | null;
+  /** Момент старта сессии (с отсчётом); null — преподаватель ещё не нажал «Начать» */
+  session_start_at: string | null;
 }
 
 export interface ExamLinkRow extends ExamLink {
@@ -26,7 +28,7 @@ export interface ExamLinkRow extends ExamLink {
   counts: AttemptCounts;
 }
 
-export type Attempt = AttemptInput & { code: string; started_at: string };
+export type Attempt = AttemptInput & { code: string; started_at: string; ticket_id: string | null; lang: string };
 
 // Тот же запасной бот, что в мини-приложении (src/tg/TgApp.tsx)
 const BOT = (import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string | undefined) || 'testgenerrepbot';
@@ -47,21 +49,34 @@ export async function closeExamLink(code: string): Promise<void> {
   if (error) throw error;
 }
 
+/** «Начать»: старт через 3 секунды у всех сразу, minutes — 5..45; проверяет база */
+export async function startSession(code: string, minutes: number): Promise<ExamLink> {
+  const { data, error } = await supabase.rpc('exam_session_start', { p_code: code, p_minutes: minutes });
+  if (error) throw error;
+  return data as ExamLink;
+}
+
+/** Смена варианта ученику до старта сессии */
+export async function setAttemptVariant(attemptId: string, ticketId: string): Promise<void> {
+  const { error } = await supabase.rpc('exam_attempt_set_variant', { p_attempt_id: attemptId, p_ticket_id: ticketId });
+  if (error) throw error;
+}
+
 /** Свои запуски (главный админ — все; фильтрует база), открытые сверху, с названием набора, предметом и числом попыток */
 export async function fetchExamLinks(withAuthors = false): Promise<ExamLinkRow[]> {
   const { data, error } = await supabase
     .from('exam_links')
-    .select('code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, batch:ticket_batches(title, generation_params, subject:subjects(name))')
+    .select('code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, session_start_at, batch:ticket_batches(title, generation_params, subject:subjects(name))')
     .order('created_at', { ascending: false })
     .limit(200);
   if (error) throw error;
   const links = (data ?? []) as any[];
   const codes = links.map((l) => l.code);
-  const byCode = new Map<string, { finished_at: string | null; deadline_at: string }[]>();
+  const byCode = new Map<string, { finished_at: string | null }[]>();
   if (codes.length) {
     // id для постраничного чтения — поле id попытки
-    const { data: att, error: e2 } = await fetchAllPages<{ id: string; code: string; finished_at: string | null; deadline_at: string }>(
-      () => supabase.from('exam_attempts').select('id, code, finished_at, deadline_at').in('code', codes),
+    const { data: att, error: e2 } = await fetchAllPages<{ id: string; code: string; finished_at: string | null }>(
+      () => supabase.from('exam_attempts').select('id, code, finished_at').in('code', codes),
     );
     if (e2) throw e2;
     for (const a of att ?? []) {
@@ -81,14 +96,14 @@ export async function fetchExamLinks(withAuthors = false): Promise<ExamLinkRow[]
     } catch { /* имена не обязательны */ }
   }
   const now = Date.now();
-  return sortLinks(links.map((l) => ({ ...l, creator: authors.get(l.created_by) ?? null, counts: countAttempts(byCode.get(l.code) ?? [], now) })) as ExamLinkRow[], now);
+  return sortLinks(links.map((l) => ({ ...l, creator: authors.get(l.created_by) ?? null, counts: countAttempts(byCode.get(l.code) ?? [], now, l) })) as ExamLinkRow[], now);
 }
 
 /** Попытки одного запуска: имя, аккаунт Telegram, номер билета, баллы */
 export async function fetchAttempts(code: string): Promise<Attempt[]> {
   const { data, error } = await supabase
     .from('exam_attempts')
-    .select('id, code, student_name, tg_username, tg_name, started_at, deadline_at, finished_at, score, max_score, ticket:tickets(ticket_number)')
+    .select('id, code, ticket_id, lang, student_name, tg_username, tg_name, started_at, finished_at, score, max_score, ticket:tickets(ticket_number)')
     .eq('code', code)
     .order('started_at', { ascending: true })
     .limit(1000);
