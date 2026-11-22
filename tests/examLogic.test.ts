@@ -76,6 +76,8 @@ describe('reviewMistakes', () => {
       { tqId: 'c', snapshot: {}, answer: null, points: 1, max: 2 },
       { tqId: 'd', snapshot: { empty: true }, answer: null, points: 0, max: 0 },
     ];
+    const withEmpty = [{ tqId: 'e', snapshot: { empty: true }, answer: null, points: 0, max: 0 }, { tqId: 'z', snapshot: {}, answer: null, points: 0, max: 1 }];
+    expect(reviewMistakes(withEmpty).map((x) => x.n)).toEqual([1]); // пустое место не занимает номер
     expect(reviewMistakes(r).map((x) => [x.n, x.item.tqId])).toEqual([[2, 'b'], [3, 'c']]);
   });
 });

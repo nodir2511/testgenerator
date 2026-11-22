@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { FormattedText } from '../components/FormulaEditor';
 import { isEmptyQ, matchingAnswer, normalizeOpen, pickText, sortByOrder, type Answer, type Lang } from './examLogic';
 
@@ -48,22 +48,9 @@ function OptionBody({ o, lang }: { o: any; lang: Lang }) {
   );
 }
 
-/** Поле числа: черновик хранится у себя, ответ уходит по blur и через паузу после набора */
-function OpenField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+/** Поле числа: каждое изменение сразу идёт наверх (там ответ учитывается в счётчике и сдаче), отправка на сервер — с паузой или по blur */
+function OpenField({ value, onChange }: { value: string; onChange: (v: string, deferred: boolean) => void }) {
   const [draft, setDraft] = useState(value);
-  const sent = useRef(value);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const latest = useRef(onChange);
-  latest.current = onChange;
-
-  const flush = (v: string) => {
-    clearTimeout(timer.current);
-    if (v !== sent.current) { sent.current = v; latest.current(v); }
-  };
-  const draftRef = useRef(value);
-  draftRef.current = draft;
-  useEffect(() => () => flush(draftRef.current), []); // уход к другому вопросу не теряет набранное
-
   return (
     <input
       className="exam-input"
@@ -75,17 +62,16 @@ function OpenField({ value, onChange }: { value: string; onChange: (v: string) =
       onChange={(e) => {
         const v = normalizeOpen(e.target.value);
         setDraft(v);
-        clearTimeout(timer.current);
-        timer.current = setTimeout(() => flush(v), 700);
+        onChange(v, true);
       }}
-      onBlur={() => flush(draft)}
+      onBlur={() => onChange(draft, false)}
     />
   );
 }
 
 /** Вопрос для ответа: варианты, пары, число. Каждое изменение сразу уходит наверх (там сохраняется на сервере). */
 export function ExamQuestion({ snap, n, lang, prevPassageId, answer, unsaved, onAnswer }: CommonProps & {
-  answer: Answer | undefined; unsaved: boolean; onAnswer: (a: Answer) => void;
+  answer: Answer | undefined; unsaved: boolean; onAnswer: (a: Answer, deferred?: boolean) => void;
 }) {
   if (isEmptyQ(snap)) {
     return <div className="exam-card"><b>{n}.</b> <span className="hint">Это место в билете пустое — пропустите его.</span></div>;
@@ -143,7 +129,7 @@ export function ExamQuestion({ snap, n, lang, prevPassageId, answer, unsaved, on
 
       {snap.type === 'open' && (
         <div style={{ marginTop: 10 }}>
-          <OpenField value={typeof answer === 'string' ? answer : ''} onChange={(v) => onAnswer(v === '' ? null : v)} />
+          <OpenField value={typeof answer === 'string' ? answer : ''} onChange={(v, deferred) => onAnswer(v === '' ? null : v, deferred)} />
         </div>
       )}
 

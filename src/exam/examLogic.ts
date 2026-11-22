@@ -73,7 +73,12 @@ export function pickText(o: any, lang: Lang, prefix: 'text' | 'content' = 'text'
 /** Только вопросы, где потеряны баллы; n — номер в билете */
 export function reviewMistakes(items: ReviewItem[]): Array<{ n: number; item: ReviewItem }> {
   const out: Array<{ n: number; item: ReviewItem }> = [];
-  items.forEach((item, i) => { if (item.points < item.max) out.push({ n: i + 1, item }); });
+  let n = 0; // номер среди непустых мест — тот же, что видел ученик в билете
+  for (const item of items) {
+    if (isEmptyQ(item.snapshot)) continue;
+    n++;
+    if (item.points < item.max) out.push({ n, item });
+  }
   return out;
 }
 

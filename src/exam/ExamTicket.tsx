@@ -22,9 +22,8 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
 
   const answersRef = useRef(answers);
   const unsavedRef = useRef(unsaved);
-  unsavedRef.current = unsaved;
   const ver = useRef<Record<string, number>>({});
-  const flying = useRef(new Set<string>());
+  const flying = useRef(new Map<string, Promise<void>>()); // сохранения в полёте: сдача ждёт их
   const submittingRef = useRef(false);
   const doneRef = useRef(false);
   const onFinishedRef = useRef(onFinished);
@@ -35,13 +34,14 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
   const left = remainingMs(deadline, offset ?? 0, now);
   const { answered, total } = useMemo(() => countAnswered(questions, answers), [questions, answers]);
 
-  const markUnsaved = (tqId: string, on: boolean) =>
-    setUnsaved((prev) => {
-      if (prev.has(tqId) === on) return prev;
-      const next = new Set(prev);
-      if (on) next.add(tqId); else next.delete(tqId);
-      return next;
-    });
+  // Набор неотправленных ведём синхронно в ref (его читает сдача), в state — для показа
+  const markUnsaved = (tqId: string, on: boolean) => {
+    if (unsavedRef.current.has(tqId) === on) return;
+    const next = new Set(unsavedRef.current);
+    if (on) next.add(tqId); else next.delete(tqId);
+    unsavedRef.current = next;
+    setUnsaved(next);
+  };
 
   const finish = useCallback(async (auto: boolean) => {
     if (submittingRef.current || doneRef.current) return;
@@ -49,11 +49,13 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
     setSubmitting(true);
     setNotice('');
     try {
-      // Сначала дослать то, что не успело сохраниться (одна попытка), затем сдать
-      for (const tqId of Object.keys(ver.current)) {
-        if (!unsavedRef.current.has(tqId) || flying.current.has(tqId)) continue; // в полёте — досылает сам send
-        try { await apiSave(code, tqId, answersRef.current[tqId] ?? null); } catch { /* сервер сдаст с тем, что сохранено */ }
-      }
+      // Сдача идёт после сохранений: сначала ждём те, что в полёте (не дольше 3 с), потом досылаем неотправленные
+      const settle = (ps: Promise<unknown>[]) => Promise.race([Promise.allSettled(ps), new Promise((r) => setTimeout(r, 3000))]);
+      timers.current.forEach(clearTimeout); // отложенные отправки заменяет досылка ниже
+      timers.current.clear();
+      await settle([...flying.current.values()]);
+      const rest = Object.keys(ver.current).filter((id) => unsavedRef.current.has(id) && !flying.current.has(id));
+      await settle(rest.map((id) => apiSave(code, id, answersRef.current[id] ?? null).catch(() => undefined)));
       const r = await apiSubmit(code);
       doneRef.current = true;
       onFinishedRef.current(r);
@@ -66,32 +68,42 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
     }
   }, [code]);
 
-    const send = useCallback(async (tqId: string) => {
-    if (flying.current.has(tqId) || doneRef.current) return;
-    flying.current.add(tqId);
-    try {
-      for (;;) {
-        const v = ver.current[tqId] ?? 0;
-        const r = await apiSave(code, tqId, answersRef.current[tqId] ?? null);
-        if (!r.ok) { void finish(true); return; } // срок вышел или запуск закрыт — сдаём то, что сохранено
-        if ((ver.current[tqId] ?? 0) === v) { markUnsaved(tqId, false); setNotice(''); return; }
+  const send = useCallback((tqId: string): Promise<void> => {
+    if (flying.current.has(tqId) || doneRef.current) return flying.current.get(tqId) ?? Promise.resolve();
+    const p = (async () => {
+      try {
+        for (;;) {
+          const v = ver.current[tqId] ?? 0;
+          const r = await apiSave(code, tqId, answersRef.current[tqId] ?? null);
+          if (!r.ok) { void finish(true); return; } // срок вышел или запуск закрыт — сдаём то, что сохранено
+          if ((ver.current[tqId] ?? 0) === v) { markUnsaved(tqId, false); setNotice(''); return; }
+        }
+      } catch (e) {
+        if (e instanceof ExamApiError && e.status === 401) setNotice('Сессия Telegram устарела: ответ не сохранён. Закройте страницу и откройте ссылку на билет заново.');
+        else if (e instanceof ExamApiError && !e.retryable) { markUnsaved(tqId, false); setNotice(e.message); }
+        // сеть: остаётся «не сохранено», повтор по таймеру
+      } finally {
+        flying.current.delete(tqId);
       }
-    } catch (e) {
-      if (e instanceof ExamApiError && e.status === 401) setNotice('Сессия Telegram устарела: ответ не сохранён. Закройте страницу и откройте ссылку на билет заново.');
-      else if (e instanceof ExamApiError && !e.retryable) { markUnsaved(tqId, false); setNotice(e.message); }
-      // сеть: остаётся «не сохранено», повтор по таймеру
-    } finally {
-      flying.current.delete(tqId);
-    }
+      })();
+    flying.current.set(tqId, p);
+    return p;
   }, [code, finish]);
 
-  const onAnswer = (tqId: string, a: Answer) => {
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  useEffect(() => { const m = timers.current; return () => m.forEach(clearTimeout); }, []);
+
+  // deferred — набор числа: ответ учитывается сразу, на сервер уходит после паузы (или по blur)
+  const onAnswer = (tqId: string, a: Answer, deferred = false) => {
     const next = { ...answersRef.current, [tqId]: a };
     answersRef.current = next;
     setAnswers(next);
     ver.current[tqId] = (ver.current[tqId] ?? 0) + 1;
     markUnsaved(tqId, true);
-    void send(tqId);
+    clearTimeout(timers.current.get(tqId));
+    timers.current.delete(tqId);
+    if (deferred) timers.current.set(tqId, setTimeout(() => { timers.current.delete(tqId); void send(tqId); }, 700));
+    else void send(tqId);
   };
 
   // Таймер
@@ -158,7 +170,7 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
       {q && (
         <ExamQuestion
           key={q.tqId} snap={q.snapshot} n={pos + 1} lang={lang} prevPassageId={null}
-          answer={answers[q.tqId]} unsaved={unsaved.has(q.tqId)} onAnswer={(a) => onAnswer(q.tqId, a)}
+          answer={answers[q.tqId]} unsaved={unsaved.has(q.tqId)} onAnswer={(a, d) => onAnswer(q.tqId, a, d)}
         />
       )}
 
