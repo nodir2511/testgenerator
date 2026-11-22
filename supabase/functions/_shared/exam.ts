@@ -226,3 +226,39 @@ ${piece}` : piece;
   flush();
   return parts;
 }
+
+// ── Общий старт для класса: зал ожидания, отсчёт, единое время окончания ──
+export const EXAM_MIN_MINUTES = 5;
+export const EXAM_MAX_MINUTES = 45;
+export const EXAM_COUNTDOWN_SEC = 3;
+export const EXAM_POLL_MS = 3000;
+export type SessionPhase = 'waiting' | 'countdown' | 'running' | 'ended';
+export interface SessionLink { session_start_at: string | null; duration_min: number }
+
+/** Конец сессии: старт + минуты; null, если сессия не начата. */
+export function sessionEnd(link: SessionLink): Date | null {
+  if (!link.session_start_at) return null;
+  const start = Date.parse(link.session_start_at);
+  if (Number.isNaN(start)) return null;
+  return new Date(start + link.duration_min * 60_000);
+}
+
+export function sessionPhase(link: SessionLink, now: Date): SessionPhase {
+  const end = sessionEnd(link);
+  if (!end) return 'waiting';
+  const t = now.getTime();
+  if (t < Date.parse(link.session_start_at as string)) return 'countdown';
+  return t < end.getTime() ? 'running' : 'ended';
+}
+
+/** Целое число минут в пределах 5..45 или null. */
+export function clampMinutes(v: unknown): number | null {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  if (typeof n !== 'number' || !Number.isInteger(n)) return null;
+  return n >= EXAM_MIN_MINUTES && n <= EXAM_MAX_MINUTES ? n : null;
+}
+
+/** Цифра отсчёта 3,2,1; 0 — отсчёт закончен. */
+export function countdownDigit(startsAtMs: number, nowMs: number): number {
+  return Math.min(EXAM_COUNTDOWN_SEC, Math.max(0, Math.ceil((startsAtMs - nowMs) / 1000)));
+}

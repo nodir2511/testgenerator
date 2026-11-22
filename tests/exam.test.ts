@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   EXAM_MINUTES, EXAM_LINK_HOURS, publicSnapshot, reviewSnapshot, parseOpen, scoreAttempt, pickVariant, examCode,
   parseStartPayload, deadlineOf, attemptState, tgPlain, reviewLines, chunkLines, examLang, reviewHead, reviewButtonText, reviewJustSent, REVIEW_RESEND_GUARD_MS,
+  EXAM_MIN_MINUTES, EXAM_MAX_MINUTES, EXAM_COUNTDOWN_SEC, EXAM_POLL_MS, sessionEnd, sessionPhase, clampMinutes, countdownDigit,
 } from '../supabase/functions/_shared/exam';
 
 const test = (id = 'q1', right = 'o2') => ({
@@ -264,5 +265,45 @@ describe('chunkLines', () => {
     for (const p of parts) expect(p.length).toBeLessThanOrEqual(3800);
     expect(parts.join('\n').split('\n').length).toBe(100);
     expect(chunkLines(['a', 'b'])).toEqual(['a\nb']);
+  });
+});
+
+describe('сессия: зал ожидания и общий старт', () => {
+  const T0 = Date.parse('2026-11-22T12:00:00Z');
+  const link = (startMs: number | null, min = 30) => ({ session_start_at: startMs === null ? null : new Date(startMs).toISOString(), duration_min: min });
+
+  it('константы', () => {
+    expect([EXAM_MIN_MINUTES, EXAM_MAX_MINUTES, EXAM_COUNTDOWN_SEC, EXAM_POLL_MS]).toEqual([5, 45, 3, 3000]);
+  });
+
+  it('sessionEnd', () => {
+    expect(sessionEnd(link(null))).toBeNull();
+    expect(sessionEnd(link(T0, 30))?.toISOString()).toBe('2026-11-22T12:30:00.000Z');
+  });
+
+  it('sessionPhase', () => {
+    expect(sessionPhase(link(null), new Date(T0))).toBe('waiting');
+    expect(sessionPhase(link(T0 + 2000), new Date(T0))).toBe('countdown');
+    expect(sessionPhase(link(T0 - 10_000), new Date(T0))).toBe('running');
+    expect(sessionPhase(link(T0 - 31 * 60_000), new Date(T0))).toBe('ended');
+    expect(sessionPhase(link(T0), new Date(T0))).toBe('running');
+    expect(sessionPhase(link(T0 - 30 * 60_000), new Date(T0))).toBe('ended');
+  });
+
+  it('clampMinutes', () => {
+    expect(clampMinutes(30)).toBe(30);
+    expect(clampMinutes('30')).toBe(30);
+    expect(clampMinutes(5)).toBe(5);
+    expect(clampMinutes(45)).toBe(45);
+    for (const v of [4, 46, 30.5, 'abc', null]) expect(clampMinutes(v)).toBeNull();
+  });
+
+  it('countdownDigit', () => {
+    expect(countdownDigit(T0 + 2500, T0)).toBe(3);
+    expect(countdownDigit(T0 + 1500, T0)).toBe(2);
+    expect(countdownDigit(T0 + 500, T0)).toBe(1);
+    expect(countdownDigit(T0, T0)).toBe(0);
+    expect(countdownDigit(T0, T0 + 5000)).toBe(0);
+    expect(countdownDigit(T0 + 9000, T0)).toBe(3);
   });
 });
