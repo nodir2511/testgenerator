@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  canLaunchByUser, sessionEndOf, canStartSession, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, canLaunchBatch, formatScore, summaryText, reviewSendState, reviewConfirmText, reviewResultText,
+  canLaunchByUser, sessionEndOf, canStartSession, finishedInSession, startedMinutesNotice, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, canLaunchBatch, formatScore, summaryText, reviewSendState, reviewConfirmText, reviewResultText,
 } from '../src/lib/examView';
 
 const NOW = Date.parse('2026-11-22T10:00:00.000Z');
@@ -26,6 +26,26 @@ describe('sessionEndOf', () => {
   it('старт + минуты', () => expect(sessionEndOf(L({ session_start_at: iso(-5), duration_min: 30 }))).toBe(iso(25)));
   it('закрыт раньше конца — конец по закрытию', () => expect(sessionEndOf(L({ session_start_at: iso(-5), closed_at: iso(-1) }))).toBe(iso(-1)));
   it('закрыт позже конца — конец по времени', () => expect(sessionEndOf(L({ session_start_at: iso(-5), closed_at: iso(40) }))).toBe(iso(25)));
+  it('срок ссылки кончается раньше конца сессии — конец по сроку ссылки', () => {
+    expect(sessionEndOf(L({ session_start_at: iso(-5), duration_min: 30, closes_at: iso(10) }))).toBe(iso(10));
+  });
+  it('минимум из трёх', () => {
+    expect(sessionEndOf(L({ session_start_at: iso(-5), duration_min: 30, closes_at: iso(10), closed_at: iso(3) }))).toBe(iso(3));
+  });
+});
+
+describe('finishedInSession: закрытые в ожидании не считаются начавшими', () => {
+  it('сдал после старта', () => expect(finishedInSession(iso(-1), iso(-5))).toBe(true));
+  it('закрыта до старта', () => expect(finishedInSession(iso(-10), iso(-5))).toBe(false));
+  it('ровно в момент старта — не в сессии (как на сервере)', () => expect(finishedInSession(iso(-5), iso(-5))).toBe(false));
+  it('сессия не начиналась', () => expect(finishedInSession(iso(-1), null)).toBe(false));
+  it('не закончена', () => expect(finishedInSession(null, iso(-5))).toBe(false));
+});
+
+describe('startedMinutesNotice', () => {
+  it('сервер вернул другую длительность — сообщение', () => expect(startedMinutesNotice(30, 20)).toBe('Сессия уже запущена на 20 мин'));
+  it('та же — ничего', () => expect(startedMinutesNotice(30, 30)).toBeNull());
+  it('нет числа — ничего', () => expect(startedMinutesNotice(30, undefined)).toBeNull());
 });
 
 describe('canStartSession', () => {
@@ -36,10 +56,15 @@ describe('canStartSession', () => {
 });
 
 describe('attemptState и остаток', () => {
-  it('сдана', () => expect(attemptState({ finished_at: iso(-5) }, NOW, iso(10))).toBe('finished'));
-  it('идёт', () => expect(attemptState({ finished_at: null }, NOW, iso(10))).toBe('running'));
-  it('время вышло, не сдана', () => expect(attemptState({ finished_at: null }, NOW, iso(-1))).toBe('timeout'));
-  it('сессия не начата — не «вышло»', () => expect(attemptState({ finished_at: null }, NOW, null)).toBe('running'));
+  const S = iso(-20);
+  it('сдана', () => expect(attemptState({ finished_at: iso(-5) }, NOW, iso(10), S)).toBe('finished'));
+  it('идёт', () => expect(attemptState({ finished_at: null }, NOW, iso(10), S)).toBe('running'));
+  it('время вышло, не сдана', () => expect(attemptState({ finished_at: null }, NOW, iso(-1), S)).toBe('timeout'));
+  it('сессия не начата — не «вышло»', () => expect(attemptState({ finished_at: null }, NOW, null, null)).toBe('running'));
+  it('закрыта в ожидании (до старта) — «не начал», не «сдал»', () => {
+    expect(attemptState({ finished_at: iso(-30) }, NOW, iso(10), S)).toBe('not_started');
+    expect(attemptState({ finished_at: iso(-30) }, NOW, null, null)).toBe('not_started');
+  });
   it('остаток округляется вверх и не уходит в минус', () => {
     expect(remainingMinutes(iso(10.2), NOW)).toBe(11);
     expect(remainingMinutes(iso(-3), NOW)).toBe(0);
@@ -49,16 +74,20 @@ describe('attemptState и остаток', () => {
 describe('сводка', () => {
   const attempts = [{ finished_at: iso(-1) }, { finished_at: null }, { finished_at: null }];
   it('идущая сессия: сдали и идут', () => {
-    expect(countAttempts(attempts, NOW, L({ session_start_at: iso(-5) }))).toEqual({ finished: 1, running: 2, timeout: 0 });
+    expect(countAttempts(attempts, NOW, L({ session_start_at: iso(-5) }))).toEqual({ finished: 1, running: 2, timeout: 0, notStarted: 0 });
   });
   it('сессия закончилась: несданные — «вышло», не «идут»', () => {
-    expect(countAttempts(attempts, NOW, L({ session_start_at: iso(-40) }))).toEqual({ finished: 1, running: 0, timeout: 2 });
+    expect(countAttempts(attempts, NOW, L({ session_start_at: iso(-40) }))).toEqual({ finished: 1, running: 0, timeout: 2, notStarted: 0 });
+  });
+  it('закрытые до старта не считаются «сдали»', () => {
+    expect(countAttempts([{ finished_at: iso(-10) }, { finished_at: iso(-1) }], NOW, L({ session_start_at: iso(-5) })))
+      .toEqual({ finished: 1, running: 0, timeout: 0, notStarted: 1 });
   });
   it('текст', () => {
-    expect(summaryText({ finished: 3, running: 2, timeout: 0 })).toBe('сдали 3, идут 2');
-    expect(summaryText({ finished: 0, running: 0, timeout: 0 })).toBe('пока никто не начал');
-    expect(summaryText({ finished: 0, running: 4, timeout: 0 }, 'waiting')).toBe('ждут: 4');
-    expect(summaryText({ finished: 0, running: 0, timeout: 0 }, 'waiting')).toBe('ждут: 0');
+    expect(summaryText({ finished: 3, running: 2, timeout: 0, notStarted: 0 })).toBe('сдали 3, идут 2');
+    expect(summaryText({ finished: 0, running: 0, timeout: 0, notStarted: 0 })).toBe('пока никто не начал');
+    expect(summaryText({ finished: 0, running: 4, timeout: 0, notStarted: 0 }, 'waiting')).toBe('ждут: 4');
+    expect(summaryText({ finished: 0, running: 0, timeout: 0, notStarted: 0 }, 'waiting')).toBe('ждут: 0');
   });
 });
 
@@ -95,6 +124,12 @@ describe('строка таблицы', () => {
   it('время вышло', () => expect(mapAttemptRow(run, NOW, L({ session_start_at: iso(-40) })).note).toBe('время вышло, баллы появятся после подсчёта'));
   it('запуск закрыт раньше конца: не «идёт»', () => {
     expect(mapAttemptRow(run, NOW, L({ session_start_at: iso(-18), closed_at: iso(-1) })).status).toBe('timeout');
+  });
+  it('закрыта в ожидании — «не начал», без баллов', () => {
+    const r = mapAttemptRow({ ...base, finished_at: iso(-25), score: 0, max_score: 40 }, NOW, link);
+    expect(r.status).toBe('not_started');
+    expect(r.note).toBe('не начал');
+    expect(r.score).toBe('');
   });
   it('до старта: ждёт, не «вышло»', () => {
     const r = mapAttemptRow(run, NOW, L());

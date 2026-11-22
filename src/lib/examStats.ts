@@ -1,4 +1,5 @@
 import { scoreAttempt, type ExamAnswers, type ExamQuestion } from '../../supabase/functions/_shared/exam';
+import { finishedInSession } from './examView';
 
 // Разбор по вопросам и ведомость для Excel. Чистые функции: без обращений к базе.
 
@@ -48,12 +49,13 @@ interface Acc {
   wrong: Map<string, number>;
 }
 
-export function questionStats(tickets: StatTicket[], attempts: StatAttempt[]): QuestionStat[] {
+/** sessionStartAt — session_start_at запуска: попытки, закрытые до старта (в ожидании), в разбор не входят */
+export function questionStats(tickets: StatTicket[], attempts: StatAttempt[], sessionStartAt: string | null): QuestionStat[] {
   const byTicket = new Map(tickets.map((t) => [t.id, t]));
   const groups = new Map<string, Acc>();
 
   for (const a of attempts) {
-    if (!a.finished_at) continue;
+    if (!finishedInSession(a.finished_at, sessionStartAt)) continue;
     const t = byTicket.get(a.ticket_id);
     if (!t) continue;
     const answers = (a.answers ?? {}) as ExamAnswers;
@@ -100,13 +102,17 @@ export function questionStats(tickets: StatTicket[], attempts: StatAttempt[]): Q
 
 export const SHEET_HEADER = ['Имя', 'Аккаунт', 'Вариант', 'Баллы', 'Максимум', '%', 'Статус'];
 
-/** Строки ведомости для write-excel-file: заголовок и по строке на каждую попытку. Баллы — сохранённые, иначе пересчёт по снимкам. */
-export function attemptsSheet(attempts: SheetAttempt[], tickets: StatTicket[]): Array<Array<{ value: string | number }>> {
+/**
+ * Строки ведомости для write-excel-file: заголовок и по строке на каждую попытку. Баллы — сохранённые, иначе пересчёт по снимкам.
+ * Закрытые до старта сессии (sessionStartAt) — «не начал», без баллов.
+ */
+export function attemptsSheet(attempts: SheetAttempt[], tickets: StatTicket[], sessionStartAt: string | null): Array<Array<{ value: string | number }>> {
   const byTicket = new Map(tickets.map((t) => [t.id, t]));
   const rows: Array<Array<{ value: string | number }>> = [SHEET_HEADER.map((value) => ({ value }))];
   for (const a of attempts) {
     const t = byTicket.get(a.ticket_id);
-    const done = !!a.finished_at;
+    const done = finishedInSession(a.finished_at, sessionStartAt);
+    const status = done ? 'сдал' : a.finished_at ? 'не начал' : 'не сдал';
     let score: number | null = done ? (a.score ?? null) : null;
     let max: number | null = done ? (a.max_score ?? null) : null;
     if (done && (score == null || max == null) && t) {
@@ -122,7 +128,7 @@ export function attemptsSheet(attempts: SheetAttempt[], tickets: StatTicket[]): 
       { value: score ?? '' },
       { value: max ?? '' },
       { value: pct },
-      { value: done ? 'сдал' : 'не сдал' },
+      { value: status },
     ]);
   }
   return rows;

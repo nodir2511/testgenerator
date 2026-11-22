@@ -1,11 +1,11 @@
 import React, { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Play } from 'lucide-react';
-import { EXAM_LINKS_KEY, examAttemptsKey, examTicketsKey, fetchAttempts, fetchExamTickets, setAttemptVariant, startSession, type ExamLinkRow } from '../../lib/examLinks';
-import { canStartSession, langName } from '../../lib/examView';
+import { EXAM_LINKS_KEY, examAttemptsKey, examTicketNumbersKey, fetchAttempts, fetchExamTicketNumbers, setAttemptVariant, startSession, type ExamLinkRow } from '../../lib/examLinks';
+import { canStartSession, langName, startedMinutesNotice } from '../../lib/examView';
 import { EXAM_MAX_MINUTES, EXAM_MIN_MINUTES, EXAM_POLL_MS } from '../../../supabase/functions/_shared/exam';
 import { confirmAction } from '../../lib/confirm';
-import { notifyError } from '../../lib/errors';
+import { notifyError, notifyInfo } from '../../lib/errors';
 import { Button, inputClass } from '../ui';
 
 const DEFAULT_MINUTES = 30;
@@ -25,8 +25,8 @@ export const SessionLobby: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
     meta: { action: 'Не удалось загрузить список учеников' },
   });
   const { data: tickets } = useQuery({
-    queryKey: examTicketsKey(link.batch_id),
-    queryFn: () => fetchExamTickets(link.batch_id),
+    queryKey: examTicketNumbersKey(link.batch_id),
+    queryFn: () => fetchExamTicketNumbers(link.batch_id),
     meta: { action: 'Не удалось загрузить билеты набора' },
   });
   const attempts = data ?? [];
@@ -43,7 +43,10 @@ export const SessionLobby: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
 
   const start = useMutation({
     mutationFn: () => startSession(link.code, minutes),
-    onSuccess: () => {
+    onSuccess: (started) => {
+      // Сессию уже запустили раньше (другая вкладка, двойное нажатие) — время прежнее
+      const notice = startedMinutesNotice(minutes, started?.duration_min);
+      if (notice) notifyInfo(notice);
       queryClient.invalidateQueries({ queryKey: EXAM_LINKS_KEY });
       refresh();
     },
@@ -58,7 +61,7 @@ export const SessionLobby: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
     try {
       if (!(await confirmAction({
         title: `Начать для ${attempts.length} ${studentsWord(attempts.length)}?`,
-        message: `Время: ${minutes} минут. Ученики сразу получат отсчёт 3-2-1. Начать?`,
+        message: `Время: ${minutes} минут. Через несколько секунд у учеников пойдёт отсчёт 3-2-1. Начать?`,
         confirmLabel: 'Начать',
         cancelLabel: 'Отмена',
       }))) return;

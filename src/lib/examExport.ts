@@ -7,10 +7,10 @@ export function examExcelName(title: string, date = new Date()): string {
   return `Билеты классу — ${safe} — ${date.toISOString().slice(0, 10)}.xlsx`;
 }
 
-export async function exportExamToExcel(title: string, attempts: SheetAttempt[], tickets: StatTicket[]): Promise<void> {
+export async function exportExamToExcel(title: string, attempts: SheetAttempt[], tickets: StatTicket[], sessionStartAt: string | null): Promise<void> {
   const { default: writeExcelFile } = await import('write-excel-file/browser');
   const { saveAs } = await import('file-saver');
-  const [head, ...body] = attemptsSheet(attempts, tickets);
+  const [head, ...body] = attemptsSheet(attempts, tickets, sessionStartAt);
   const rows = [
     head.map((c) => ({ ...c, fontWeight: 'bold' as const, backgroundColor: '#6C5DD3', color: '#FFFFFF', align: 'center' as const })),
     ...body,

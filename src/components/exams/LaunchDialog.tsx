@@ -189,7 +189,7 @@ export const LaunchDialog: React.FC<{ initialBatchId?: string | null; onClose: (
         ) : (
           <>
             <p className="text-sm text-slate-600">
-              Отправьте ученикам ссылку или покажите QR-код. Ссылка действует 24 часа, на билет даётся {link.duration_min} минут, попытка одна.
+              Отправьте ученикам ссылку или покажите QR-код. Ссылка действует 24 часа, попытка одна. Время назначите вы при запуске сессии.
             </p>
             {url ? (
               <div className="flex flex-col items-center gap-3">

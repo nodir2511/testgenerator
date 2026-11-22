@@ -1,5 +1,5 @@
 // Чистая логика страницы /tg/exam (без React и браузера): таймер, формы ответов, разбор.
-import { countdownDigit } from '../../supabase/functions/_shared/exam';
+import { countdownDigit, EXAM_COUNTDOWN_SEC } from '../../supabase/functions/_shared/exam';
 
 export type Lang = 'ru' | 'tg';
 export type Answer = string | Record<string, string> | null;
@@ -114,19 +114,48 @@ export function reviewFailureKind(e: unknown): 'not_ready' | 'retry' | 'error' {
   return 'error';
 }
 
-/** Что показывать в зале по ответу сервера: ждать, отсчёт (3, 2, 1) или идти за билетом. Время — по часам сервера (offset). */
-export type LobbyView = { kind: 'waiting' } | { kind: 'countdown'; digit: number } | { kind: 'run' };
+/**
+ * Что показывать в зале по ответу сервера: ждать, «скоро начнём» (старт назначен, до него больше 3 с),
+ * отсчёт 3, 2, 1 (последние секунды) или идти за билетом. Время — по часам сервера (offset).
+ */
+export type LobbyView = { kind: 'waiting' } | { kind: 'soon' } | { kind: 'countdown'; digit: number } | { kind: 'run' };
 export function lobbyView(res: { state: string; attempt?: { ticketNumber?: number | null; startsAt?: string } }, offsetMs: number, clientNow: number = Date.now()): LobbyView {
   if (res.state === 'running') return { kind: 'run' };
   if (res.state !== 'countdown' || !res.attempt?.startsAt) return { kind: 'waiting' };
   const startsAt = Date.parse(res.attempt.startsAt);
   if (Number.isNaN(startsAt)) return { kind: 'waiting' };
-  const digit = countdownDigit(startsAt, clientNow + offsetMs);
+  const serverNow = clientNow + offsetMs;
+  // Сервер ставит старт с запасом (несколько секунд): цифры — только за последние EXAM_COUNTDOWN_SEC
+  if (startsAt - serverNow > EXAM_COUNTDOWN_SEC * 1000) return { kind: 'soon' };
+  const digit = countdownDigit(startsAt, serverNow);
   return digit === 0 ? { kind: 'run' } : { kind: 'countdown', digit };
 }
 
 export const waitText = (res: { state: string }): string =>
   res.state === 'countdown' ? 'Начинаем!' : 'Ждите, преподаватель начнёт сессию';
+
+/** Подпись под номером варианта в зале */
+export function lobbyWaitText(lv: LobbyView): string {
+  if (lv.kind === 'soon') return 'Скоро начнём…';
+  if (lv.kind === 'run' || lv.kind === 'countdown') return 'Начинаем!';
+  return 'Ждите, преподаватель начнёт сессию';
+}
+
+/** «Время: N мин» — когда преподаватель уже выбрал длительность (сервер прислал minutes) */
+export const lobbyMinutesText = (res: { minutes?: number | null }): string =>
+  typeof res.minutes === 'number' && res.minutes > 0 ? `Время: ${res.minutes} мин` : '';
+
+/** Ответ save: state 'waiting' — сервер ещё не считает сессию начатой (часы на границе старта) */
+export interface SaveResponse { ok: boolean; state?: string }
+export const SAVE_WAIT_RETRY_MS = 700;
+export const SAVE_WAIT_MAX_TRIES = 5;
+/** saved — записано; retry — повторить через SAVE_WAIT_RETRY_MS; finish — приём закрыт или время вышло, сдать; keep — не сдавать, оставить «не сохранено» */
+export function saveOutcome(r: SaveResponse): 'saved' | 'retry' | 'finish' | 'keep' {
+  if (r.ok) return 'saved';
+  if (r.state === 'waiting') return 'retry';
+  if (r.state === 'closed' || r.state === 'finished') return 'finish';
+  return 'keep';
+}
 
 /** Сколько минут осталось, для надписи «осталось N мин»: вверх, не меньше 1 */
 export const minutesLeft = (ms: number): number => Math.max(1, Math.ceil(ms / 60_000));
