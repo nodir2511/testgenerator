@@ -64,6 +64,7 @@ export const SCHEMA_FILES = [
   'question_nct_difficulty.sql',
   'passages.sql',
   'security_round5.sql',
+  'deleted_question_options.sql',
 ];
 
 /** Файлы с данными, а не со схемой: в тестовую базу не применяются */

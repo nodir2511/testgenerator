@@ -51,9 +51,23 @@ describe('вопросы: кто что видит', () => {
     expect(seen).not.toContain(s.questions.law);
     expect(seen).not.toContain(s.questions.lawDeleted);
   });
-  it('варианты удалённого вопроса своего предмета остаются видны (так задумано: auth_question_ids включает удалённые)', async () => {
-    const rows = await as(db.admin, s.users.subjTeacher, (q) => q('select distinct question_id as id from public.question_options'));
-    expect(ids(rows)).toContain(s.questions.chemDeleted);
+  it('варианты удалённых вопросов видны только тем, кто видит сами удалённые вопросы', async () => {
+    const optionsOf = (userId: string) =>
+      as(db.admin, userId, async (q) => ids(await q('select distinct question_id as id from public.question_options')));
+    expect(await optionsOf(s.users.subjTeacher)).toEqual([s.questions.chem]);
+    expect(await optionsOf(s.users.teacher)).toEqual([s.questions.chem, s.questions.law].sort());
+    expect(await optionsOf(s.users.subjAdmin)).toEqual([s.questions.chem, s.questions.chemDeleted].sort());
+    expect(await optionsOf(s.users.admin)).toEqual(Object.values(s.questions).sort());
+  });
+  it('пары соответствия удалённого вопроса преподавателю по предметам не видны', async () => {
+    const seen = await as(db.admin, s.users.subjTeacher, async (q) => {
+      await q('reset role');
+      await q("insert into public.matching_items (question_id, side, text, order_index) values ($1, 'left', 'удалённый', 1), ($2, 'left', 'живой', 1)",
+        [s.questions.chemDeleted, s.questions.chem]);
+      await q('set local role authenticated');
+      return ids(await q('select distinct question_id as id from public.matching_items'));
+    });
+    expect(seen).toEqual([s.questions.chem]);
   });
 });
 

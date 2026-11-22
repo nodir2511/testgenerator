@@ -76,3 +76,6 @@ coverage/
 
 # Пакет вопросов «Своей игры»: данные, не коммитить
 supabase/sql/game_pack_chemistry.sql
+
+# Заглушки Supabase для тестов прав доступа
+!tests-db/*.sql

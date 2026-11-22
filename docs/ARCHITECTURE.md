@@ -195,7 +195,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
   - SELECT: admin — всё; user — неудалённые; subject_teacher — неудалённые своих предметов; subject_admin — все своих предметов.
   - DELETE — только админ (`security_round5.sql`; сайт физически не удаляет, только `is_deleted`).
   - INSERT и UPDATE — по `can_manage_*`.
-- **question_options, matching_items**: SELECT — admin и user всё, остальные через `auth_question_ids()`; политики ускорены в `question_children_rls_fast.sql`.
+- **question_options, matching_items**: SELECT — через `can_view_question(question_id)`, видимость как у самого вопроса: admin — всё, user — неудалённые, subject_teacher — неудалённые своих предметов, subject_admin — все своих предметов (`question_children_rls_fast.sql`, `deleted_question_options.sql`).
 - **chapters, topics, subjects**: SELECT для вошедших, DELETE только админ, INSERT и UPDATE для управляющих предметом.
 - **ticket_batches, tickets, ticket_questions**: свои наборы; owner видит все. Кластерные (`is_cluster_batch`) видит и создаёт только owner. DELETE наборов — только owner.
 - **question_usage**: SELECT для вошедших; пишет только триггер.
@@ -251,6 +251,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `omr_checks.sql` | `omr_checks`: результаты проверки бланков (пишет только `tg-app`) |
 | `omr_digit_samples.sql` | `omr_digit_samples`: собранные картинки цифр из клеток (только `tg-app`) |
 | `security_round5.sql` | проверка перед 1.0.0: `update_batch_questions` не превращает набор в кластерный и проверяет вопрос; DELETE вопросов, глав, тем и картинок — только админ; лимиты `report_client_error` на отправителя; `game_rejoin` — 5 попыток за 15 минут; `guard_ticket_insert` освобождает и админа по предметам; привязка Telegram закрыта «Учителю игры»; историю импорта читают только staff; триггерные функции не вызываются через RPC. **Применяется последним** |
+| `deleted_question_options.sql` | `can_view_question` учитывает `is_deleted`: варианты и пары соответствия удалённого вопроса видит только тот, кто видит сам вопрос (релиз 1.0.2) |
 | `game.sql`, `game_v2.sql` … `game_v6.sql`, `game_pack_chemistry.sql` (пакет вопросов по химии) | «Своя игра» по версиям; все применены (v6 — 1 ноября 2026) |
 
 
@@ -602,7 +603,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `bootstrap.sql` — заглушки Supabase: роли `anon` / `authenticated` / `service_role`, `auth.users`, `auth.uid()` (читает `request.jwt.claims`), `storage.buckets` / `storage.objects`, публикация `supabase_realtime`, `cron.schedule`, `net.http_post`, права по умолчанию на схему `public`.
 - `helpers.ts` — `seed()` (пять пользователей разных ролей, два предмета, вопросы, в том числе удалённые), `as(admin, userId, fn)` — запросы от имени пользователя в транзакции с откатом, `switchUser`, `rejected` (запрос, который должен быть отклонён).
 - `access.test.ts` — схема применяется с нуля; кто какие вопросы и варианты видит и меняет; защита ролей и `is_owner`; назначение предметов; закрытая регистрация; наборы билетов (видимость, удаление, кластерные, `update_batch_questions`); счётчик `question_usage`; дневной лимит; `client_errors`, `audit_logs`; закрытость таблиц для анонимов.
-- Чего так не проверить: вход (Supabase Auth), хранилище файлов, Realtime, Edge Functions, pg_cron — только RLS, триггеры и функции базы. Тела политик с живой базой не сверяются; 22.11.2026 совпали списки политик (78) и функций (73), в живой базе есть лишняя таблица `bulk_change_backups`, которой нет в `supabase/sql`.
+- Чего так не проверить: вход (Supabase Auth), хранилище файлов, Realtime, Edge Functions, pg_cron — только RLS, триггеры и функции базы. Тела политик с живой базой не сверяются; 22.11.2026 совпали списки политик (78) и функций (73), в живой базе есть таблица `bulk_change_backups` (`id, created_at, kind, payload`), которой нет в `supabase/sql`: журнал отката разовых массовых правок банка от 9.11.2026 (5 записей), RLS включён, политик нет — с сайта недоступна.
 - Порядок применения отличается от порядка появления файлов: `owner_history.sql` идёт до `generation_limits.sql` (нужна `is_owner()`), `security_round3.sql` — после `question_children_rls_fast.sql` (нужна `can_view_question()`): файлы дописывались позже.
 
 ## 15. Ловушки
