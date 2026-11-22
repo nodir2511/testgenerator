@@ -25,7 +25,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
   chunkLines, examLang, pickVariant, publicSnapshot, reviewButtonText, reviewHead, reviewJustSent, reviewLines, reviewSnapshot, scoreAttempt,
-  sessionEnd, sessionPhase, tgPlain,
+  sessionEnd, sessionPhase, shuffleOptions, tgPlain,
   type ExamAnswer, type ExamAnswers, type ExamQuestion,
 } from '../_shared/exam.ts';
 import { verifyInitData, type TgInitUser } from '../_shared/tgInitData.ts';
@@ -216,10 +216,11 @@ async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache)
       attempt: {
         ticketNumber: num,
         deadline: new Date(effEnd(l)).toISOString(), // общий конец сессии (раньше — если запуск закрыт)
-        // Пустое место (вопроса не нашлось) — только тип, без остальных полей снимка
+        // Пустое место (вопроса не нашлось) — только тип, без остальных полей снимка.
+        // Порядок вариантов и пунктов соответствия — свой у каждого ученика (от id попытки), один и тот же при перезаходе
         questions: questions.map((q) => ({
           tqId: q.tqId,
-          snapshot: !q.snapshot || q.snapshot.empty === true ? { empty: true, type: q.snapshot?.type ?? null } : publicSnapshot(q.snapshot),
+          snapshot: !q.snapshot || q.snapshot.empty === true ? { empty: true, type: q.snapshot?.type ?? null } : shuffleOptions(publicSnapshot(q.snapshot), a.id),
         })),
         answers: a.answers ?? {},
       },
@@ -412,11 +413,12 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       }
       const questions = await ticketQuestions(a.ticket_id, cache);
       const answers = (a.answers ?? {}) as ExamAnswers;
+      const seed = a.id;
       const items = scoreAttempt(questions, answers).items;
       return json({
         questions: questions.map((q, i) => ({
-          // Без лишних полей снимка: тексты, картинки и только три поля ключа
-          tqId: q.tqId, snapshot: reviewSnapshot(q.snapshot), answer: answers[q.tqId] ?? null, points: items[i].points, max: items[i].max,
+          // Без лишних полей снимка: тексты, картинки и только три поля ключа; порядок — как видел ученик
+          tqId: q.tqId, snapshot: shuffleOptions(reviewSnapshot(q.snapshot), seed), answer: answers[q.tqId] ?? null, points: items[i].points, max: items[i].max,
         })),
       });
     }
@@ -460,7 +462,7 @@ async function teacherAction(action: string, body: any, userId: string): Promise
         const button = { inline_keyboard: [[{ text: reviewButtonText(lang), web_app: { url: `${EXAM_URL}?c=${code}&review=1` } }]] };
         const questions = await ticketQuestions(a.ticket_id, cache);
         const head = reviewHead(title, a.score ?? 0, a.max_score ?? 0, lang);
-        const parts = chunkLines([head, ...reviewLines(questions, (a.answers ?? {}) as ExamAnswers, lang)]);
+        const parts = chunkLines([head, ...reviewLines(questions, (a.answers ?? {}) as ExamAnswers, lang, a.id)]); // буквы — как на экране ученика
         let ok = true;
         for (let i = 0; i < parts.length && ok; i++) {
           if (!first) await sleep(50);

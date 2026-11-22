@@ -3,6 +3,7 @@ import {
   EXAM_MINUTES, EXAM_LINK_HOURS, publicSnapshot, reviewSnapshot, parseOpen, scoreAttempt, pickVariant, examCode,
   parseStartPayload, deadlineOf, attemptState, tgPlain, reviewLines, chunkLines, examLang, reviewHead, reviewButtonText, reviewJustSent, REVIEW_RESEND_GUARD_MS,
   EXAM_MIN_MINUTES, EXAM_MAX_MINUTES, EXAM_COUNTDOWN_SEC, EXAM_POLL_MS, sessionEnd, sessionPhase, clampMinutes, countdownDigit,
+  shuffleOptions,
 } from '../supabase/functions/_shared/exam';
 
 const test = (id = 'q1', right = 'o2') => ({
@@ -234,8 +235,9 @@ describe('reviewLines', () => {
     const lines = reviewLines(qs, { a: 'o2', b: 'o1', m: { l1: 'r1', l2: 'r2', l3: 'r3', l4: 'r5' }, p: '17' }, 'ru');
     const all = lines.join('\n');
     expect(all).toContain('[рисунок]');
-    expect(all).toContain('Ваш ответ: Ro1');
-    expect(all).toContain('Верный ответ: Ro2');
+    expect(all).toContain('Ваш ответ: A) Ro1');
+    expect(all).toContain('Верный ответ: B) Ro2');
+    expect(all).toContain('Ваш ответ: A) Л1 — 1) П1; B) Л2 — 2) П2; C) Л3 — 3) П3; D) Л4 — 5) П5');
     expect(all).toContain('Ваш ответ: 17');
     expect(all).toContain('Верный ответ: 16');
     expect(all).toMatch(/2\. .*Формула воды/);
@@ -305,5 +307,129 @@ describe('сессия: зал ожидания и общий старт', () =>
     expect(countdownDigit(T0, T0)).toBe(0);
     expect(countdownDigit(T0, T0 + 5000)).toBe(0);
     expect(countdownDigit(T0 + 9000, T0)).toBe(3);
+  });
+});
+
+describe('shuffleOptions: свой порядок вариантов у каждого ученика', () => {
+  const four = (id = 'q4') => ({
+    ...test(id),
+    options: ['o1', 'o2', 'o3', 'o4'].map((o, i) => ({ id: o, text: `Вариант ${i + 1}`, text_ru: `Вариант ${i + 1}`, text_tg: `Ҷавоб ${i + 1}`, image_url: null, is_correct: o === 'o2', order_index: i + 1 })),
+  });
+  const sorted = (xs: any[]) => [...xs].sort((a, b) => a.order_index - b.order_index);
+  const ids = (xs: any[]) => sorted(xs).map((o) => o.id).join(',');
+  const side = (s: any, k: 'left' | 'right') => s.matching_items.filter((m: any) => m.side === k);
+
+  it('один seed — один порядок (повторный вызов, повторное открытие)', () => {
+    const a = shuffleOptions(publicSnapshot(four()), 'att-1');
+    const b = shuffleOptions(publicSnapshot(four()), 'att-1');
+    expect(a).toEqual(b);
+    expect(ids(shuffleOptions(reviewSnapshot(four()), 'att-1').options)).toBe(ids(a.options));
+  });
+
+  it('разные seed дают разные порядки; порядок зависит и от id вопроса', () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 200; i++) seen.add(ids(shuffleOptions(four(), `seed-${i}`).options));
+    expect(seen.size).toBeGreaterThanOrEqual(3);
+    const byQ = new Set<string>();
+    for (let i = 0; i < 50; i++) byQ.add(ids(shuffleOptions(four(`q-${i}`), 'att-1').options));
+    expect(byQ.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('те же варианты и id, order_index 0..n-1 по новому порядку, исходный снимок не изменён', () => {
+    const src = four();
+    const copy = JSON.stringify(src);
+    for (let i = 0; i < 30; i++) {
+      const out = shuffleOptions(src, `s${i}`);
+      expect(out.options.map((o: any) => o.order_index)).toEqual([0, 1, 2, 3]);
+      expect(out.options.map((o: any) => o.id).sort()).toEqual(['o1', 'o2', 'o3', 'o4']);
+      for (const o of out.options) {
+        const was = src.options.find((x) => x.id === o.id)!;
+        expect({ ...o, order_index: was.order_index }).toEqual(was);
+      }
+      expect(out.content).toBe(src.content);
+    }
+    expect(JSON.stringify(src)).toBe(copy);
+  });
+
+  it('без is_correct на входе — без is_correct на выходе', () => {
+    expect(JSON.stringify(shuffleOptions(publicSnapshot(four()), 'x'))).not.toMatch(/correct/);
+    expect(JSON.stringify(shuffleOptions(publicSnapshot(matching()), 'x'))).not.toMatch(/correct/);
+  });
+
+  it('соответствие: левые и правые перемешиваются независимо, id и correct_match_id прежние', () => {
+    const src = matching();
+    const copy = JSON.stringify(src);
+    const lefts = new Set<string>(), rights = new Set<string>(), pairs = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const out = shuffleOptions(src, `seed-${i}`);
+      const l = side(out, 'left'), r = side(out, 'right');
+      expect(sorted(l).map((m: any) => m.order_index)).toEqual([0, 1, 2, 3]);
+      expect(sorted(r).map((m: any) => m.order_index)).toEqual([0, 1, 2, 3, 4]);
+      expect(l.map((m: any) => m.id).sort()).toEqual(['l1', 'l2', 'l3', 'l4']);
+      expect(r.map((m: any) => m.id).sort()).toEqual(['r1', 'r2', 'r3', 'r4', 'r5']);
+      for (const m of l) expect(m.correct_match_id).toBe(`r${m.id.slice(1)}`);
+      lefts.add(ids(l)); rights.add(ids(r)); pairs.add(`${ids(l)}|${ids(r)}`);
+    }
+    expect(lefts.size).toBeGreaterThanOrEqual(3);
+    expect(rights.size).toBeGreaterThanOrEqual(3);
+    // Независимо: пар порядков больше, чем порядков одной стороны
+    expect(pairs.size).toBeGreaterThan(Math.max(lefts.size, rights.size));
+    expect(JSON.stringify(src)).toBe(copy);
+  });
+
+  it('оценка не меняется: баллы по id', () => {
+    const qs = [{ tqId: 'a', snapshot: four() }, { tqId: 'm', snapshot: matching() }];
+    const ans = { a: 'o2', m: { l1: 'r1', l2: 'r3', l3: 'r3', l4: 'r4' } };
+    const shuffled = qs.map((q) => ({ ...q, snapshot: shuffleOptions(q.snapshot, 'att-7') }));
+    expect(scoreAttempt(shuffled, ans).score).toBe(scoreAttempt(qs, ans).score);
+  });
+
+  it('open, пустое место, один вариант, группа из одного пункта — как есть', () => {
+    expect(shuffleOptions(open(), 's')).toEqual(open());
+    expect(shuffleOptions({ empty: true, type: 'test' }, 's')).toEqual({ empty: true, type: 'test' });
+    expect(shuffleOptions(null, 's')).toBeNull();
+    const one = { ...test(), options: [test().options[0]] };
+    expect(shuffleOptions(one, 's')).toEqual(one);
+    const m: any = matching();
+    m.matching_items = [m.matching_items[0], ...m.matching_items.slice(4)]; // один левый, пять правых
+    for (let i = 0; i < 20; i++) expect(side(shuffleOptions(m, `s${i}`), 'left')).toEqual([m.matching_items[0]]);
+  });
+
+  it('варианты вроде «все перечисленные» — порядок не меняется вовсе', () => {
+    for (const phrase of ['Все перечисленные', 'ни один из перечисленных', 'Оба ответа верны', 'всё перечисленное', 'Ҳамаи ҷавобҳо', 'ҲЕҶ ЯКЕ']) {
+      const s: any = four();
+      s.options[3].text = phrase; s.options[3].text_ru = phrase;
+      for (let i = 0; i < 20; i++) expect(shuffleOptions(s, `s${i}`)).toEqual(s);
+    }
+    const t: any = four();
+    t.options[2].text_tg = 'Ҳеҷ яке аз инҳо'; // только в таджикском тексте
+    for (let i = 0; i < 20; i++) expect(shuffleOptions(t, `s${i}`)).toEqual(t);
+    // «оба» внутри другого слова — обычный вариант
+    const w: any = four();
+    w.options[0].text = 'Собака'; w.options[0].text_ru = 'Собака';
+    const seen = new Set<string>();
+    for (let i = 0; i < 50; i++) seen.add(ids(shuffleOptions(w, `s${i}`).options));
+    expect(seen.size).toBeGreaterThan(1);
+  });
+
+  it('reviewLines с seed: буквы и цифры в тексте — как на экране ученика', () => {
+    const LET = 'ABCDEFGH';
+    for (let i = 0; i < 20; i++) {
+      const seed = `att-${i}`;
+      const qs = [{ tqId: 'a', snapshot: four() }, { tqId: 'm', snapshot: matching() }];
+      const ans = { a: 'o3', m: { l1: 'r2', l2: 'r2', l3: 'r3', l4: 'r4' } as Record<string, string> };
+      const all = reviewLines(qs, ans, 'ru', seed).join('\n');
+      // Экран ученика: publicSnapshot + shuffleOptions, буква — по order_index
+      const opts = sorted(shuffleOptions(publicSnapshot(four()), seed).options);
+      expect(all).toContain(`Ваш ответ: ${LET[opts.findIndex((o: any) => o.id === 'o3')]}) Вариант 3`);
+      expect(all).toContain(`Верный ответ: ${LET[opts.findIndex((o: any) => o.id === 'o2')]}) Вариант 2`);
+      const ms = shuffleOptions(publicSnapshot(matching()), seed);
+      const l = sorted(side(ms, 'left')), r = sorted(side(ms, 'right'));
+      const row = (lid: string, rid: string) => `${LET[l.findIndex((x: any) => x.id === lid)]}) Л${lid.slice(1)} — ${r.findIndex((x: any) => x.id === rid) + 1}) П${rid.slice(1)}`;
+      expect(all).toContain(`Ваш ответ: ${l.map((x: any) => row(x.id, ans.m[x.id])).join('; ')}`);
+      expect(all).toContain(`Верный ответ: ${l.map((x: any) => row(x.id, `r${x.id.slice(1)}`)).join('; ')}`);
+    }
+    // Без seed — исходный порядок
+    expect(reviewLines([{ tqId: 'a', snapshot: four() }], { a: 'o3' }, 'ru').join('\n')).toContain('Ваш ответ: C) Вариант 3');
   });
 });

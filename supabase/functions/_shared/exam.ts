@@ -121,6 +121,63 @@ export function attemptState(a: { finished_at: string | null; deadline_at: strin
   return new Date(a.deadline_at).getTime() <= now.getTime() ? 'expired' : 'running';
 }
 
+// ---------- свой порядок вариантов у каждого ученика ----------
+/** FNV-1a (32 бита): строка → число для генератора */
+function hash32(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+/** mulberry32: детерминированный генератор 0..1 */
+function rng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+/** Копии пунктов в исходном порядке (order_index), затем перестановка Фишера — Йетса и order_index 0..n-1 */
+function shuffled(items: any[], key: string): any[] {
+  const out = [...items].sort(sortByOrder).map((x) => ({ ...x }));
+  const rnd = rng(hash32(key));
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  out.forEach((x, i) => { x.order_index = i; });
+  return out;
+}
+// Смысл таких вариантов зависит от места («оба», «все перечисленные») — вопрос не перемешиваем
+const POSITIONAL = /(^|[^\p{L}])(вс[её]\s+(выше)?перечисл|вс[её]\s+вышеуказанн|ни\s+од(ин|на|но|ни)\s+из|(оба|обе|ҳамаи|ҳама)(?!\p{L})|ҳеҷ\s+як)/iu;
+const positional = (items: any[]) => items.some((o) => ['text', 'text_ru', 'text_tg'].some((k) => typeof o?.[k] === 'string' && POSITIONAL.test(o[k])));
+
+/**
+ * Копия снимка с перемешанными вариантами (тест) или пунктами (соответствие: левые и правые — независимо).
+ * Порядок зависит только от seed (id попытки) и id вопроса. id, ключи и прочие поля не меняются, order_index — 0..n-1.
+ * open, пустое место, один вариант и вопросы с вариантами вроде «все перечисленные» — как есть. Исходный снимок не меняется.
+ */
+export function shuffleOptions(snap: any, seed: string): any {
+  if (isEmpty(snap) || snap.type === 'open') return snap;
+  const base = `${seed}:${snap.id ?? ''}`;
+  if (Array.isArray(snap.options) && snap.options.length > 1 && !positional(snap.options)) {
+    return { ...snap, options: shuffled(snap.options, base) };
+  }
+  if (Array.isArray(snap.matching_items) && !positional(snap.matching_items)) {
+    const l = snap.matching_items.filter((m: any) => m?.side === 'left');
+    const r = snap.matching_items.filter((m: any) => m?.side === 'right');
+    if (l.length < 2 && r.length < 2) return snap;
+    const other = snap.matching_items.filter((m: any) => m?.side !== 'left' && m?.side !== 'right');
+    return {
+      ...snap,
+      matching_items: [...(l.length > 1 ? shuffled(l, `${base}:left`) : l), ...(r.length > 1 ? shuffled(r, `${base}:right`) : r), ...other],
+    };
+  }
+  return snap;
+}
+
 // ---------- текст для чата ----------
 const SUB: Record<string, string> = { '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉', '+': '₊', '-': '₋', '−': '₋', '=': '₌', '(': '₍', ')': '₎' };
 const SUP: Record<string, string> = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '+': '⁺', '-': '⁻', '−': '⁻', '=': '⁼', '(': '⁽', ')': '⁾' };
@@ -153,22 +210,29 @@ type Lang = 'ru' | 'tg';
 const pick = (o: any, lang: Lang, base = 'text') => String((lang === 'tg' ? o?.[`${base}_tg`] : o?.[`${base}_ru`]) || o?.[base] || '');
 const NONE = '—';
 
+// Буквы и цифры — как на странице ученика (ExamQuestion.tsx): по порядку order_index
+const LETTERS = 'ABCDEFGH';
+const letter = (i: number) => LETTERS[i] ?? String(i + 1);
+
 function givenAndRight(snap: any, ans: ExamAnswer | undefined, lang: Lang): { given: string; right: string } {
   if (snap.type === 'matching') {
-    const rightsById = new Map<string, any>((snap.matching_items ?? []).filter((m: any) => m.side === 'right').map((m: any) => [m.id, m]));
+    const rights = (snap.matching_items ?? []).filter((m: any) => m.side === 'right').sort(sortByOrder);
     const a = ans && typeof ans === 'object' ? ans : {};
-    const pair = (l: any, rid: string | null | undefined) => `${tgPlain(pick(l, lang))} — ${rid && rightsById.has(rid) ? tgPlain(pick(rightsById.get(rid), lang)) : NONE}`;
+    const rightText = (rid: string | null | undefined) => {
+      const k = rid ? rights.findIndex((m: any) => m.id === rid) : -1;
+      return k >= 0 ? `${k + 1}) ${tgPlain(pick(rights[k], lang))}` : NONE;
+    };
     const rows = lefts(snap);
-    return { given: rows.map((l) => pair(l, a[l.id])).join('; '), right: rows.map((l) => pair(l, l.correct_match_id)).join('; ') };
+    const pair = (l: any, i: number, rid: string | null | undefined) => `${letter(i)}) ${tgPlain(pick(l, lang))} — ${rightText(rid)}`;
+    return { given: rows.map((l, i) => pair(l, i, a[l.id])).join('; '), right: rows.map((l, i) => pair(l, i, l.correct_match_id)).join('; ') };
   }
   if (snap.type === 'open') {
     const k = snap.correct_numeric_answer;
     return { given: typeof ans === 'string' && ans.trim() ? escHtml(ans.trim()) : NONE, right: k == null ? NONE : String(k) };
   }
-  const opts: any[] = snap.options ?? [];
-  const mine = typeof ans === 'string' ? opts.find((o) => o.id === ans) : null;
-  const right = opts.find((o) => o.is_correct);
-  return { given: mine ? tgPlain(pick(mine, lang)) : NONE, right: right ? tgPlain(pick(right, lang)) : NONE };
+  const opts: any[] = [...(snap.options ?? [])].sort(sortByOrder);
+  const opt = (i: number) => (i >= 0 ? `${letter(i)}) ${tgPlain(pick(opts[i], lang))}` : NONE);
+  return { given: opt(typeof ans === 'string' ? opts.findIndex((o) => o.id === ans) : -1), right: opt(opts.findIndex((o) => o.is_correct)) };
 }
 
 const REVIEW_TEXT: Record<Lang, { mine: string; right: string; none: string; head: string; score: (a: number, b: number) => string; button: string }> = {
@@ -182,13 +246,16 @@ export function reviewHead(title: string, score: number, max: number, lang: Lang
 }
 export const reviewButtonText = (lang: Lang): string => REVIEW_TEXT[lang].button;
 
-/** Только вопросы с потерянными баллами: номер, текст, «Ваш ответ», «Верный ответ». Один элемент — один вопрос. */
-export function reviewLines(questions: ExamQuestion[], answers: ExamAnswers, lang: Lang): string[] {
+/**
+ * Только вопросы с потерянными баллами: номер, текст, «Ваш ответ», «Верный ответ». Один элемент — один вопрос.
+ * seed (id попытки) — тот же порядок вариантов, что видел ученик (shuffleOptions), чтобы буквы совпадали с экраном.
+ */
+export function reviewLines(questions: ExamQuestion[], answers: ExamAnswers, lang: Lang, seed?: string): string[] {
   const out: string[] = [];
   questions.forEach((q, i) => {
     const r = scoreOne(q.snapshot, answers[q.tqId]);
     if (r.points >= r.max) return;
-    const snap = q.snapshot;
+    const snap = seed ? shuffleOptions(q.snapshot, seed) : q.snapshot;
     const { given, right } = givenAndRight(snap, answers[q.tqId], lang);
     const pic = snap.image_url ? ' [рисунок]' : '';
     out.push(`${i + 1}.${pic} ${tgPlain(pick(snap, lang, 'content'))}\n${REVIEW_TEXT[lang].mine}: ${given}\n${REVIEW_TEXT[lang].right}: ${right}`);
