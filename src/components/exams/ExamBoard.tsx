@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Lock } from 'lucide-react';
-import { callExamTeacher, NotLinkedError, closeExamLink, EXAM_LINKS_KEY, examAttemptsKey, fetchAttempts, type ExamLinkRow } from '../../lib/examLinks';
+import { BarChart3, Loader2, Lock } from 'lucide-react';
+import { ExamExcelButton } from './ExamExcelButton';
+import { QuestionStats } from './QuestionStats';
+import { callExamTeacher, NotLinkedError, closeExamLink, EXAM_LINKS_KEY, examAttemptsKey, examAttemptsFullKey, fetchAttempts, type ExamLinkRow } from '../../lib/examLinks';
 import { linkState, mapAttemptRow } from '../../lib/examView';
 import { confirmAction } from '../../lib/confirm';
 import { notifyError, notifyInfo, notifySuccess } from '../../lib/errors';
@@ -13,6 +15,7 @@ const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString(
 export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
   const queryClient = useQueryClient();
   const [now, setNow] = useState(() => Date.now());
+  const [showStats, setShowStats] = useState(false);
   // Остаток времени у идущих пересчитывается без запроса к базе
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15_000);
@@ -46,6 +49,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
       notifySuccess('Запуск закрыт');
       queryClient.invalidateQueries({ queryKey: EXAM_LINKS_KEY });
       queryClient.invalidateQueries({ queryKey: examAttemptsKey(link.code) });
+      queryClient.invalidateQueries({ queryKey: examAttemptsFullKey(link.code) });
     },
     onError: (e) => notifyError(e, 'Не удалось закрыть запуск'),
   });
@@ -65,8 +69,13 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-slate-600">{open ? 'Таблица обновляется сама.' : 'Запуск закрыт.'}</p>
-        {open && <Button variant="danger-soft" size="sm" icon={Lock} loading={close.isPending} onClick={onClose}>Закрыть</Button>}
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" icon={BarChart3} onClick={() => setShowStats((v) => !v)}>{showStats ? 'Скрыть разбор' : 'Разбор по вопросам'}</Button>
+          <ExamExcelButton link={link} />
+          {open && <Button variant="danger-soft" size="sm" icon={Lock} loading={close.isPending} onClick={onClose}>Закрыть</Button>}
+        </div>
       </div>
+      {showStats && <QuestionStats code={link.code} batchId={link.batch_id} />}
 
       {isLoading ? (
         <div className="flex items-center text-sm text-slate-500 py-4"><Loader2 className="w-4 h-4 mr-2 animate-spin" />Загружаю…</div>

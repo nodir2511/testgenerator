@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { fetchAllPages } from './fetchAllPages';
+import type { SheetAttempt, StatTicket } from './examStats';
 import { buildExamUrl, countAttempts, sortLinks, type AttemptCounts, type AttemptInput } from './examView';
 
 // Билеты классу: запуск набора, список запусков и попытки учеников. Запись — только через RPC и функцию tg-exam.
@@ -93,6 +94,35 @@ export async function fetchAttempts(code: string): Promise<Attempt[]> {
     .limit(1000);
   if (error) throw error;
   return (data ?? []) as unknown as Attempt[];
+}
+
+export const examAttemptsFullKey = (code: string) => ['exam_attempts_full', code] as const;
+export const examTicketsKey = (batchId: string) => ['exam_tickets', batchId] as const;
+export type AttemptWithAnswers = SheetAttempt & { id: string; code: string };
+
+/** Билеты набора со снимками вопросов — для разбора по вопросам (читает автор набора или главный админ) */
+export async function fetchExamTickets(batchId: string): Promise<StatTicket[]> {
+  const { data, error } = await supabase
+    .from('tickets')
+    .select('id, ticket_number, questions:ticket_questions(id, order_index, question_id, question_snapshot)')
+    .eq('batch_id', batchId)
+    .order('ticket_number')
+    .limit(1000);
+  if (error) throw error;
+  return (data ?? []).map((t: any) => ({
+    id: t.id,
+    ticket_number: t.ticket_number,
+    questions: [...(t.questions ?? [])].sort((a: any, b: any) => a.order_index - b.order_index),
+  }));
+}
+
+/** Попытки запуска вместе с ответами — для разбора и Excel */
+export async function fetchAttemptsWithAnswers(code: string): Promise<AttemptWithAnswers[]> {
+  const { data, error } = await fetchAllPages<AttemptWithAnswers>(
+    () => supabase.from('exam_attempts').select('id, code, ticket_id, student_name, tg_username, tg_name, finished_at, score, max_score, answers').eq('code', code),
+  );
+  if (error) throw error;
+  return data ?? [];
 }
 
 // Описание ошибки из ответа Edge Function ({ error: '...' })
