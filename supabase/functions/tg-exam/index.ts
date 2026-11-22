@@ -4,6 +4,8 @@
 // преподаватель рассылает разбор и получает ссылку и итог в бот.
 //
 // Ученик (заголовок X-Tg-Init-Data, подпись Telegram): open, start, save, submit, review.
+//   start — вход в зал ожидания (вариант, имя, язык); вопросы ученик получает только когда часы сервера дошли
+//   до exam_links.session_start_at (преподаватель нажал «Начать»); конец у всех общий — effEnd(запуска).
 //   Привязка к аккаунту сайта не нужна; личность — id из подписи. Данных tg-app здесь нет.
 //   Ключи ответов (is_correct, correct_match_id, correct_numeric_answer) ученик получает только
 //   в review — после сдачи и после того, как преподаватель отправил разбор. Баллы считает сервер.
@@ -22,7 +24,8 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
-  attemptState, chunkLines, deadlineOf, examLang, pickVariant, publicSnapshot, reviewButtonText, reviewHead, reviewJustSent, reviewLines, reviewSnapshot, scoreAttempt, tgPlain,
+  chunkLines, examLang, pickVariant, publicSnapshot, reviewButtonText, reviewHead, reviewJustSent, reviewLines, reviewSnapshot, scoreAttempt,
+  sessionEnd, sessionPhase, tgPlain,
   type ExamAnswer, type ExamAnswers, type ExamQuestion,
 } from '../_shared/exam.ts';
 import { verifyInitData, type TgInitUser } from '../_shared/tgInitData.ts';
@@ -52,26 +55,45 @@ const json = (body: unknown, status = 200) =>
 // ---------------- Данные ----------------
 type Link = {
   code: string; batch_id: string; created_by: string; created_at: string; closes_at: string; closed_at: string | null;
-  duration_min: number; review_sent_at: string | null;
+  duration_min: number; review_sent_at: string | null; session_start_at: string | null;
   batch: { title: string | null; generation_params: any; subject: { name: string | null } | null } | null;
 };
 type Attempt = {
   id: string; code: string; tg_user_id: number; student_name: string; ticket_id: string; started_at: string;
-  deadline_at: string; finished_at: string | null; answers: ExamAnswers | null; score: number | null; max_score: number | null;
+  deadline_at: string | null; finished_at: string | null; answers: ExamAnswers | null; score: number | null; max_score: number | null;
   lang: string | null;
 };
 type QCache = Map<string, ExamQuestion[]>;
 
-const LINK_COLS = 'code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, batch:ticket_batches(title, generation_params, subject:subjects(name))';
+const LINK_COLS = 'code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, session_start_at, batch:ticket_batches(title, generation_params, subject:subjects(name))';
 const ATTEMPT_COLS = 'id, code, tg_user_id, student_name, ticket_id, started_at, deadline_at, finished_at, answers, score, max_score, lang';
 
-const ms = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : Infinity);
+const ms = (iso: string | null | undefined) => {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  return Number.isNaN(t) ? Infinity : t;
+};
 /** Ссылка принимает новых учеников и ответы: не закрыта преподавателем и не истекла */
 const linkOpen = (l: Link, now: Date) => !l.closed_at && ms(l.closes_at) > now.getTime();
-/** Срок попытки с учётом досрочного закрытия ссылки преподавателем */
-const effDeadline = (a: Attempt, l: Link) => Math.min(ms(a.deadline_at), ms(l.closed_at));
-const stateOf = (a: Attempt, l: Link, now: Date) =>
-  attemptState({ finished_at: a.finished_at, deadline_at: new Date(effDeadline(a, l)).toISOString() }, now);
+/**
+ * Конец приёма ответов для всех попыток запуска (мс): раньшее из конца общей сессии
+ * (session_start_at + duration_min), закрытия преподавателем и истечения ссылки.
+ * Сессия не начата — только закрытие. Срок самой попытки (exam_attempts.deadline_at) не используется.
+ */
+const effEnd = (l: Link) => Math.min(sessionEnd(l)?.getTime() ?? Infinity, ms(l.closed_at), ms(l.closes_at));
+type Phase = 'waiting' | 'countdown' | 'running' | 'ended';
+/** Фаза запуска по часам сервера (никогда — по данным клиента) */
+const phaseOf = (l: Link, now: Date): Phase => (now.getTime() >= effEnd(l) ? 'ended' : sessionPhase(l, now));
+/** Состояние незавершённой попытки = фаза запуска; сданная — finished; приём закончен — expired */
+const stateOf = (a: Attempt, l: Link, now: Date): 'finished' | 'expired' | Exclude<Phase, 'ended'> => {
+  if (a.finished_at) return 'finished';
+  const p = phaseOf(l, now);
+  return p === 'ended' ? 'expired' : p;
+};
+/**
+ * Попытка сдана в начатой сессии (вопросы ученик видел). Закрытие запуска в ожидании или во время отсчёта
+ * сдаёт попытки с нулём (finished_at = closed_at раньше старта) — такому ученику показываем «закрыто», а не балл и разбор.
+ */
+const inSession = (a: Attempt, l: Link) => !!l.session_start_at && !!a.finished_at && ms(a.finished_at) > ms(l.session_start_at);
 /** Язык билета выбирает ученик перед началом (exam_attempts.lang); без попытки — русский */
 const langOf = (a: Attempt | null): 'ru' | 'tg' => examLang(a?.lang);
 
@@ -123,15 +145,16 @@ async function finalize(a: Attempt, cache: QCache): Promise<Attempt> {
 }
 
 /**
- * При любом обращении к запуску: просроченные (или оборванные закрытием ссылки) попытки сдаются сами,
- * сданные без балла досчитываются. Сбой на одной попытке не ломает запуск: пишем в журнал и идём дальше.
+ * При любом обращении к запуску: когда приём ответов закончился (now >= effEnd: конец общей сессии, закрытие
+ * преподавателем или истечение ссылки — в том числе до старта сессии, тогда с нулём), все незавершённые попытки
+ * сдаются сами; сданные без балла досчитываются. Сбой на одной попытке не ломает запуск: пишем в журнал и идём дальше.
  */
 async function finishExpired(l: Link, now: Date, cache: QCache) {
   try {
-    let q = sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', l.code).is('finished_at', null);
-    if (!(l.closed_at && ms(l.closed_at) <= now.getTime())) q = q.lte('deadline_at', now.toISOString());
+    const ended = now.getTime() >= effEnd(l);
+    const none = Promise.resolve({ data: [] as Attempt[], error: null });
     const [open, unscored] = await Promise.all([
-      q.limit(500),
+      ended ? sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', l.code).is('finished_at', null).limit(500) : none,
       sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', l.code).not('finished_at', 'is', null).is('score', null).limit(500),
     ]);
     if (open.error) throw open.error;
@@ -148,30 +171,51 @@ async function finishExpired(l: Link, now: Date, cache: QCache) {
   }
 }
 
-/** Ответ ученику: только снимки без ответов (publicSnapshot), свои ответы и срок */
+async function ticketNumber(ticketId: string): Promise<number | null> {
+  const { data, error } = await sb.from('tickets').select('ticket_number').eq('id', ticketId).maybeSingle();
+  if (error) throw error;
+  return (data as any)?.ticket_number ?? null;
+}
+
+/**
+ * Ответ ученику. Фаза — только по часам сервера (now) против session_start_at запуска.
+ * waiting / countdown: только номер варианта (и время старта) — ни вопросов, ни снимков: вопросы читаются из базы
+ * лишь в ветке running. running: снимки без ответов (publicSnapshot), свои ответы и общий конец сессии.
+ */
 async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache) {
   const base = {
     now: Date.now(), // часы сервера (мс): клиент считает по ним остаток времени
     title: l.batch?.title ?? '',
     subject: l.batch?.subject?.name ?? '',
-    minutes: l.duration_min,
+    minutes: l.session_start_at ? l.duration_min : null, // до «Начать» время не выбрано
     lang: langOf(a),
   };
+  if (a && !a.finished_at && stateOf(a, l, now) === 'expired') a = await finalize(a, cache); // приём закончен — сдаём
   if (a?.finished_at) {
+    // Запуск закрыли до старта сессии (вопросов ученик не видел) — «закрыто», без балла
+    if (!inSession(a, l)) return { ...base, state: 'closed' as const };
     if (a.score == null) a = await finalize(a, cache); // сдана, но балл не записан (сбой) — досчитываем
     return { ...base, state: 'finished' as const, attempt: { score: a.score ?? 0, max: a.max_score ?? 0, review: !!l.review_sent_at } };
   }
-  if (a && stateOf(a, l, now) === 'running') {
-    const [questions, { data: t }] = await Promise.all([
-      ticketQuestions(a.ticket_id, cache),
-      sb.from('tickets').select('ticket_number').eq('id', a.ticket_id).maybeSingle(),
-    ]);
+  const st = a ? stateOf(a, l, now) : null;
+  if (a && st === 'waiting') {
+    return { ...base, state: 'waiting' as const, attempt: { ticketNumber: await ticketNumber(a.ticket_id) } };
+  }
+  if (a && st === 'countdown') {
+    return {
+      ...base,
+      state: 'countdown' as const,
+      attempt: { ticketNumber: await ticketNumber(a.ticket_id), startsAt: new Date(ms(l.session_start_at)).toISOString() },
+    };
+  }
+  if (a && st === 'running') {
+    const [questions, num] = await Promise.all([ticketQuestions(a.ticket_id, cache), ticketNumber(a.ticket_id)]);
     return {
       ...base,
       state: 'running' as const,
       attempt: {
-        ticketNumber: (t as any)?.ticket_number ?? null,
-        deadline: new Date(effDeadline(a, l)).toISOString(),
+        ticketNumber: num,
+        deadline: new Date(effEnd(l)).toISOString(), // общий конец сессии (раньше — если запуск закрыт)
         // Пустое место (вопроса не нашлось) — только тип, без остальных полей снимка
         questions: questions.map((q) => ({
           tqId: q.tqId,
@@ -181,8 +225,14 @@ async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache)
       },
     };
   }
-  // Попытки нет (или она только что сдана другим запросом — тогда перечитают при следующем open)
-  return { ...base, state: (!a && linkOpen(l, now) && l.batch ? 'new' : 'closed') as 'new' | 'closed' };
+  // Попытки нет: войти можно, пока ссылка открыта и сессия не кончилась (опоздавший получает остаток общего времени)
+  const p = phaseOf(l, now);
+  if (!a && linkOpen(l, now) && l.batch && p !== 'ended') {
+    // Отсчёт уже идёт — время выбрано, для текста страницы это «сессия идёт»
+    if (p === 'waiting') return { ...base, state: 'new' as const, session: 'waiting' as const };
+    return { ...base, state: 'new' as const, session: 'running' as const, remainingMs: Math.max(0, effEnd(l) - now.getTime()) };
+  }
+  return { ...base, state: 'closed' as const };
 }
 
 // ---------------- Проверка ответа ученика ----------------
@@ -293,7 +343,8 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
 
     case 'start': {
       if (a) return json(await studentView(l, a, now, cache)); // повторный start — та же попытка
-      if (!linkOpen(l, now) || !l.batch) return json(await studentView(l, null, now, cache));
+      // Вход в зал: пока ссылка открыта и сессия не кончилась; опоздавший сразу попадает в идущую сессию
+      if (!linkOpen(l, now) || !l.batch || phaseOf(l, now) === 'ended') return json(await studentView(l, null, now, cache));
       const name = cleanName(body.name);
       if (!name) return json({ error: 'bad_name', message: 'Введите фамилию и имя (от 2 до 80 знаков).' }, 400);
       const { data: tickets, error: tErr } = await sb.from('tickets').select('id').eq('batch_id', l.batch_id);
@@ -301,11 +352,11 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       if (!tickets?.length) return json({ error: 'no_tickets', message: 'В наборе нет билетов.' }, 422);
       const ticket = pickVariant(tickets as Array<{ id: string }>);
       const tgName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ').slice(0, 128) || null;
-      // Одна попытка на аккаунт: при гонке двух start вставка второй ничего не делает, обе читают одну строку
+      // Одна попытка на аккаунт: при гонке двух start вставка второй ничего не делает, обе читают одну строку.
+      // Срок у попытки не пишется: конец общий для всех — effEnd(запуска), от времени входа он не зависит
       const { error } = await sb.from('exam_attempts').upsert({
         code, tg_user_id: tgUser.id, tg_username: tgUser.username ?? null, tg_name: tgName, student_name: name,
         ticket_id: ticket.id, started_at: now.toISOString(), lang: examLang(body.lang),
-        deadline_at: deadlineOf(now, new Date(l.closes_at), l.duration_min).toISOString(),
       }, { onConflict: 'code,tg_user_id', ignoreDuplicates: true });
       if (error) throw error;
       a = await readAttempt(code, tgUser.id);
@@ -314,10 +365,13 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
     }
 
     case 'save': {
-      if (!a) return json({ ok: false, state: linkOpen(l, now) ? 'new' : 'closed', now: Date.now() });
-      if (stateOf(a, l, now) !== 'running') {
-        await finalize(a, cache);
-        return json({ ok: false, state: 'finished', now: Date.now() });
+      if (!a) return json({ ok: false, state: linkOpen(l, now) && phaseOf(l, now) !== 'ended' ? 'new' : 'closed', now: Date.now() });
+      const st = stateOf(a, l, now);
+      // До session_start_at (ожидание и отсчёт) — ничего не пишем; база тоже отказала бы
+      if (st === 'waiting' || st === 'countdown') return json({ ok: false, state: 'waiting', now: Date.now() });
+      if (st !== 'running') {
+        const done = await finalize(a, cache);
+        return json({ ok: false, state: done.finished_at && inSession(done, l) ? 'finished' : 'closed', now: Date.now() });
       }
       if (!isId(body.tqId)) return json({ error: 'bad_question', message: 'Некорректный вопрос.' }, 400);
       const questions = await ticketQuestions(a.ticket_id, cache);
@@ -326,7 +380,7 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       const ans = cleanAnswer(q.snapshot, body.answer);
       if (ans === undefined) return json({ error: 'bad_answer', message: 'Некорректный ответ.' }, 400);
       // Одно атомарное обновление в базе: ответ дописывается к сохранённым и только пока попытка идёт
-      // (не сдана, срок не прошёл, ссылка не закрыта) — иначе ничего не пишется
+      // (не сдана, часы базы внутри окна сессии, ссылка не закрыта и не истекла) — иначе ничего не пишется
       const { data: saved, error } = await sb.rpc('exam_attempt_save', { p_attempt_id: a.id, p_tq_id: q.tqId, p_answer: ans });
       if (error) throw error;
       if (saved === true) return json({ ok: true, now: Date.now() });
@@ -334,18 +388,26 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       const fresh = (await loadLink(code)) ?? l;
       await finishExpired(fresh, new Date(), cache);
       const cur = await readAttemptById(a.id);
-      return json({ ok: false, state: cur?.finished_at ? 'finished' : 'closed', now: Date.now() });
+      // Попытка не сдана и приём, по часам функции, не кончился — расхождение часов функции и базы на границе
+      // старта (миллисекунды): ответ не записан, клиент перечитает состояние
+      if (cur && !cur.finished_at && phaseOf(fresh, new Date()) !== 'ended') return json({ ok: false, state: 'waiting', now: Date.now() });
+      return json({ ok: false, state: cur?.finished_at && inSession(cur, fresh) ? 'finished' : 'closed', now: Date.now() });
     }
 
     case 'submit': {
       if (!a) return json({ error: 'not_started', message: 'Билет ещё не начат.' }, 409);
+      // До старта сессии сдать нельзя: иначе ученик случайно закроет попытку с нулём, не увидев вопросов
+      const st = stateOf(a, l, now);
+      if (st === 'waiting' || st === 'countdown') {
+        return json({ error: 'session_not_started', message: 'Преподаватель ещё не начал билет.' }, 409);
+      }
       // После срока тоже сдаёт — с теми ответами, что успели сохраниться
       const done = await finalize(a, cache);
       return json({ score: done.score ?? 0, max: done.max_score ?? 0, now: Date.now() });
     }
 
     case 'review': {
-      if (!a?.finished_at || !l.review_sent_at) {
+      if (!a?.finished_at || !l.review_sent_at || !inSession(a, l)) {
         return json({ error: 'review_not_ready', message: 'Разбор появится, когда преподаватель его отправит.' }, 403);
       }
       const questions = await ticketQuestions(a.ticket_id, cache);
@@ -392,7 +454,8 @@ async function teacherAction(action: string, body: any, userId: string): Promise
       const { error: uErr } = await sb.from('exam_links').update({ review_sent_at: now.toISOString() }).eq('code', code);
       if (uErr) throw uErr;
       let sent = 0, failed = 0, first = true;
-      for (const a of (data ?? []) as Attempt[]) {
+      // Разбор — только тем, кто писал в начатой сессии (закрытые в ожидании вопросов не видели)
+      for (const a of ((data ?? []) as Attempt[]).filter((x) => inSession(x, l))) {
         const lang = langOf(a); // каждому ученику — на языке его попытки
         const button = { inline_keyboard: [[{ text: reviewButtonText(lang), web_app: { url: `${EXAM_URL}?c=${code}&review=1` } }]] };
         const questions = await ticketQuestions(a.ticket_id, cache);
@@ -413,11 +476,12 @@ async function teacherAction(action: string, body: any, userId: string): Promise
       const chat = await teacherChat(userId);
       if (!chat) return json({ error: NOT_LINKED }, 400);
       if (!linkOpen(l, now)) return json({ error: 'Запуск уже закрыт.' }, 409);
+      if (phaseOf(l, now) === 'ended') return json({ error: 'Время билета уже закончилось.' }, 409);
       const bot = await botName();
       if (!bot) return json({ error: 'Не удалось получить имя бота. Попробуйте ещё раз.' }, 502);
       const url = `https://t.me/${bot}?start=exam_${code}`;
       const subject = l.batch?.subject?.name ? `\nПредмет: ${tgPlain(l.batch.subject.name)}` : '';
-      const text = `📝 <b>Билет: ${title}</b>${subject}\nНа прохождение ${l.duration_min} минут, попытка одна.\nОткройте ссылку и нажмите «Начать билет»:\n${url}`;
+      const text = `📝 <b>Билет: ${title}</b>${subject}\nВремя назначит преподаватель, попытка одна.\nОткройте ссылку и нажмите «Начать билет»:\n${url}`;
       const ok = await sendText(chat, text, { inline_keyboard: [[{ text: '📝 Начать билет', url }]] });
       return ok ? json({ ok: true }) : json({ error: 'Бот не смог написать вам: откройте бота в Telegram и нажмите «Start».' }, 502);
     }
