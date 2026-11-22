@@ -217,6 +217,12 @@ describe('служебные таблицы', () => {
     expect(res.insertErr).not.toBeNull();
     expect(res.rows).toBe(0);
   });
+  it('журнал отката массовых правок закрыт для всех ролей приложения, даже для главного админа', async () => {
+    for (const userId of [s.users.owner, s.users.teacher, null]) {
+      const err = await as(db.admin, userId, (q) => rejected(q, 'select * from public.bulk_change_backups limit 1'));
+      expect(err).toMatch(/permission denied/);
+    }
+  });
   it('без входа закрыты профили, наборы билетов и служебные таблицы', async () => {
     for (const table of ['profiles', 'ticket_batches', 'user_subjects', 'audit_logs', 'telegram_links']) {
       const err = await as(db.admin, null, (q) => rejected(q, `select * from public.${table} limit 1`));

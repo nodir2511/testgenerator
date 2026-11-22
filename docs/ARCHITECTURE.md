@@ -45,7 +45,7 @@ scripts/                omr-blanks.mjs (бланки ответов для пе�
 tests/                  vitest (раздел 14)
 tests-db/               тесты прав доступа (RLS, RPC) на встроенном Postgres, отдельный запуск `npm run test:db` (раздел 14)
 docs/ARCHITECTURE.md    Этот файл
-.github/workflows/      ci.yml — на каждый пуш: `npm audit`, проверка, что копии в `_shared` совпадают с исходниками (`sync-docx-shared.mjs` + `git diff --exit-code`), и `npm run build` (тесты, типы, сборка); backup.yml — копия базы (запуск вручную, ночной cron выключен)
+.github/workflows/      ci.yml — на каждый пуш: `npm audit`, проверка, что копии в `_shared` совпадают с исходниками (`sync-docx-shared.mjs` + `git diff --exit-code`), `npm run build` (тесты, типы, сборка) и `npm run test:db` (права доступа на встроенном Postgres); backup.yml — копия базы (запуск вручную, ночной cron выключен)
 supabase/config.toml    только `project_id`
 scratch/, temp_docs/    Рабочие материалы, в git нет
 ```
@@ -252,6 +252,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 | `omr_digit_samples.sql` | `omr_digit_samples`: собранные картинки цифр из клеток (только `tg-app`) |
 | `security_round5.sql` | проверка перед 1.0.0: `update_batch_questions` не превращает набор в кластерный и проверяет вопрос; DELETE вопросов, глав, тем и картинок — только админ; лимиты `report_client_error` на отправителя; `game_rejoin` — 5 попыток за 15 минут; `guard_ticket_insert` освобождает и админа по предметам; привязка Telegram закрыта «Учителю игры»; историю импорта читают только staff; триггерные функции не вызываются через RPC. **Применяется последним** |
 | `deleted_question_options.sql` | `can_view_question` учитывает `is_deleted`: варианты и пары соответствия удалённого вопроса видит только тот, кто видит сам вопрос (релиз 1.0.2) |
+| `bulk_change_backups.sql` | журнал отката разовых массовых правок банка (`id, created_at, kind, payload`): RLS включён, политик и прав у ролей API нет — пишет только сервисный ключ |
 | `game.sql`, `game_v2.sql` … `game_v6.sql`, `game_pack_chemistry.sql` (пакет вопросов по химии) | «Своя игра» по версиям; все применены (v6 — 1 ноября 2026) |
 
 
@@ -545,7 +546,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - Проверки:
   - `npx tsc -b` и `npx vitest run` — перед каждым коммитом;
   - `npm run build` — тесты, типы и сборка вместе; то же и `npm audit --omit=dev --audit-level=high` запускает GitHub Actions (`ci.yml`) на каждый пуш;
-  - `npm run test:db` — тесты прав доступа на встроенном Postgres (раздел 14); запускайте после правок в `supabase/sql`. В CI пока не входит.
+  - `npm run test:db` — тесты прав доступа на встроенном Postgres (раздел 14); запускайте после правок в `supabase/sql`. Входит в CI (`ci.yml`, после сборки).
   - после новых цветовых классов Tailwind — `npm run theme:dark` и коммит `src/dark.css`.
 - `.env` в git не хранится, переменные — в `.env.example`:
   - сайт: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_TELEGRAM_BOT_USERNAME`, `VITE_SUPPORT_TELEGRAM` (необязательно);
@@ -603,7 +604,7 @@ scratch/, temp_docs/    Рабочие материалы, в git нет
 - `bootstrap.sql` — заглушки Supabase: роли `anon` / `authenticated` / `service_role`, `auth.users`, `auth.uid()` (читает `request.jwt.claims`), `storage.buckets` / `storage.objects`, публикация `supabase_realtime`, `cron.schedule`, `net.http_post`, права по умолчанию на схему `public`.
 - `helpers.ts` — `seed()` (пять пользователей разных ролей, два предмета, вопросы, в том числе удалённые), `as(admin, userId, fn)` — запросы от имени пользователя в транзакции с откатом, `switchUser`, `rejected` (запрос, который должен быть отклонён).
 - `access.test.ts` — схема применяется с нуля; кто какие вопросы и варианты видит и меняет; защита ролей и `is_owner`; назначение предметов; закрытая регистрация; наборы билетов (видимость, удаление, кластерные, `update_batch_questions`); счётчик `question_usage`; дневной лимит; `client_errors`, `audit_logs`; закрытость таблиц для анонимов.
-- Чего так не проверить: вход (Supabase Auth), хранилище файлов, Realtime, Edge Functions, pg_cron — только RLS, триггеры и функции базы. Тела политик с живой базой не сверяются; 22.11.2026 совпали списки политик (78) и функций (73), в живой базе есть таблица `bulk_change_backups` (`id, created_at, kind, payload`), которой нет в `supabase/sql`: журнал отката разовых массовых правок банка от 9.11.2026 (5 записей), RLS включён, политик нет — с сайта недоступна.
+- Чего так не проверить: вход (Supabase Auth), хранилище файлов, Realtime, Edge Functions, pg_cron — только RLS, триггеры и функции базы. Тела политик с живой базой не сверяются; 22.11.2026 совпали списки политик (78) и функций (73), таблица `bulk_change_backups` описана в `supabase/sql/bulk_change_backups.sql` (в живой базе создана вручную 9.11.2026).
 - Порядок применения отличается от порядка появления файлов: `owner_history.sql` идёт до `generation_limits.sql` (нужна `is_owner()`), `security_round3.sql` — после `question_children_rls_fast.sql` (нужна `can_view_question()`): файлы дописывались позже.
 
 ## 15. Ловушки

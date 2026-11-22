@@ -33,3 +33,5 @@ jobs:
         env:
           VITE_SUPABASE_URL: https://example.supabase.co
           VITE_SUPABASE_ANON_KEY: ci-placeholder
+      - name: Права доступа в базе (встроенный Postgres)
+        run: npm run test:db

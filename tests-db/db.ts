@@ -65,6 +65,7 @@ export const SCHEMA_FILES = [
   'passages.sql',
   'security_round5.sql',
   'deleted_question_options.sql',
+  'bulk_change_backups.sql',
 ];
 
 /** Файлы с данными, а не со схемой: в тестовую базу не применяются */
