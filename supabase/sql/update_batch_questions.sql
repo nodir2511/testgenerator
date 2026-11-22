@@ -5,6 +5,8 @@
 --    вопросов билетов и (если передано) обновляет generation_params набора, чтобы архив знал текущие темы.
 --    «Пустое место» (вопроса не нашлось) хранится как question_id = null и снимок { empty: true, type, ... }.
 -- Менять набор может его автор или главный админ. Партии экзамена-кластера менять нельзя.
+-- Набор, который запускали классу («Билеты классу», exam_links), менять нельзя вовсе: снимки лежат под теми же id,
+-- что в ответах учеников. Итоговое определение функции — в security_round5.sql (там та же проверка).
 -- Требует question_usage_counter.sql. Повторный запуск безопасен.
 -- Применить: supabase db query --linked -f supabase/sql/update_batch_questions.sql
 
@@ -65,6 +67,10 @@ begin
   end if;
   if public.is_cluster_batch(b.generation_params) then
     raise exception 'Партии экзамена-кластера менять нельзя';
+  end if;
+  -- Набор уже запускали классу (даже закрыто): снимки лежат под теми же id, что в ответах учеников и статистике
+  if to_regclass('public.exam_links') is not null and exists (select 1 from public.exam_links where batch_id = p_batch_id) then
+    raise exception 'У набора есть запуск классу — менять вопросы нельзя. Сделайте копию набора.';
   end if;
 
   for c in select value from jsonb_array_elements(coalesce(p_changes, '[]'::jsonb)) loop

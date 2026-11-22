@@ -22,7 +22,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
-  attemptState, chunkLines, deadlineOf, pickVariant, publicSnapshot, reviewLines, reviewSnapshot, scoreAttempt, tgPlain,
+  attemptState, chunkLines, deadlineOf, examLang, pickVariant, publicSnapshot, reviewButtonText, reviewHead, reviewJustSent, reviewLines, reviewSnapshot, scoreAttempt, tgPlain,
   type ExamAnswer, type ExamAnswers, type ExamQuestion,
 } from '../_shared/exam.ts';
 import { verifyInitData, type TgInitUser } from '../_shared/tgInitData.ts';
@@ -58,11 +58,12 @@ type Link = {
 type Attempt = {
   id: string; code: string; tg_user_id: number; student_name: string; ticket_id: string; started_at: string;
   deadline_at: string; finished_at: string | null; answers: ExamAnswers | null; score: number | null; max_score: number | null;
+  lang: string | null;
 };
 type QCache = Map<string, ExamQuestion[]>;
 
 const LINK_COLS = 'code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, batch:ticket_batches(title, generation_params, subject:subjects(name))';
-const ATTEMPT_COLS = 'id, code, tg_user_id, student_name, ticket_id, started_at, deadline_at, finished_at, answers, score, max_score';
+const ATTEMPT_COLS = 'id, code, tg_user_id, student_name, ticket_id, started_at, deadline_at, finished_at, answers, score, max_score, lang';
 
 const ms = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : Infinity);
 /** Ссылка принимает новых учеников и ответы: не закрыта преподавателем и не истекла */
@@ -71,7 +72,8 @@ const linkOpen = (l: Link, now: Date) => !l.closed_at && ms(l.closes_at) > now.g
 const effDeadline = (a: Attempt, l: Link) => Math.min(ms(a.deadline_at), ms(l.closed_at));
 const stateOf = (a: Attempt, l: Link, now: Date) =>
   attemptState({ finished_at: a.finished_at, deadline_at: new Date(effDeadline(a, l)).toISOString() }, now);
-const langOf = (l: Link): 'ru' | 'tg' => (l.batch?.generation_params?.lang === 'tg' ? 'tg' : 'ru');
+/** Язык билета выбирает ученик перед началом (exam_attempts.lang); без попытки — русский */
+const langOf = (a: Attempt | null): 'ru' | 'tg' => examLang(a?.lang);
 
 async function loadLink(code: string): Promise<Link | null> {
   const { data, error } = await sb.from('exam_links').select(LINK_COLS).eq('code', code).maybeSingle();
@@ -153,7 +155,7 @@ async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache)
     title: l.batch?.title ?? '',
     subject: l.batch?.subject?.name ?? '',
     minutes: l.duration_min,
-    lang: langOf(l),
+    lang: langOf(a),
   };
   if (a?.finished_at) {
     if (a.score == null) a = await finalize(a, cache); // сдана, но балл не записан (сбой) — досчитываем
@@ -280,7 +282,9 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
 
   const now = new Date();
   const cache: QCache = new Map();
-  await finishExpired(l, now, cache);
+  // save не сдаёт чужие просроченные попытки: exam_attempt_save сам отказывает после срока и закрытия,
+  // а состояние этой попытки считается ниже (stateOf + finalize); остальные действия подчищают запуск
+  if (action !== 'save') await finishExpired(l, now, cache);
   let a = await readAttempt(code, tgUser.id);
 
   switch (action) {
@@ -300,7 +304,7 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       // Одна попытка на аккаунт: при гонке двух start вставка второй ничего не делает, обе читают одну строку
       const { error } = await sb.from('exam_attempts').upsert({
         code, tg_user_id: tgUser.id, tg_username: tgUser.username ?? null, tg_name: tgName, student_name: name,
-        ticket_id: ticket.id, started_at: now.toISOString(),
+        ticket_id: ticket.id, started_at: now.toISOString(), lang: examLang(body.lang),
         deadline_at: deadlineOf(now, new Date(l.closes_at), l.duration_min).toISOString(),
       }, { onConflict: 'code,tg_user_id', ignoreDuplicates: true });
       if (error) throw error;
@@ -379,18 +383,20 @@ async function teacherAction(action: string, body: any, userId: string): Promise
     case 'review_send': {
       // Пока ссылка открыта, разбор (с верными ответами) переслали бы тем, кто ещё пишет
       if (linkOpen(l, now)) return json({ error: 'Сначала закройте запуск: иначе ответы увидят те, кто ещё проходит билет.' }, 409);
+      // Двойной щелчок или повтор запроса: вторая рассылка сразу после первой не нужна (409, клиент покажет это спокойно)
+      if (reviewJustSent(l.review_sent_at, now)) return json({ error: 'Разбор только что отправлен.' }, 409);
       const { data, error } = await sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', code)
         .not('finished_at', 'is', null).order('finished_at').limit(500);
       if (error) throw error;
       // Отметка ставится до рассылки: кнопка «Открыть с формулами и рисунками» должна работать сразу
       const { error: uErr } = await sb.from('exam_links').update({ review_sent_at: now.toISOString() }).eq('code', code);
       if (uErr) throw uErr;
-      const lang = langOf(l);
-      const button = { inline_keyboard: [[{ text: 'Открыть с формулами и рисунками', web_app: { url: `${EXAM_URL}?c=${code}&review=1` } }]] };
       let sent = 0, failed = 0, first = true;
       for (const a of (data ?? []) as Attempt[]) {
+        const lang = langOf(a); // каждому ученику — на языке его попытки
+        const button = { inline_keyboard: [[{ text: reviewButtonText(lang), web_app: { url: `${EXAM_URL}?c=${code}&review=1` } }]] };
         const questions = await ticketQuestions(a.ticket_id, cache);
-        const head = `📝 <b>Разбор: ${title}</b>\nВы набрали ${a.score ?? 0} из ${a.max_score ?? 0}.`;
+        const head = reviewHead(title, a.score ?? 0, a.max_score ?? 0, lang);
         const parts = chunkLines([head, ...reviewLines(questions, (a.answers ?? {}) as ExamAnswers, lang)]);
         let ok = true;
         for (let i = 0; i < parts.length && ok; i++) {

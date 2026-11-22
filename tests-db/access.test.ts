@@ -244,6 +244,49 @@ describe('билеты классу', () => {
     expect(res).toEqual({ author: 1, owner: 1, other: 0 });
   });
 
+  it('exam_attempts.lang: по умолчанию ru, tg принимается, мусор отклоняется', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      const ticket = (await q('select id from public.tickets where batch_id = $1', [r.batch.id]))[0].id;
+      await q('reset role');
+      const ins = (tg: number, lang?: string) => q(
+        `insert into public.exam_attempts (code, tg_user_id, student_name, ticket_id, deadline_at${lang ? ', lang' : ''})
+         values ($1, $2, 'Ученик', $3, now() + interval '30 minutes'${lang ? ', $4' : ''}) returning lang`,
+        lang ? [link.code, tg, ticket, lang] : [link.code, tg, ticket]);
+      const def = (await ins(1))[0].lang;
+      const tj = (await ins(2, 'tg'))[0].lang;
+      const junk = await rejected(q, `insert into public.exam_attempts (code, tg_user_id, student_name, ticket_id, deadline_at, lang)
+        values ($1, 3, 'Ученик', $2, now() + interval '30 minutes', 'xx')`, [link.code, ticket]);
+      return { def, tj, junk };
+    });
+    expect(res.def).toBe('ru');
+    expect(res.tj).toBe('tg');
+    expect(res.junk).toMatch(/check/i);
+  });
+
+  it('update_batch_questions: без запуска классу правка проходит, с запуском (в том числе закрытым) — отказ, снимок не меняется', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const tq = (await q('select tq.id from public.ticket_questions tq join public.tickets t on t.id = tq.ticket_id where t.batch_id = $1', [r.batch.id]))[0];
+      const edit = (text: string) => JSON.stringify([{ ticket_question_id: tq.id, question_id: s.questions.chem, question_snapshot: { ...snapshot(s.questions.chem), content: text } }]);
+      const content = async () => (await q("select question_snapshot->>'content' as c from public.ticket_questions where id = $1", [tq.id]))[0].c;
+      await q('select public.update_batch_questions($1, $2::jsonb)', [r.batch.id, edit('До запуска')]);
+      const before = await content();
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      const open = await rejected(q, 'select public.update_batch_questions($1, $2::jsonb)', [r.batch.id, edit('С открытым запуском')]);
+      await q('select public.exam_link_close($1)', [link.code]);
+      const closed = await rejected(q, 'select public.update_batch_questions($1, $2::jsonb)', [r.batch.id, edit('С закрытым запуском')]);
+      const onlyParams = await rejected(q, 'select public.update_batch_questions($1, $2::jsonb, $3::jsonb)', [r.batch.id, '[]', '{"x":1}']);
+      return { before, open, closed, onlyParams, after: await content() };
+    });
+    expect(res.before).toBe('До запуска');
+    expect(res.open).toMatch(/есть запуск классу/);
+    expect(res.closed).toMatch(/Сделайте копию набора/);
+    expect(res.onlyParams).toMatch(/есть запуск классу/);
+    expect(res.after).toBe('До запуска');
+  });
+
   it('exam_link_close: автор и главный админ закрывают, другой преподаватель получает отказ', async () => {
     const res = await as(db.admin, s.users.teacher, async (q) => {
       const r = await saveBatch(q, s.subjects.chem, s.questions.chem);

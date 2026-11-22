@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   EXAM_MINUTES, EXAM_LINK_HOURS, publicSnapshot, reviewSnapshot, parseOpen, scoreAttempt, pickVariant, examCode,
-  parseStartPayload, deadlineOf, attemptState, tgPlain, reviewLines, chunkLines,
+  parseStartPayload, deadlineOf, attemptState, tgPlain, reviewLines, chunkLines, examLang, reviewHead, reviewButtonText, reviewJustSent, REVIEW_RESEND_GUARD_MS,
 } from '../supabase/functions/_shared/exam';
 
 const test = (id = 'q1', right = 'o2') => ({
@@ -162,6 +162,63 @@ describe('tgPlain', () => {
     expect(tgPlain('A & B > C')).toBe('A &amp; B &gt; C');
     expect(tgPlain('&amp;lt;')).toBe('&amp;lt;');
     expect(tgPlain('&amp;')).toBe('&amp;');
+  });
+});
+
+describe('tgPlain: математика со знаками < и >', () => {
+  it('сравнение с «<» и «>» в одной строке не вырезается как тег', () => {
+    expect(tgPlain('x<y и z>w')).toBe('x&lt;y и z&gt;w');
+    expect(tgPlain('если a<b и c>d, то')).toBe('если a&lt;b и c&gt;d, то');
+    expect(tgPlain('1<x<5')).toBe('1&lt;x&lt;5');
+    expect(tgPlain('<y>')).toBe('&lt;y&gt;');
+  });
+  it('разметку сайта по-прежнему убирает', () => {
+    expect(tgPlain('<b>а</b><i>б</i><u>в</u><em>г</em><strong>д</strong><span class="x">е</span><p>ж</p>')).toBe('абвгдеж');
+    expect(tgPlain('<lab1>слово</lab1>')).toBe('слово');
+    expect(tgPlain('а<br>б<br/>в<BR />г')).toBe('а\nб\nв\nг');
+  });
+  it('безопасно для Telegram HTML: чужие теги экранируются', () => {
+    const out = tgPlain('<script>alert(1)</script><a href="x">y</a> <b>ok</b>');
+    expect(out).not.toMatch(/<(?!\/?(b|i|u)>)/);
+    expect(out).toContain('&lt;script&gt;');
+    expect(out).toContain('ok');
+  });
+});
+
+describe('examLang и защита от двойной рассылки', () => {
+  it('examLang: только tg считается таджикским', () => {
+    expect(examLang('tg')).toBe('tg');
+    expect(examLang('ru')).toBe('ru');
+    expect(examLang(undefined)).toBe('ru');
+    expect(examLang('en')).toBe('ru');
+  });
+  it('reviewJustSent: 409 только если разбор отправлен меньше 10 секунд назад', () => {
+    const now = new Date('2026-11-22T12:00:30Z');
+    expect(REVIEW_RESEND_GUARD_MS).toBe(10_000);
+    expect(reviewJustSent(null, now)).toBe(false);
+    expect(reviewJustSent('2026-11-22T12:00:25Z', now)).toBe(true);
+    expect(reviewJustSent('2026-11-22T12:00:20Z', now)).toBe(false);
+    expect(reviewJustSent('2026-11-22T12:00:10Z', now)).toBe(false);
+    expect(reviewJustSent('2026-11-22T12:00:40Z', now)).toBe(false); // из будущего (сдвиг часов) не блокирует
+  });
+});
+
+describe('тексты разбора по языку запуска', () => {
+  it('русский по умолчанию', () => {
+    expect(reviewHead('Алгебра', 3, 5, 'ru')).toBe('📝 <b>Разбор: Алгебра</b>\nВы набрали 3 из 5.');
+    expect(reviewButtonText('ru')).toBe('Открыть с формулами и рисунками');
+  });
+  it('таджикский: заголовок, кнопка и подписи строк', () => {
+    expect(reviewHead('Алгебра', 3, 5, 'tg')).toContain('Шарҳ');
+    expect(reviewHead('Алгебра', 3, 5, 'tg')).toContain('3 аз 5');
+    expect(reviewButtonText('tg')).not.toBe(reviewButtonText('ru'));
+    const qs = [{ tqId: 'a', snapshot: test('a') }];
+    const lines = reviewLines(qs, { a: 'o1' }, 'tg').join(' ');
+    expect(lines).toContain('Ҷавоби шумо');
+    expect(lines).toContain('Ҷавоби дуруст');
+    expect(lines).not.toContain('Ваш ответ');
+    expect(reviewLines(qs, { a: 'o2' }, 'tg')).toEqual(['Хатоҳо нест']);
+    expect(reviewLines(qs, { a: 'o2' }, 'ru')).toEqual(['Ошибок нет']);
   });
 });
 

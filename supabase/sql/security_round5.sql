@@ -20,6 +20,10 @@ begin
   if public.is_cluster_batch(b.generation_params) then
     raise exception 'Партии экзамена-кластера менять нельзя';
   end if;
+  -- Набор уже запускали классу (даже закрыто): снимки лежат под теми же id, что в ответах учеников и статистике
+  if to_regclass('public.exam_links') is not null and exists (select 1 from public.exam_links where batch_id = p_batch_id) then
+    raise exception 'У набора есть запуск классу — менять вопросы нельзя. Сделайте копию набора.';
+  end if;
   if p_params is not null and (jsonb_typeof(p_params) <> 'object' or public.is_cluster_batch(p_params)) then
     raise exception 'Неверные параметры набора';
   end if;

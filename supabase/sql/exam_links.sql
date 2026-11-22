@@ -5,6 +5,7 @@
 -- из приложения таблицы можно только читать: свой запуск (created_by = auth.uid()) или всё — главный админ.
 -- Ученики попытки через RLS не читают никогда (только сервисный ключ). У anon прав нет.
 -- Кластерные наборы (generation_params.source = 'cluster') классу запускать нельзя.
+-- Набор с запуском менять нельзя: update_batch_questions отказывает (см. update_batch_questions.sql и security_round5.sql).
 -- Повторный запуск безопасен.
 -- Применить: supabase db query --linked -f supabase/sql/exam_links.sql
 
@@ -35,6 +36,15 @@ create table if not exists public.exam_attempts (
   max_score int,
   unique (code, tg_user_id)
 );
+
+-- Язык билета выбирает ученик перед началом: ru или tg (на нём вопросы, разбор и сообщения бота)
+alter table public.exam_attempts add column if not exists lang text not null default 'ru';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'exam_attempts_lang_check' and conrelid = 'public.exam_attempts'::regclass) then
+    alter table public.exam_attempts add constraint exam_attempts_lang_check check (lang in ('ru', 'tg'));
+  end if;
+end $$;
 
 create index if not exists exam_links_batch_idx on public.exam_links (batch_id);
 create index if not exists exam_links_created_by_idx on public.exam_links (created_by);

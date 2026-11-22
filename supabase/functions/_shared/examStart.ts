@@ -3,7 +3,7 @@
 
 import { EXAM_MINUTES, tgPlain } from './exam.ts';
 
-export const EXAM_CLOSED_TEXT = 'Экзамен по этой ссылке закрыт. Спросите новую ссылку у преподавателя.';
+export const EXAM_CLOSED_TEXT = 'Билет по этой ссылке закрыт. Спросите новую ссылку у преподавателя.';
 export const EXAM_TOO_MANY_TEXT = 'Слишком много попыток. Подождите несколько минут.';
 
 /** Ссылка закрыта: нет такой, закрыта преподавателем или истекла. Для ученика все три случая выглядят одинаково. */
@@ -14,9 +14,10 @@ export function examLinkClosed(link: { closed_at: string | null; closes_at: stri
 }
 
 /** Текст сообщения (parse_mode HTML): название набора проходит через tgPlain (разметка сайта → текст, «<», «>», «&» экранированы). */
-export function examStartText(title: string | null | undefined): string {
+export function examStartText(title: string | null | undefined, minutes?: number | null): string {
   const t = tgPlain(String(title ?? '')).trim();
-  return `📝 Билет${t ? `: ${t}` : ''}. На прохождение ${EXAM_MINUTES} минут, попытка одна.`;
+  const m = Number.isFinite(minutes) && (minutes as number) > 0 ? Math.round(minutes as number) : EXAM_MINUTES;
+  return `📝 Билет${t ? `: ${t}` : ''}. На прохождение ${m} минут, попытка одна.`;
 }
 
 /**

@@ -659,7 +659,7 @@ const sendPlain = (chat: number, text: string, markup?: Record<string, unknown>)
 async function onExamStart(chat: number, tgUserId: number, code: string) {
   if (examMisses.blocked(tgUserId)) return sendPlain(chat, EXAM_TOO_MANY_TEXT);
   const { data: link, error } = await sb.from('exam_links')
-    .select('closed_at, closes_at, batch:ticket_batches(title)').eq('code', code).maybeSingle();
+    .select('closed_at, closes_at, duration_min, batch:ticket_batches(title)').eq('code', code).maybeSingle();
   if (error) {
     console.error('exam link lookup failed', error.message);
     return sendPlain(chat, '⚠️ Не удалось открыть билет. Попробуйте ещё раз через минуту.');
@@ -671,7 +671,7 @@ async function onExamStart(chat: number, tgUserId: number, code: string) {
   }
   const batch = (link as any).batch;
   const title = (Array.isArray(batch) ? batch[0]?.title : batch?.title) ?? '';
-  return sendPlain(chat, examStartText(title), {
+  return sendPlain(chat, examStartText(title, (link as any).duration_min), {
     inline_keyboard: [[{ text: 'Начать билет', web_app: { url: `${EXAM_URL}?c=${code}` } }]],
   });
 }

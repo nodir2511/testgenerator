@@ -54,9 +54,25 @@ describe('examStartText', () => {
   });
 });
 
+describe('examStartText: срок из запуска', () => {
+  it('берёт duration_min запуска', () => {
+    expect(examStartText('Физика', 45)).toBe('📝 Билет: Физика. На прохождение 45 минут, попытка одна.');
+  });
+  it('нет значения или мусор — запасные 30 минут', () => {
+    expect(examStartText('Физика', null)).toContain('30 минут');
+    expect(examStartText('Физика', undefined)).toContain('30 минут');
+    expect(examStartText('Физика', 0)).toContain('30 минут');
+    expect(examStartText('Физика', NaN)).toContain('30 минут');
+  });
+});
+
 describe('тексты', () => {
+  it('в словах для ученика нет «экзамен» (так называется только экзамен-кластер)', () => {
+    expect(EXAM_CLOSED_TEXT).not.toMatch(/экзамен/i);
+    expect(examStartText('A', 30)).not.toMatch(/экзамен/i);
+  });
   it('закрыто и лимит', () => {
-    expect(EXAM_CLOSED_TEXT).toBe('Экзамен по этой ссылке закрыт. Спросите новую ссылку у преподавателя.');
+    expect(EXAM_CLOSED_TEXT).toBe('Билет по этой ссылке закрыт. Спросите новую ссылку у преподавателя.');
     expect(EXAM_TOO_MANY_TEXT).toBe('Слишком много попыток. Подождите несколько минут.');
   });
 });

@@ -105,6 +105,17 @@ export function deadlineOf(startedAt: Date, linkClosesAt: Date, minutes: number 
   return new Date(Math.min(startedAt.getTime() + minutes * 60_000, linkClosesAt.getTime()));
 }
 
+/** Язык вопросов запуска: только 'tg' даёт таджикский, остальное — русский */
+export const examLang = (v: unknown): 'ru' | 'tg' => (v === 'tg' ? 'tg' : 'ru');
+
+/** Разбор отправляли меньше 10 секунд назад — вторую рассылку (двойной щелчок) не начинаем */
+export const REVIEW_RESEND_GUARD_MS = 10_000;
+export function reviewJustSent(reviewSentAt: string | null | undefined, now: Date): boolean {
+  if (!reviewSentAt) return false;
+  const ago = now.getTime() - new Date(reviewSentAt).getTime();
+  return ago >= 0 && ago < REVIEW_RESEND_GUARD_MS;
+}
+
 export function attemptState(a: { finished_at: string | null; deadline_at: string }, now: Date): 'running' | 'expired' | 'finished' {
   if (a.finished_at) return 'finished';
   return new Date(a.deadline_at).getTime() <= now.getTime() ? 'expired' : 'running';
@@ -123,13 +134,17 @@ function script(inner: string, map: Record<string, string>, fallback: string): s
 const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const unescHtml = (s: string) => s.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/g, "'").replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&');
 
+// b, i, u, lab1–9 — разметка вопросов сайта (fractions.ts); sub, sup, frac, br разобраны выше; em, strong, span, p — из вставленного текста
+const KNOWN_TAG = /<\/?(?:b|i|u|em|strong|sub|sup|frac|lab[1-9]|(?:span|p)(?:\s+[a-z-]+=\s*(?:"[^"<>]*"|'[^'<>]*'))*)\s*\/?>/gi;
+
 /** Разметка сайта → простой текст для Telegram (parse_mode HTML: «<», «>», «&» экранированы). Дробь — «числитель/знаменатель». */
 export function tgPlain(text: string): string {
   let s = String(text ?? '');
   s = s.replace(/<frac>\s*([^/<]+)\/([^<]+)<\/frac>/gi, '$1/$2').replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '$1/$2');
   s = s.replace(/<sub>([\s\S]*?)<\/sub>/gi, (_, t) => script(t, SUB, '_'));
   s = s.replace(/<sup>([\s\S]*?)<\/sup>/gi, (_, t) => script(t, SUP, '^'));
-  s = s.replace(/<br\s*\/?>/gi, '\n').replace(/<\/?[a-zA-Z][^>]*>/g, '');
+  // Убираем только известную разметку сайта; всё остальное («x<y и z>w») остаётся текстом и экранируется ниже
+  s = s.replace(/<br\s*\/?>/gi, '\n').replace(KNOWN_TAG, '');
   return escHtml(unescHtml(s));
 }
 
@@ -156,6 +171,17 @@ function givenAndRight(snap: any, ans: ExamAnswer | undefined, lang: Lang): { gi
   return { given: mine ? tgPlain(pick(mine, lang)) : NONE, right: right ? tgPlain(pick(right, lang)) : NONE };
 }
 
+const REVIEW_TEXT: Record<Lang, { mine: string; right: string; none: string; head: string; score: (a: number, b: number) => string; button: string }> = {
+  ru: { mine: 'Ваш ответ', right: 'Верный ответ', none: 'Ошибок нет', head: 'Разбор', score: (a, b) => `Вы набрали ${a} из ${b}.`, button: 'Открыть с формулами и рисунками' },
+  tg: { mine: 'Ҷавоби шумо', right: 'Ҷавоби дуруст', none: 'Хатоҳо нест', head: 'Шарҳ', score: (a, b) => `Шумо ${a} аз ${b} гирифтед.`, button: 'Кушодан бо формулаҳо ва расмҳо' },
+};
+
+/** Первая строка сообщения с разбором: заголовок (уже очищенный tgPlain) и баллы */
+export function reviewHead(title: string, score: number, max: number, lang: Lang): string {
+  return `📝 <b>${REVIEW_TEXT[lang].head}: ${title}</b>\n${REVIEW_TEXT[lang].score(score, max)}`;
+}
+export const reviewButtonText = (lang: Lang): string => REVIEW_TEXT[lang].button;
+
 /** Только вопросы с потерянными баллами: номер, текст, «Ваш ответ», «Верный ответ». Один элемент — один вопрос. */
 export function reviewLines(questions: ExamQuestion[], answers: ExamAnswers, lang: Lang): string[] {
   const out: string[] = [];
@@ -165,9 +191,9 @@ export function reviewLines(questions: ExamQuestion[], answers: ExamAnswers, lan
     const snap = q.snapshot;
     const { given, right } = givenAndRight(snap, answers[q.tqId], lang);
     const pic = snap.image_url ? ' [рисунок]' : '';
-    out.push(`${i + 1}.${pic} ${tgPlain(pick(snap, lang, 'content'))}\nВаш ответ: ${given}\nВерный ответ: ${right}`);
+    out.push(`${i + 1}.${pic} ${tgPlain(pick(snap, lang, 'content'))}\n${REVIEW_TEXT[lang].mine}: ${given}\n${REVIEW_TEXT[lang].right}: ${right}`);
   });
-  return out.length ? out : ['Ошибок нет'];
+  return out.length ? out : [REVIEW_TEXT[lang].none];
 }
 
 /** Где резать слишком длинную строку: по пробелу, не внутри «&...;». */
