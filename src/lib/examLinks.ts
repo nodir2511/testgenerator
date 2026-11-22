@@ -20,13 +20,15 @@ export interface ExamLink {
 
 export interface ExamLinkRow extends ExamLink {
   batch: { title: string; generation_params: any; subject: { name: string } | null } | null;
+  /** Имя автора: только когда его удалось прочитать (главный админ); иначе null */
   creator: { full_name: string | null; email: string | null } | null;
   counts: AttemptCounts;
 }
 
 export type Attempt = AttemptInput & { code: string; started_at: string };
 
-const BOT = import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string | undefined;
+// Тот же запасной бот, что в мини-приложении (src/tg/TgApp.tsx)
+const BOT = (import.meta.env.VITE_TELEGRAM_BOT_USERNAME as string | undefined) || 'testgenerrepbot';
 
 /** Ссылка ученика: https://t.me/<бот>?start=exam_<код>. Пустая строка, если имя бота не задано при сборке */
 export function examUrl(code: string): string {
@@ -45,10 +47,10 @@ export async function closeExamLink(code: string): Promise<void> {
 }
 
 /** Свои запуски (главный админ — все; фильтрует база), открытые сверху, с названием набора, предметом и числом попыток */
-export async function fetchExamLinks(): Promise<ExamLinkRow[]> {
+export async function fetchExamLinks(withAuthors = false): Promise<ExamLinkRow[]> {
   const { data, error } = await supabase
     .from('exam_links')
-    .select('code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, batch:ticket_batches(title, generation_params, subject:subjects(name)), creator:profiles!created_by(full_name, email)')
+    .select('code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, batch:ticket_batches(title, generation_params, subject:subjects(name))')
     .order('created_at', { ascending: false })
     .limit(200);
   if (error) throw error;
@@ -67,8 +69,18 @@ export async function fetchExamLinks(): Promise<ExamLinkRow[]> {
       byCode.set(a.code, arr);
     }
   }
+  // exam_links.created_by ссылается на auth.users, поэтому имена авторов — отдельным запросом к profiles.
+  // Сбой не мешает списку: просто без имён
+  const authors = new Map<string, { full_name: string | null; email: string | null }>();
+  const ids = [...new Set(links.map((l) => l.created_by as string))];
+  if (withAuthors && ids.length) {
+    try {
+      const { data: profs, error: pe } = await supabase.from('profiles').select('id, full_name, email').in('id', ids);
+      if (!pe) for (const pr of profs ?? []) authors.set(pr.id, { full_name: pr.full_name, email: pr.email });
+    } catch { /* имена не обязательны */ }
+  }
   const now = Date.now();
-  return sortLinks(links.map((l) => ({ ...l, counts: countAttempts(byCode.get(l.code) ?? [], now) })) as ExamLinkRow[], now);
+  return sortLinks(links.map((l) => ({ ...l, creator: authors.get(l.created_by) ?? null, counts: countAttempts(byCode.get(l.code) ?? [], now) })) as ExamLinkRow[], now);
 }
 
 /** Попытки одного запуска: имя, аккаунт Telegram, номер билета, баллы */
@@ -96,8 +108,13 @@ async function functionErrorMessage(error: unknown): Promise<string> {
 }
 
 /** Действия преподавателя функции tg-exam. supabase.functions.invoke сам подставляет JWT текущей сессии в Authorization */
+export class NotLinkedError extends Error {}
+
 export async function callExamTeacher(action: 'link_send' | 'notify_closed', code: string): Promise<void> {
   const { data, error } = await supabase.functions.invoke('tg-exam', { body: { action, code } });
-  if (error) throw new Error(await functionErrorMessage(error));
-  if (data?.error) throw new Error(String(data.error));
+  let msg = '';
+  if (error) msg = await functionErrorMessage(error);
+  else if (data?.error) msg = String(data.error);
+  if (!msg) return;
+  throw /Привяжите Telegram/.test(msg) ? new NotLinkedError(msg) : new Error(msg);
 }

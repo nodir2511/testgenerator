@@ -353,6 +353,7 @@ const BatchCard: React.FC<{
   onDelete: () => void;
   loadTickets: () => Promise<any[]>;
 }> = ({ batch, expanded, onToggle, busyId, exportLang, showCreator, canDelete, onDownload, onKey, onDelete, loadTickets }) => {
+  const { user, isOwner } = useAuth();
   const cluster = isClusterBatch(batch);
   const p = batch.generation_params || {};
   const perTicket = (p.test_count ?? 0) + (p.matching_count ?? 0) + (p.open_count ?? 0);
@@ -461,7 +462,7 @@ const BatchCard: React.FC<{
               }}
             />
           )}
-          {!cluster && (
+          {!cluster && (isOwner || batch.created_by === user?.id) && (
             <Button variant="secondary" className="bg-white" icon={Rocket} onClick={() => { window.location.hash = `exams/${batch.id}`; }}>
               Запустить классу
             </Button>

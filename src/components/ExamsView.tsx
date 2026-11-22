@@ -36,8 +36,8 @@ export const ExamsView: React.FC = () => {
   }, []);
 
   const { data: links = [], isLoading } = useQuery({
-    queryKey: EXAM_LINKS_KEY,
-    queryFn: fetchExamLinks,
+    queryKey: [...EXAM_LINKS_KEY, isOwner],
+    queryFn: () => fetchExamLinks(isOwner),
     // пока есть открытые запуски, цифры «сдали / идут» обновляются сами
     refetchInterval: (q) => ((q.state.data as ExamLinkRow[] | undefined)?.some((l) => linkState(l, Date.now()) === 'open') ? 10_000 : false),
     meta: { action: 'Не удалось загрузить запуски' },

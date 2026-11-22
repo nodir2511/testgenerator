@@ -66,10 +66,17 @@ export interface AttemptRowView {
   finishedAt: string | null;
 }
 
-export function mapAttemptRow(a: AttemptInput, now: number): AttemptRowView {
-  const status = attemptState(a, now);
-  const note = status === 'running' ? `идёт, осталось ${remainingMinutes(a.deadline_at, now)} мин`
-    : status === 'timeout' ? 'время вышло, не сдал' : '';
+/** Раньший из срока попытки и конца запуска (закрытие или срок ссылки): позже работа уже не идёт */
+export function effectiveDeadline(deadline: string, linkEnd?: string | null): string {
+  return linkEnd && Date.parse(linkEnd) < Date.parse(deadline) ? linkEnd : deadline;
+}
+
+export function mapAttemptRow(a: AttemptInput, now: number, linkEnd?: string | null): AttemptRowView {
+  const eff = effectiveDeadline(a.deadline_at, linkEnd);
+  const status = attemptState({ finished_at: a.finished_at, deadline_at: eff }, now);
+  // Не сдана, но время вышло: сервер засчитывает такую попытку по сохранённым ответам при ближайшем обращении
+  const note = status === 'running' ? `идёт, осталось ${remainingMinutes(eff, now)} мин`
+    : status === 'timeout' ? 'время вышло, баллы появятся после подсчёта' : '';
   return {
     id: a.id,
     name: a.student_name,
@@ -80,6 +87,11 @@ export function mapAttemptRow(a: AttemptInput, now: number): AttemptRowView {
     note,
     finishedAt: a.finished_at,
   };
+}
+
+/** Запустить набор может его автор или главный админ */
+export function canLaunchByUser(b: { created_by?: string | null; generation_params?: any }, userId: string | undefined, isOwner: boolean): boolean {
+  return canLaunchBatch(b) && (isOwner || (!!userId && b.created_by === userId));
 }
 
 /** Кластерные наборы классу запускать нельзя */

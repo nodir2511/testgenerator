@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Lock } from 'lucide-react';
-import { callExamTeacher, closeExamLink, EXAM_LINKS_KEY, examAttemptsKey, fetchAttempts, type ExamLinkRow } from '../../lib/examLinks';
+import { callExamTeacher, NotLinkedError, closeExamLink, EXAM_LINKS_KEY, examAttemptsKey, fetchAttempts, type ExamLinkRow } from '../../lib/examLinks';
 import { linkState, mapAttemptRow } from '../../lib/examView';
 import { confirmAction } from '../../lib/confirm';
 import { notifyError, notifyInfo, notifySuccess } from '../../lib/errors';
@@ -28,7 +28,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
   });
   useEffect(() => { setNow(Date.now()); }, [data]);
 
-  const rows = (data ?? []).map((a) => mapAttemptRow(a, now));
+  const rows = (data ?? []).map((a) => mapAttemptRow(a, now, link.closed_at ?? link.closes_at));
 
   const close = useMutation({
     mutationFn: async () => {
@@ -37,6 +37,8 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
       try {
         await callExamTeacher('notify_closed', link.code);
       } catch (e) {
+        // Telegram не привязан: итог слать некуда, это не ошибка закрытия
+        if (e instanceof NotLinkedError) return;
         notifyInfo(`Запуск закрыт, но итог в Telegram не отправлен: ${(e as Error).message}`);
       }
     },
@@ -51,7 +53,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
   const onClose = async () => {
     if (!(await confirmAction({
       title: 'Закрыть запуск?',
-      message: 'Новые ученики больше не смогут начать билет, а идущие попытки будут сданы с тем, что успели ответить. Итог придёт вам в Telegram.',
+      message: 'Новые ученики больше не смогут начать билет, а работы тех, кто не успел сдать, будут засчитаны по сохранённым ответам. Если Telegram привязан, итог придёт вам туда.',
       confirmLabel: 'Закрыть запуск',
       cancelLabel: 'Оставить открытым',
       tone: 'danger',

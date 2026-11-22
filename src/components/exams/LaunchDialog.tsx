@@ -8,19 +8,19 @@ import { useAuth } from '../../hooks/useAuth';
 import { useDialog } from '../../hooks/useDialog';
 import { notifyError, notifySuccess } from '../../lib/errors';
 import { callExamTeacher, createExamLink, examUrl, EXAM_LINKS_KEY, type ExamLink } from '../../lib/examLinks';
-import { canLaunchBatch } from '../../lib/examView';
+import { canLaunchBatch, canLaunchByUser } from '../../lib/examView';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui';
 
-interface BatchOption { id: string; title: string; created_at: string; generation_params: any; subject: { name: string } | null }
+interface BatchOption { id: string; created_by: string | null; title: string; created_at: string; generation_params: any; subject: { name: string } | null }
 
-const SELECT = 'id, title, created_at, generation_params, subject:subjects(name)';
+const SELECT = 'id, created_by, title, created_at, generation_params, subject:subjects(name)';
 
 const batchLabel = (b: BatchOption) => `${b.subject?.name ? `${b.subject.name} · ` : ''}${b.title}`;
 
 /** Окно запуска: выбор своего набора → ссылка, QR и отправка себе в Telegram */
 export const LaunchDialog: React.FC<{ initialBatchId?: string | null; onClose: () => void; onCreated?: (link: ExamLink) => void }> = ({ initialBatchId, onClose, onCreated }) => {
-  const { user } = useAuth();
+  const { user, isOwner } = useAuth();
   const queryClient = useQueryClient();
   const panel = useRef<HTMLDivElement>(null);
   useDialog(panel, onClose, true);
@@ -56,7 +56,7 @@ export const LaunchDialog: React.FC<{ initialBatchId?: string | null; onClose: (
     },
     meta: { action: 'Не удалось загрузить набор билетов' },
   });
-  const pre = preselected.data && canLaunchBatch(preselected.data) ? preselected.data : null;
+  const pre = preselected.data && canLaunchByUser(preselected.data, user?.id, isOwner) ? preselected.data : null;
   const list = options.data ?? [];
   const shown = pre && !search.trim() && !list.some((b) => b.id === pre.id) ? [pre, ...list] : list;
   const selected = shown.find((b) => b.id === selectedId) ?? (selectedId === pre?.id ? pre : null);
@@ -95,7 +95,12 @@ export const LaunchDialog: React.FC<{ initialBatchId?: string | null; onClose: (
   });
 
   const copy = () => {
-    navigator.clipboard?.writeText(url || link?.code || '').then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }, () => undefined);
+    const text = url || link?.code || '';
+    if (!navigator.clipboard?.writeText) { notifyError(new Error('Копирование недоступно в этом браузере'), 'Не удалось скопировать ссылку'); return; }
+    navigator.clipboard.writeText(text).then(
+      () => { setCopied(true); setTimeout(() => setCopied(false), 1500); },
+      (e) => notifyError(e, 'Не удалось скопировать ссылку'),
+    );
   };
 
   return createPortal(
@@ -153,7 +158,7 @@ export const LaunchDialog: React.FC<{ initialBatchId?: string | null; onClose: (
               ))}
             </div>
             {initialBatchId && !preselected.isLoading && !pre && !selected && (
-              <p className="text-xs text-amber-700">Набор из ссылки не найден или это экзамен-кластер: его классу запустить нельзя.</p>
+              <p className="text-xs text-amber-700">Этот набор нельзя запустить: он не найден, это экзамен-кластер или создан не вами. Выберите свой набор из списка.</p>
             )}
             <Button variant="primary" size="lg" className="w-full" disabled={!selected} loading={create.isPending} onClick={() => create.mutate()}>
               Запустить{selected ? `: ${batchLabel(selected)}` : ''}
@@ -169,11 +174,7 @@ export const LaunchDialog: React.FC<{ initialBatchId?: string | null; onClose: (
                 {qr && <img src={qr} alt="QR-код ссылки на билет" width={200} height={200} className="rounded-xl border border-slate-200" />}
                 <code className="w-full break-all bg-slate-100 rounded-lg px-3 py-2 text-sm font-mono text-center">{url}</code>
               </div>
-            ) : (
-              <p className="text-sm text-amber-700">
-                Имя бота не задано в настройках сайта (VITE_TELEGRAM_BOT_USERNAME), поэтому ссылку собрать нельзя. Код запуска: <b className="font-mono">{link.code}</b>
-              </p>
-            )}
+            ) : null}
             <div className="flex flex-col sm:flex-row gap-2">
               <Button variant="secondary" className="flex-1" icon={copied ? Check : Copy} onClick={copy}>{copied ? 'Скопировано' : url ? 'Копировать' : 'Копировать код'}</Button>
               <Button

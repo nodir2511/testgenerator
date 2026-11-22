@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, canLaunchBatch, formatScore, summaryText,
+  canLaunchByUser, effectiveDeadline, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, canLaunchBatch, formatScore, summaryText,
 } from '../src/lib/examView';
 
 const NOW = Date.parse('2026-11-22T10:00:00.000Z');
@@ -67,7 +67,11 @@ describe('строка таблицы', () => {
     expect(r.score).toBe('');
     expect(r.note).toBe('идёт, осталось 12 мин');
   });
-  it('время вышло', () => expect(mapAttemptRow({ ...base, finished_at: null, score: null, max_score: null, deadline_at: iso(-3) }, NOW).note).toBe('время вышло, не сдал'));
+  it('время вышло', () => expect(mapAttemptRow({ ...base, finished_at: null, score: null, max_score: null, deadline_at: iso(-3) }, NOW).note).toBe('время вышло, баллы появятся после подсчёта'));
+  it('запуск закрыт раньше срока попытки: не «идёт»', () => {
+    const r = mapAttemptRow({ ...base, finished_at: null, score: null, max_score: null, deadline_at: iso(12) }, NOW, iso(-1));
+    expect(r.status).toBe('timeout');
+  });
 });
 
 describe('formatScore', () => {
@@ -80,5 +84,20 @@ describe('canLaunchBatch', () => {
   it('обычный можно', () => {
     expect(canLaunchBatch({ generation_params: { ticket_count: 5 } })).toBe(true);
     expect(canLaunchBatch({ generation_params: null })).toBe(true);
+  });
+});
+
+describe('effectiveDeadline и canLaunchByUser', () => {
+  it('берёт раньший срок', () => {
+    expect(effectiveDeadline(iso(10), iso(5))).toBe(iso(5));
+    expect(effectiveDeadline(iso(10), null)).toBe(iso(10));
+    expect(effectiveDeadline(iso(10), iso(20))).toBe(iso(10));
+  });
+  it('автор или главный админ', () => {
+    expect(canLaunchByUser({ created_by: 'u1' }, 'u1', false)).toBe(true);
+    expect(canLaunchByUser({ created_by: 'u2' }, 'u1', false)).toBe(false);
+    expect(canLaunchByUser({ created_by: 'u2' }, 'u1', true)).toBe(true);
+    expect(canLaunchByUser({ created_by: 'u1', generation_params: { source: 'cluster' } }, 'u1', true)).toBe(false);
+    expect(canLaunchByUser({ created_by: 'u1' }, undefined, false)).toBe(false);
   });
 });
