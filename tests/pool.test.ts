@@ -28,23 +28,28 @@ function makePool(type: string, topics: number, perTopic: number) {
 
 const light = (q: any) => ({ id: q.id, type: q.type, topic_id: q.topic_id, chapter_id: q.chapter_id, num: q.num, linked_ids: q.linked_ids ?? null, chapter: { order_index: q.chapter.order_index }, topic: { order_index: q.topic.order_index } });
 
-// Имитация цепочки запросов Supabase к таблице questions: фильтры eq/in, order('id'), range, плюс select по списку id
+// Имитация цепочки запросов Supabase к таблице questions: фильтры eq/in, страницы «после id» (gt/gte/lt, order('id'), limit),
+// плюс select по списку id. Чтения по смещению (range) нет намеренно.
 function fakeClient(rows: any[]) {
   const log: Array<{ select: string; kind: string; size?: number }> = [];
+  const sorted = [...rows].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const from = (_table: string) => {
     let select = '';
     const filters: Array<(r: any) => boolean> = [];
-    let range: [number, number] | null = null;
+    let limit: number | null = null;
     const q: any = {
       select: (s: string) => { select = s; return q; },
       eq: () => q, // предмет и признак удаления в тестовых данных не различаются
       in: (col: string, vals: string[]) => { filters.push((r) => vals.includes(r[col])); return q; },
+      gt: (col: string, v: string) => { filters.push((r) => r[col] > v); return q; },
+      gte: (col: string, v: string) => { filters.push((r) => r[col] >= v); return q; },
+      lt: (col: string, v: string) => { filters.push((r) => r[col] < v); return q; },
       order: () => q,
-      range: (a: number, b: number) => { range = [a, b]; return q; },
+      limit: (n: number) => { limit = n; return q; },
       then: (resolve: (v: any) => void) => {
-        let data = rows.filter((r) => filters.every((f) => f(r)));
-        if (range) data = data.slice(range[0], range[1] + 1).slice(0, 1000);
-        log.push({ select, kind: range ? 'pool' : 'ids', size: data.length });
+        let data = (limit ? sorted : rows).filter((r) => filters.every((f) => f(r)));
+        if (limit) data = data.slice(0, Math.min(limit, 1000));
+        log.push({ select, kind: limit ? 'pool' : 'ids', size: data.length });
         resolve({ data: select === POOL_SELECT ? data.map(light) : data, error: null });
       },
     };

@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { TicketPreviewPanel } from './TicketPreview';
+import { Modal } from './BatchModal';
+import { EditQuestionModal } from './BatchQuestionEdit';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
 import { notifyError, notifyInfo } from '../lib/errors';
@@ -75,43 +77,56 @@ function useBatchEdit(batch: EditBatch, enabled: boolean, onChanged?: Changed) {
 
 // ---------- Окно ----------
 
-const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode }> = ({ title, onClose, children, footer }) => {
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
-  }, [onClose]);
-  return (
-    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-slate-950/50 sm:p-4" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} className="bg-white w-full sm:max-w-xl max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl shadow-xl">
-        <div className="flex items-start justify-between gap-3 p-4 border-b border-slate-100">
-          <h3 className="font-bold text-slate-900 text-base leading-snug">{title}</h3>
-          <button onClick={onClose} className="w-10 h-10 -mr-2 -mt-2 rounded-xl text-slate-500 hover:bg-slate-100 flex items-center justify-center shrink-0" aria-label="Закрыть"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="p-4 overflow-y-auto space-y-3 text-sm text-slate-700">{children}</div>
-        {footer && <div className="p-4 border-t border-slate-100 flex flex-wrap justify-end gap-2">{footer}</div>}
-      </div>
-    </div>
-  );
-};
-
 // ---------- Темы набора и массовая замена ----------
 
-export const BatchTopicsBar: React.FC<{ batch: EditBatch; enabled?: boolean; onChanged?: Changed }> = ({ batch, enabled = true, onChanged }) => {
+export const BatchTopicsBar: React.FC<{
+  batch: EditBatch; enabled?: boolean; onChanged?: Changed;
+  /** Только кнопка «Заменить тему» (строка переключателей предпросмотра) */
+  compact?: boolean;
+}> = ({ batch, enabled = true, onChanged, compact = false }) => {
   const canEdit = useCanEdit(batch);
   const ed = useBatchEdit(batch, enabled && canEdit, onChanged);
   const [removing, setRemoving] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   if (!canEdit) return null;
-  if (ed.loading || !ed.data) return enabled ? <div className="py-2"><Loader2 className="w-5 h-5 animate-spin text-indigo-600" /></div> : null;
+  if (ed.loading || !ed.data) return enabled && !compact ? <div className="py-2"><Loader2 className="w-5 h-5 animate-spin text-indigo-600" /></div> : null;
   const counts = topicCounts(ed.data.slots).sort((a, b) => {
     const ta = ed.topicById.get(a.topicId), tb = ed.topicById.get(b.topicId);
     return (ta?.chapterOrder ?? 0) - (tb?.chapterOrder ?? 0) || (ta?.order ?? 0) - (tb?.order ?? 0);
   });
   const empty = ed.data.slots.filter((s) => !s.questionId).length;
   if (counts.length === 0 && empty === 0) return null;
+
+  const modals = (
+    <>
+      {picking && (
+        <Modal title="Какую тему убрать из набора?" onClose={() => setPicking(false)}>
+          <p>Вопросы этой темы во всех билетах заменятся вопросами других тем набора — поровну.</p>
+          <div className="space-y-1.5">
+            {counts.map((c) => {
+              const t = ed.topicById.get(c.topicId);
+              return (
+                <button key={c.topicId} onClick={() => { setPicking(false); setRemoving(c.topicId); }} className="w-full text-left min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">
+                  <b>{ed.label(t)}</b> · {c.count} {plural(c.count, 'вопрос', 'вопроса', 'вопросов')}
+                  <div className="text-slate-600 truncate">{t ? ruPart(t.name) : ''}</div>
+                </button>
+              );
+            })}
+          </div>
+        </Modal>
+      )}
+      {removing && <RemoveTopicModal batch={batch} ed={ed} topicId={removing} onClose={() => setRemoving(null)} />}
+    </>
+  );
+  if (compact) {
+    if (counts.length < 2) return null;
+    return (
+      <>
+        <Button variant="secondary" size="sm" className="bg-white ml-auto" icon={RefreshCw} onClick={() => setPicking(true)}>Заменить тему</Button>
+        {modals}
+      </>
+    );
+  }
 
   return (
     <div className="space-y-2" data-testid="batch-topics">
@@ -138,23 +153,7 @@ export const BatchTopicsBar: React.FC<{ batch: EditBatch; enabled?: boolean; onC
         {empty > 0 && <Badge tone="danger" className="text-sm font-normal">Пустых мест: <b>{empty}</b></Badge>}
       </div>
 
-      {picking && (
-        <Modal title="Какую тему убрать из набора?" onClose={() => setPicking(false)}>
-          <p>Вопросы этой темы во всех билетах заменятся вопросами других тем набора — поровну.</p>
-          <div className="space-y-1.5">
-            {counts.map((c) => {
-              const t = ed.topicById.get(c.topicId);
-              return (
-                <button key={c.topicId} onClick={() => { setPicking(false); setRemoving(c.topicId); }} className="w-full text-left min-h-[44px] px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">
-                  <b>{ed.label(t)}</b> · {c.count} {plural(c.count, 'вопрос', 'вопроса', 'вопросов')}
-                  <div className="text-slate-600 truncate">{t ? ruPart(t.name) : ''}</div>
-                </button>
-              );
-            })}
-          </div>
-        </Modal>
-      )}
-      {removing && <RemoveTopicModal batch={batch} ed={ed} topicId={removing} onClose={() => setRemoving(null)} />}
+      {modals}
     </div>
   );
 };
@@ -259,6 +258,7 @@ export const BatchVariants: React.FC<{
   const ed = useBatchEdit(batch, enabled, onChanged);
   const [swap, setSwap] = useState<Slot | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const closePreview = useCallback(() => setPreviewId(null), []);
   // места, входящие в текст (английский): у них кнопка «Заменить текст» вместо «Заменить вопрос»
   const textSlotIds = useMemo(() => {
@@ -316,7 +316,25 @@ export const BatchVariants: React.FC<{
       {swap && (textSlotIds.has(swap.tqId)
         ? <ReplaceTextModal batch={batch} ed={ed} slot={swap} onClose={() => setSwap(null)} />
         : <ReplaceModal batch={batch} ed={ed} slot={swap} onClose={() => setSwap(null)} />)}
-      {previewId && <TicketPreviewPanel tickets={ed.data.tickets} ticketId={previewId} title={batch.title} subjectName={batch.subjectName} onSelect={setPreviewId} onClose={closePreview} />}
+      {editing && (
+        <EditQuestionModal
+          tickets={ed.data.tickets}
+          tqId={editing}
+          onSave={(rows) => ed.commit(rows, ed.data!.slots)}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {previewId && (
+        <TicketPreviewPanel
+          tickets={ed.data.tickets} ticketId={previewId} title={batch.title} subjectName={batch.subjectName} onSelect={setPreviewId} onClose={closePreview}
+          actions={canEdit ? {
+            onSwap: (tqId) => setSwap(slotOf.get(tqId) ?? null),
+            swapTitle: (tqId) => (textSlotIds.has(tqId) ? 'Заменить текст' : 'Заменить вопрос'),
+            onEdit: setEditing,
+          } : undefined}
+          toolbar={canEdit ? <BatchTopicsBar batch={batch} enabled={enabled} onChanged={onChanged} compact /> : undefined}
+        />
+      )}
     </>
   );
 };

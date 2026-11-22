@@ -186,7 +186,7 @@ function oldDbClient(rows: any[]) {
     let ids: string[] | null = null;
     const q: any = {
       select: (s: string) => { select = s; return q; },
-      eq: () => q, in: (_c: string, v: string[]) => { ids = v; return q; }, order: () => q, range: () => q,
+      eq: () => q, in: (_c: string, v: string[]) => { ids = v; return q; }, order: () => q, limit: () => q,
       then: (resolve: (v: any) => void) => {
         log.push(select);
         if (/passage/.test(select)) return resolve({ data: null, error: { message: 'Could not find a relationship between questions and passages' } });

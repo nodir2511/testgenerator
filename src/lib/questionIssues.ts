@@ -48,6 +48,8 @@ export function questionIssues(q: Q): IssueCode[] {
   return out;
 }
 
+// Фильтр «проблемы» в банке вопросов считает база: функция questions_with_issue (supabase/sql/perf_round1.sql).
+// Правила в ней те же, что в questionIssues выше, — меняете одно, меняйте и другое.
 export type IssueFilter = 'all' | 'any' | 'no_answer' | 'count';
 
 export const ISSUE_FILTER_LABELS: Record<IssueFilter, string> = {
@@ -56,10 +58,3 @@ export const ISSUE_FILTER_LABELS: Record<IssueFilter, string> = {
   no_answer: 'Без правильного ответа',
   count: 'Не по стандарту (A–D ≠ 4, 1–5 ≠ 5)',
 };
-
-export function matchesIssueFilter(issues: IssueCode[], f: IssueFilter): boolean {
-  if (f === 'all') return true;
-  if (f === 'any') return issues.length > 0;
-  if (f === 'no_answer') return issues.includes('no_answer');
-  return issues.some((i) => i === 'options_count' || i === 'left_count' || i === 'right_count');
-}

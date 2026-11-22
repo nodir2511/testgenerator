@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, Maximize2, Minimize2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Maximize2, Minimize2, RefreshCw, X } from 'lucide-react';
 import { FormattedText } from './FormulaEditor';
 import { isEmptySnapshot, TYPE_LABEL } from '../lib/questionSwap';
 // то же правило, что `isEnglishSubject` в docxExport (сам модуль подгружается лениво)
@@ -37,19 +37,98 @@ const pickText = (o: any, lang: Lang, prefix: 'content' | 'text' = 'text'): stri
 const byOrder = (a: any, b: any) => (a.order_index || 0) - (b.order_index || 0);
 const OPTION_LETTERS = 'ABCDEFGH';
 
-const QuestionView: React.FC<{ snap: any; n: number; lang: Lang; showAnswers: boolean; prevPassageId: string | null }> = ({ snap, n, lang, showAnswers, prevPassageId }) => {
+/** Действия над вопросом прямо в предпросмотре (обычный набор, который пользователь вправе менять) */
+export interface PreviewActions {
+  /** Открыть окно замены вопроса (или текста — у вопросов к тексту) */
+  onSwap: (tqId: string) => void;
+  swapTitle: (tqId: string) => string;
+  /** Открыть правку вопроса в этом наборе (банк не меняется) */
+  onEdit: (tqId: string) => void;
+}
+type RowActions = { onSwap: () => void; swapTitle: string; onEdit: () => void };
+
+const SwapButton: React.FC<{ a: RowActions; n: number }> = ({ a, n }) => (
+  <button
+    onClick={a.onSwap}
+    className="w-9 h-9 shrink-0 -ml-1 rounded-lg text-indigo-700 hover:bg-indigo-50 flex items-center justify-center"
+    aria-label={`${a.swapTitle}: № ${n}`}
+    title={a.swapTitle}
+  >
+    <RefreshCw className="w-4 h-4" />
+  </button>
+);
+
+const QuestionView: React.FC<{ snap: any; n: number; lang: Lang; showAnswers: boolean; prevPassageId: string | null; actions?: RowActions }> = ({ snap, n, lang, showAnswers, prevPassageId, actions }) => {
   if (isEmptySnapshot(snap)) {
-    return (
+    const emptyBox = (
       <div className="rounded-xl border border-red-300 bg-red-50 text-red-800 px-3 py-2 text-sm">
         <b>{n}.</b> Пустое место — нужен вопрос ({TYPE_LABEL[snap.type as keyof typeof TYPE_LABEL] ?? snap.type})
       </div>
     );
+    return actions ? <div className="flex items-start gap-1.5"><SwapButton a={actions} n={n} /><div className="min-w-0 flex-1">{emptyBox}</div></div> : emptyBox;
   }
   const passage = snap.passage && snap.passage.id !== prevPassageId ? snap.passage : null;
   const options = [...(snap.options || [])].sort(byOrder);
   const left = (snap.matching_items || []).filter((m: any) => m.side === 'left').sort(byOrder);
   const right = (snap.matching_items || []).filter((m: any) => m.side === 'right').sort(byOrder);
   const content = pickText(snap, lang, 'content');
+
+  const body = (
+    <>
+        <div className="flex gap-2 text-[15px] leading-relaxed text-slate-900">
+          <b className="shrink-0 text-slate-500 tabular-nums">{n}.</b>
+          <div className="min-w-0 break-words font-medium">{content ? <FormattedText text={content} /> : <span className="text-slate-500 italic">без условия</span>}</div>
+        </div>
+        {snap.image_url && <img src={snap.image_url} alt="" loading="lazy" className="max-h-72 max-w-full rounded-xl border border-slate-200 bg-white object-contain" />}
+
+        {snap.type === 'test' && (
+          <ul className="grid gap-1.5 sm:grid-cols-2 pl-6 text-sm">
+            {options.map((o: any, i: number) => {
+              const ok = showAnswers && o.is_correct;
+              return (
+                <li key={o.id ?? i} className={`flex gap-2 items-start rounded-lg border px-2.5 py-1.5 ${ok ? 'border-success-line bg-success-soft' : 'border-slate-200 bg-white'}`}>
+                  <b className={`shrink-0 ${ok ? 'text-success' : 'text-slate-500'}`}>{OPTION_LETTERS[i]})</b>
+                  <span className="min-w-0 break-words space-y-1">
+                    {pickText(o, lang) && <span className="block"><FormattedText text={pickText(o, lang)} /></span>}
+                    {o.image_url && <img src={o.image_url} alt="" loading="lazy" className="max-h-24 rounded border border-slate-200 bg-white object-contain" />}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {snap.type === 'matching' && (
+          <div className="grid grid-cols-2 gap-2 pl-6 text-sm">
+            <ul className="space-y-1.5">
+              {left.map((l: any, i: number) => {
+                const target = right.findIndex((r: any) => r.id === l.correct_match_id);
+                return (
+                  <li key={l.id ?? i} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 break-words">
+                    <b className="text-slate-500 mr-1">{OPTION_LETTERS[i]})</b><FormattedText text={pickText(l, lang)} />
+                    {l.image_url && <img src={l.image_url} alt="" loading="lazy" className="mt-1 max-h-20 rounded border border-slate-200 bg-white object-contain" />}
+                    {showAnswers && target >= 0 && <span className="block text-xs font-semibold text-success mt-0.5">Ответ: {target + 1}</span>}
+                  </li>
+                );
+              })}
+            </ul>
+            <ul className="space-y-1.5">
+              {right.map((r: any, i: number) => (
+                <li key={r.id ?? i} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 break-words">
+                  <b className="text-slate-500 mr-1">{i + 1})</b><FormattedText text={pickText(r, lang)} />
+                  {r.image_url && <img src={r.image_url} alt="" loading="lazy" className="mt-1 max-h-20 rounded border border-slate-200 bg-white object-contain" />}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {snap.type === 'open' && showAnswers && snap.correct_numeric_answer != null && snap.correct_numeric_answer !== '' && (
+          <p className="pl-6 text-sm font-semibold text-success">Ответ: {String(snap.correct_numeric_answer)}</p>
+        )}
+      {snap.edited && <p className="pl-6 text-xs font-semibold text-amber-700">изменён в наборе</p>}
+    </>
+  );
 
   return (
     <div className="space-y-2">
@@ -59,57 +138,22 @@ const QuestionView: React.FC<{ snap: any; n: number; lang: Lang; showAnswers: bo
           <div className="whitespace-pre-line text-slate-800"><FormattedText text={passage.content || ''} /></div>
         </div>
       )}
-      <div className="flex gap-2 text-[15px] leading-relaxed text-slate-900">
-        <b className="shrink-0 text-slate-500 tabular-nums">{n}.</b>
-        <div className="min-w-0 break-words font-medium">{content ? <FormattedText text={content} /> : <span className="text-slate-500 italic">без условия</span>}</div>
-      </div>
-      {snap.image_url && <img src={snap.image_url} alt="" loading="lazy" className="max-h-72 max-w-full rounded-xl border border-slate-200 bg-white object-contain" />}
-
-      {snap.type === 'test' && (
-        <ul className="grid gap-1.5 sm:grid-cols-2 pl-6 text-sm">
-          {options.map((o: any, i: number) => {
-            const ok = showAnswers && o.is_correct;
-            return (
-              <li key={o.id ?? i} className={`flex gap-2 items-start rounded-lg border px-2.5 py-1.5 ${ok ? 'border-success-line bg-success-soft' : 'border-slate-200 bg-white'}`}>
-                <b className={`shrink-0 ${ok ? 'text-success' : 'text-slate-500'}`}>{OPTION_LETTERS[i]})</b>
-                <span className="min-w-0 break-words space-y-1">
-                  {pickText(o, lang) && <span className="block"><FormattedText text={pickText(o, lang)} /></span>}
-                  {o.image_url && <img src={o.image_url} alt="" loading="lazy" className="max-h-24 rounded border border-slate-200 bg-white object-contain" />}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      {snap.type === 'matching' && (
-        <div className="grid grid-cols-2 gap-2 pl-6 text-sm">
-          <ul className="space-y-1.5">
-            {left.map((l: any, i: number) => {
-              const target = right.findIndex((r: any) => r.id === l.correct_match_id);
-              return (
-                <li key={l.id ?? i} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 break-words">
-                  <b className="text-slate-500 mr-1">{OPTION_LETTERS[i]})</b><FormattedText text={pickText(l, lang)} />
-                  {l.image_url && <img src={l.image_url} alt="" loading="lazy" className="mt-1 max-h-20 rounded border border-slate-200 bg-white object-contain" />}
-                  {showAnswers && target >= 0 && <span className="block text-xs font-semibold text-success mt-0.5">Ответ: {target + 1}</span>}
-                </li>
-              );
-            })}
-          </ul>
-          <ul className="space-y-1.5">
-            {right.map((r: any, i: number) => (
-              <li key={r.id ?? i} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 break-words">
-                <b className="text-slate-500 mr-1">{i + 1})</b><FormattedText text={pickText(r, lang)} />
-                {r.image_url && <img src={r.image_url} alt="" loading="lazy" className="mt-1 max-h-20 rounded border border-slate-200 bg-white object-contain" />}
-              </li>
-            ))}
-          </ul>
+      {actions ? (
+        <div className="flex items-start gap-1.5">
+          <SwapButton a={actions} n={n} />
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={actions.onEdit}
+            onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); actions.onEdit(); } }}
+            aria-label={`Изменить вопрос ${n} в этом наборе`}
+            title="Нажмите, чтобы изменить вопрос в этом наборе"
+            className="min-w-0 flex-1 space-y-2 -my-1 py-1 px-1.5 rounded-xl cursor-pointer hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
+            {body}
+          </div>
         </div>
-      )}
-
-      {snap.type === 'open' && showAnswers && snap.correct_numeric_answer != null && snap.correct_numeric_answer !== '' && (
-        <p className="pl-6 text-sm font-semibold text-success">Ответ: {String(snap.correct_numeric_answer)}</p>
-      )}
+      ) : body}
     </div>
   );
 };
@@ -123,7 +167,11 @@ export const TicketPreviewPanel: React.FC<{
   subjectName?: string;
   onSelect: (id: string) => void;
   onClose: () => void;
-}> = ({ tickets, ticketId, title, subjectName, onSelect, onClose }) => {
+  /** Замена и правка вопросов из предпросмотра; без них панель только показывает (кластерные книжки, чужие наборы) */
+  actions?: PreviewActions;
+  /** Дополнительные кнопки в строке переключателей (например, «Заменить тему») */
+  toolbar?: React.ReactNode;
+}> = ({ tickets, ticketId, title, subjectName, onSelect, onClose, actions, toolbar }) => {
   const [wordView, setWordView] = useState(() => safeGet(LS_VIEW) === 'word');
   const index = tickets.findIndex((t) => t.id === ticketId);
   const ticket = tickets[index];
@@ -248,6 +296,7 @@ export const TicketPreviewPanel: React.FC<{
             Показать ответы
           </label>
         )}
+        {toolbar}
       </div>
 
       <div ref={bodyRef} className={inWord ? 'flex-1 overflow-y-auto' : 'flex-1 overflow-y-auto p-4 space-y-5'}>
@@ -263,6 +312,7 @@ export const TicketPreviewPanel: React.FC<{
             lang={effLang}
             showAnswers={showAnswers}
             prevPassageId={i > 0 ? ticket.questions[i - 1].question_snapshot?.passage?.id ?? null : null}
+            actions={actions && { onSwap: () => actions.onSwap(tq.id), swapTitle: actions.swapTitle(tq.id), onEdit: () => actions.onEdit(tq.id) }}
           />
         ))}
       </div>

@@ -42,7 +42,8 @@ export default defineConfig(({ command }) => ({
     rollupOptions: {
       output: {
         manualChunks: {
-          vendor: ['react', 'react-dom'],
+          // react-dom/client указан отдельно: иначе сам React DOM попадает в основной файл и скачивается заново после каждого деплоя
+          vendor: ['react', 'react-dom', 'react-dom/client'],
           supabase: ['@supabase/supabase-js'],
           query: ['@tanstack/react-query'],
           docx: ['docx'],

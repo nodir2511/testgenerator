@@ -51,6 +51,7 @@ export const SCHEMA_FILES = [
   'security_round4.sql',
   'owner_only_delete_batches.sql',
   'telegram_release_notify.sql',
+  'error_digest.sql',
   'question_usage.sql',
   'duplicate_dismissals.sql',
   'question_usage_counter.sql',
@@ -66,6 +67,7 @@ export const SCHEMA_FILES = [
   'security_round5.sql',
   'deleted_question_options.sql',
   'bulk_change_backups.sql',
+  'perf_round1.sql',
 ];
 
 /** Файлы с данными, а не со схемой: в тестовую базу не применяются */

@@ -6,7 +6,7 @@ import { assertRowsChanged, withUndo } from '../lib/errors';
 import { Question, QuestionType, Subject, Chapter, Topic, Passage } from '../types/database';
 import { useAuth } from '../hooks/useAuth';
 import { FormattedText } from './FormulaEditor';
-import { questionIssues, ISSUE_LABELS, ISSUE_FILTER_LABELS, matchesIssueFilter, IssueFilter } from '../lib/questionIssues';
+import { questionIssues, ISSUE_LABELS, ISSUE_FILTER_LABELS, IssueFilter } from '../lib/questionIssues';
 import { CustomSelect } from './CustomSelect';
 import { 
   Search, 
@@ -189,63 +189,22 @@ export const QuestionList: React.FC<QuestionListProps> = ({
     matching_items:matching_items(*)
   `;
 
-  // Список id вопросов с проблемами (по текущим фильтрам): проверка идёт на клиенте,
-  // потому что «число вариантов» и «верный ответ» в SQL-фильтр PostgREST не выразить
-  const loadIssueIds = async (): Promise<string[]> => {
-    const ids: string[] = [];
-    const build = (byNum: boolean, from: number) => {
-      let q = supabase
-        .from('questions')
-        .select('id, type, correct_numeric_answer, options:question_options(is_correct), matching_items:matching_items(id, side, correct_match_id)')
-        .eq('is_deleted', false);
-      q = byNum
-        ? q.order('num', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true })
-        : q.order('created_at', { ascending: false });
-      return applyFilters(q.order('id')).range(from, from + 999);
-    };
-    let byNum = Boolean(filterTopicId);
-    for (let from = 0; ; from += 1000) {
-      let { data, error } = await build(byNum, from);
-      if (error && error.code === '42703' && byNum) { byNum = false; ({ data, error } = await build(false, from)); }
-      if (error) throw error;
-      for (const row of (data || []) as any[]) {
-        if (matchesIssueFilter(questionIssues(row), filterIssue)) ids.push(row.id);
-      }
-      if (!data || data.length < 1000) break;
-    }
-    return ids;
-  };
-
-  const fetchIssuePage = async (pageNo: number) => {
-    const ids = await queryClient.fetchQuery({
-      queryKey: ['questions', 'issue-ids', filterSubjectId, filterChapterId, filterTopicId, filterType, filterNct, filterDiff, activePassage, searchQuery, filterIssue],
-      staleTime: 15000,
-      queryFn: loadIssueIds,
-    });
-    const slice = ids.slice(pageNo * PAGE_SIZE, (pageNo + 1) * PAGE_SIZE);
-    if (slice.length === 0) return { questions: [] as Question[], totalCount: ids.length };
-    const { data, error } = await supabase.from('questions').select(FULL_SELECT).in('id', slice);
-    if (error) throw error;
-    const order = new Map(slice.map((id, i) => [id, i]));
-    const questions = ((data || []) as Question[]).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-    return { questions, totalCount: ids.length };
+  // Источник строк: вся таблица вопросов или, при фильтре «проблемы», функция базы questions_with_issue
+  // (проверка «число вариантов» и «верный ответ» идёт в базе; раньше для неё скачивались все вопросы под фильтрами).
+  // Пустые параметры не передаём: в адресе запроса null стал бы строкой.
+  const questionSource = () => {
+    if (filterIssue === 'all') return supabase.from('questions').select(FULL_SELECT, { count: 'exact' });
+    const args: Record<string, string> = { p_issue: filterIssue };
+    if (filterSubjectId) args.p_subject_id = filterSubjectId;
+    if (filterChapterId) args.p_chapter_id = filterChapterId;
+    if (filterTopicId) args.p_topic_id = filterTopicId;
+    return supabase.rpc('questions_with_issue', args, { get: true, count: 'exact' }).select(FULL_SELECT);
   };
 
   // Запрос одной страницы вопросов с фильтрацией на сервере
   const fetchPage = async (pageNo: number) => {
-      if (filterIssue !== 'all') return fetchIssuePage(pageNo);
       const build = (byNum: boolean) => {
-        let query = supabase
-          .from('questions')
-          .select(`
-            *,
-            chapter:chapters(name),
-            topic:topics(name),
-            source:sources(name),
-            options:question_options(*),
-            matching_items:matching_items(*)
-          `, { count: 'exact' })
-          .eq('is_deleted', false);
+        let query: any = questionSource().eq('is_deleted', false);
         // В выбранной теме — по номерам вопросов, иначе — новые сверху
         query = byNum
           ? query.order('num', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true }).order('id')
@@ -334,7 +293,11 @@ export const QuestionList: React.FC<QuestionListProps> = ({
       const out = new Map<string, string[]>();
       const push = (id: string, label: string) => out.set(id, [...(out.get(id) || []), label]);
       const label = (x: any) => (x.type === 'test' ? 'тест' : x.type === 'open' ? 'открытый' : 'соответствие') + (x.num != null ? ` №${x.num}` : '');
-      const { data: back } = await supabase.from('questions').select('id, type, num, linked_ids').eq('is_deleted', false).overlaps('linked_ids', shownIds);
+      // Кто ссылается на показанные вопросы: функция базы ищет по индексу (прямой запрос к таблице перебирал весь банк)
+      let { data: back, error: backError } = await supabase.rpc('questions_linking_to', { p_ids: shownIds });
+      if (backError?.code === 'PGRST202') { // функции ещё нет в базе (perf_round1.sql не применён)
+        ({ data: back } = await supabase.from('questions').select('id, type, num, linked_ids').eq('is_deleted', false).overlaps('linked_ids', shownIds));
+      }
       for (const b of back || []) for (const t of (b.linked_ids || []) as string[]) if (shownIds.includes(t)) push(t, label(b));
       const targets = Array.from(new Set(questions.flatMap((q) => ((q as any).linked_ids || []) as string[])));
       if (targets.length) {

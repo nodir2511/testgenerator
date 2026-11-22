@@ -24,12 +24,84 @@ const mentions = (e: any, re: RegExp) => re.test(`${e?.message ?? ''} ${e?.detai
 export const QUESTION_FULL_SELECT = '*, chapter:chapters(name, order_index), topic:topics(name, order_index), options:question_options(*), matching_items:matching_items(*), passage:passages(id, kind, title, content)';
 
 const PAGE = 1000; // Supabase отдаёт не больше 1000 строк за запрос
-const PARALLEL = 4;
+const PARALLEL = 6; // сколько окон читается одновременно
+const WINDOW_ROWS = 850; // сколько строк ждём в одном окне: с запасом до PAGE, чтобы окно читалось одним запросом
+const MAX_WINDOWS = 24;
 const IDS_PER_REQUEST = 100; // идентификаторы идут в адрес запроса: 100 × 37 символов — безопасно
+
+// ── Чтение больших выборок «окнами по id» ───────────────────────────────────────────────────
+// Раньше страницы читались по смещению (range): чтобы отдать строки 3001–4000, база собирала и первые 3000
+// вместе с вложенными вариантами ответов — чем дальше страница, тем дороже. Теперь каждая страница — условие
+// по id (id > …, id < …): база сразу встаёт на нужное место по индексу и лишнего не читает.
+
+/** Окно по id: строки после after (или начиная с from) и до before, не включая его */
+export interface IdWindow { after?: any; from?: any; before?: any }
+
+/** Добавляет к запросу окно по id, порядок по id и размер страницы */
+export function inIdWindow(q: any, w: IdWindow): any {
+  if (w.after !== undefined) q = q.gt('id', w.after);
+  if (w.from !== undefined) q = q.gte('id', w.from);
+  if (w.before !== undefined) q = q.lt('id', w.before);
+  return q.order('id').limit(PAGE);
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i;
+const UUID_SPACE = 0x100000000; // первые 8 знаков uuid — число от 0 до 2^32
+const uuidAt = (n: number) => `${n.toString(16).padStart(8, '0')}-0000-0000-0000-000000000000`;
+
+/**
+ * Делит остаток диапазона id (после последней строки первой страницы) на окна, которые можно читать одновременно.
+ * id в базе — случайные uuid, поэтому строки лежат по диапазону равномерно: первая страница показывает,
+ * какую долю диапазона занимают PAGE строк. Если id не uuid или лежат неравномерно, окна просто читаются
+ * в несколько страниц — результат тот же.
+ */
+function idWindowsAfter(last: any): IdWindow[] {
+  if (typeof last !== 'string' || !UUID.test(last)) return [{ after: last }];
+  const start = parseInt(last.slice(0, 8), 16) + 1;
+  if (start >= UUID_SPACE) return [{ after: last }];
+  const restRows = (PAGE * (UUID_SPACE - start)) / start;
+  const count = Math.min(MAX_WINDOWS, Math.max(1, Math.ceil(restRows / WINDOW_ROWS)));
+  const bounds: number[] = [];
+  for (let i = 1; i < count; i++) {
+    const b = start + Math.floor(((UUID_SPACE - start) * i) / count);
+    if (b < UUID_SPACE && b > (bounds.length ? bounds[bounds.length - 1] : start - 1)) bounds.push(b);
+  }
+  const windows: IdWindow[] = [{ after: last, before: bounds.length ? uuidAt(bounds[0]) : undefined }];
+  bounds.forEach((b, i) => windows.push({ from: uuidAt(b), before: i + 1 < bounds.length ? uuidAt(bounds[i + 1]) : undefined }));
+  return windows;
+}
+
+/**
+ * Читает все строки запроса по порядку id. page(окно) должен вернуть строки окна (не больше PAGE) или бросить ошибку.
+ * Первая страница одна; если она полная, остаток читается окнами, по PARALLEL одновременно.
+ */
+export async function readAllById<T extends { id: any }>(page: (w: IdWindow) => Promise<T[]>): Promise<T[]> {
+  const first = await page({});
+  if (first.length < PAGE) return first;
+  const windows = idWindowsAfter(first[first.length - 1].id);
+  const parts: T[][] = new Array(windows.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < windows.length) {
+      const i = next++;
+      let w = windows[i];
+      const rows: T[] = [];
+      for (;;) {
+        const got = await page(w);
+        rows.push(...got);
+        if (got.length < PAGE) break;
+        w = { after: got[got.length - 1].id, before: w.before };
+      }
+      parts[i] = rows;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PARALLEL, windows.length) }, worker));
+  return first.concat(...parts);
+}
 
 /**
  * Лёгкий пул предмета. Фильтр: темы, иначе главы, иначе весь предмет.
- * Первая страница одна; если она полная, следующие читаются пачками по PARALLEL (порядок строк сохраняется).
+ * Строки идут по порядку id; большие пулы читаются окнами по id (readAllById).
  */
 const MAX_IN_IDS = 100;
 
@@ -43,12 +115,12 @@ export async function loadLightPool(sb: any, sel: PoolSelection): Promise<any[]>
   const topicSet = manyTopics ? new Set(sel.topicIds) : null;
   const byChapters = sel.chapterIds.length > 0 && sel.chapterIds.length <= MAX_IN_IDS;
   const pick = (rows: any[]) => (topicSet ? rows.filter((r) => topicSet.has(r.topic_id)) : rows);
-  const page = async (from: number): Promise<any[]> => {
+  const page = async (w: IdWindow): Promise<any[]> => {
     const run = async () => {
       let q = sb.from('questions').select(select).eq('subject_id', sel.subjectId).eq('is_deleted', false);
       if (sel.topicIds.length && !manyTopics) q = q.in('topic_id', sel.topicIds);
       else if (byChapters) q = q.in('chapter_id', sel.chapterIds);
-      return q.order('id').range(from, from + PAGE - 1);
+      return inIdWindow(q, w);
     };
     let { data, error } = await run();
     // Таблиц question_usage и passages в базе может ещё не быть (миграция не применена): тогда читаем без них
@@ -63,14 +135,7 @@ export async function loadLightPool(sb: any, sel: PoolSelection): Promise<any[]>
     if (error) throw error;
     return data ?? [];
   };
-  const all: any[] = await page(0);
-  if (all.length < PAGE) return pick(all);
-  for (let from = PAGE; ; from += PAGE * PARALLEL) {
-    const parts = await Promise.all(Array.from({ length: PARALLEL }, (_, i) => page(from + i * PAGE)));
-    for (const p of parts) all.push(...p);
-    if (parts.some((p) => p.length < PAGE)) break;
-  }
-  return pick(all);
+  return pick(await readAllById(page));
 }
 
 /**

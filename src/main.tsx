@@ -8,6 +8,7 @@ import UpdateBanner from './components/UpdateBanner';
 import ConfirmDialog from './components/ConfirmDialog';
 import { notifyError, notifySuccess } from './lib/errors';
 import { prefetchOnStartup } from './lib/startupPrefetch';
+import { clearSavedQueryCache } from './lib/queryPersist';
 import { installGlobalErrorReporting } from './lib/errorReporter';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './index.css';
@@ -76,6 +77,7 @@ if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/
   // После выхода следующий пользователь этой вкладки не должен увидеть чужие данные из кэша
   window.addEventListener(SIGNED_OUT_EVENT, () => {
     queryClient.clear();
+    clearSavedQueryCache();
     try { localStorage.removeItem('examiner_tg_generated_batch'); } catch { /* память недоступна */ }
   });
   prefetchOnStartup(queryClient);

@@ -172,6 +172,25 @@ describe('наборы билетов', () => {
     expect(res.clusterErr).toMatch(/кластера менять нельзя/);
     expect(res.foreignErr).toMatch(/только его автор/);
   });
+  it('update_batch_questions: автор правит текст вопроса в своём наборе, вопрос в банке не меняется', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const tq = (await q('select tq.id from public.ticket_questions tq join public.tickets t on t.id = tq.ticket_id where t.batch_id = $1', [r.batch.id]))[0];
+      const edited = { ...snapshot(s.questions.chem), content: 'Правка в наборе', edited: true };
+      await q('select public.update_batch_questions($1, $2::jsonb)', [
+        r.batch.id, JSON.stringify([{ ticket_question_id: tq.id, question_id: s.questions.chem, question_snapshot: edited }]),
+      ]);
+      return {
+        snap: (await q('select question_id, question_snapshot from public.ticket_questions where id = $1', [tq.id]))[0],
+        bank: (await q('select content from public.questions where id = $1', [s.questions.chem]))[0].content,
+        used: (await q('select times_used from public.question_usage where question_id = $1', [s.questions.chem]))[0].times_used,
+      };
+    });
+    expect(res.snap.question_id).toBe(s.questions.chem);
+    expect(res.snap.question_snapshot).toMatchObject({ content: 'Правка в наборе', edited: true });
+    expect(res.bank).toBe('Формула воды');
+    expect(res.used).toBe(1);
+  });
   it('счётчик использования вопроса растёт при сохранении набора', async () => {
     const used = await as(db.admin, s.users.owner, async (q) => {
       await saveBatch(q, s.subjects.chem, s.questions.chem);
@@ -228,5 +247,156 @@ describe('служебные таблицы', () => {
       const err = await as(db.admin, null, (q) => rejected(q, `select * from public.${table} limit 1`));
       expect(err, table).toMatch(/permission denied/);
     }
+  });
+});
+
+describe('ускорение (perf_round1.sql)', () => {
+  /** Вопрос, созданный в обход RLS (перед вызовом — reset role) */
+  const addQuestion = async (q: Q, key: 'chem' | 'law', type: string, extra: { answer?: number; deleted?: boolean } = {}) =>
+    (await q(
+      `insert into public.questions (subject_id, chapter_id, topic_id, type, content, is_deleted, created_by, version, correct_numeric_answer)
+       values ($1, $2, $3, $4, 'проверка', $5, $6, 1, $7) returning id`,
+      [s.subjects[key], s.chapters[key], s.topics[key], type, extra.deleted ?? false, s.users.owner, extra.answer ?? null],
+    ))[0].id as string;
+  const addOptions = (q: Q, qid: string, correct: boolean[]) =>
+    q(`insert into public.question_options (question_id, text, is_correct, order_index)
+       select $1, 'v' || i, c, i from unnest($2::boolean[]) with ordinality as t(c, i)`, [qid, correct]);
+  /** Соответствие: left левых, right правых; linked — сколько левых получают правильный ответ */
+  const addMatching = async (q: Q, qid: string, left: number, right: number, linked: number) => {
+    const rights = await q(
+      `insert into public.matching_items (question_id, side, text, order_index)
+       select $1, 'right', 'r' || i, i from generate_series(1, $2::int) i returning id`, [qid, right]);
+    for (let i = 1; i <= left; i++) {
+      await q(`insert into public.matching_items (question_id, side, text, order_index, correct_match_id) values ($1, 'left', $2, $3, $4)`,
+        [qid, `l${i}`, i, i <= linked ? rights[(i - 1) % rights.length].id : null]);
+    }
+  };
+  const withIssue = async (q: Q, issue: string, subjectId: string | null = null) =>
+    ids(await q('select id from public.questions_with_issue($1, $2)', [issue, subjectId]));
+
+  it('questions_with_issue находит вопросы без ответа и не по стандарту', async () => {
+    const res = await as(db.admin, s.users.admin, async (q) => {
+      await q('reset role');
+      const made = {
+        threeOptions: await addQuestion(q, 'chem', 'test'),
+        twoCorrect: await addQuestion(q, 'chem', 'test'),
+        noCorrect: await addQuestion(q, 'chem', 'test'),
+        noOptions: await addQuestion(q, 'chem', 'test'),
+        openEmpty: await addQuestion(q, 'chem', 'open'),
+        openOk: await addQuestion(q, 'chem', 'open', { answer: 12 }),
+        matchOk: await addQuestion(q, 'chem', 'matching'),
+        matchUnlinked: await addQuestion(q, 'chem', 'matching'),
+        matchThreeLeft: await addQuestion(q, 'chem', 'matching'),
+        matchFourRight: await addQuestion(q, 'chem', 'matching'),
+        deletedBroken: await addQuestion(q, 'chem', 'test', { deleted: true }),
+      };
+      await addOptions(q, made.threeOptions, [true, false, false]);
+      await addOptions(q, made.twoCorrect, [true, true, false, false]);
+      await addOptions(q, made.noCorrect, [false, false, false, false]);
+      await addMatching(q, made.matchOk, 4, 5, 4);
+      await addMatching(q, made.matchUnlinked, 4, 5, 3);
+      await addMatching(q, made.matchThreeLeft, 3, 5, 3);
+      await addMatching(q, made.matchFourRight, 4, 4, 4);
+      await switchUser(q, s.users.admin);
+      return { made, any: await withIssue(q, 'any'), noAnswer: await withIssue(q, 'no_answer'), count: await withIssue(q, 'count') };
+    });
+    const m = res.made;
+    expect(res.any).toEqual([m.threeOptions, m.twoCorrect, m.noCorrect, m.noOptions, m.openEmpty, m.matchUnlinked, m.matchThreeLeft, m.matchFourRight].sort());
+    expect(res.noAnswer).toEqual([m.noCorrect, m.noOptions, m.openEmpty, m.matchUnlinked].sort());
+    expect(res.count).toEqual([m.threeOptions, m.noOptions, m.matchThreeLeft, m.matchFourRight].sort());
+  });
+  it('questions_with_issue показывает только доступные вопросы и умеет отбирать по предмету', async () => {
+    const res = await as(db.admin, s.users.admin, async (q) => {
+      await q('reset role');
+      const chem = await addQuestion(q, 'chem', 'open');
+      const law = await addQuestion(q, 'law', 'open');
+      await switchUser(q, s.users.admin);
+      const admin = await withIssue(q, 'any');
+      const adminLaw = await withIssue(q, 'any', s.subjects.law);
+      await switchUser(q, s.users.subjTeacher);
+      const subjTeacher = await withIssue(q, 'any');
+      return { chem, law, admin, adminLaw, subjTeacher };
+    });
+    expect(res.admin).toEqual([res.chem, res.law].sort());
+    expect(res.adminLaw).toEqual([res.law]);
+    expect(res.subjTeacher).toEqual([res.chem]);
+  });
+  it('questions_linking_to: кто ссылается на вопрос — только видимые и неудалённые', async () => {
+    const res = await as(db.admin, s.users.admin, async (q) => {
+      await q('reset role');
+      const made = {
+        chem: await addQuestion(q, 'chem', 'open', { answer: 1 }),
+        law: await addQuestion(q, 'law', 'open', { answer: 1 }),
+        deleted: await addQuestion(q, 'chem', 'open', { answer: 1, deleted: true }),
+        elsewhere: await addQuestion(q, 'chem', 'open', { answer: 1 }),
+      };
+      await q('update public.questions set linked_ids = $2::uuid[] where id = any($1::uuid[])', [[made.chem, made.law, made.deleted], [s.questions.chem]]);
+      await q('update public.questions set linked_ids = $2::uuid[] where id = $1', [made.elsewhere, [s.questions.law]]);
+      const find = async (userId: string) => {
+        await switchUser(q, userId);
+        return ids(await q('select id from public.questions_linking_to($1::uuid[])', [[s.questions.chem]]));
+      };
+      return { made, admin: await find(s.users.admin), subjTeacher: await find(s.users.subjTeacher), teacher: await find(s.users.teacher) };
+    });
+    expect(res.admin).toEqual([res.made.chem, res.made.law].sort());
+    expect(res.teacher).toEqual([res.made.chem, res.made.law].sort());
+    expect(res.subjTeacher).toEqual([res.made.chem]);
+    const anon = await as(db.admin, null, (q) => rejected(q, 'select id from public.questions_linking_to($1::uuid[])', [[s.questions.chem]]));
+    expect(anon).toMatch(/permission denied/);
+  });
+  it('билеты и вопросы набора видны автору и главному админу, но не другим', async () => {
+    const seen = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const seenBy = async (userId: string) => {
+        await switchUser(q, userId);
+        const tickets = (await q('select id from public.tickets where batch_id = $1', [r.batch.id])).length;
+        const questions = (await q('select tq.id from public.ticket_questions tq where tq.ticket_id = any($1::uuid[])', [r.tickets.map((t: any) => t.id)])).length;
+        return [tickets, questions];
+      };
+      return {
+        author: await seenBy(s.users.teacher),
+        owner: await seenBy(s.users.owner),
+        admin: await seenBy(s.users.admin),
+        other: await seenBy(s.users.subjTeacher),
+      };
+    });
+    expect(seen).toEqual({ author: [1, 1], owner: [1, 1], admin: [0, 0], other: [0, 0] });
+  });
+  it('версии «Что нового»: пишет только главный админ, читатель видит пункты своего уровня', async () => {
+    const res = await as(db.admin, s.users.owner, async (q) => {
+      const rel = async (version: string, items: Array<[number, string]>) => {
+        const id = (await q('insert into public.site_releases (version, title) values ($1, $1) returning id', [version]))[0].id as string;
+        for (const [rank, scope] of items) {
+          await q("insert into public.site_release_items (release_id, kind, text, min_rank, scope) values ($1, 'new', 'пункт', $2, $3)", [id, rank, scope]);
+        }
+        return id;
+      };
+      const forAll = await rel('9.0.1', [[1, 'site'], [3, 'site']]);
+      const forAdmins = await rel('9.0.2', [[3, 'site']]);
+      const gameOnly = await rel('9.0.3', [[1, 'game']]);
+      const mine = [forAll, forAdmins, gameOnly];
+      const visible = async () => ids(await q('select id from public.site_releases where id = any($1::uuid[])', [mine]));
+      const unread = async () => ids(await q('select id from public.unread_site_releases() where id = any($1::uuid[])', [mine]));
+      const owner = { visible: await visible(), unread: await unread() };
+      await switchUser(q, s.users.admin);
+      const adminInsert = await rejected(q, "insert into public.site_releases (version, title) values ('9.9.9', 'x')");
+      const adminItem = await rejected(q, "insert into public.site_release_items (release_id, kind, text) values ($1, 'new', 'x')", [forAll]);
+      const adminDeleted = (await q('delete from public.site_releases where id = $1 returning id', [forAll])).length;
+      await switchUser(q, s.users.teacher);
+      const teacher = { visible: await visible(), unread: await unread() };
+      const teacherItems = (await q('select id from public.site_release_items where release_id = $1', [forAll])).length;
+      await q('insert into public.site_release_reads (user_id, release_id) values ($1, $2)', [s.users.teacher, forAll]);
+      const teacherAfterRead = await unread();
+      return { forAll, forAdmins, gameOnly, owner, adminInsert, adminItem, adminDeleted, teacher, teacherItems, teacherAfterRead };
+    });
+    expect(res.owner.visible).toEqual([res.forAll, res.forAdmins, res.gameOnly].sort());
+    expect(res.owner.unread).toEqual([res.forAll, res.forAdmins].sort());
+    expect(res.adminInsert).toMatch(/row-level security/);
+    expect(res.adminItem).toMatch(/row-level security/);
+    expect(res.adminDeleted).toBe(0);
+    expect(res.teacher.visible).toEqual([res.forAll, res.gameOnly].sort());
+    expect(res.teacher.unread).toEqual([res.forAll]);
+    expect(res.teacherItems).toBe(1);
+    expect(res.teacherAfterRead).toEqual([]);
   });
 });

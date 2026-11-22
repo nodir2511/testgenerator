@@ -25,7 +25,7 @@ import { WhatsNewModal } from './components/WhatsNewModal';
 import { confirmAction } from './lib/confirm';
 import { SideNav, type SideNavGroup } from './components/SideNav';
 import { ThemeButton, ThemeSegmented } from './components/ThemeToggle';
-import { useReleases } from './hooks/useReleases';
+import { useUnreadReleases } from './hooks/useReleases';
 import { Question, ROLE_LABELS } from './types/database';
 import { 
   BookOpen, 
@@ -186,7 +186,7 @@ export const App: React.FC = () => {
   useDialog(sheetPanel, closeSheet, mobileMenuOpen);
 
   // Обновления сайта: окно «Что нового» при входе, пока есть непрочитанные версии
-  const { unread, markRead } = useReleases();
+  const { unread, markRead } = useUnreadReleases();
   const [newsDismissed, setNewsDismissed] = useState(false);
   const showNews = !!user && !isGameOnly && !newsDismissed && unread.length > 0 && currentTab !== 'releases';
   const closeNews = () => {
