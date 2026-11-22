@@ -42,34 +42,24 @@ describe('examLinkClosed', () => {
 });
 
 describe('examStartText', () => {
-  it('формулировка и 30 минут', () => {
-    expect(examStartText('Алгебра, 9 класс')).toBe('📝 Билет: Алгебра, 9 класс. На прохождение 30 минут, попытка одна.');
+  const base = (t: string) => `📝 Билет${t}. Нажмите «Войти в билет» и ждите: время назначит преподаватель, попытка одна.`;
+  it('формулировка без «30 минут»', () => {
+    expect(examStartText('Алгебра, 9 класс')).toBe(base(': Алгебра, 9 класс'));
+    expect(examStartText('Алгебра')).not.toMatch(/\d+ минут/);
   });
   it('название экранируется для HTML и очищается от разметки', () => {
     expect(examStartText('A <b>x</b> & <i')).not.toMatch(/<b>|<i/);
     expect(examStartText('a < b & c')).toContain('a &lt; b &amp; c');
   });
   it('пустое название — без «: .»', () => {
-    expect(examStartText('')).toBe('📝 Билет. На прохождение 30 минут, попытка одна.');
-  });
-});
-
-describe('examStartText: срок из запуска', () => {
-  it('берёт duration_min запуска', () => {
-    expect(examStartText('Физика', 45)).toBe('📝 Билет: Физика. На прохождение 45 минут, попытка одна.');
-  });
-  it('нет значения или мусор — запасные 30 минут', () => {
-    expect(examStartText('Физика', null)).toContain('30 минут');
-    expect(examStartText('Физика', undefined)).toContain('30 минут');
-    expect(examStartText('Физика', 0)).toContain('30 минут');
-    expect(examStartText('Физика', NaN)).toContain('30 минут');
+    expect(examStartText('')).toBe(base(''));
   });
 });
 
 describe('тексты', () => {
   it('в словах для ученика нет «экзамен» (так называется только экзамен-кластер)', () => {
     expect(EXAM_CLOSED_TEXT).not.toMatch(/экзамен/i);
-    expect(examStartText('A', 30)).not.toMatch(/экзамен/i);
+    expect(examStartText('A')).not.toMatch(/экзамен/i);
   });
   it('закрыто и лимит', () => {
     expect(EXAM_CLOSED_TEXT).toBe('Билет по этой ссылке закрыт. Спросите новую ссылку у преподавателя.');

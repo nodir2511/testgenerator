@@ -671,8 +671,8 @@ async function onExamStart(chat: number, tgUserId: number, code: string) {
   }
   const batch = (link as any).batch;
   const title = (Array.isArray(batch) ? batch[0]?.title : batch?.title) ?? '';
-  return sendPlain(chat, examStartText(title, (link as any).duration_min), {
-    inline_keyboard: [[{ text: 'Начать билет', web_app: { url: `${EXAM_URL}?c=${code}` } }]],
+  return sendPlain(chat, examStartText(title), {
+    inline_keyboard: [[{ text: 'Войти в билет', web_app: { url: `${EXAM_URL}?c=${code}` } }]],
   });
 }
 
@@ -683,7 +683,7 @@ async function onMessage(m: any) {
   if (m.chat.type !== 'private') return;
 
   // ссылка ученика «/start exam_КОД»: до проверки привязки (ученик аккаунта на сайте не имеет) и до кода привязки.
-  // Ученику — только сообщение и кнопка «Начать билет»; ни главного меню, ни других кнопок.
+  // Ученику — только сообщение и кнопка «Войти в билет»; ни главного меню, ни других кнопок.
   const examCode = parseStartPayload(text);
   if (examCode) return onExamStart(chat, m.from?.id ?? chat, examCode);
 

@@ -119,7 +119,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
       ) : isLoading ? (
         <div className="flex items-center text-sm text-slate-500 py-4"><Loader2 className="w-4 h-4 mr-2 animate-spin" />Загружаю…</div>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-slate-500 py-4">Пока никто не начал. Ученики появятся здесь, как только откроют ссылку и нажмут «Начать билет».</p>
+        <p className="text-sm text-slate-500 py-4">Пока никто не начал. Ученики появятся здесь, как только откроют ссылку и нажмут «Войти в билет».</p>
       ) : (
         <div className="overflow-x-auto -mx-1">
           <table className="w-full text-sm">

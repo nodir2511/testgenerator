@@ -1,7 +1,7 @@
 // Бот: ссылка ученика /start exam_КОД. Чистые помощники (тексты, срок ссылки, ограничитель перебора кодов).
 // Подключает только exam.ts (он без импортов): Edge Function telegram-bot и тесты.
 
-import { EXAM_MINUTES, tgPlain } from './exam.ts';
+import { tgPlain } from './exam.ts';
 
 export const EXAM_CLOSED_TEXT = 'Билет по этой ссылке закрыт. Спросите новую ссылку у преподавателя.';
 export const EXAM_TOO_MANY_TEXT = 'Слишком много попыток. Подождите несколько минут.';
@@ -14,10 +14,9 @@ export function examLinkClosed(link: { closed_at: string | null; closes_at: stri
 }
 
 /** Текст сообщения (parse_mode HTML): название набора проходит через tgPlain (разметка сайта → текст, «<», «>», «&» экранированы). */
-export function examStartText(title: string | null | undefined, minutes?: number | null): string {
+export function examStartText(title: string | null | undefined): string {
   const t = tgPlain(String(title ?? '')).trim();
-  const m = Number.isFinite(minutes) && (minutes as number) > 0 ? Math.round(minutes as number) : EXAM_MINUTES;
-  return `📝 Билет${t ? `: ${t}` : ''}. На прохождение ${m} минут, попытка одна.`;
+  return `📝 Билет${t ? `: ${t}` : ''}. Нажмите «Войти в билет» и ждите: время назначит преподаватель, попытка одна.`;
 }
 
 /**
