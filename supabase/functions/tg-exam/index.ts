@@ -24,7 +24,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
-  chunkLines, examLang, pickVariant, publicSnapshot, reviewButtonText, reviewHead, reviewJustSent, reviewLines, reviewSnapshot, scoreAttempt,
+  chunkLines, closedSummary, examLang, LINK_SEND_BUTTON, linkSendText, pickVariant, publicSnapshot, reviewButtonText, reviewHead, reviewJustSent, reviewLines, reviewSnapshot, scoreAttempt,
   sessionEnd, sessionPhase, shuffleOptions, tgPlain,
   type ExamAnswer, type ExamAnswers, type ExamQuestion,
 } from '../_shared/exam.ts';
@@ -62,11 +62,14 @@ type Attempt = {
   id: string; code: string; tg_user_id: number; student_name: string; ticket_id: string; started_at: string;
   deadline_at: string | null; finished_at: string | null; answers: ExamAnswers | null; score: number | null; max_score: number | null;
   lang: string | null;
+  /** номер варианта — только у попытки из readAttempt (один join, без отдельного запроса к tickets) */
+  ticket?: { ticket_number: number | null } | null;
 };
 type QCache = Map<string, ExamQuestion[]>;
 
 const LINK_COLS = 'code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, session_start_at, batch:ticket_batches(title, generation_params, subject:subjects(name))';
 const ATTEMPT_COLS = 'id, code, tg_user_id, student_name, ticket_id, started_at, deadline_at, finished_at, answers, score, max_score, lang';
+const ATTEMPT_VIEW_COLS = `${ATTEMPT_COLS}, ticket:tickets(ticket_number)`;
 
 const ms = (iso: string | null | undefined) => {
   const t = iso ? new Date(iso).getTime() : NaN;
@@ -114,10 +117,11 @@ async function ticketQuestions(ticketId: string, cache: QCache): Promise<ExamQue
   return qs;
 }
 
+/** Попытка ученика вместе с номером варианта (join tickets) — один запрос на опрос в зале ожидания */
 async function readAttempt(code: string, tgUserId: number): Promise<Attempt | null> {
-  const { data, error } = await sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', code).eq('tg_user_id', tgUserId).maybeSingle();
+  const { data, error } = await sb.from('exam_attempts').select(ATTEMPT_VIEW_COLS).eq('code', code).eq('tg_user_id', tgUserId).maybeSingle();
   if (error) throw error;
-  return (data as Attempt) ?? null;
+  return (data as unknown as Attempt) ?? null;
 }
 
 async function readAttemptById(id: string): Promise<Attempt | null> {
@@ -171,8 +175,10 @@ async function finishExpired(l: Link, now: Date, cache: QCache) {
   }
 }
 
-async function ticketNumber(ticketId: string): Promise<number | null> {
-  const { data, error } = await sb.from('tickets').select('ticket_number').eq('id', ticketId).maybeSingle();
+/** Номер варианта: из join readAttempt; отдельный запрос — только если попытка прочитана без него */
+async function ticketNumber(a: Attempt): Promise<number | null> {
+  if (a.ticket !== undefined) return a.ticket?.ticket_number ?? null;
+  const { data, error } = await sb.from('tickets').select('ticket_number').eq('id', a.ticket_id).maybeSingle();
   if (error) throw error;
   return (data as any)?.ticket_number ?? null;
 }
@@ -199,17 +205,17 @@ async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache)
   }
   const st = a ? stateOf(a, l, now) : null;
   if (a && st === 'waiting') {
-    return { ...base, state: 'waiting' as const, attempt: { ticketNumber: await ticketNumber(a.ticket_id) } };
+    return { ...base, state: 'waiting' as const, attempt: { ticketNumber: await ticketNumber(a) } };
   }
   if (a && st === 'countdown') {
     return {
       ...base,
       state: 'countdown' as const,
-      attempt: { ticketNumber: await ticketNumber(a.ticket_id), startsAt: new Date(ms(l.session_start_at)).toISOString() },
+      attempt: { ticketNumber: await ticketNumber(a), startsAt: new Date(ms(l.session_start_at)).toISOString() },
     };
   }
   if (a && st === 'running') {
-    const [questions, num] = await Promise.all([ticketQuestions(a.ticket_id, cache), ticketNumber(a.ticket_id)]);
+    const [questions, num] = await Promise.all([ticketQuestions(a.ticket_id, cache), ticketNumber(a)]);
     return {
       ...base,
       state: 'running' as const,
@@ -220,7 +226,7 @@ async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache)
         // Порядок вариантов и пунктов соответствия — свой у каждого ученика (от id попытки), один и тот же при перезаходе
         questions: questions.map((q) => ({
           tqId: q.tqId,
-          snapshot: !q.snapshot || q.snapshot.empty === true ? { empty: true, type: q.snapshot?.type ?? null } : shuffleOptions(publicSnapshot(q.snapshot), a.id),
+          snapshot: !q.snapshot || q.snapshot.empty === true ? { empty: true, type: q.snapshot?.type ?? null } : shuffleOptions(publicSnapshot(q.snapshot), a.id, q.tqId),
         })),
         answers: a.answers ?? {},
       },
@@ -334,8 +340,11 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
   const now = new Date();
   const cache: QCache = new Map();
   // save не сдаёт чужие просроченные попытки: exam_attempt_save сам отказывает после срока и закрытия,
-  // а состояние этой попытки считается ниже (stateOf + finalize); остальные действия подчищают запуск
-  if (action !== 'save') await finishExpired(l, now, cache);
+  // а состояние этой попытки считается ниже (stateOf + finalize); остальные действия подчищают запуск.
+  // open в ожидании и отсчёте (опрос раз в 3 с от каждого ученика) — без подчистки: по уже загруженной строке
+  // запуска он не закрыт и не истёк, сдавать нечего; лишние запросы к базе не нужны
+  const lobby = action === 'open' && ['waiting', 'countdown'].includes(phaseOf(l, now));
+  if (action !== 'save' && !lobby) await finishExpired(l, now, cache);
   let a = await readAttempt(code, tgUser.id);
 
   switch (action) {
@@ -418,7 +427,7 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       return json({
         questions: questions.map((q, i) => ({
           // Без лишних полей снимка: тексты, картинки и только три поля ключа; порядок — как видел ученик
-          tqId: q.tqId, snapshot: shuffleOptions(reviewSnapshot(q.snapshot), seed), answer: answers[q.tqId] ?? null, points: items[i].points, max: items[i].max,
+          tqId: q.tqId, snapshot: shuffleOptions(reviewSnapshot(q.snapshot), seed, q.tqId), answer: answers[q.tqId] ?? null, points: items[i].points, max: items[i].max,
         })),
       });
     }
@@ -482,9 +491,8 @@ async function teacherAction(action: string, body: any, userId: string): Promise
       const bot = await botName();
       if (!bot) return json({ error: 'Не удалось получить имя бота. Попробуйте ещё раз.' }, 502);
       const url = `https://t.me/${bot}?start=exam_${code}`;
-      const subject = l.batch?.subject?.name ? `\nПредмет: ${tgPlain(l.batch.subject.name)}` : '';
-      const text = `📝 <b>Билет: ${title}</b>${subject}\nВремя назначит преподаватель, попытка одна.\nОткройте ссылку и нажмите «Начать билет»:\n${url}`;
-      const ok = await sendText(chat, text, { inline_keyboard: [[{ text: '📝 Начать билет', url }]] });
+      const text = linkSendText(title, l.batch?.subject?.name ? tgPlain(l.batch.subject.name) : '', url);
+      const ok = await sendText(chat, text, { inline_keyboard: [[{ text: LINK_SEND_BUTTON, url }]] });
       return ok ? json({ ok: true }) : json({ error: 'Бот не смог написать вам: откройте бота в Telegram и нажмите «Start».' }, 502);
     }
 
@@ -493,14 +501,10 @@ async function teacherAction(action: string, body: any, userId: string): Promise
       if (!chat) return json({ error: NOT_LINKED }, 400);
       const { data, error } = await sb.from('exam_attempts').select('finished_at, score, max_score').eq('code', code).limit(1000);
       if (error) throw error;
-      const rows = data ?? [];
-      const done = rows.filter((r: any) => r.finished_at);
-      const avg = (k: 'score' | 'max_score') => done.reduce((s: number, r: any) => s + (r[k] ?? 0), 0) / (done.length || 1);
-      const fmt = (n: number) => (Math.round(n * 10) / 10).toString().replace('.', ',');
-      const lines = [`🏁 <b>Итог: ${title}</b>`, `Сдали: ${done.length} из ${rows.length} начавших.`];
-      if (done.length) lines.push(`Средний балл: ${fmt(avg('score'))} из ${fmt(avg('max_score'))}.`);
-      const ok = await sendText(chat, lines.join('\n'));
-      return ok ? json({ ok: true, finished: done.length, started: rows.length }) : json({ error: 'Бот не смог написать вам: откройте бота в Telegram и нажмите «Start».' }, 502);
+      // Закрытые в ожидании (вопросов не видели, ноль) — не «сдали» и не в среднем: то же правило, что inSession
+      const sum = closedSummary((data ?? []) as any[], l.session_start_at);
+      const ok = await sendText(chat, [`🏁 <b>Итог: ${title}</b>`, ...sum.lines].join('\n'));
+      return ok ? json({ ok: true, finished: sum.finished, started: sum.started }) : json({ error: 'Бот не смог написать вам: откройте бота в Telegram и нажмите «Start».' }, 502);
     }
   }
   return json({ error: 'Неизвестное действие' }, 400);

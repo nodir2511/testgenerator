@@ -2,7 +2,6 @@
 // Модуль без импортов: его подключает Edge Function tg-app, тесты — напрямую.
 // Баллы те же, что в omrScore.ts: тест — 1; соответствие — по 1 за каждый верный пункт; открытый вопрос — 2.
 
-export const EXAM_MINUTES = 30;
 export const EXAM_LINK_HOURS = 24;
 
 /** тест: id варианта; соответствие: { idЛевого: idПравого }; открытый: строка с числом */
@@ -100,11 +99,6 @@ export function parseStartPayload(text: string): string | null {
   return [...code].every((c) => CODE_ALPHABET.includes(c)) ? code : null;
 }
 
-/** min(старт + minutes, закрытие ссылки) */
-export function deadlineOf(startedAt: Date, linkClosesAt: Date, minutes: number = EXAM_MINUTES): Date {
-  return new Date(Math.min(startedAt.getTime() + minutes * 60_000, linkClosesAt.getTime()));
-}
-
 /** Язык вопросов запуска: только 'tg' даёт таджикский, остальное — русский */
 export const examLang = (v: unknown): 'ru' | 'tg' => (v === 'tg' ? 'tg' : 'ru');
 
@@ -114,11 +108,6 @@ export function reviewJustSent(reviewSentAt: string | null | undefined, now: Dat
   if (!reviewSentAt) return false;
   const ago = now.getTime() - new Date(reviewSentAt).getTime();
   return ago >= 0 && ago < REVIEW_RESEND_GUARD_MS;
-}
-
-export function attemptState(a: { finished_at: string | null; deadline_at: string }, now: Date): 'running' | 'expired' | 'finished' {
-  if (a.finished_at) return 'finished';
-  return new Date(a.deadline_at).getTime() <= now.getTime() ? 'expired' : 'running';
 }
 
 // ---------- свой порядок вариантов у каждого ученика ----------
@@ -156,12 +145,14 @@ const positional = (items: any[]) => items.some((o) => ['text', 'text_ru', 'text
 
 /**
  * Копия снимка с перемешанными вариантами (тест) или пунктами (соответствие: левые и правые — независимо).
- * Порядок зависит только от seed (id попытки) и id вопроса. id, ключи и прочие поля не меняются, order_index — 0..n-1.
- * open, пустое место, один вариант и вопросы с вариантами вроде «все перечисленные» — как есть. Исходный снимок не меняется.
+ * Порядок зависит только от seed (id попытки) и id вопроса; у снимка без id — от запасного ключа fallbackKey
+ * (tqId — id места в билете), чтобы такие вопросы не перемешивались одинаково. id, ключи и прочие поля не меняются,
+ * order_index — 0..n-1. open, пустое место, один вариант и вопросы с вариантами вроде «все перечисленные» — как есть.
+ * Исходный снимок не меняется.
  */
-export function shuffleOptions(snap: any, seed: string): any {
+export function shuffleOptions(snap: any, seed: string, fallbackKey?: string): any {
   if (isEmpty(snap) || snap.type === 'open') return snap;
-  const base = `${seed}:${snap.id ?? ''}`;
+  const base = `${seed}:${snap.id ?? fallbackKey ?? ''}`;
   if (Array.isArray(snap.options) && snap.options.length > 1 && !positional(snap.options)) {
     return { ...snap, options: shuffled(snap.options, base) };
   }
@@ -249,18 +240,47 @@ export const reviewButtonText = (lang: Lang): string => REVIEW_TEXT[lang].button
 /**
  * Только вопросы с потерянными баллами: номер, текст, «Ваш ответ», «Верный ответ». Один элемент — один вопрос.
  * seed (id попытки) — тот же порядок вариантов, что видел ученик (shuffleOptions), чтобы буквы совпадали с экраном.
+ * Номер — среди непустых мест, как в билете ученика и на странице разбора (src/exam/examLogic.ts reviewMistakes).
  */
 export function reviewLines(questions: ExamQuestion[], answers: ExamAnswers, lang: Lang, seed?: string): string[] {
   const out: string[] = [];
-  questions.forEach((q, i) => {
+  let n = 0;
+  for (const q of questions) {
+    if (isEmpty(q.snapshot)) continue;
+    n++;
     const r = scoreOne(q.snapshot, answers[q.tqId]);
-    if (r.points >= r.max) return;
-    const snap = seed ? shuffleOptions(q.snapshot, seed) : q.snapshot;
+    if (r.points >= r.max) continue;
+    const snap = seed ? shuffleOptions(q.snapshot, seed, q.tqId) : q.snapshot;
     const { given, right } = givenAndRight(snap, answers[q.tqId], lang);
     const pic = snap.image_url ? ' [рисунок]' : '';
-    out.push(`${i + 1}.${pic} ${tgPlain(pick(snap, lang, 'content'))}\n${REVIEW_TEXT[lang].mine}: ${given}\n${REVIEW_TEXT[lang].right}: ${right}`);
-  });
+    out.push(`${n}.${pic} ${tgPlain(pick(snap, lang, 'content'))}\n${REVIEW_TEXT[lang].mine}: ${given}\n${REVIEW_TEXT[lang].right}: ${right}`);
+  }
   return out.length ? out : [REVIEW_TEXT[lang].none];
+}
+
+// ---------- сообщения преподавателю ----------
+export const LINK_SEND_BUTTON = '📝 Войти в билет';
+/** Ссылка для класса в чат преподавателя (title и subject уже очищены tgPlain) */
+export function linkSendText(title: string, subject: string, url: string): string {
+  const subj = subject ? `\nПредмет: ${subject}` : '';
+  return `📝 <b>Билет: ${title}</b>${subj}\nВремя назначит преподаватель, попытка одна.\nОткройте ссылку и нажмите «Войти в билет»:\n${url}`;
+}
+
+/**
+ * Итог запуска для преподавателя. «Сдали» и средний балл — только попытки, сданные в начатой сессии
+ * (finished_at позже session_start_at): закрытые в ожидании (с нулём, вопросов не видели) не считаются.
+ */
+export function closedSummary(
+  rows: Array<{ finished_at: string | null; score: number | null; max_score: number | null }>,
+  sessionStartAt: string | null,
+): { finished: number; started: number; lines: string[] } {
+  const start = sessionStartAt ? Date.parse(sessionStartAt) : NaN;
+  const done = Number.isNaN(start) ? [] : rows.filter((r) => r.finished_at && Date.parse(r.finished_at) > start);
+  const avg = (k: 'score' | 'max_score') => done.reduce((s, r) => s + (r[k] ?? 0), 0) / (done.length || 1);
+  const fmt = (n: number) => (Math.round(n * 10) / 10).toString().replace('.', ',');
+  const lines = [`Сдали: ${done.length} из ${rows.length} начавших.`];
+  if (done.length) lines.push(`Средний балл: ${fmt(avg('score'))} из ${fmt(avg('max_score'))}.`);
+  return { finished: done.length, started: rows.length, lines };
 }
 
 /** Где резать слишком длинную строку: по пробелу, не внутри «&...;». */
@@ -297,8 +317,15 @@ ${piece}` : piece;
 // ── Общий старт для класса: зал ожидания, отсчёт, единое время окончания ──
 export const EXAM_MIN_MINUTES = 5;
 export const EXAM_MAX_MINUTES = 45;
+/** Сколько цифр отсчёта видит ученик (3, 2, 1): клиент показывает их только за последние 3 с до старта */
 export const EXAM_COUNTDOWN_SEC = 3;
 export const EXAM_POLL_MS = 3000;
+/**
+ * Старт сессии — через столько секунд после «Начать» (exam_session_start: now() + 6 seconds; тест сверяет с SQL).
+ * Не меньше отсчёта плюс одного интервала опроса: ученик, опросивший сервер прямо перед «Начать», узнаёт о старте
+ * через ≤ 3 с и ещё успевает увидеть все три цифры. Фаза countdown на сервере — всё время от «Начать» до старта.
+ */
+export const EXAM_START_LEAD_SEC = 6;
 export type SessionPhase = 'waiting' | 'countdown' | 'running' | 'ended';
 export interface SessionLink { session_start_at: string | null; duration_min: number }
 

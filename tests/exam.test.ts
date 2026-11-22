@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
-  EXAM_MINUTES, EXAM_LINK_HOURS, publicSnapshot, reviewSnapshot, parseOpen, scoreAttempt, pickVariant, examCode,
-  parseStartPayload, deadlineOf, attemptState, tgPlain, reviewLines, chunkLines, examLang, reviewHead, reviewButtonText, reviewJustSent, REVIEW_RESEND_GUARD_MS,
-  EXAM_MIN_MINUTES, EXAM_MAX_MINUTES, EXAM_COUNTDOWN_SEC, EXAM_POLL_MS, sessionEnd, sessionPhase, clampMinutes, countdownDigit,
+  EXAM_LINK_HOURS, publicSnapshot, reviewSnapshot, parseOpen, scoreAttempt, pickVariant, examCode,
+  parseStartPayload, tgPlain, reviewLines, chunkLines, examLang, reviewHead, reviewButtonText, reviewJustSent, REVIEW_RESEND_GUARD_MS,
+  EXAM_MIN_MINUTES, EXAM_MAX_MINUTES, EXAM_COUNTDOWN_SEC, EXAM_START_LEAD_SEC, EXAM_POLL_MS, sessionEnd, sessionPhase, clampMinutes, countdownDigit,
   shuffleOptions,
 } from '../supabase/functions/_shared/exam';
+import * as examShared from '../supabase/functions/_shared/exam';
 
 const test = (id = 'q1', right = 'o2') => ({
   id, type: 'test', content: 'Формула воды', content_ru: 'Формула воды', content_tg: 'Формулаи об', image_url: null, order_index: 1,
@@ -139,16 +140,10 @@ describe('pickVariant, examCode, parseStartPayload', () => {
 });
 
 describe('время', () => {
-  it('константы', () => { expect(EXAM_MINUTES).toBe(30); expect(EXAM_LINK_HOURS).toBe(24); });
-  it('deadlineOf', () => {
-    expect(deadlineOf(new Date('2026-01-01T12:00:00Z'), new Date('2026-01-01T18:00:00Z')).toISOString()).toBe('2026-01-01T12:30:00.000Z');
-    expect(deadlineOf(new Date('2026-01-01T17:50:00Z'), new Date('2026-01-01T18:00:00Z')).toISOString()).toBe('2026-01-01T18:00:00.000Z');
-  });
-  it('attemptState', () => {
-    const now = new Date('2026-01-01T12:00:00Z');
-    expect(attemptState({ finished_at: '2026-01-01T11:00:00Z', deadline_at: '2026-01-01T13:00:00Z' }, now)).toBe('finished');
-    expect(attemptState({ finished_at: null, deadline_at: '2026-01-01T11:59:00Z' }, now)).toBe('expired');
-    expect(attemptState({ finished_at: null, deadline_at: '2026-01-01T12:30:00Z' }, now)).toBe('running');
+  it('константы', () => { expect(EXAM_LINK_HOURS).toBe(24); });
+  it('старый срок попытки (30 мин от входа) удалён: конец у всех общий — от старта сессии', () => {
+    const mod: Record<string, unknown> = examShared;
+    for (const dead of ['EXAM_MINUTES', 'deadlineOf', 'attemptState']) expect(mod[dead]).toBeUndefined();
   });
 });
 
@@ -257,6 +252,49 @@ describe('reviewLines', () => {
   it('без ошибок', () => {
     expect(reviewLines([qs[0]], { a: 'o2' }, 'ru')).toEqual(['Ошибок нет']);
   });
+  it('номер — среди непустых мест, как в билете ученика (пустые места не считаются)', () => {
+    const withGaps = [
+      { tqId: 'e1', snapshot: { empty: true, type: 'test' } },
+      { tqId: 'a', snapshot: test('a') },
+      { tqId: 'e2', snapshot: null },
+      { tqId: 'p', snapshot: open(16) },
+    ];
+    const lines = reviewLines(withGaps, { a: 'o1', p: '17' }, 'ru');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^1\. Формула воды/);
+    expect(lines[1]).toMatch(/^2\. Сколько/);
+  });
+});
+
+describe('сообщения преподавателю', () => {
+  it('linkSendText / linkSendButton: «Войти в билет», не «Начать билет»', () => {
+    const t = examShared.linkSendText('Алгебра', 'Математика', 'https://t.me/bot?start=exam_AB23CD');
+    expect(t).toContain('📝 <b>Билет: Алгебра</b>');
+    expect(t).toContain('\nПредмет: Математика');
+    expect(t).toContain('нажмите «Войти в билет»');
+    expect(t).toContain('https://t.me/bot?start=exam_AB23CD');
+    expect(t).not.toMatch(/Начать билет/);
+    expect(examShared.linkSendText('Алгебра', '', 'u')).not.toContain('Предмет');
+    expect(examShared.LINK_SEND_BUTTON).toBe('📝 Войти в билет');
+  });
+
+  it('closedSummary: закрытые в ожидании не считаются ни в «сдали», ни в среднем', () => {
+    const start = '2026-11-22T12:00:00Z';
+    const rows = [
+      { finished_at: '2026-11-22T12:20:00Z', score: 30, max_score: 40 },
+      { finished_at: '2026-11-22T12:25:00Z', score: 20, max_score: 40 },
+      { finished_at: '2026-11-22T11:59:00Z', score: 0, max_score: 40 }, // закрыта в ожидании
+      { finished_at: null, score: null, max_score: null },
+    ];
+    const s = examShared.closedSummary(rows, start);
+    expect([s.finished, s.started]).toEqual([2, 4]);
+    expect(s.lines).toEqual(['Сдали: 2 из 4 начавших.', 'Средний балл: 25 из 40.']);
+    // Сессию так и не начали — сдавших нет, среднего нет
+    const none = examShared.closedSummary(rows, null);
+    expect(none.finished).toBe(0);
+    expect(none.lines).toEqual(['Сдали: 0 из 4 начавших.']);
+    expect(examShared.closedSummary([{ finished_at: '2026-11-22T12:20:00Z', score: 12.25, max_score: 40 }], start).lines[1]).toBe('Средний балл: 12,3 из 40.');
+  });
 });
 
 describe('chunkLines', () => {
@@ -276,6 +314,18 @@ describe('сессия: зал ожидания и общий старт', () =>
 
   it('константы', () => {
     expect([EXAM_MIN_MINUTES, EXAM_MAX_MINUTES, EXAM_COUNTDOWN_SEC, EXAM_POLL_MS]).toEqual([5, 45, 3, 3000]);
+  });
+
+  it('EXAM_START_LEAD_SEC: старт через 6 с — больше отсчёта плюс одного опроса, чтобы каждый ученик увидел цифры', () => {
+    expect(EXAM_START_LEAD_SEC).toBe(6);
+    expect(EXAM_START_LEAD_SEC * 1000).toBeGreaterThanOrEqual(EXAM_COUNTDOWN_SEC * 1000 + EXAM_POLL_MS);
+  });
+
+  it('EXAM_START_LEAD_SEC совпадает с интервалом в exam_session_start (supabase/sql/exam_links.sql)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const sql = readFileSync(new URL('../supabase/sql/exam_links.sql', import.meta.url), 'utf8');
+    const m = /session_start_at\s*=\s*now\(\)\s*\+\s*interval\s*'(\d+) seconds'/.exec(sql);
+    expect(m?.[1]).toBe(String(EXAM_START_LEAD_SEC));
   });
 
   it('sessionEnd', () => {
@@ -382,6 +432,22 @@ describe('shuffleOptions: свой порядок вариантов у кажд
     const ans = { a: 'o2', m: { l1: 'r1', l2: 'r3', l3: 'r3', l4: 'r4' } };
     const shuffled = qs.map((q) => ({ ...q, snapshot: shuffleOptions(q.snapshot, 'att-7') }));
     expect(scoreAttempt(shuffled, ans).score).toBe(scoreAttempt(qs, ans).score);
+  });
+
+  it('снимок без id: зерно — запасной ключ (tqId), разные вопросы перемешаны по-разному', () => {
+    const noId = (): any => { const s: any = four(); delete s.id; return s; };
+    // Запасной ключ задаёт порядок: тот же tqId — тот же порядок; разные tqId — разные порядки
+    expect(shuffleOptions(noId(), 'att-1', 'tq-1')).toEqual(shuffleOptions(noId(), 'att-1', 'tq-1'));
+    const byTq = new Set<string>();
+    for (let i = 0; i < 50; i++) byTq.add(ids(shuffleOptions(noId(), 'att-1', `tq-${i}`).options));
+    expect(byTq.size).toBeGreaterThanOrEqual(3);
+    // id снимка важнее запасного ключа: порядок прежний, что бы ни передали третьим параметром
+    expect(ids(shuffleOptions(four('q9'), 'att-1', 'tq-1').options)).toBe(ids(shuffleOptions(four('q9'), 'att-1').options));
+    expect(ids(shuffleOptions(four('q9'), 'att-1', 'tq-1').options)).toBe(ids(shuffleOptions(four('q9'), 'att-1', 'tq-2').options));
+    // reviewLines передаёт tqId: буквы разбора без id снимка — те же, что на экране
+    const shown = sorted(shuffleOptions(publicSnapshot(noId()), 'att-3', 'x').options);
+    const line = reviewLines([{ tqId: 'x', snapshot: noId() }], { x: 'o3' }, 'ru', 'att-3').join('\n');
+    expect(line).toContain(`Ваш ответ: ${'ABCD'[shown.findIndex((o: any) => o.id === 'o3')]}) Вариант 3`);
   });
 
   it('open, пустое место, один вариант, группа из одного пункта — как есть', () => {

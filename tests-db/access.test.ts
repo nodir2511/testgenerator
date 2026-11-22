@@ -549,7 +549,7 @@ describe('билеты классу', () => {
     });
   const start = (q: Q, code: string, minutes: number) => q('select * from public.exam_session_start($1, $2)', [code, minutes]);
 
-  it('exam_session_start: автор запускает сессию, старт через ~3 с, длительность выбрана; повторный вызов ничего не меняет', async () => {
+  it('exam_session_start: автор запускает сессию, старт через ~6 с (EXAM_START_LEAD_SEC), длительность выбрана; повторный вызов ничего не меняет', async () => {
     const res = await withLobby(async (q, c) => {
       const first = (await start(q, c.code, 20))[0];
       const again = (await start(q, c.code, 40))[0];
@@ -558,8 +558,8 @@ describe('билеты классу', () => {
     });
     expect(res.first.duration_min).toBe(20);
     expect(res.first.session_start_at).not.toBeNull();
-    expect(res.delta).toBeGreaterThan(2);
-    expect(res.delta).toBeLessThan(4);
+    expect(res.delta).toBeGreaterThan(5);
+    expect(res.delta).toBeLessThan(7);
     expect(res.again.duration_min).toBe(20);
     expect(new Date(res.again.session_start_at).getTime()).toBe(new Date(res.first.session_start_at).getTime());
   });
@@ -600,6 +600,23 @@ describe('билеты классу', () => {
       return (await start(q, c.code, 30))[0].session_start_at;
     });
     expect(byOwner).not.toBeNull();
+  });
+
+  it('exam_session_start: ссылка закроется раньше конца сессии — отказ, сессия не начата; ровно до закрытия — можно', async () => {
+    const res = await withLobby(async (q, c) => {
+      await q('reset role');
+      // старт через 6 с + 30 мин > closes_at (через 20 мин)
+      await q("update public.exam_links set closes_at = now() + interval '20 minutes' where code = $1", [c.code]);
+      await switchUser(q, s.users.teacher);
+      const tooLong = await rejected(q, 'select public.exam_session_start($1, 30)', [c.code]);
+      const started = (await q('select session_start_at from public.exam_links where code = $1', [c.code]))[0].session_start_at;
+      const ok = (await start(q, c.code, 15))[0];
+      return { tooLong, started, ok };
+    });
+    expect(res.tooLong).toMatch(/Ссылка закроется раньше конца сессии/);
+    expect(res.started).toBeNull();
+    expect(res.ok.duration_min).toBe(15);
+    expect(res.ok.session_start_at).not.toBeNull();
   });
 
   it('exam_attempt_set_variant: до старта автор меняет на билет своего набора; после старта, чужой, чужой набор, сданная — отказ', async () => {

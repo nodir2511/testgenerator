@@ -209,7 +209,9 @@ begin
 end;
 $$;
 
--- Начать сессию: автор запуска или главный админ. Старт через 3 секунды (чтобы у всех экран успел переключиться).
+-- Начать сессию: автор запуска или главный админ. Старт через 6 секунд (EXAM_START_LEAD_SEC в _shared/exam.ts):
+-- отсчёт 3 с + один интервал опроса клиента (3 с) — каждый ученик успевает увидеть цифры 3, 2, 1.
+-- Сессия должна закончиться до закрытия ссылки (closes_at), иначе отказ.
 -- Уже начатую сессию не трогает (идемпотентно: возвращает строку как есть).
 create or replace function public.exam_session_start(p_code text, p_minutes int)
 returns public.exam_links
@@ -231,8 +233,11 @@ begin
   if not exists (select 1 from public.exam_attempts where code = p_code) then
     raise exception 'Пока никто не зашёл — начинать некому';
   end if;
+  if now() + interval '6 seconds' + make_interval(mins => p_minutes) > l.closes_at then
+    raise exception 'Ссылка закроется раньше конца сессии: выберите меньше минут';
+  end if;
   update public.exam_links
-     set session_start_at = now() + interval '3 seconds', duration_min = p_minutes
+     set session_start_at = now() + interval '6 seconds', duration_min = p_minutes
    where code = p_code
   returning * into l;
   return l;
