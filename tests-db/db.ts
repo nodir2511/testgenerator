@@ -68,6 +68,7 @@ export const SCHEMA_FILES = [
   'deleted_question_options.sql',
   'bulk_change_backups.sql',
   'perf_round1.sql',
+  'exam_links.sql',
 ];
 
 /** Файлы с данными, а не со схемой: в тестовую базу не применяются */

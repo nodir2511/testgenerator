@@ -200,6 +200,143 @@ describe('наборы билетов', () => {
   });
 });
 
+describe('билеты классу', () => {
+  const newAttempt = async (q: Q, code: string, ticketId: string, tgUser = 1001) =>
+    q(`insert into public.exam_attempts (code, tg_user_id, student_name, ticket_id, deadline_at)
+       values ($1, $2, 'Ученик', $3, now() + interval '30 minutes')`, [code, tgUser, ticketId]);
+  it('автор создаёт запуск своего набора и видит его; другой преподаватель — нет, главный админ — да', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      const seen = async (userId: string) => {
+        await switchUser(q, userId);
+        return (await q('select code from public.exam_links where code = $1', [link.code])).length;
+      };
+      return {
+        link,
+        author: await seen(s.users.teacher),
+        owner: await seen(s.users.owner),
+        other: await seen(s.users.subjTeacher),
+        admin: await seen(s.users.admin),
+      };
+    });
+    expect(res.link.code).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/);
+    expect(res.link.created_by).toBe(s.users.teacher);
+    expect(res.link.duration_min).toBe(30);
+    expect(new Date(res.link.closes_at).getTime() - Date.now()).toBeGreaterThan(23 * 3600 * 1000);
+    expect(res.link.closed_at).toBeNull();
+    expect({ author: res.author, owner: res.owner, other: res.other, admin: res.admin }).toEqual({ author: 1, owner: 1, other: 0, admin: 0 });
+  });
+
+  it('попытки видны автору запуска и главному админу, но не другому преподавателю', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      const ticket = (await q('select id from public.tickets where batch_id = $1', [r.batch.id]))[0].id;
+      await q('reset role');
+      await newAttempt(q, link.code, ticket);
+      const seen = async (userId: string) => {
+        await switchUser(q, userId);
+        return (await q('select id from public.exam_attempts')).length;
+      };
+      return { author: await seen(s.users.teacher), owner: await seen(s.users.owner), other: await seen(s.users.subjTeacher) };
+    });
+    expect(res).toEqual({ author: 1, owner: 1, other: 0 });
+  });
+
+  it('exam_link_close: автор и главный админ закрывают, другой преподаватель получает отказ', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      await switchUser(q, s.users.subjTeacher);
+      const foreign = await rejected(q, 'select public.exam_link_close($1)', [link.code]);
+      await switchUser(q, s.users.teacher);
+      await q('select public.exam_link_close($1)', [link.code]);
+      const closed = (await q('select closed_at from public.exam_links where code = $1', [link.code]))[0].closed_at;
+      return { foreign, closed };
+    });
+    expect(res.foreign).toMatch(/Закрыть запуск может только его автор/);
+    expect(res.closed).not.toBeNull();
+  });
+
+  it('exam_link_create: чужой набор — отказ, несуществующий — отказ, главный админ может любой', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const missing = await rejected(q, 'select public.exam_link_create($1)', ['00000000-0000-0000-0000-000000000000']);
+      await switchUser(q, s.users.subjTeacher);
+      const foreign = await rejected(q, 'select public.exam_link_create($1)', [r.batch.id]);
+      await switchUser(q, s.users.owner);
+      const ownerOk = await rejected(q, 'select public.exam_link_create($1)', [r.batch.id]);
+      return { missing, foreign, ownerOk };
+    });
+    expect(res.missing).toMatch(/Набор билетов не найден/);
+    expect(res.foreign).toMatch(/Запустить набор может только его автор/);
+    expect(res.ownerOk).toBeNull();
+  });
+
+  it('кластерный набор классу запустить нельзя', async () => {
+    const err = await as(db.admin, s.users.owner, async (q) => {
+      const cluster = await saveBatch(q, s.subjects.chem, s.questions.chem, { source: 'cluster' });
+      return rejected(q, 'select public.exam_link_create($1)', [cluster.batch.id]);
+    });
+    expect(err).toMatch(/Кластерный набор/);
+  });
+
+  it('прямая запись из приложения запрещена', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      const ticket = (await q('select id from public.tickets where batch_id = $1', [r.batch.id]))[0].id;
+      return {
+        attempt: await rejected(q, `insert into public.exam_attempts (code, tg_user_id, student_name, ticket_id, deadline_at)
+          values ($1, 1, 'Х', $2, now())`, [link.code, ticket]),
+        linkInsert: await rejected(q, `insert into public.exam_links (code, batch_id, created_by, closes_at)
+          values ('ZZZZZZ', $1, $2, now())`, [r.batch.id, s.users.teacher]),
+        linkUpdate: await rejected(q, "update public.exam_links set duration_min = 999 where code = $1", [link.code]),
+        linkDelete: await rejected(q, 'delete from public.exam_links where code = $1', [link.code]),
+      };
+    });
+    expect(res.attempt).toMatch(/permission denied/);
+    expect(res.linkInsert).toMatch(/permission denied/);
+    expect(res.linkUpdate).toMatch(/permission denied/);
+    expect(res.linkDelete).toMatch(/permission denied/);
+  });
+
+  it('без входа таблицы и функции недоступны', async () => {
+    const res = await as(db.admin, null, async (q) => ({
+      links: await rejected(q, 'select * from public.exam_links'),
+      attempts: await rejected(q, 'select * from public.exam_attempts'),
+      create: await rejected(q, 'select public.exam_link_create($1)', ['00000000-0000-0000-0000-000000000000']),
+      close: await rejected(q, "select public.exam_link_close('AAAAAA')"),
+    }));
+    expect(res.links).toMatch(/permission denied/);
+    expect(res.attempts).toMatch(/permission denied/);
+    expect(res.create).toMatch(/permission denied/);
+    expect(res.close).toMatch(/permission denied/);
+  });
+
+  it('удаление набора удаляет запуск и попытки; (code, tg_user_id) уникально', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      const ticket = (await q('select id from public.tickets where batch_id = $1', [r.batch.id]))[0].id;
+      await q('reset role');
+      await newAttempt(q, link.code, ticket);
+      const dup = await rejected(q, `insert into public.exam_attempts (code, tg_user_id, student_name, ticket_id, deadline_at)
+        values ($1, 1001, 'Дубль', $2, now())`, [link.code, ticket]);
+      await q('delete from public.ticket_batches where id = $1', [r.batch.id]);
+      return {
+        dup,
+        links: (await q('select 1 from public.exam_links where code = $1', [link.code])).length,
+        attempts: (await q('select 1 from public.exam_attempts where code = $1', [link.code])).length,
+      };
+    });
+    expect(res.dup).toMatch(/duplicate key|unique/);
+    expect(res.links).toBe(0);
+    expect(res.attempts).toBe(0);
+  });
+});
+
 describe('лимиты генерации', () => {
   it('преподаватель упирается в дневной лимит, админ — нет', async () => {
     const perDay = (await db.admin.query('select per_day from public.generation_settings')).rows[0].per_day as number;
