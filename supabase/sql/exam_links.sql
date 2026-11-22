@@ -6,6 +6,8 @@
 -- Ученики попытки через RLS не читают никогда (только сервисный ключ). У anon прав нет.
 -- Кластерные наборы (generation_params.source = 'cluster') классу запускать нельзя.
 -- Набор с запуском менять нельзя: update_batch_questions отказывает (см. update_batch_questions.sql и security_round5.sql).
+-- Сессия: ученики заходят в «зал ожидания», автор нажимает «Начать» (exam_session_start) — у всех общий старт
+-- (session_start_at) и общий срок (session_start_at + duration_min). Вариант до старта может сменить автор.
 -- Повторный запуск безопасен.
 -- Применить: supabase db query --linked -f supabase/sql/exam_links.sql
 
@@ -29,7 +31,7 @@ create table if not exists public.exam_attempts (
   student_name text not null,
   ticket_id uuid not null references public.tickets(id) on delete cascade,
   started_at timestamptz not null default now(),
-  deadline_at timestamptz not null,
+  deadline_at timestamptz,
   finished_at timestamptz,
   answers jsonb not null default '{}',
   score int,
@@ -43,6 +45,18 @@ do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'exam_attempts_lang_check' and conrelid = 'public.exam_attempts'::regclass) then
     alter table public.exam_attempts add constraint exam_attempts_lang_check check (lang in ('ru', 'tg'));
+  end if;
+end $$;
+
+-- Срок попытки теперь на уровне запуска (session_start_at + duration_min), у попытки он не обязателен
+alter table public.exam_attempts alter column deadline_at drop not null;
+
+-- Старт общей сессии: пусто = ожидание («зал ожидания»); длительность 5..45 минут
+alter table public.exam_links add column if not exists session_start_at timestamptz;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'exam_links_duration_check' and conrelid = 'public.exam_links'::regclass) then
+    alter table public.exam_links add constraint exam_links_duration_check check (duration_min between 5 and 45);
   end if;
 end $$;
 
@@ -133,7 +147,8 @@ $$;
 
 -- Сохранить один ответ ученика (вызывает только tg-exam сервисным ключом).
 -- Одно атомарное обновление: ответ дописывается к уже сохранённым (два сохранения подряд не теряют друг друга),
--- и только пока попытка идёт: не сдана, срок не прошёл, ссылка не закрыта и не истекла. null стирает ответ.
+-- и только пока попытка идёт: не сдана, сессия запущена и идёт (session_start_at <= now < session_start_at + duration_min),
+-- ссылка не закрыта и не истекла. null стирает ответ.
 -- Возвращает, записан ли ответ.
 create or replace function public.exam_attempt_save(p_attempt_id uuid, p_tq_id text, p_answer jsonb)
 returns boolean
@@ -153,7 +168,9 @@ begin
    where a.id = p_attempt_id
      and l.code = a.code
      and a.finished_at is null
-     and a.deadline_at > now()
+     and l.session_start_at is not null
+     and now() >= l.session_start_at
+     and now() < l.session_start_at + make_interval(mins => l.duration_min)
      and l.closed_at is null
      and l.closes_at > now();
   get diagnostics n = row_count;
@@ -161,8 +178,8 @@ begin
 end;
 $$;
 
--- Сдать попытку (вызывает только tg-exam сервисным ключом): finished_at = раньшее из «сейчас», срока попытки
--- и закрытия ссылки. После этого exam_attempt_save ответы не меняет, поэтому балл, посчитанный по возвращённым
+-- Сдать попытку (вызывает только tg-exam сервисным ключом): finished_at = раньшее из «сейчас», конца сессии
+-- (session_start_at + duration_min, если сессия запущена) и закрытия ссылки. После этого exam_attempt_save ответы не меняет, поэтому балл, посчитанный по возвращённым
 -- ответам, всегда соответствует сохранённым. Уже сданная попытка не меняется — возвращаются её ответы;
 -- нет попытки — null.
 create or replace function public.exam_attempt_close(p_attempt_id uuid)
@@ -175,7 +192,11 @@ declare
   r jsonb;
 begin
   update public.exam_attempts a
-     set finished_at = least(now(), a.deadline_at, coalesce(l.closed_at, 'infinity'::timestamptz))
+     set finished_at = least(
+           now(),
+           coalesce(l.session_start_at + make_interval(mins => l.duration_min), 'infinity'::timestamptz),
+           coalesce(l.closed_at, 'infinity'::timestamptz)
+         )
     from public.exam_links l
    where a.id = p_attempt_id
      and l.code = a.code
@@ -188,6 +209,63 @@ begin
 end;
 $$;
 
+-- Начать сессию: автор запуска или главный админ. Старт через 3 секунды (чтобы у всех экран успел переключиться).
+-- Уже начатую сессию не трогает (идемпотентно: возвращает строку как есть).
+create or replace function public.exam_session_start(p_code text, p_minutes int)
+returns public.exam_links
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  l public.exam_links;
+begin
+  select * into l from public.exam_links where code = p_code for update;
+  if not found then raise exception 'Запуск не найден'; end if;
+  if l.created_by is distinct from auth.uid() and not public.is_owner() then
+    raise exception 'Начать сессию может только автор запуска';
+  end if;
+  if l.session_start_at is not null then return l; end if;
+  if l.closed_at is not null or l.closes_at <= now() then raise exception 'Запуск закрыт'; end if;
+  if p_minutes is null or p_minutes < 5 or p_minutes > 45 then raise exception 'Длительность от 5 до 45 минут'; end if;
+  if not exists (select 1 from public.exam_attempts where code = p_code) then
+    raise exception 'Пока никто не зашёл — начинать некому';
+  end if;
+  update public.exam_links
+     set session_start_at = now() + interval '3 seconds', duration_min = p_minutes
+   where code = p_code
+  returning * into l;
+  return l;
+end;
+$$;
+
+-- Сменить вариант ученика до начала сессии: автор запуска или главный админ, билет — из набора запуска
+create or replace function public.exam_attempt_set_variant(p_attempt_id uuid, p_ticket_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  a public.exam_attempts;
+  l public.exam_links;
+begin
+  select * into a from public.exam_attempts where id = p_attempt_id for update;
+  if not found then raise exception 'Попытка не найдена'; end if;
+  select * into l from public.exam_links where code = a.code;
+  if l.created_by is distinct from auth.uid() and not public.is_owner() then
+    raise exception 'Сменить вариант может только автор запуска';
+  end if;
+  if l.session_start_at is not null or a.finished_at is not null then
+    raise exception 'Сменить вариант можно только до начала сессии';
+  end if;
+  if not exists (select 1 from public.tickets t where t.id = p_ticket_id and t.batch_id = l.batch_id) then
+    raise exception 'Этого билета нет в наборе';
+  end if;
+  update public.exam_attempts set ticket_id = p_ticket_id where id = p_attempt_id;
+end;
+$$;
+
 revoke all on function public.exam_attempt_save(uuid, text, jsonb) from public, anon, authenticated;
 grant execute on function public.exam_attempt_save(uuid, text, jsonb) to service_role;
 revoke all on function public.exam_attempt_close(uuid) from public, anon, authenticated;
@@ -197,3 +275,7 @@ revoke all on function public.exam_link_create(uuid) from public, anon;
 grant execute on function public.exam_link_create(uuid) to authenticated;
 revoke all on function public.exam_link_close(text) from public, anon;
 grant execute on function public.exam_link_close(text) to authenticated;
+revoke all on function public.exam_session_start(text, int) from public, anon;
+grant execute on function public.exam_session_start(text, int) to authenticated;
+revoke all on function public.exam_attempt_set_variant(uuid, uuid) from public, anon;
+grant execute on function public.exam_attempt_set_variant(uuid, uuid) to authenticated;

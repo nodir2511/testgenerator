@@ -380,14 +380,17 @@ describe('билеты классу', () => {
   });
 
   // Ответы и сдачу пишет только tg-exam сервисным ключом через exam_attempt_save / exam_attempt_close
-  const withAttempt = <T>(fn: (q: Q, a: { id: string; code: string }) => Promise<T>) =>
+  // Срок теперь на уровне запуска: session_start_at + duration_min. start — SQL-выражение для session_start_at
+  // (по умолчанию сессия идёт: началась минуту назад, длительность 30 минут); null — сессия не запущена.
+  const withAttempt = <T>(fn: (q: Q, a: { id: string; code: string }) => Promise<T>, start: string | null = "now() - interval '1 minute'", duration = 30) =>
     as(db.admin, s.users.teacher, async (q) => {
       const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
       const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
       const ticket = (await q('select id from public.tickets where batch_id = $1', [r.batch.id]))[0].id;
       await q('reset role');
-      const id = (await q(`insert into public.exam_attempts (code, tg_user_id, student_name, ticket_id, deadline_at)
-        values ($1, 2002, 'Ученик', $2, now() + interval '30 minutes') returning id`, [link.code, ticket]))[0].id;
+      const id = (await q(`insert into public.exam_attempts (code, tg_user_id, student_name, ticket_id)
+        values ($1, 2002, 'Ученик', $2) returning id`, [link.code, ticket]))[0].id;
+      if (start) await q(`update public.exam_links set session_start_at = ${start}, duration_min = $2 where code = $1`, [link.code, duration]);
       await q('set local role service_role');
       return fn(q, { id, code: link.code });
     });
@@ -409,15 +412,36 @@ describe('билеты классу', () => {
     expect(res.after).toEqual({ q1: 'opt1', q2: { l1: 'r2' } });
   });
 
-  it('exam_attempt_save после срока, после сдачи и после закрытия ссылки ничего не меняет', async () => {
+  it('exam_attempt_save до старта сессии и в незапущенной сессии ничего не меняет, в окне работы пишет', async () => {
+    const res = await withAttempt(async (q, a) => {
+      await q('reset role');
+      await q("update public.exam_links set session_start_at = now() + interval '3 seconds' where code = $1", [a.code]);
+      await q('set local role service_role');
+      const beforeStart = await save(q, a.id, 'q1', 'early');
+      const answersBefore = await answersOf(q, a.id);
+      await q('reset role');
+      await q("update public.exam_links set session_start_at = now() - interval '1 second' where code = $1", [a.code]);
+      await q('set local role service_role');
+      const inWindow = await save(q, a.id, 'q1', 'ok');
+      return { beforeStart, answersBefore, inWindow, answers: await answersOf(q, a.id) };
+    }, null);
+    expect(res).toEqual({ beforeStart: false, answersBefore: {}, inWindow: true, answers: { q1: 'ok' } });
+  });
+
+  it('exam_attempt_save без запущенной сессии (ожидание) ничего не меняет', async () => {
+    const res = await withAttempt(async (q, a) => ({ ok: await save(q, a.id, 'q1', 'x'), answers: await answersOf(q, a.id) }), null);
+    expect(res).toEqual({ ok: false, answers: {} });
+  });
+
+  it('exam_attempt_save после конца сессии, после сдачи и после закрытия ссылки ничего не меняет', async () => {
     const res = await withAttempt(async (q, a) => {
       await save(q, a.id, 'q1', 'opt1');
       await q('reset role');
-      await q("update public.exam_attempts set deadline_at = now() - interval '1 second' where id = $1", [a.id]);
+      await q("update public.exam_links set session_start_at = now() - interval '31 minutes' where code = $1", [a.code]);
       await q('set local role service_role');
       const late = await save(q, a.id, 'q1', 'late');
       await q('reset role');
-      await q("update public.exam_attempts set deadline_at = now() + interval '30 minutes' where id = $1", [a.id]);
+      await q("update public.exam_links set session_start_at = now() - interval '1 minute' where code = $1", [a.code]);
       await q('update public.exam_links set closed_at = now() where code = $1', [a.code]);
       await q('set local role service_role');
       const closed = await save(q, a.id, 'q2', 'closed');
@@ -444,15 +468,182 @@ describe('билеты классу', () => {
     expect(res).toEqual({ first: { q1: 'opt1' }, after: false, again: { q1: 'opt1' }, same: true, finished: true, missing: null });
   });
 
-  it('exam_attempt_close после срока ставит finished_at = срок попытки', async () => {
+  it('exam_attempt_close после конца сессии ставит finished_at = конец сессии', async () => {
     const res = await withAttempt(async (q, a) => {
+      await save(q, a.id, 'q1', 'opt1');
+      const ans = (await q('select public.exam_attempt_close($1) as r', [a.id]))[0].r;
+      const row = (await q(`select finished_at = l.session_start_at + make_interval(mins => l.duration_min) as eq, finished_at < now() as past
+        from public.exam_attempts a join public.exam_links l on l.code = a.code where a.id = $1`, [a.id]))[0];
+      return { ans, row };
+    }, "now() - interval '40 minutes'");
+    expect(res).toEqual({ ans: {}, row: { eq: true, past: true } });
+  });
+
+  it('exam_attempt_close в идущей сессии: finished_at не позже конца сессии; закрытый запуск — не позже closed_at', async () => {
+    const run = await withAttempt(async (q, a) => {
+      await save(q, a.id, 'q1', 'opt1');
+      const ans = (await q('select public.exam_attempt_close($1) as r', [a.id]))[0].r;
+      const row = (await q(`select finished_at <= l.session_start_at + make_interval(mins => l.duration_min) as in_end, finished_at <= now() as not_future
+        from public.exam_attempts a join public.exam_links l on l.code = a.code where a.id = $1`, [a.id]))[0];
+      return { ans, row };
+    });
+    expect(run).toEqual({ ans: { q1: 'opt1' }, row: { in_end: true, not_future: true } });
+    const closed = await withAttempt(async (q, a) => {
       await q('reset role');
-      await q("update public.exam_attempts set deadline_at = now() - interval '5 minutes' where id = $1", [a.id]);
+      await q("update public.exam_links set closed_at = now() - interval '2 minutes' where code = $1", [a.code]);
       await q('set local role service_role');
       await q('select public.exam_attempt_close($1)', [a.id]);
-      return (await q('select finished_at = deadline_at as eq from public.exam_attempts where id = $1', [a.id]))[0].eq;
+      return (await q(`select finished_at = l.closed_at as eq from public.exam_attempts a join public.exam_links l on l.code = a.code where a.id = $1`, [a.id]))[0].eq;
     });
-    expect(res).toBe(true);
+    expect(closed).toBe(true);
+  });
+
+  it('exam_attempt_close при незапущенной сессии и закрытом запуске сдаёт попытку и возвращает ответы', async () => {
+    const res = await withAttempt(async (q, a) => {
+      await q('reset role');
+      await q("update public.exam_attempts set answers = '{\"q1\":\"x\"}'::jsonb where id = $1", [a.id]);
+      await q("update public.exam_links set closed_at = now() - interval '1 minute' where code = $1", [a.code]);
+      await q('set local role service_role');
+      const ans = (await q('select public.exam_attempt_close($1) as r', [a.id]))[0].r;
+      const row = (await q(`select finished_at is not null as done, finished_at = l.closed_at as eq
+        from public.exam_attempts a join public.exam_links l on l.code = a.code where a.id = $1`, [a.id]))[0];
+      const again = (await q('select public.exam_attempt_close($1) as r', [a.id]))[0].r;
+      return { ans, row, again };
+    }, null);
+    expect(res).toEqual({ ans: { q1: 'x' }, row: { done: true, eq: true }, again: { q1: 'x' } });
+  });
+
+  it('exam_attempts.deadline_at может быть null', async () => {
+    const res = await withAttempt(async (q, a) => {
+      await q('reset role');
+      return (await q('select deadline_at from public.exam_attempts where id = $1', [a.id]))[0].deadline_at;
+    }, null);
+    expect(res).toBeNull();
+  });
+
+  it('exam_links.duration_min: от 5 до 45 минут', async () => {
+    const res = await withAttempt(async (q, a) => {
+      await q('reset role');
+      const set = (m: number) => rejected(q, 'update public.exam_links set duration_min = $2 where code = $1', [a.code, m]);
+      return { low: await set(4), high: await set(46), min: await set(5), max: await set(45), def: await set(30) };
+    }, null);
+    expect(res.low).toMatch(/check/i);
+    expect(res.high).toMatch(/check/i);
+    expect([res.min, res.max, res.def]).toEqual([null, null, null]);
+  });
+
+  // Зал ожидания: старт сессии и смена варианта (под преподавателем, автором запуска)
+  const withLobby = <T>(fn: (q: Q, c: { code: string; batch: string; attempt: string; ticket: string }) => Promise<T>, attempts = 1) =>
+    as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      const ticket = (await q('select id from public.tickets where batch_id = $1', [r.batch.id]))[0].id;
+      let attempt = '';
+      if (attempts > 0) {
+        await q('reset role');
+        attempt = (await q(`insert into public.exam_attempts (code, tg_user_id, student_name, ticket_id)
+          values ($1, 3003, 'Ученик', $2) returning id`, [link.code, ticket]))[0].id;
+        await switchUser(q, s.users.teacher);
+      }
+      return fn(q, { code: link.code, batch: r.batch.id, attempt, ticket });
+    });
+  const start = (q: Q, code: string, minutes: number) => q('select * from public.exam_session_start($1, $2)', [code, minutes]);
+
+  it('exam_session_start: автор запускает сессию, старт через ~3 с, длительность выбрана; повторный вызов ничего не меняет', async () => {
+    const res = await withLobby(async (q, c) => {
+      const first = (await start(q, c.code, 20))[0];
+      const again = (await start(q, c.code, 40))[0];
+      const row = (await q('select extract(epoch from session_start_at - now()) as d from public.exam_links where code = $1', [c.code]))[0];
+      return { first, again, delta: Number(row.d) };
+    });
+    expect(res.first.duration_min).toBe(20);
+    expect(res.first.session_start_at).not.toBeNull();
+    expect(res.delta).toBeGreaterThan(2);
+    expect(res.delta).toBeLessThan(4);
+    expect(res.again.duration_min).toBe(20);
+    expect(new Date(res.again.session_start_at).getTime()).toBe(new Date(res.first.session_start_at).getTime());
+  });
+
+  it('exam_session_start: 4 и 46 минут, пустой зал, закрытый запуск, чужой преподаватель, несуществующий код — отказ', async () => {
+    const res = await withLobby(async (q, c) => {
+      const short = await rejected(q, 'select public.exam_session_start($1, 4)', [c.code]);
+      const long = await rejected(q, 'select public.exam_session_start($1, 46)', [c.code]);
+      const missing = await rejected(q, "select public.exam_session_start('ZZZZZZ', 30)");
+      await switchUser(q, s.users.subjTeacher);
+      const foreign = await rejected(q, 'select public.exam_session_start($1, 30)', [c.code]);
+      await switchUser(q, s.users.teacher);
+      await q('select public.exam_link_close($1)', [c.code]);
+      const closed = await rejected(q, 'select public.exam_session_start($1, 30)', [c.code]);
+      const started = (await q('select session_start_at from public.exam_links where code = $1', [c.code]))[0].session_start_at;
+      return { short, long, missing, foreign, closed, started };
+    });
+    expect(res.short).toMatch(/Длительность от 5 до 45 минут/);
+    expect(res.long).toMatch(/Длительность от 5 до 45 минут/);
+    expect(res.missing).toMatch(/Запуск не найден/);
+    expect(res.foreign).toMatch(/Начать сессию может только автор запуска/);
+    expect(res.closed).toMatch(/Запуск закрыт/);
+    expect(res.started).toBeNull();
+    const empty = await withLobby((q, c) => rejected(q, 'select public.exam_session_start($1, 30)', [c.code]), 0);
+    expect(empty).toMatch(/Пока никто не зашёл — начинать некому/);
+  });
+
+  it('exam_session_start: истёкший запуск — отказ; главный админ может начать чужой запуск', async () => {
+    const expired = await withLobby(async (q, c) => {
+      await q('reset role');
+      await q("update public.exam_links set closes_at = now() - interval '1 second' where code = $1", [c.code]);
+      await switchUser(q, s.users.teacher);
+      return rejected(q, 'select public.exam_session_start($1, 30)', [c.code]);
+    });
+    expect(expired).toMatch(/Запуск закрыт/);
+    const byOwner = await withLobby(async (q, c) => {
+      await switchUser(q, s.users.owner);
+      return (await start(q, c.code, 30))[0].session_start_at;
+    });
+    expect(byOwner).not.toBeNull();
+  });
+
+  it('exam_attempt_set_variant: до старта автор меняет на билет своего набора; после старта, чужой, чужой набор, сданная — отказ', async () => {
+    // билеты создаёт save_ticket_batch; второй билет набора и билет чужого набора добавляем под суперпользователем
+    const out = await withLobby(async (q, c) => {
+      await q('reset role');
+      const t2 = (await q('insert into public.tickets (batch_id, ticket_number) values ($1, 2) returning id', [c.batch]))[0].id;
+      await switchUser(q, s.users.owner); // у главного админа нет паузы между генерациями
+      const otherBatch = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      await q('reset role');
+      const foreignTicket = (await q('select id from public.tickets where batch_id = $1', [otherBatch.batch.id]))[0].id;
+      await switchUser(q, s.users.subjTeacher);
+      const stranger = await rejected(q, 'select public.exam_attempt_set_variant($1, $2)', [c.attempt, t2]);
+      await switchUser(q, s.users.teacher);
+      const missing = await rejected(q, "select public.exam_attempt_set_variant('00000000-0000-0000-0000-000000000000', $1)", [t2]);
+      const wrongBatch = await rejected(q, 'select public.exam_attempt_set_variant($1, $2)', [c.attempt, foreignTicket]);
+      await q('select public.exam_attempt_set_variant($1, $2)', [c.attempt, t2]);
+      await q('reset role');
+      const changed = (await q('select ticket_id from public.exam_attempts where id = $1', [c.attempt]))[0].ticket_id;
+      await q('update public.exam_attempts set finished_at = now() where id = $1', [c.attempt]);
+      await switchUser(q, s.users.teacher);
+      const finished = await rejected(q, 'select public.exam_attempt_set_variant($1, $2)', [c.attempt, c.ticket]);
+      await q('reset role');
+      await q('update public.exam_attempts set finished_at = null where id = $1', [c.attempt]);
+      await switchUser(q, s.users.teacher);
+      await start(q, c.code, 30);
+      const afterStart = await rejected(q, 'select public.exam_attempt_set_variant($1, $2)', [c.attempt, c.ticket]);
+      return { t2, changed, stranger, missing, wrongBatch, finished, afterStart };
+    });
+    expect(out.changed).toBe(out.t2);
+    expect(out.stranger).toMatch(/Сменить вариант может только автор запуска/);
+    expect(out.missing).toMatch(/Попытка не найдена/);
+    expect(out.wrongBatch).toMatch(/Этого билета нет в наборе/);
+    expect(out.finished).toMatch(/Сменить вариант можно только до начала сессии/);
+    expect(out.afterStart).toMatch(/Сменить вариант можно только до начала сессии/);
+  });
+
+  it('exam_session_start и exam_attempt_set_variant недоступны без входа', async () => {
+    const id = '00000000-0000-0000-0000-000000000000';
+    const anon = await as(db.admin, null, async (q) => [
+      await rejected(q, "select public.exam_session_start('AAAAAA', 30)"),
+      await rejected(q, 'select public.exam_attempt_set_variant($1, $1)', [id]),
+    ]);
+    for (const e of anon) expect(e).toMatch(/permission denied/);
   });
 
   it('exam_attempt_save и exam_attempt_close доступны только сервисному ключу', async () => {
