@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  formatRemaining, remainingMs, countAnswered, isAnswered, pickText, normalizeOpen, matchingAnswer, reviewMistakes, nameOk, sortByOrder,
+  formatRemaining, remainingMs, countAnswered, isAnswered, pickText, normalizeOpen, matchingAnswer, reviewMistakes, nameOk, sortByOrder, lobbyView, waitText, minutesLeft,
 } from '../src/exam/examLogic';
 
 describe('formatRemaining', () => {
@@ -128,5 +128,45 @@ describe('постраничная навигация', () => {
     expect(firstUnansweredPos(qs, { a: 'x', b: '5', c: 'y' })).toBe(0);
     expect(firstUnansweredPos(qs, {})).toBe(0);
     expect(firstUnansweredPos(qs, { a: 'x', b: '5' })).toBe(2);
+  });
+});
+
+describe('lobbyView', () => {
+  const startsAt = '2026-01-01T10:00:03.000Z';
+  const server = (ms: number) => Date.parse('2026-01-01T10:00:00.000Z') + ms;
+  const cd = { state: 'countdown' as const, attempt: { ticketNumber: 4, startsAt } };
+  it('ожидание — без отсчёта', () => expect(lobbyView({ state: 'waiting', attempt: { ticketNumber: 4 } }, 0, 0)).toEqual({ kind: 'waiting' }));
+  it('отсчёт 3, 2, 1 по серверному времени', () => {
+    expect(lobbyView(cd, 0, server(500))).toEqual({ kind: 'countdown', digit: 3 });
+    expect(lobbyView(cd, 0, server(1500))).toEqual({ kind: 'countdown', digit: 2 });
+    expect(lobbyView(cd, 0, server(2500))).toEqual({ kind: 'countdown', digit: 1 });
+  });
+  it('в момент старта и позже — запуск', () => {
+    expect(lobbyView(cd, 0, server(3000))).toEqual({ kind: 'run' });
+    expect(lobbyView(cd, 0, server(9000))).toEqual({ kind: 'run' });
+  });
+  it('телефон спешит или отстаёт на минуту — те же цифры', () => {
+    for (const skew of [60_000, -60_000]) {
+      // часы телефона = серверные + skew, смещение = −skew
+      expect(lobbyView(cd, -skew, server(1500) + skew)).toEqual({ kind: 'countdown', digit: 2 });
+      expect(lobbyView(cd, -skew, server(3000) + skew)).toEqual({ kind: 'run' });
+    }
+  });
+  it('running сразу (опоздавший) — запуск без отсчёта', () => {
+    expect(lobbyView({ state: 'running', attempt: {} }, 0, 0)).toEqual({ kind: 'run' });
+  });
+  it('countdown без startsAt — ожидание', () => expect(lobbyView({ state: 'countdown', attempt: { ticketNumber: 1 } }, 0, 0)).toEqual({ kind: 'waiting' }));
+});
+
+describe('waitText / minutesLeft', () => {
+  it('тексты', () => {
+    expect(waitText({ state: 'waiting' })).toBe('Ждите, преподаватель начнёт сессию');
+    expect(waitText({ state: 'countdown' })).toBe('Начинаем!');
+  });
+  it('minutesLeft округляет вверх и не уходит ниже 1', () => {
+    expect(minutesLeft(29 * 60_000 + 1)).toBe(30);
+    expect(minutesLeft(60_000)).toBe(1);
+    expect(minutesLeft(5)).toBe(1);
+    expect(minutesLeft(-1)).toBe(1);
   });
 });

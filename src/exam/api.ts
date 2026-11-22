@@ -56,13 +56,21 @@ export async function examApi<T>(action: string, body: Record<string, unknown> =
   return data as T;
 }
 
-export interface ViewBase { now?: number; title: string; subject: string; minutes: number; lang: Lang }
+/** minutes — null, пока преподаватель не назначил время (зал ожидания) */
+export interface ViewBase { now?: number; title: string; subject: string; minutes: number | null; lang: Lang }
 export type OpenResponse =
-  | (ViewBase & { state: 'new' | 'closed' })
+  // new: попытки ещё нет; session — идёт ли уже сессия класса (тогда remainingMs — сколько осталось)
+  | (ViewBase & { state: 'new'; session?: 'waiting' | 'running'; remainingMs?: number })
+  | (ViewBase & { state: 'closed' })
   | (ViewBase & { state: 'finished'; attempt: { score: number; max: number; review: boolean } })
+  // зал ожидания и отсчёт: вопросов нет, только номер варианта (и время старта)
+  | (ViewBase & { state: 'waiting'; attempt: { ticketNumber: number | null } })
+  | (ViewBase & { state: 'countdown'; attempt: { ticketNumber: number | null; startsAt: string } })
   | (ViewBase & { state: 'running'; attempt: { ticketNumber: number | null; deadline: string; questions: ExamQ[]; answers: Answers } });
 
-export const apiOpen = (code: string) => examApi<OpenResponse>('open', { code });
+export type LobbyResponse = Extract<OpenResponse, { state: 'waiting' | 'countdown' }>;
+
+export const apiOpen =(code: string) => examApi<OpenResponse>('open', { code });
 export const apiStart = (code: string, name: string, lang: Lang = 'ru') => examApi<OpenResponse>('start', { code, name, lang });
 export const apiSave = (code: string, tqId: string, answer: Answer) =>
   examApi<{ ok: boolean; state?: 'new' | 'closed' | 'finished'; now?: number }>('save', { code, tqId, answer });
