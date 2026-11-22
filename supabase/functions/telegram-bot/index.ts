@@ -14,6 +14,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as T from '../_shared/ticketing.ts';
 import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser as linkedUserOf, userMessage } from '../_shared/generate.ts';
 import { LAW_RE } from '../_shared/answerKey.ts';
+import { parseStartPayload } from '../_shared/exam.ts';
+import { createMissLimiter, EXAM_CLOSED_TEXT, EXAM_TOO_MANY_TEXT, examLinkClosed, examStartText } from '../_shared/examStart.ts';
 import { chunkLines, itemVisible, parseReleaseCommand, rankOf, releaseLines, RELEASE_CB, type ReleaseItem, type ReleaseRow } from '../_shared/releases.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -646,11 +648,44 @@ async function generate(chat: number, msgId: number | undefined, st: State, user
   await send(chat, '🎉 <b>Экзаменационный комплект отправлен в чат!</b>\n\nФайлы готовы к печати. Вы можете повторить или настроить новый набор:', kb, MAIN_KEYBOARD);
 }
 
+// ---------------- Билет классу: ссылка ученика ----------------
+const EXAM_URL = Deno.env.get('EXAM_URL') || 'https://testgenerator-3s51.vercel.app/tg/exam'; // тот же, что в tg-exam
+const examMisses = createMissLimiter(10, 10 * 60_000); // неизвестные/закрытые коды: не больше 10 за 10 минут на пользователя
+
+/** Без reply_markup: у ученика не должно появляться меню бота (send() подставил бы MAIN_KEYBOARD) */
+const sendPlain = (chat: number, text: string, markup?: Record<string, unknown>) =>
+  tg('sendMessage', { chat_id: chat, text, parse_mode: 'HTML', ...(markup ? { reply_markup: markup } : {}) });
+
+async function onExamStart(chat: number, tgUserId: number, code: string) {
+  if (examMisses.blocked(tgUserId)) return sendPlain(chat, EXAM_TOO_MANY_TEXT);
+  const { data: link, error } = await sb.from('exam_links')
+    .select('closed_at, closes_at, batch:ticket_batches(title)').eq('code', code).maybeSingle();
+  if (error) {
+    console.error('exam link lookup failed', error.message);
+    return sendPlain(chat, '⚠️ Не удалось открыть билет. Попробуйте ещё раз через минуту.');
+  }
+  // нет, закрыта и истекла — один и тот же ответ: по тексту не узнать, существует ли код
+  if (examLinkClosed(link as any, new Date())) {
+    examMisses.miss(tgUserId);
+    return sendPlain(chat, EXAM_CLOSED_TEXT);
+  }
+  const batch = (link as any).batch;
+  const title = (Array.isArray(batch) ? batch[0]?.title : batch?.title) ?? '';
+  return sendPlain(chat, examStartText(title), {
+    inline_keyboard: [[{ text: 'Начать билет', web_app: { url: `${EXAM_URL}?c=${code}` } }]],
+  });
+}
+
 // ---------------- Обработка апдейтов ----------------
 async function onMessage(m: any) {
   const chat: number = m.chat.id;
   const text: string = (m.text ?? '').trim();
   if (m.chat.type !== 'private') return;
+
+  // ссылка ученика «/start exam_КОД»: до проверки привязки (ученик аккаунта на сайте не имеет) и до кода привязки.
+  // Ученику — только сообщение и кнопка «Начать билет»; ни главного меню, ни других кнопок.
+  const examCode = parseStartPayload(text);
+  if (examCode) return onExamStart(chat, m.from?.id ?? chat, examCode);
 
   // привязка по коду
   if (text.startsWith('/start')) {
