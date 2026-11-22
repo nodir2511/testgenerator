@@ -14,6 +14,7 @@ import * as T from '../_shared/ticketing.ts';
 import { allowedSubjectIds, generateAndSend, limitsFor, linkedUser, resendBatch, sendDocument, userMessage, type Limits } from '../_shared/generate.ts';
 import { matchingAnswer, openAnswer, testAnswer } from '../_shared/answerKey.ts';
 import { MATCHING_ROWS, blankFor, maxPoints, scoreAnswers, type Answers, type Composition, type TicketKey } from '../_shared/omrScore.ts';
+import { verifyInitData } from '../_shared/tgInitData.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -31,37 +32,6 @@ const corsHeaders = {
 };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-
-// ---------------- Проверка подписи initData ----------------
-const enc = new TextEncoder();
-async function hmac(key: BufferSource, data: string): Promise<ArrayBuffer> {
-  const k = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return crypto.subtle.sign('HMAC', k, enc.encode(data));
-}
-const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
-
-async function verifyInitData(raw: string): Promise<{ id: number } | null> {
-  if (!raw || raw.length > 4096) return null;
-  const params = new URLSearchParams(raw);
-  const hash = params.get('hash');
-  if (!hash) return null;
-  params.delete('hash');
-  const check = [...params.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n');
-  const secret = await hmac(enc.encode('WebAppData'), BOT_TOKEN);
-  const expected = hex(await hmac(secret, check));
-  if (expected.length !== hash.length) return null;
-  let diff = 0;
-  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ hash.charCodeAt(i);
-  if (diff !== 0) return null;
-  const age = Math.floor(Date.now() / 1000) - Number(params.get('auth_date') || 0);
-  if (age < -300 || age > MAX_AGE_SEC) return null;
-  try {
-    const u = JSON.parse(params.get('user') || '');
-    return typeof u?.id === 'number' ? { id: u.id } : null;
-  } catch {
-    return null;
-  }
-}
 
 // ---------------- Данные ----------------
 type Counts = { test: number; matching: number; open: number };
@@ -212,7 +182,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Метод не поддерживается' }, 405);
 
   try {
-    const tgUser = await verifyInitData(req.headers.get('X-Tg-Init-Data') ?? '');
+    const tgUser = await verifyInitData(req.headers.get('X-Tg-Init-Data') ?? '', BOT_TOKEN, MAX_AGE_SEC);
     if (!tgUser) return json({ error: 'bad_init_data', message: 'Откройте приложение из Telegram.' }, 401);
 
     const body = await req.json().catch(() => ({}));

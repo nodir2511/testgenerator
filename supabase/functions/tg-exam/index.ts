@@ -1,0 +1,472 @@
+// Edge Function: tg-exam
+//
+// «Билеты классу»: ученик проходит билет набора на странице /tg/exam внутри Telegram,
+// преподаватель рассылает разбор и получает ссылку и итог в бот.
+//
+// Ученик (заголовок X-Tg-Init-Data, подпись Telegram): open, start, save, submit, review.
+//   Привязка к аккаунту сайта не нужна; личность — id из подписи. Данных tg-app здесь нет.
+//   Ключи ответов (is_correct, correct_match_id, correct_numeric_answer) ученик получает только
+//   в review — после сдачи и после того, как преподаватель отправил разбор. Баллы считает сервер.
+// Преподаватель (Authorization: Bearer <JWT сайта>): review_send, link_send, notify_closed.
+//   Доступ: автор запуска (exam_links.created_by) или главный админ (profiles.is_owner).
+//
+// Таблицы exam_links и exam_attempts (supabase/sql/exam_links.sql) пишет только эта функция
+// сервисным ключом; запуск создаёт и закрывает сайт через RPC exam_link_create / exam_link_close.
+//
+// Деплой:  supabase functions deploy tg-exam --no-verify-jwt
+// Секреты: TELEGRAM_BOT_TOKEN (тот же, что у telegram-bot);
+//          необязательно EXAM_URL (по умолчанию https://testgenerator-3s51.vercel.app/tg/exam).
+// SUPABASE_URL и SUPABASE_SERVICE_ROLE_KEY задаёт сам Supabase.
+// initData и токены не логируются.
+
+import { createClient } from 'npm:@supabase/supabase-js@2';
+import {
+  attemptState, chunkLines, deadlineOf, pickVariant, publicSnapshot, reviewLines, scoreAttempt, tgPlain,
+  type ExamAnswer, type ExamAnswers, type ExamQuestion,
+} from '../_shared/exam.ts';
+import { verifyInitData, type TgInitUser } from '../_shared/tgInitData.ts';
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN')!;
+// Без токена подпись initData проверялась бы пустым ключом, который может вычислить кто угодно
+if (!BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN is not set');
+const EXAM_URL = Deno.env.get('EXAM_URL') || 'https://testgenerator-3s51.vercel.app/tg/exam';
+
+const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+
+const MAX_AGE_SEC = 24 * 3600;
+const MAX_BODY = 16 * 1024;
+const CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/;
+const ID_MAX = 64;
+const OPEN_MAX = 20;
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'content-type, x-tg-init-data, authorization, apikey, x-client-info',
+};
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+// ---------------- Данные ----------------
+type Link = {
+  code: string; batch_id: string; created_by: string; created_at: string; closes_at: string; closed_at: string | null;
+  duration_min: number; review_sent_at: string | null;
+  batch: { title: string | null; generation_params: any; subject: { name: string | null } | null } | null;
+};
+type Attempt = {
+  id: string; code: string; tg_user_id: number; student_name: string; ticket_id: string; started_at: string;
+  deadline_at: string; finished_at: string | null; answers: ExamAnswers | null; score: number | null; max_score: number | null;
+};
+type QCache = Map<string, ExamQuestion[]>;
+
+const LINK_COLS = 'code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, batch:ticket_batches(title, generation_params, subject:subjects(name))';
+const ATTEMPT_COLS = 'id, code, tg_user_id, student_name, ticket_id, started_at, deadline_at, finished_at, answers, score, max_score';
+
+const ms = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : Infinity);
+/** Ссылка принимает новых учеников и ответы: не закрыта преподавателем и не истекла */
+const linkOpen = (l: Link, now: Date) => !l.closed_at && ms(l.closes_at) > now.getTime();
+/** Срок попытки с учётом досрочного закрытия ссылки преподавателем */
+const effDeadline = (a: Attempt, l: Link) => Math.min(ms(a.deadline_at), ms(l.closed_at));
+const stateOf = (a: Attempt, l: Link, now: Date) =>
+  attemptState({ finished_at: a.finished_at, deadline_at: new Date(effDeadline(a, l)).toISOString() }, now);
+const langOf = (l: Link): 'ru' | 'tg' => (l.batch?.generation_params?.lang === 'tg' ? 'tg' : 'ru');
+
+async function loadLink(code: string): Promise<Link | null> {
+  const { data, error } = await sb.from('exam_links').select(LINK_COLS).eq('code', code).maybeSingle();
+  if (error) throw error;
+  return (data as unknown as Link) ?? null;
+}
+
+async function ticketQuestions(ticketId: string, cache: QCache): Promise<ExamQuestion[]> {
+  const hit = cache.get(ticketId);
+  if (hit) return hit;
+  const { data, error } = await sb.from('ticket_questions').select('id, order_index, question_snapshot')
+    .eq('ticket_id', ticketId).order('order_index');
+  if (error) throw error;
+  const qs = (data ?? []).map((r: any) => ({ tqId: String(r.id), snapshot: r.question_snapshot }));
+  cache.set(ticketId, qs);
+  return qs;
+}
+
+async function readAttempt(code: string, tgUserId: number): Promise<Attempt | null> {
+  const { data, error } = await sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', code).eq('tg_user_id', tgUserId).maybeSingle();
+  if (error) throw error;
+  return (data as Attempt) ?? null;
+}
+
+async function readAttemptById(id: string): Promise<Attempt | null> {
+  const { data, error } = await sb.from('exam_attempts').select(ATTEMPT_COLS).eq('id', id).maybeSingle();
+  if (error) throw error;
+  return (data as Attempt) ?? null;
+}
+
+/**
+ * Сдать попытку с сохранёнными ответами. Балл считается по тем ответам, что лежат в базе:
+ * запись идёт, только если ответы не изменились с момента чтения (иначе перечитываем).
+ * Уже сданную попытку не трогает (finished_at is null), поэтому две сдачи одновременно безопасны.
+ */
+async function finalize(a0: Attempt, l: Link, now: Date, cache: QCache): Promise<Attempt> {
+  const questions = await ticketQuestions(a0.ticket_id, cache);
+  let a = a0;
+  for (let i = 0; i < 4; i++) {
+    if (a.finished_at) return a;
+    const answers = (a.answers ?? {}) as ExamAnswers;
+    const r = scoreAttempt(questions, answers);
+    const finishedAt = new Date(Math.min(now.getTime(), effDeadline(a, l))).toISOString();
+    let q = sb.from('exam_attempts').update({ finished_at: finishedAt, score: r.score, max_score: r.max })
+      .eq('id', a.id).is('finished_at', null);
+    // Последняя попытка — без сверки ответов, чтобы сдача не застряла
+    if (i < 3) q = q.eq('answers', JSON.stringify(a.answers ?? {}));
+    const { data, error } = await q.select(ATTEMPT_COLS).maybeSingle();
+    if (error) throw error;
+    if (data) return data as Attempt;
+    const cur = await readAttemptById(a.id);
+    if (!cur) return { ...a, finished_at: finishedAt, score: r.score, max_score: r.max };
+    a = cur;
+  }
+  return a;
+}
+
+/** При любом обращении к запуску: просроченные (или оборванные закрытием ссылки) попытки сдаются сами */
+async function finishExpired(l: Link, now: Date, cache: QCache) {
+  let q = sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', l.code).is('finished_at', null);
+  if (!(l.closed_at && ms(l.closed_at) <= now.getTime())) q = q.lte('deadline_at', now.toISOString());
+  const { data, error } = await q.limit(500);
+  if (error) throw error;
+  for (const a of (data ?? []) as Attempt[]) await finalize(a, l, now, cache);
+}
+
+/** Ответ ученику: только снимки без ответов (publicSnapshot), свои ответы и срок */
+async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache) {
+  const base = {
+    title: l.batch?.title ?? '',
+    subject: l.batch?.subject?.name ?? '',
+    minutes: l.duration_min,
+    lang: langOf(l),
+  };
+  if (a?.finished_at) {
+    return { ...base, state: 'finished' as const, attempt: { score: a.score ?? 0, max: a.max_score ?? 0, review: !!l.review_sent_at } };
+  }
+  if (a && stateOf(a, l, now) === 'running') {
+    const [questions, { data: t }] = await Promise.all([
+      ticketQuestions(a.ticket_id, cache),
+      sb.from('tickets').select('ticket_number').eq('id', a.ticket_id).maybeSingle(),
+    ]);
+    return {
+      ...base,
+      state: 'running' as const,
+      attempt: {
+        ticketNumber: (t as any)?.ticket_number ?? null,
+        deadline: new Date(effDeadline(a, l)).toISOString(),
+        // Пустое место (вопроса не нашлось) — только тип, без остальных полей снимка
+        questions: questions.map((q) => ({
+          tqId: q.tqId,
+          snapshot: !q.snapshot || q.snapshot.empty === true ? { empty: true, type: q.snapshot?.type ?? null } : publicSnapshot(q.snapshot),
+        })),
+        answers: a.answers ?? {},
+      },
+    };
+  }
+  // Попытки нет (или она только что сдана другим запросом — тогда перечитают при следующем open)
+  return { ...base, state: (!a && linkOpen(l, now) && l.batch ? 'new' : 'closed') as 'new' | 'closed' };
+}
+
+// ---------------- Проверка ответа ученика ----------------
+const isId = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= ID_MAX;
+
+/** Ответ нужной формы для этого вопроса; undefined — ответ некорректен; null — стереть ответ */
+function cleanAnswer(snap: any, ans: unknown): ExamAnswer | undefined {
+  if (!snap || snap.empty === true) return undefined;
+  if (ans === null) return null;
+  if (snap.type === 'matching') {
+    if (!ans || typeof ans !== 'object' || Array.isArray(ans)) return undefined;
+    const items: any[] = snap.matching_items ?? [];
+    const leftIds = new Set(items.filter((m) => m.side === 'left').map((m) => m.id));
+    const rightIds = new Set(items.filter((m) => m.side === 'right').map((m) => m.id));
+    const entries = Object.entries(ans as Record<string, unknown>);
+    if (entries.length > leftIds.size) return undefined;
+    const out: Record<string, string> = {};
+    for (const [k, v] of entries) {
+      if (!leftIds.has(k)) return undefined;
+      if (v === null || v === '') continue; // пункт без пары
+      if (!isId(v) || !rightIds.has(v)) return undefined;
+      out[k] = v;
+    }
+    return Object.keys(out).length ? out : null;
+  }
+  if (snap.type === 'open') {
+    if (typeof ans !== 'string') return undefined;
+    const s = ans.trim();
+    if (s.length > OPEN_MAX || !/^[+-]?\d*[.,]?\d*$/.test(s)) return undefined;
+    return s === '' ? null : s;
+  }
+  // тест: id одного из вариантов этого вопроса
+  if (!isId(ans)) return undefined;
+  return (snap.options ?? []).some((o: any) => o.id === ans) ? ans : undefined;
+}
+
+/** Имя ученика: 2–80 знаков после обрезки, без управляющих символов, пробелы схлопнуты */
+function cleanName(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const s = v.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim();
+  return [...s].length >= 2 && [...s].length <= 80 ? s : null;
+}
+
+// ---------------- Telegram ----------------
+const sleep = (n: number) => new Promise((r) => setTimeout(r, n));
+
+/** Вызов Bot API. Ошибки сети не логируем: в тексте ошибки fetch есть адрес с токеном. */
+async function tgCall(method: string, payload: Record<string, unknown>): Promise<any> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return await res.json().catch(() => ({ ok: false }));
+  } catch {
+    return { ok: false, description: 'network error' };
+  }
+}
+
+async function sendText(chat: number, text: string, markup?: Record<string, unknown>): Promise<boolean> {
+  for (let i = 0; i < 2; i++) {
+    const r = await tgCall('sendMessage', {
+      chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true,
+      ...(markup ? { reply_markup: markup } : {}),
+    });
+    if (r?.ok) return true;
+    const wait = Number(r?.parameters?.retry_after);
+    if (r?.error_code === 429 && wait > 0 && wait <= 10 && i === 0) { await sleep(wait * 1000); continue; }
+    console.warn('tg-exam sendMessage failed:', r?.error_code, r?.description);
+    return false;
+  }
+  return false;
+}
+
+let botUsername: string | null = null;
+async function botName(): Promise<string | null> {
+  if (botUsername) return botUsername;
+  const r = await tgCall('getMe', {});
+  botUsername = r?.ok && typeof r.result?.username === 'string' ? r.result.username : null;
+  return botUsername;
+}
+
+async function teacherChat(userId: string): Promise<number | null> {
+  const { data } = await sb.from('telegram_links').select('chat_id').eq('user_id', userId).maybeSingle();
+  return data?.chat_id ? Number(data.chat_id) : null;
+}
+
+const NOT_LINKED = 'Привяжите Telegram: на сайте нажмите значок Telegram вверху страницы.';
+
+// ---------------- Действия ученика ----------------
+async function studentAction(action: string, body: any, tgUser: TgInitUser): Promise<Response> {
+  const code = typeof body.code === 'string' ? body.code.trim().toUpperCase() : '';
+  if (!CODE_RE.test(code)) return json({ error: 'bad_code', message: 'Неверная ссылка на билет.' }, 400);
+  const l = await loadLink(code);
+  if (!l) return json({ error: 'not_found', message: 'Ссылка на билет не найдена: запуск или набор удалён.' }, 404);
+
+  const now = new Date();
+  const cache: QCache = new Map();
+  await finishExpired(l, now, cache);
+  let a = await readAttempt(code, tgUser.id);
+
+  switch (action) {
+    case 'open':
+      return json(await studentView(l, a, now, cache));
+
+    case 'start': {
+      if (a) return json(await studentView(l, a, now, cache)); // повторный start — та же попытка
+      if (!linkOpen(l, now) || !l.batch) return json(await studentView(l, null, now, cache));
+      const name = cleanName(body.name);
+      if (!name) return json({ error: 'bad_name', message: 'Введите фамилию и имя (от 2 до 80 знаков).' }, 400);
+      const { data: tickets, error: tErr } = await sb.from('tickets').select('id').eq('batch_id', l.batch_id);
+      if (tErr) throw tErr;
+      if (!tickets?.length) return json({ error: 'no_tickets', message: 'В наборе нет билетов.' }, 422);
+      const ticket = pickVariant(tickets as Array<{ id: string }>);
+      const tgName = [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' ').slice(0, 128) || null;
+      // Одна попытка на аккаунт: при гонке двух start вставка второй ничего не делает, обе читают одну строку
+      const { error } = await sb.from('exam_attempts').upsert({
+        code, tg_user_id: tgUser.id, tg_username: tgUser.username ?? null, tg_name: tgName, student_name: name,
+        ticket_id: ticket.id, started_at: now.toISOString(),
+        deadline_at: deadlineOf(now, new Date(l.closes_at), l.duration_min).toISOString(),
+      }, { onConflict: 'code,tg_user_id', ignoreDuplicates: true });
+      if (error) throw error;
+      a = await readAttempt(code, tgUser.id);
+      if (!a) return json({ error: 'start_failed', message: 'Не удалось начать билет. Попробуйте ещё раз.' }, 500);
+      return json(await studentView(l, a, now, cache));
+    }
+
+    case 'save': {
+      if (!a) return json({ ok: false, state: linkOpen(l, now) ? 'new' : 'closed' });
+      if (stateOf(a, l, now) !== 'running') {
+        if (!a.finished_at) await finalize(a, l, now, cache);
+        return json({ ok: false, state: 'finished' });
+      }
+      if (!isId(body.tqId)) return json({ error: 'bad_question', message: 'Некорректный вопрос.' }, 400);
+      const questions = await ticketQuestions(a.ticket_id, cache);
+      const q = questions.find((x) => x.tqId === body.tqId);
+      if (!q) return json({ error: 'bad_question', message: 'Этого вопроса нет в вашем билете.' }, 400);
+      const ans = cleanAnswer(q.snapshot, body.answer);
+      if (ans === undefined) return json({ error: 'bad_answer', message: 'Некорректный ответ.' }, 400);
+      // Запись только пока попытка идёт (не сдана и срок не прошёл) и только поверх тех ответов,
+      // что прочитаны (иначе два быстрых сохранения затёрли бы друг друга) — при расхождении перечитываем
+      for (let i = 0; i < 5; i++) {
+        const old = (a.answers ?? {}) as ExamAnswers;
+        const next: ExamAnswers = { ...old };
+        if (ans === null) delete next[q.tqId];
+        else next[q.tqId] = ans;
+        const nowIso = new Date().toISOString();
+        const { data, error } = await sb.from('exam_attempts').update({ answers: next })
+          .eq('id', a.id).is('finished_at', null).gt('deadline_at', nowIso).eq('answers', JSON.stringify(old))
+          .select('id').maybeSingle();
+        if (error) throw error;
+        if (data) return json({ ok: true });
+        const cur = await readAttemptById(a.id);
+        if (!cur) return json({ ok: false, state: 'closed' });
+        if (stateOf(cur, l, new Date()) !== 'running') {
+          if (!cur.finished_at) await finalize(cur, l, new Date(), cache);
+          return json({ ok: false, state: 'finished' });
+        }
+        a = cur;
+      }
+      return json({ error: 'busy', message: 'Не удалось сохранить ответ. Попробуйте ещё раз.' }, 409);
+    }
+
+    case 'submit': {
+      if (!a) return json({ error: 'not_started', message: 'Билет ещё не начат.' }, 409);
+      // После срока тоже сдаёт — с теми ответами, что успели сохраниться
+      const done = a.finished_at ? a : await finalize(a, l, now, cache);
+      return json({ score: done.score ?? 0, max: done.max_score ?? 0 });
+    }
+
+    case 'review': {
+      if (!a?.finished_at || !l.review_sent_at) {
+        return json({ error: 'review_not_ready', message: 'Разбор появится, когда преподаватель его отправит.' }, 403);
+      }
+      const questions = await ticketQuestions(a.ticket_id, cache);
+      const answers = (a.answers ?? {}) as ExamAnswers;
+      const items = scoreAttempt(questions, answers).items;
+      return json({
+        questions: questions.map((q, i) => ({
+          tqId: q.tqId, snapshot: q.snapshot, answer: answers[q.tqId] ?? null, points: items[i].points, max: items[i].max,
+        })),
+      });
+    }
+  }
+  return json({ error: 'Неизвестное действие' }, 400);
+}
+
+// ---------------- Действия преподавателя ----------------
+async function teacherAction(action: string, body: any, userId: string): Promise<Response> {
+  const code = typeof body.code === 'string' ? body.code.trim().toUpperCase() : '';
+  const l = CODE_RE.test(code) ? await loadLink(code) : null;
+  let allowed = !!l && l.created_by === userId;
+  if (l && !allowed) {
+    const { data: prof } = await sb.from('profiles').select('is_owner').eq('id', userId).maybeSingle();
+    allowed = prof?.is_owner === true;
+  }
+  // Чужой запуск и несуществующий — один ответ: по коду нельзя узнать, есть ли такой запуск
+  if (!l || !allowed) return json({ error: 'Запуск не найден' }, 404);
+
+  const now = new Date();
+  const cache: QCache = new Map();
+  await finishExpired(l, now, cache);
+  const title = tgPlain(l.batch?.title || 'Билет');
+
+  switch (action) {
+    case 'review_send': {
+      // Пока ссылка открыта, разбор (с верными ответами) переслали бы тем, кто ещё пишет
+      if (linkOpen(l, now)) return json({ error: 'Сначала закройте запуск: иначе ответы увидят те, кто ещё проходит билет.' }, 409);
+      const { data, error } = await sb.from('exam_attempts').select(ATTEMPT_COLS).eq('code', code)
+        .not('finished_at', 'is', null).order('finished_at').limit(500);
+      if (error) throw error;
+      // Отметка ставится до рассылки: кнопка «Открыть с формулами и рисунками» должна работать сразу
+      const { error: uErr } = await sb.from('exam_links').update({ review_sent_at: now.toISOString() }).eq('code', code);
+      if (uErr) throw uErr;
+      const lang = langOf(l);
+      const button = { inline_keyboard: [[{ text: 'Открыть с формулами и рисунками', web_app: { url: `${EXAM_URL}?c=${code}&review=1` } }]] };
+      let sent = 0, failed = 0, first = true;
+      for (const a of (data ?? []) as Attempt[]) {
+        const questions = await ticketQuestions(a.ticket_id, cache);
+        const head = `📝 <b>Разбор: ${title}</b>\nВы набрали ${a.score ?? 0} из ${a.max_score ?? 0}.`;
+        const parts = chunkLines([head, ...reviewLines(questions, (a.answers ?? {}) as ExamAnswers, lang)]);
+        let ok = true;
+        for (let i = 0; i < parts.length && ok; i++) {
+          if (!first) await sleep(50);
+          first = false;
+          ok = await sendText(Number(a.tg_user_id), parts[i], i === parts.length - 1 ? button : undefined);
+        }
+        if (ok) sent++; else failed++;
+      }
+      return json({ sent, failed });
+    }
+
+    case 'link_send': {
+      const chat = await teacherChat(userId);
+      if (!chat) return json({ error: NOT_LINKED }, 400);
+      if (!linkOpen(l, now)) return json({ error: 'Запуск уже закрыт.' }, 409);
+      const bot = await botName();
+      if (!bot) return json({ error: 'Не удалось получить имя бота. Попробуйте ещё раз.' }, 502);
+      const url = `https://t.me/${bot}?start=exam_${code}`;
+      const subject = l.batch?.subject?.name ? `\nПредмет: ${tgPlain(l.batch.subject.name)}` : '';
+      const text = `📝 <b>Билет: ${title}</b>${subject}\nНа прохождение ${l.duration_min} минут, попытка одна.\nОткройте ссылку и нажмите «Начать билет»:\n${url}`;
+      const ok = await sendText(chat, text, { inline_keyboard: [[{ text: '📝 Начать билет', url }]] });
+      return ok ? json({ ok: true }) : json({ error: 'Бот не смог написать вам: откройте бота в Telegram и нажмите «Start».' }, 502);
+    }
+
+    case 'notify_closed': {
+      const chat = await teacherChat(userId);
+      if (!chat) return json({ error: NOT_LINKED }, 400);
+      const { data, error } = await sb.from('exam_attempts').select('finished_at, score, max_score').eq('code', code).limit(1000);
+      if (error) throw error;
+      const rows = data ?? [];
+      const done = rows.filter((r: any) => r.finished_at);
+      const avg = (k: 'score' | 'max_score') => done.reduce((s: number, r: any) => s + (r[k] ?? 0), 0) / (done.length || 1);
+      const fmt = (n: number) => (Math.round(n * 10) / 10).toString().replace('.', ',');
+      const lines = [`🏁 <b>Итог: ${title}</b>`, `Сдали: ${done.length} из ${rows.length} начавших.`];
+      if (done.length) lines.push(`Средний балл: ${fmt(avg('score'))} из ${fmt(avg('max_score'))}.`);
+      const ok = await sendText(chat, lines.join('\n'));
+      return ok ? json({ ok: true, finished: done.length, started: rows.length }) : json({ error: 'Бот не смог написать вам: откройте бота в Telegram и нажмите «Start».' }, 502);
+    }
+  }
+  return json({ error: 'Неизвестное действие' }, 400);
+}
+
+const STUDENT_ACTIONS = new Set(['open', 'start', 'save', 'submit', 'review']);
+const TEACHER_ACTIONS = new Set(['review_send', 'link_send', 'notify_closed']);
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  if (req.method !== 'POST') return json({ error: 'Метод не поддерживается' }, 405);
+
+  try {
+    const raw = await req.text();
+    if (raw.length > MAX_BODY) return json({ error: 'Слишком большой запрос' }, 413);
+    let body: any = {};
+    try { body = JSON.parse(raw || '{}'); } catch { /* пустое тело */ }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) body = {};
+    const action = typeof body.action === 'string' ? body.action : '';
+
+    if (STUDENT_ACTIONS.has(action)) {
+      const tgUser = await verifyInitData(req.headers.get('X-Tg-Init-Data') ?? '', BOT_TOKEN, MAX_AGE_SEC);
+      if (!tgUser) return json({ error: 'bad_init_data', message: 'Откройте билет из Telegram.' }, 401);
+      return await studentAction(action, body, tgUser);
+    }
+
+    if (TEACHER_ACTIONS.has(action)) {
+      const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+      if (!token) return json({ error: 'Требуется авторизация' }, 401);
+      const { data: auth, error: authErr } = await sb.auth.getUser(token);
+      if (authErr || !auth?.user) return json({ error: 'Недействительная сессия' }, 401);
+      return await teacherAction(action, body, auth.user.id);
+    }
+
+    return json({ error: 'Неизвестное действие' }, 400);
+  } catch (err) {
+    // Ошибки базы безопасны для журнала; сетевые ошибки Telegram сюда не доходят (см. tgCall)
+    console.error('tg-exam', err instanceof Error ? err.message : err);
+    return json({ error: 'Внутренняя ошибка. Попробуйте ещё раз.' }, 500);
+  }
+});
