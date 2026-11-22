@@ -576,18 +576,17 @@ export const TicketGenerator: React.FC = () => {
         />
 
         <CompositionColumn
-          subjectName={subjectName} isStaff={isStaff} isOwner={isOwner} limits={limits} userLimits={userLimits} leftToday={leftToday}
-          editComposition={editComposition} setEditComposition={setEditComposition} testCount={testCount} setTestCount={setTestCount}
-          matchingCount={matchingCount} setMatchingCount={setMatchingCount} openCount={openCount} setOpenCount={setOpenCount}
-          readingCount={readingCount} setReadingCount={setReadingCount} clozeCount={clozeCount} setClozeCount={setClozeCount} showTexts={showTexts}
-          standard={standard} isStandard={isStandard} poolStats={poolStats} isChem={isChem} nctCfg={nctCfg} nctPref={nctPref} setNctPref={setNctPref}
-          nctMode={nctMode} diffShares={diffShares} setDiffShare={setDiffShare} diffSum={diffSum} permAvailable={permAvailable} permPref={permPref}
-          setPermPref={setPermPref} variantChoices={variantChoices} ticketCount={ticketCount} setTicketCount={setTicketCount} pickEmpty={pickEmpty}
-          health={health} healthDot={healthDot} fitted={fitted} fittedTotal={fittedTotal} scopeMode={scopeMode} setScopeMode={setScopeMode}
-          showExtra={showExtra} setShowExtra={setShowExtra} customTitle={customTitle} setCustomTitle={setCustomTitle} autoTitle={autoTitle}
-          shuffleOptions={shuffleOptions} setShuffleOptions={setShuffleOptions} shuffleMatching={shuffleMatching}
-          setShuffleMatching={setShuffleMatching} handleGenerate={handleGenerate} isGenerating={isGenerating} genProgress={genProgress}
-          blockReason={blockReason} generatedBatch={generatedBatch}
+          subjectName={subjectName} isStaff={isStaff} isOwner={isOwner}
+          composition={{
+            editComposition, setEditComposition, testCount, setTestCount, matchingCount, setMatchingCount, openCount, setOpenCount,
+            readingCount, setReadingCount, clozeCount, setClozeCount, showTexts, standard, isStandard,
+          }}
+          nct={{ isChem, nctCfg, nctPref, setNctPref, nctMode, diffShares, setDiffShare, diffSum, permAvailable, permPref, setPermPref }}
+          variants={{ variantChoices, ticketCount, setTicketCount }}
+          quota={{ limits, userLimits, leftToday }}
+          pool={{ poolStats, pickEmpty, health, healthDot, fitted, fittedTotal, scopeMode, setScopeMode }}
+          extra={{ showExtra, setShowExtra, customTitle, setCustomTitle, autoTitle, shuffleOptions, setShuffleOptions, shuffleMatching, setShuffleMatching }}
+          run={{ handleGenerate, isGenerating, genProgress, blockReason, generatedBatch }}
         />
       </div>
     </div>

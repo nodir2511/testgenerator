@@ -21,13 +21,8 @@ export interface HealthInfo {
   fixTickets?: boolean;
 }
 
-interface CompositionColumnProps {
-  subjectName: string;
-  isStaff: boolean;
-  isOwner: boolean;
-  limits: { perType: number; tickets: number };
-  userLimits: { perDay: number };
-  leftToday: number | null;
+// Состав билета: сколько заданий каждого типа, тексты английского и стандарт предмета
+export interface CompositionGroup {
   editComposition: boolean;
   setEditComposition: React.Dispatch<React.SetStateAction<boolean>>;
   testCount: number;
@@ -43,7 +38,10 @@ interface CompositionColumnProps {
   showTexts: boolean;
   standard: ReturnType<typeof standardFor>;
   isStandard: boolean;
-  poolStats: PoolCounts | undefined;
+}
+
+// Режим НЦТ: переключатель, доли сложности, переставленные варианты
+export interface NctGroup {
   isChem: boolean;
   nctCfg: NctConfig;
   nctPref: boolean;
@@ -55,9 +53,25 @@ interface CompositionColumnProps {
   permAvailable: boolean;
   permPref: boolean;
   setPermPref: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+// Число вариантов
+export interface VariantsGroup {
   variantChoices: number[];
   ticketCount: number;
   setTicketCount: React.Dispatch<React.SetStateAction<number>>;
+}
+
+// Лимиты роли и остаток генераций на сегодня
+export interface QuotaGroup {
+  limits: { perType: number; tickets: number };
+  userLimits: { perDay: number };
+  leftToday: number | null;
+}
+
+// Пул вопросов и готовность: хватает ли вопросов и чем это исправить
+export interface PoolGroup {
+  poolStats: PoolCounts | undefined;
   pickEmpty: boolean;
   health: HealthInfo | null;
   healthDot: string;
@@ -65,6 +79,10 @@ interface CompositionColumnProps {
   fittedTotal: number;
   scopeMode: ScopeMode;
   setScopeMode: React.Dispatch<React.SetStateAction<ScopeMode>>;
+}
+
+// Блок «Дополнительно»: название набора и перемешивание
+export interface ExtraGroup {
   showExtra: boolean;
   setShowExtra: React.Dispatch<React.SetStateAction<boolean>>;
   customTitle: string;
@@ -74,23 +92,45 @@ interface CompositionColumnProps {
   setShuffleOptions: React.Dispatch<React.SetStateAction<boolean>>;
   shuffleMatching: boolean;
   setShuffleMatching: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+// Кнопка генерации: обработчик, ход работы и причина блокировки
+export interface RunGroup {
   handleGenerate: (cfg?: GenCfg) => Promise<void>;
   isGenerating: boolean;
   genProgress: { percent: number; stage: string };
   blockReason: string | null;
   /** созданный набор (нужен только факт, что он есть) */
-  generatedBatch: any | null;
+  generatedBatch: unknown;
+}
+
+export interface CompositionColumnProps {
+  subjectName: string;
+  isStaff: boolean;
+  isOwner: boolean;
+  composition: CompositionGroup;
+  nct: NctGroup;
+  variants: VariantsGroup;
+  quota: QuotaGroup;
+  pool: PoolGroup;
+  extra: ExtraGroup;
+  run: RunGroup;
 }
 
 // Правая колонка генератора: состав билета, режим НЦТ, число вариантов, готовность, название и кнопка создания.
 // Состояние и обработчики — в TicketGenerator
 export const CompositionColumn: React.FC<CompositionColumnProps> = ({
-  subjectName, isStaff, isOwner, limits, userLimits, leftToday, editComposition, setEditComposition, testCount, setTestCount, matchingCount,
-  setMatchingCount, openCount, setOpenCount, readingCount, setReadingCount, clozeCount, setClozeCount, showTexts, standard, isStandard, poolStats,
-  isChem, nctCfg, nctPref, setNctPref, nctMode, diffShares, setDiffShare, diffSum, permAvailable, permPref, setPermPref, variantChoices, ticketCount,
-  setTicketCount, pickEmpty, health, healthDot, fitted, fittedTotal, scopeMode, setScopeMode, showExtra, setShowExtra, customTitle, setCustomTitle,
-  autoTitle, shuffleOptions, setShuffleOptions, shuffleMatching, setShuffleMatching, handleGenerate, isGenerating, genProgress, blockReason,
-  generatedBatch,
+  subjectName, isStaff, isOwner,
+  composition: {
+    editComposition, setEditComposition, testCount, setTestCount, matchingCount, setMatchingCount, openCount, setOpenCount,
+    readingCount, setReadingCount, clozeCount, setClozeCount, showTexts, standard, isStandard,
+  },
+  nct: { isChem, nctCfg, nctPref, setNctPref, nctMode, diffShares, setDiffShare, diffSum, permAvailable, permPref, setPermPref },
+  variants: { variantChoices, ticketCount, setTicketCount },
+  quota: { limits, userLimits, leftToday },
+  pool: { poolStats, pickEmpty, health, healthDot, fitted, fittedTotal, scopeMode, setScopeMode },
+  extra: { showExtra, setShowExtra, customTitle, setCustomTitle, autoTitle, shuffleOptions, setShuffleOptions, shuffleMatching, setShuffleMatching },
+  run: { handleGenerate, isGenerating, genProgress, blockReason, generatedBatch },
 }) => (
   <div className="md:col-span-2 xl:col-span-5 space-y-4 sm:space-y-5 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:overflow-y-auto xl:pb-1">
     {/* 3. Состав билета: по умолчанию — стандарт предмета одной строкой */}
