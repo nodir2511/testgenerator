@@ -69,6 +69,7 @@ export const SCHEMA_FILES = [
   'bulk_change_backups.sql',
   'perf_round1.sql',
   'exam_links.sql',
+  'site_tips.sql',
 ];
 
 /** Файлы с данными, а не со схемой: в тестовую базу не применяются */

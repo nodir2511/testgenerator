@@ -928,3 +928,83 @@ describe('ускорение (perf_round1.sql)', () => {
     expect(res.teacherAfterRead).toEqual([]);
   });
 });
+
+describe('подсказки «А вы знали?» (site_tips.sql)', () => {
+  // Подсказки теста — «из будущего», чтобы быть новее подсказок, которые заполняет сам site_tips.sql
+  const addTip = (q: Q, version: string, text: string, rank = 1, at = '2030-01-01') =>
+    q("select public.add_site_tip($1, $2, 'nav-exams', 'exams', $3::smallint, $4::timestamptz) as id", [version, text, rank, at]).then((r) => r[0].id as string);
+  const pending = async (q: Q, mine: string[]) =>
+    (await q('select id from public.next_site_tips()')).map((r) => r.id as string).filter((id) => mine.includes(id));
+
+  it('видны по уровню, самая новая — первой; после показа — следующая', async () => {
+    const res = await as(db.admin, s.users.owner, async (q) => {
+      const older = await addTip(q, '9.1.0', 'старая', 1, '2030-01-01');
+      const newer = await addTip(q, '9.1.1', 'новая', 1, '2030-02-01');
+      const forAdmins = await addTip(q, '9.1.2', 'для админов', 3, '2030-03-01');
+      const again = await addTip(q, '9.1.1', 'новая', 1, '2030-02-01');
+      const mine = [older, newer, forAdmins];
+      const owner = await pending(q, mine);
+      await switchUser(q, s.users.teacher);
+      const teacher = await pending(q, mine);
+      const teacherDirect = ids(await q('select id from public.site_tips where id = any($1::uuid[])', [mine]));
+      await q('insert into public.site_tip_seen (user_id, tip_id) values ($1, $2)', [s.users.teacher, newer]);
+      const teacherAfter = await pending(q, mine);
+      const teacherSeen = (await q('select tip_id from public.site_tip_seen')).length;
+      await switchUser(q, s.users.admin);
+      const adminSeesOthers = (await q('select tip_id from public.site_tip_seen')).length;
+      const adminFakeSeen = await rejected(q, 'insert into public.site_tip_seen (user_id, tip_id) values ($1, $2)', [s.users.teacher, older]);
+      const admin = await pending(q, mine);
+      return { older, newer, forAdmins, again, owner, teacher, teacherDirect, teacherAfter, teacherSeen, adminSeesOthers, adminFakeSeen, admin };
+    });
+    expect(res.again).toBe(res.newer);
+    expect(res.owner).toEqual([res.forAdmins, res.newer, res.older]);
+    expect(res.teacher).toEqual([res.newer, res.older]);
+    expect(res.teacherDirect).toEqual([res.newer, res.older].sort());
+    expect(res.teacherAfter).toEqual([res.older]);
+    expect(res.teacherSeen).toBe(1);
+    expect(res.adminSeesOthers).toBe(0);
+    expect(res.adminFakeSeen).toMatch(/row-level security/);
+    expect(res.admin).toEqual([res.forAdmins, res.newer, res.older]);
+  });
+
+  it('пока окно «Что нового» этой версии не закрыто, её подсказок нет', async () => {
+    const res = await as(db.admin, s.users.owner, async (q) => {
+      const rel = (await q("select public.add_site_release('9.2.0', 'x', $1::jsonb) as id", [JSON.stringify([{ kind: 'new', text: 'пункт', min_rank: 1 }])]))[0].id as string;
+      // Версия, пункты которой учителю не видны: её окно ему не покажут, подсказка ждать не должна
+      await q("select public.add_site_release('9.2.1', 'x', $1::jsonb)", [JSON.stringify([{ kind: 'new', text: 'для админов', min_rank: 3 }])]);
+      const blocked = await addTip(q, '9.2.0', 'подсказка новой версии', 1, '2030-05-01');
+      const hiddenRelease = await addTip(q, '9.2.1', 'подсказка к чужой версии', 1, '2030-04-01');
+      const mine = [blocked, hiddenRelease];
+      await switchUser(q, s.users.teacher);
+      const before = await pending(q, mine);
+      await q('insert into public.site_release_reads (user_id, release_id) values ($1, $2)', [s.users.teacher, rel]);
+      const after = await pending(q, mine);
+      return { blocked, hiddenRelease, before, after };
+    });
+    expect(res.before).toEqual([res.hiddenRelease]);
+    expect(res.after).toEqual([res.blocked, res.hiddenRelease]);
+  });
+
+  it('писать подсказки можно только через add_site_tip главного админа', async () => {
+    const res = await as(db.admin, s.users.owner, async (q) => {
+      const ownerInsert = await rejected(q, "insert into public.site_tips (version, text, target) values ('9.3.0', 'x', 'nav-exams')");
+      await switchUser(q, s.users.admin);
+      const adminInsert = await rejected(q, "insert into public.site_tips (version, text, target) values ('9.3.0', 'x', 'nav-exams')");
+      const adminAdd = await rejected(q, "select public.add_site_tip('9.3.0', 'x', 'nav-exams')");
+      await switchUser(q, s.users.teacher);
+      const teacherAdd = await rejected(q, "select public.add_site_tip('9.3.0', 'x', 'nav-exams')");
+      const teacherDelete = await rejected(q, 'delete from public.site_tips');
+      return { ownerInsert, adminInsert, adminAdd, teacherAdd, teacherDelete };
+    });
+    expect(res.ownerInsert).toMatch(/permission denied|row-level security/);
+    expect(res.adminInsert).toMatch(/permission denied|row-level security/);
+    expect(res.adminAdd).toMatch(/главный админ/);
+    expect(res.teacherAdd).toMatch(/главный админ/);
+    expect(res.teacherDelete).toMatch(/permission denied/);
+  });
+
+  it('гость не вызывает next_site_tips', async () => {
+    const err = await as(db.admin, null, (q) => rejected(q, 'select * from public.next_site_tips()'));
+    expect(err).toMatch(/permission denied/);
+  });
+});
