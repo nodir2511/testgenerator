@@ -3,8 +3,13 @@ import { Image as ImageIcon } from 'lucide-react';
 import { OMR_LAYOUTS } from '../../lib/omr/layouts.generated';
 import { loadGrayImage } from '../../lib/omr/image';
 import { probeInBackground } from '../../lib/omr/omrClient';
+import type { DigitKnn } from '../../lib/omr/knn';
+import { guessOpen } from '../../lib/omr/model';
 import type { Sheet } from '../../lib/omr/process';
+import type { TicketKey } from '../../../supabase/functions/_shared/omrScore';
 import { AUTO_START, autoStep, autoTaken } from './autosnap';
+import { liveMarks } from './liveMarks';
+import { LiveLegend, LiveOverlay, type LiveView } from './LiveOverlay';
 import { SheetPhoto } from './pictures';
 import { useBack, useNoVerticalSwipes } from './telegram';
 
@@ -12,20 +17,24 @@ import { useBack, useNoVerticalSwipes } from './telegram';
 export interface ShotNote { tone: 'ok' | 'warn' | 'error'; text: string }
 
 const AUTO_KEY = 'omr_autosnap_v1';
-const PROBE_SIDE = 1000;
-const PROBE_PAUSE_MS = 250;
+const PROBE_SIDE = 1300;
+const PROBE_PAUSE_MS = 120;
 const autoSaved = () => { try { return localStorage.getItem(AUTO_KEY) !== '0'; } catch { return true; } };
 
 export const liveCameraSupported = () => typeof navigator.mediaDevices?.getUserMedia === 'function';
 
-/** Живой видоискатель: рамка по форме полоски, результат каждого снимка сразу на экране, автоснимок */
-export function Camera({ layouts, label, count, last, onShot, onGallery, onClose, onUnavailable }: {
+/** Живой видоискатель: рамка по форме полоски, кружочки ответов прямо на бланке, результат каждого снимка сразу на экране, автоснимок */
+export function Camera({ layouts, label, count, last, keys, loadDigits, onShot, onGallery, onClose, onUnavailable }: {
   layouts: string[];
   /** Какой бланк ждём */
   label: string;
   /** Сколько снимков уже в стопке; undefined — нужен один снимок (эталон) */
   count?: number;
   last?: Sheet;
+  /** Ключи по вариантам — раскрасить ответы; undefined — снимают эталон, сверять не с чем */
+  keys?: Record<number, TicketKey>;
+  /** Примеры цифр для открытых вопросов; пока не загрузились, цифры читает только сеть */
+  loadDigits?: () => Promise<DigitKnn>;
   onShot: (frame: HTMLCanvasElement, auto: boolean) => Promise<ShotNote>;
   onGallery: () => void;
   onClose: () => void;
@@ -37,11 +46,13 @@ export function Camera({ layouts, label, count, last, onShot, onGallery, onClose
   const [note, setNote] = useState<ShotNote | null>(null);
   const [auto, setAuto] = useState(autoSaved);
   const [seen, setSeen] = useState(false);
+  const [view, setView] = useState<LiveView | null>(null);
+  const digits = useRef<DigitKnn | null>(null);
   const [flash, setFlash] = useState(0);
   const state = useRef(AUTO_START);
   const alive = useRef(true);
-  const cb = useRef({ onShot, onUnavailable });
-  cb.current = { onShot, onUnavailable };
+  const cb = useRef({ onShot, onUnavailable, keys });
+  cb.current = { onShot, onUnavailable, keys };
   useBack(onClose);
   useNoVerticalSwipes();
 
@@ -75,6 +86,8 @@ export function Camera({ layouts, label, count, last, onShot, onGallery, onClose
     };
   }, []);
 
+  useEffect(() => { void loadDigits?.().then((m) => { digits.current = m; }).catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const grab = (side?: number): HTMLCanvasElement | null => {
     const v = videoRef.current;
     if (!v || !v.videoWidth) return null;
@@ -103,22 +116,28 @@ export function Camera({ layouts, label, count, last, onShot, onGallery, onClose
     }
   }, []);
 
-  // Пробы кадра для автоснимка: следующая начинается, когда закончена прежняя
+  // Пробы кадра для кружочков и автоснимка: следующая начинается, когда закончена прежняя
   const busy = reading > 0;
   useEffect(() => {
-    if (!auto || !ready || busy) return;
+    if (!ready || busy) return;
     let off = false;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       try {
         const c = document.hidden ? null : grab(PROBE_SIDE);
         if (c) {
-          const corners = await probeInBackground(await loadGrayImage(c, PROBE_SIDE), layouts);
+          const p = await probeInBackground(await loadGrayImage(c, PROBE_SIDE), layouts);
           if (off) return;
-          const r = autoStep(state.current, corners, Math.max(c.width, c.height));
-          state.current = r.state;
-          setSeen(!!corners);
-          if (r.snap) { void shoot(true); return; }
+          setSeen(!!p);
+          if (p) {
+            const result = liveMarks(p.res, OMR_LAYOUTS[p.layout], cb.current.keys, p.res.open.map((o) => guessOpen(digits.current, o)));
+            setView({ result, toPhoto: p.res.toPhoto, w: c.width, h: c.height, stale: false });
+          } else setView((v) => (v && !v.stale ? { ...v, stale: true } : null)); // один пропущенный кадр — бледнее, второй — убрать
+          if (auto) {
+            const r = autoStep(state.current, p?.corners ?? null, Math.max(c.width, c.height));
+            state.current = r.state;
+            if (r.snap) { void shoot(true); return; }
+          }
         }
       } catch { /* проба не удалась — попробуем на следующем кадре */ }
       if (!off) timer = setTimeout(() => void tick(), PROBE_PAUSE_MS);
@@ -131,7 +150,6 @@ export function Camera({ layouts, label, count, last, onShot, onGallery, onClose
   const toggleAuto = () => {
     const v = !auto;
     setAuto(v);
-    setSeen(false);
     try { localStorage.setItem(AUTO_KEY, v ? '1' : '0'); } catch { /* память недоступна */ }
   };
 
@@ -141,9 +159,11 @@ export function Camera({ layouts, label, count, last, onShot, onGallery, onClose
         <span>{label}</span>
         <button className="ck-cam-auto" role="switch" aria-checked={auto} onClick={toggleAuto}>Авто: {auto ? 'вкл' : 'выкл'}</button>
       </div>
+      <LiveLegend view={view} compare={!!keys} />
       <div className="ck-cam-view">
         <video ref={videoRef} playsInline muted autoPlay />
         <div className={`ck-cam-frame ${seen ? 'seen' : ''}`} style={{ '--r': strip.h / strip.w } as CSSProperties}><i /><i /><i /><i /></div>
+        <LiveOverlay view={view} />
         {flash > 0 && <div key={flash} className="ck-cam-flash" />}
         <div className={`ck-cam-note ${reading ? '' : note?.tone ?? ''}`} role="status">
           {reading ? 'Читаю…' : note?.text ?? (!ready ? 'Включаю камеру…' : auto ? 'Наведите рамку на полоску — снимок сделается сам' : 'Наведите рамку на полоску и нажмите кнопку')}

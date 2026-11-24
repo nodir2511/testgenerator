@@ -24,8 +24,9 @@ export function processGray(img: GrayImage, layouts: string[]): ProcessOut {
   return { error: r.error, debug: { w: img.w, h: img.h, bin: d.bin, markers: d.markers } };
 }
 
-/** Есть ли в кадре камеры нужный бланк: углы на кадре или null */
-export function probeGray(img: GrayImage, layouts: string[]): Array<[number, number]> | null {
+export interface ProbeOut { corners: Array<[number, number]>; layout: string; res: Extract<OmrResult, { ok: true }> }
+/** Есть ли в кадре камеры нужный бланк: углы на кадре и прочитанное (для кружочков поверх камеры) или null */
+export function probeGray(img: GrayImage, layouts: string[]): ProbeOut | null {
   const { res, layout } = omrReadAny(img, pick(layouts));
-  return res.ok && res.codeOk ? sheetCorners(res.toPhoto, layout) : null;
+  return res.ok && res.codeOk ? { corners: sheetCorners(res.toPhoto, layout), layout: layout.id, res } : null;
 }

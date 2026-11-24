@@ -1,5 +1,5 @@
 // Распознавание в фоновом потоке. Если поток не запустился (старый браузер, сбой загрузки), та же работа идёт в основном потоке.
-import type { ProcessOut } from './process';
+import type { ProbeOut, ProcessOut } from './process';
 import type { GrayImage } from './types';
 import type { OmrReply, OmrRequest } from './omr.worker';
 
@@ -52,7 +52,7 @@ export function createOmrClient(makeWorker: () => WorkerLike, inline: (kind: Kin
 
   return {
     read: (img: GrayImage, layouts: string[]) => run('read', img, layouts) as Promise<ProcessOut>,
-    probe: (img: GrayImage, layouts: string[]) => run('probe', img, layouts) as Promise<Array<[number, number]> | null>,
+    probe: (img: GrayImage, layouts: string[]) => run('probe', img, layouts) as Promise<ProbeOut | null>,
   };
 }
 

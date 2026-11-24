@@ -39,6 +39,9 @@ function DigitPic({ box }: { box: Ok['open'][number]['boxes'][number] }) {
   return <canvas ref={ref} aria-hidden="true" style={{ height: 40, width: 'auto', border: '1px solid var(--line)', borderRadius: 4, background: '#fff' }} />;
 }
 
+/** Модель цифр: примеры загружаются один раз за сеанс */
+export const digitModel = (api: Api) => loadDigitModel(async () => (await api<{ samples: Array<{ d: number; px: string }> }>('digits_get')).samples);
+
 /** Подставляет подсказки по цифрам в пустые поля открытых вопросов, когда модель загрузилась */
 function useDigitHints(api: Api, res: Ok, setAnswers: Dispatch<SetStateAction<Answers>>, fill = true): Array<OpenHint | null> {
   const [hints, setHints] = useState<Array<OpenHint | null>>([]);
@@ -46,7 +49,7 @@ function useDigitHints(api: Api, res: Ok, setAnswers: Dispatch<SetStateAction<An
   apiRef.current = api;
   useEffect(() => {
     let off = false;
-    void loadDigitModel(async () => (await apiRef.current<{ samples: Array<{ d: number; px: string }> }>('digits_get')).samples).then((knn) => {
+    void digitModel(apiRef.current).then((knn) => {
       if (off) return;
       const h = res.open.map((o) => guessOpen(knn, o));
       setHints(h);

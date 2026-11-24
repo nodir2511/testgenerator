@@ -9,7 +9,7 @@ import { DigitsAdmin } from './check/DigitsAdmin';
 import { cloudAvailable, loadCloudKeys, mergeKeys, removeCloudKey, saveCloudKey } from './check/keySync';
 import { SheetPhoto } from './check/pictures';
 import type { Sheet } from '../lib/omr/process';
-import { RefReview, Review, type Draft, type KeySource, type Saved } from './check/Review';
+import { RefReview, Review, digitModel, type Draft, type KeySource, type Saved } from './check/Review';
 import { ResultDetail, Results, type Api } from './check/Results';
 import { compText, count, nextReady, parseLastSource, queueNote, queueStatus, type LastSource, type Ok, type SavedCheck } from './check/logic';
 import { confirmDialog, hasNativeBack, useBack, useClosingGuard } from './check/telegram';
@@ -272,7 +272,7 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
           <div className={ready.length ? 'ck-withdock' : ''}>
             <h1>{src.title}</h1>
             <p className="ck-p">{compText(src.comp)}. Ключ есть для вариантов: {Object.keys(src.keys).sort((a, b) => Number(a) - Number(b)).join(', ') || 'нет'}.</p>
-            <QueueCapture layouts={src.layouts} queue={queue} live={live} setLive={setLive} nextNumber={() => shotNumber.current++} onAdd={(i) => { addToQueue(i); if (i.res) haptic('ok'); }} onFail={() => haptic('err')} />
+            <QueueCapture layouts={src.layouts} keys={src.keys} loadDigits={() => digitModel(api)} queue={queue} live={live} setLive={setLive} nextNumber={() => shotNumber.current++} onAdd={(i) => { addToQueue(i); if (i.res) haptic('ok'); }} onFail={() => haptic('err')} />
             {queue.length > 0 && (
               <>
                 <h2 className="ck-section">Стопка<small>{queue.length}</small></h2>

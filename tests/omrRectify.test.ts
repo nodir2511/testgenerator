@@ -91,7 +91,7 @@ describe('фрагменты снимка', () => {
 describe('проба кадра для автоснимка', () => {
   it('видит бланк и его углы', () => {
     const { img } = render(OMR_LAYOUTS.chem, 8, 3);
-    const c = probeGray(img, ['chem', 'phys']);
+    const c = probeGray(img, ['chem', 'phys'])!.corners;
     expect(c).toHaveLength(4);
     const r = omrRead(img, OMR_LAYOUTS.chem);
     if (r.ok) expect(c).toEqual(sheetCorners(r.toPhoto, OMR_LAYOUTS.chem));

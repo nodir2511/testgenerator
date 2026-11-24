@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Camera as CameraIcon, CircleHelp, Image as ImageIcon } from 'lucide-react';
-import { BLANKS } from '../../../supabase/functions/_shared/omrScore';
+import { BLANKS, type TicketKey } from '../../../supabase/functions/_shared/omrScore';
 import { OMR_LAYOUTS } from '../../lib/omr/layouts.generated';
 import { DECODE_TEXT, fileProblem } from '../../lib/omr/readPhoto';
 import { debugPicture, loadGrayImage } from '../../lib/omr/image';
+import type { DigitKnn } from '../../lib/omr/knn';
 import { readInBackground } from '../../lib/omr/omrClient';
 import type { Sheet } from '../../lib/omr/process';
 import { sameSheet } from './autosnap';
@@ -64,8 +65,10 @@ function HowToBlock({ layouts, started }: { layouts: string[]; started?: boolean
 }
 
 /** Съёмка в стопку: видоискатель (снимок за снимком) и галерея (много фото сразу); каждое фото читается сразу */
-export function QueueCapture({ layouts, queue, live, setLive, nextNumber, onAdd, onFail }: {
+export function QueueCapture({ layouts, keys, loadDigits, queue, live, setLive, nextNumber, onAdd, onFail }: {
   layouts: string[];
+  keys: Record<number, TicketKey>;
+  loadDigits: () => Promise<DigitKnn>;
   queue: Item[];
   live: boolean;
   setLive: (v: boolean) => void;
@@ -118,6 +121,8 @@ export function QueueCapture({ layouts, queue, live, setLive, nextNumber, onAdd,
           label={blankLabel(layouts)}
           count={queue.filter((i) => i.res).length}
           last={lastItem?.sheet}
+          keys={keys}
+          loadDigits={loadDigits}
           onShot={onShot}
           onGallery={() => { setLive(false); gal.current?.click(); }}
           onClose={() => setLive(false)}
