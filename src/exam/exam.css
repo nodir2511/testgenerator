@@ -75,12 +75,22 @@ body.exam-body {
 .m-rights { margin: 10px 0 4px; display: grid; gap: 4px; font-size: 15px; }
 .m-rights b { color: var(--hint); margin-right: 4px; }
 .m-row { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
-.m-pick { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-.m-pick button {
-  appearance: none; font: inherit; font-weight: 700; color: var(--fg); background: var(--bg); border: 1.5px solid var(--line);
-  border-radius: 10px; width: 48px; height: 48px; cursor: pointer;
+.m-items { margin: 10px 0 0; display: grid; gap: 8px; font-size: 15px; }
+.m-items > div { overflow-wrap: anywhere; min-width: 0; }
+.m-items b { color: var(--hint); margin-right: 4px; }
+.m-second { border-top: 1px dashed var(--line); padding-top: 10px; }
+/* Таблица ответа на соответствие — как на бумажном бланке: серое поле, белые кружки; одинаковая в обеих темах */
+.m-table {
+  display: grid; justify-content: center; justify-items: center; align-items: center; width: max-content; max-width: 100%; box-sizing: border-box;
+  margin: 14px auto 0; padding: 6px 10px 8px 6px; border-radius: 12px; background: #c9c9c9; color: #111;
+  font-family: 'Times New Roman', Times, serif;
 }
-.m-pick button.on { border-color: var(--btn); background: color-mix(in srgb, var(--btn) 18%, var(--bg)); color: var(--btn); }
+.m-table b { font-size: 22px; line-height: 1.2; font-weight: 700; }
+.m-tr { display: contents; }
+.m-table button { appearance: none; border: 0; background: none; padding: 0; width: 100%; height: 46px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.m-table button i { display: block; width: 36px; height: 36px; max-width: 90%; border-radius: 50%; background: #fff; box-sizing: border-box; }
+.m-table button.on i { background: #111; border: 4px solid #fff; }
+.m-table button:focus-visible { outline: 2px solid #1d4ed8; outline-offset: -2px; border-radius: 10px; }
 
 .rv-line { margin-top: 8px; font-size: 15px; }
 .rv-line .lbl { color: var(--hint); }

@@ -408,6 +408,8 @@ export default function TgApp() {
     }
     if (busy) app.MainButton.showProgress(true); else app.MainButton.hideProgress();
     const canBack = step === 'subject' || step === 'templates' || step === 'chapters' || step === 'topics' || step === 'counts' || step === 'final';
+    // На шаге проверки кнопкой «Назад» управляет сам раздел (check/telegram.ts)
+    if (step === 'check') return;
     if (canBack) app.BackButton.show(); else app.BackButton.hide();
   }, [step, ready, busy, chapterIds.length, settingsError, fit.error, subjects.length]);
 
@@ -525,7 +527,7 @@ export default function TgApp() {
         <React.Suspense fallback={<p className="tg-hint">Загрузка…</p>}>
           <CheckScreen
             api={api}
-            haptic={(k) => wa()?.HapticFeedback?.notificationOccurred(k === 'err' ? 'error' : 'success')}
+            haptic={(k) => (k === 'light' ? wa()?.HapticFeedback?.impactOccurred('light') : wa()?.HapticFeedback?.notificationOccurred(k === 'err' ? 'error' : 'success'))}
             onExit={() => setStep('home')}
           />
         </React.Suspense>

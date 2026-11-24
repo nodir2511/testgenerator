@@ -1,5 +1,7 @@
 // Чистая логика страницы /tg/exam (без React и браузера): таймер, формы ответов, разбор.
 import { countdownDigit, EXAM_COUNTDOWN_SEC } from '../../supabase/functions/_shared/exam';
+import { OPEN_CELLS, openCellsFor } from '../lib/openAnswer';
+import { examTexts } from './i18n';
 
 export type Lang = 'ru' | 'tg';
 export type Answer = string | Record<string, string> | null;
@@ -131,19 +133,20 @@ export function lobbyView(res: { state: string; attempt?: { ticketNumber?: numbe
   return digit === 0 ? { kind: 'run' } : { kind: 'countdown', digit };
 }
 
-export const waitText = (res: { state: string }): string =>
-  res.state === 'countdown' ? 'Начинаем!' : 'Ждите, преподаватель начнёт сессию';
+export const waitText = (res: { state: string }, lang: Lang = 'ru'): string =>
+  res.state === 'countdown' ? examTexts(lang).starting : examTexts(lang).waitTeacher;
 
-/** Подпись под номером варианта в зале */
-export function lobbyWaitText(lv: LobbyView): string {
-  if (lv.kind === 'soon') return 'Скоро начнём…';
-  if (lv.kind === 'run' || lv.kind === 'countdown') return 'Начинаем!';
-  return 'Ждите, преподаватель начнёт сессию';
+/** Подпись под номером варианта в зале (на языке билета) */
+export function lobbyWaitText(lv: LobbyView, lang: Lang = 'ru'): string {
+  const t = examTexts(lang);
+  if (lv.kind === 'soon') return t.soon;
+  if (lv.kind === 'run' || lv.kind === 'countdown') return t.starting;
+  return t.waitTeacher;
 }
 
 /** «Время: N мин» — когда преподаватель уже выбрал длительность (сервер прислал minutes) */
-export const lobbyMinutesText = (res: { minutes?: number | null }): string =>
-  typeof res.minutes === 'number' && res.minutes > 0 ? `Время: ${res.minutes} мин` : '';
+export const lobbyMinutesText = (res: { minutes?: number | null }, lang: Lang = 'ru'): string =>
+  typeof res.minutes === 'number' && res.minutes > 0 ? examTexts(lang).minutes(res.minutes) : '';
 
 /** Ответ save: state 'waiting' — сервер ещё не считает сессию начатой (часы на границе старта) */
 export interface SaveResponse { ok: boolean; state?: string }
@@ -167,9 +170,7 @@ export function saveStatus(tqId: string, unsaved: ReadonlySet<string>, failed: R
   return saved.has(tqId) ? 'saved' : 'none';
 }
 
-/** Клеток под открытый ответ, как на бланке: у таджикского и английского языков 5, у остальных предметов 4 (то же правило — openBoxesFor в lib/docxExport, совпадение проверяет тест) */
-export const OPEN_CELLS = 4;
-export const openCellsFor = (subject: string | null | undefined): number =>
-  /англ|инглис|english|тоҷик|таджик|забони/.test((subject || '').toLowerCase()) ? 5 : OPEN_CELLS;
+/** Клеток под открытый ответ, как на бланке (5 у таджикского и английского, 4 у остальных) — правило общее с проверкой ключа при импорте и в форме вопроса */
+export { OPEN_CELLS, openCellsFor };
 /** Открытый ответ: до cells цифр (как клетки на бланке); всё, кроме цифр, отбрасывается */
 export const openDigits = (raw: string, cells: number = OPEN_CELLS): string => raw.replace(/\D/g, '').slice(0, cells);

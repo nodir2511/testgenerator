@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { EXAM_POLL_MS } from '../../supabase/functions/_shared/exam';
 import { apiOpen, getServerOffset, type LobbyResponse, type OpenResponse } from './api';
 import { lobbyMinutesText, lobbyView, lobbyWaitText } from './examLogic';
+import { examTexts } from './i18n';
 
 const FAST_POLL_MS = 500; // цифры дошли до нуля, а сервер ещё отвечает «отсчёт»
 
@@ -16,7 +17,8 @@ export function ExamLobby({ code, initial, onLeave }: { code: string; initial: L
   const viewRef = useRef(view);
   viewRef.current = view;
   const lv = lobbyView(view, getServerOffset() ?? 0, now);
-  const minutesText = lobbyMinutesText(view); // длительность выбрана при «Начать» — показываем, пока ждём старта
+  const t = examTexts(view.lang);
+  const minutesText = lobbyMinutesText(view, view.lang); // длительность выбрана при «Начать» — показываем, пока ждём старта
   const fastRef = useRef(false);
   fastRef.current = lv.kind === 'run'; // отсчёт по нашим часам закончился — спрашиваем билет чаще
 
@@ -57,14 +59,14 @@ export function ExamLobby({ code, initial, onLeave }: { code: string; initial: L
         <div key={lv.digit} className="lobby-count">{lv.digit}</div>
       ) : (
         <>
-          <div className="lobby-title">{view.title || 'Билет'}</div>
-          <div className="lobby-label">Ваш вариант</div>
+          <div className="lobby-title">{view.title || t.ticket}</div>
+          <div className="lobby-label">{t.yourVariant}</div>
           <div className="lobby-digit">{view.attempt?.ticketNumber ?? '—'}</div>
-          <div className="lobby-wait">{lobbyWaitText(lv)}</div>
+          <div className="lobby-wait">{lobbyWaitText(lv, view.lang)}</div>
         </>
       )}
       {minutesText && <div className="lobby-wait">{minutesText}</div>}
-      <div className="lobby-offline">{offline ? 'Нет связи, пробуем снова…' : ''}</div>
+      <div className="lobby-offline">{offline ? t.offline : ''}</div>
     </div>
   );
 }

@@ -3,10 +3,10 @@ import type { GrayImage } from './types';
 
 const MAX_SIDE = 1800;
 
-export async function loadGrayImage(file: Blob): Promise<GrayImage> {
+export async function loadGrayImage(file: Blob | HTMLCanvasElement, maxSide = MAX_SIDE): Promise<GrayImage & { data: Uint8Array }> {
   // imageOrientation учитывает поворот из EXIF — снимки с телефона не лежат на боку
   const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  const k = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
+  const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
   const w = Math.max(1, Math.round(bmp.width * k)), h = Math.max(1, Math.round(bmp.height * k));
   const canvas = document.createElement('canvas');
   canvas.width = w;
@@ -22,7 +22,7 @@ export async function loadGrayImage(file: Blob): Promise<GrayImage> {
 }
 
 /** Картинка для подсказки: чёрное — то, что распознавание сочло тёмным; красные кружки — найденные угловые метки */
-export function debugPicture(img: GrayImage, bin: Uint8Array, markers: Array<{ x: number; y: number }>): string {
+export function debugPicture(img: { w: number; h: number }, bin: Uint8Array, markers: Array<{ x: number; y: number }>): string {
   const k = Math.min(1, 640 / img.w);
   const c = document.createElement('canvas');
   c.width = Math.round(img.w * k);

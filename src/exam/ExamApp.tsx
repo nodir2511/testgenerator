@@ -5,13 +5,14 @@ import { ExamLobby } from './ExamLobby';
 import { langName } from '../lib/examView';
 import { ReviewQuestion } from './ExamQuestion';
 import { minutesLeft, nameOk, reviewFailureKind, reviewMistakes, type Lang, type ReviewItem } from './examLogic';
+import { examErrorText, examTexts } from './i18n';
 import './exam.css';
 
 // Страница ученика /tg/exam?c=КОД[&review=1]: билет внутри Telegram. Отдельный экран, к мини-приложению преподавателя отношения не имеет.
 
 type Screen =
   | { kind: 'loading' }
-  | { kind: 'message'; title: string; text?: string; retry?: boolean; onRetry?: () => void; back?: Screen }
+  | { kind: 'message'; title: string; text?: string; lang?: Lang; retry?: boolean; onRetry?: () => void; back?: Screen }
   | { kind: 'view'; view: OpenResponse }
   | { kind: 'result'; score: number; max: number; review: boolean; lang: Lang; title: string; note?: string }
   | { kind: 'review'; lang: Lang; title: string; items: ReviewItem[]; back?: Screen };
@@ -20,13 +21,14 @@ const params = new URLSearchParams(window.location.search);
 const CODE = (params.get('c') ?? '').trim().toUpperCase();
 const WANT_REVIEW = params.get('review') === '1';
 
-function Message({ title, text, onRetry, onBack }: { title: string; text?: string; onRetry?: () => void; onBack?: () => void }) {
+function Message({ title, text, lang, onRetry, onBack }: { title: string; text?: string; lang?: Lang; onRetry?: () => void; onBack?: () => void }) {
+  const t = examTexts(lang);
   return (
     <div className="exam-app exam-center">
       <div className="big">{title}</div>
       {text && <div className="hint">{text}</div>}
-      {onRetry && <button type="button" className="exam-btn" onClick={onRetry}>Повторить</button>}
-      {onBack && <button type="button" className="exam-btn ghost" onClick={onBack}>Назад к результату</button>}
+      {onRetry && <button type="button" className="exam-btn" onClick={onRetry}>{t.retry}</button>}
+      {onBack && <button type="button" className="exam-btn ghost" onClick={onBack}>{t.backToResult}</button>}
     </div>
   );
 }
@@ -36,28 +38,30 @@ function NameForm({ view, onStart }: { view: OpenResponse; onStart: (name: strin
   const [lang, setLang] = useState<Lang>('ru');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // Страница переходит на выбранный язык сразу: дальше весь интерфейс и предупреждения — на нём
+  const t = examTexts(lang);
   const submit = async () => {
     if (!nameOk(name) || busy) return;
     setBusy(true); setErr('');
-    try { await onStart(name.replace(/\s+/g, ' ').trim(), lang); } catch (e) { setErr(e instanceof Error ? e.message : 'Ошибка'); setBusy(false); }
+    try { await onStart(name.replace(/\s+/g, ' ').trim(), lang); } catch (e) { setErr(examErrorText(e, lang)); setBusy(false); }
   };
   return (
     <div className="exam-app">
-      <h1>{view.title || 'Билет'}</h1>
+      <h1>{view.title || t.ticket}</h1>
       <div className="hint">
         {view.subject ? `${view.subject}. ` : ''}
         {view.state === 'new' && view.session === 'running' && view.remainingMs != null
-          ? `Сессия уже идёт, осталось ${minutesLeft(view.remainingMs)} мин. Попытка одна.`
-          : 'Время назначит преподаватель, попытка одна.'}
+          ? t.hintRunning(minutesLeft(view.remainingMs))
+          : t.hintWaiting}
       </div>
       <div className="exam-card">
-        <label htmlFor="exam-name" style={{ fontWeight: 700 }}>Фамилия и имя</label>
+        <label htmlFor="exam-name" style={{ fontWeight: 700 }}>{t.nameLabel}</label>
         <input
           id="exam-name" className="exam-input" style={{ marginTop: 8 }} value={name} maxLength={80} autoComplete="name"
-          placeholder="Например, Расулов Алишер" onChange={(e) => setName(e.target.value)}
+          placeholder={t.namePlaceholder} onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
         />
-        <div role="radiogroup" aria-label="Язык билета" style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <div role="radiogroup" aria-label={t.langLabel} style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           {(['ru', 'tg'] as const).map((l) => (
             <button
               key={l} type="button" role="radio" aria-checked={lang === l}
@@ -67,7 +71,7 @@ function NameForm({ view, onStart }: { view: OpenResponse; onStart: (name: strin
         </div>
         {err && <div style={{ color: 'var(--bad)', marginTop: 8 }}>{err}</div>}
         <button type="button" className="exam-btn full" style={{ marginTop: 12 }} disabled={!nameOk(name) || busy} onClick={() => void submit()}>
-          {busy ? 'Входим…' : 'Войти'}
+          {busy ? t.entering : t.enter}
         </button>
       </div>
     </div>
@@ -75,13 +79,14 @@ function NameForm({ view, onStart }: { view: OpenResponse; onStart: (name: strin
 }
 
 function ReviewScreen({ title, lang, items, onBack }: { title: string; lang: Lang; items: ReviewItem[]; onBack?: () => void }) {
+  const t = examTexts(lang);
   const mistakes = reviewMistakes(items);
   let prev: string | null = null;
   return (
     <div className="exam-app">
-      {onBack && <button type="button" className="exam-btn ghost" onClick={onBack}>Назад к результату</button>}
-      <h1>Разбор{title ? `: ${title}` : ''}</h1>
-      {mistakes.length === 0 && <div className="exam-card"><b>Ошибок нет</b></div>}
+      {onBack && <button type="button" className="exam-btn ghost" onClick={onBack}>{t.backToResult}</button>}
+      <h1>{t.reviewTitle(title)}</h1>
+      {mistakes.length === 0 && <div className="exam-card"><b>{t.noMistakes}</b></div>}
       {mistakes.map(({ n, item }) => {
         const node = <ReviewQuestion key={item.tqId} snap={item.snapshot} n={n} lang={lang} prevPassageId={prev} answer={item.answer} points={item.points} max={item.max} />;
         prev = item.snapshot?.passage?.id ?? null;
@@ -91,7 +96,8 @@ function ReviewScreen({ title, lang, items, onBack }: { title: string; lang: Lan
   );
 }
 
-const errText = (e: unknown) => (e instanceof ExamApiError ? e.message : 'Что-то пошло не так. Повторите.');
+// lang не задан — язык ещё не выбран (страница только открывается): по-русски
+const errText = (e: unknown, lang?: Lang) => examErrorText(e, lang);
 
 export default function ExamApp() {
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
@@ -108,12 +114,13 @@ export default function ExamApp() {
       setScreen({ kind: 'review', lang, title, items: r.questions, back });
     } catch (e) {
       const kind = reviewFailureKind(e);
+      const t = examTexts(lang);
       if (kind === 'not_ready') {
-        setScreen({ ...back, review: false, note: 'Разбор пока не отправлен: он появится, когда преподаватель его отправит.' });
+        setScreen({ ...back, review: false, note: t.reviewNotSent });
       } else if (kind === 'retry') {
-        setScreen({ kind: 'message', title: 'Не удалось загрузить разбор', text: errText(e), onRetry: () => { setScreen({ kind: 'loading' }); void showReview(lang, title, back); }, back });
+        setScreen({ kind: 'message', lang, title: t.reviewLoadFailed, text: errText(e, lang), onRetry: () => { setScreen({ kind: 'loading' }); void showReview(lang, title, back); }, back });
       } else {
-        setScreen({ kind: 'message', title: 'Разбор недоступен', text: errText(e), back });
+        setScreen({ kind: 'message', lang, title: t.reviewUnavailable, text: errText(e, lang), back });
       }
     }
   }, []);
@@ -154,23 +161,25 @@ export default function ExamApp() {
     case 'loading':
       return <Message title="Загрузка…" />;
     case 'message':
-      return <Message title={screen.title} text={screen.text} onRetry={screen.onRetry ?? (screen.retry ? () => void load() : undefined)} onBack={screen.back ? () => setScreen(screen.back!) : undefined} />;
-    case 'result':
+      return <Message title={screen.title} text={screen.text} lang={screen.lang} onRetry={screen.onRetry ?? (screen.retry ? () => void load() : undefined)} onBack={screen.back ? () => setScreen(screen.back!) : undefined} />;
+    case 'result': {
+      const t = examTexts(screen.lang);
       return (
         <div className="exam-app exam-center">
-          <div className="hint">Билет сдан</div>
-          <div className="big">Вы набрали {screen.score} из {screen.max}</div>
+          <div className="hint">{t.done}</div>
+          <div className="big">{t.score(screen.score, screen.max)}</div>
           {screen.note && <div className="hint">{screen.note}</div>}
           {screen.review
-            ? <button type="button" className="exam-btn" onClick={() => void showReview(screen.lang, screen.title, screen)}>Посмотреть разбор</button>
-            : !screen.note && <div className="hint">Разбор ошибок появится, когда преподаватель его отправит.</div>}
+            ? <button type="button" className="exam-btn" onClick={() => void showReview(screen.lang, screen.title, screen)}>{t.viewReview}</button>
+            : !screen.note && <div className="hint">{t.reviewLater}</div>}
         </div>
       );
+    }
     case 'review':
       return <ReviewScreen title={screen.title} lang={screen.lang} items={screen.items} onBack={screen.back ? () => setScreen(screen.back!) : undefined} />;
     case 'view': {
       const v = screen.view;
-      if (v.state === 'closed') return <Message title="Приём ответов закрыт" text="Билет по этой ссылке закрыт. Спросите новую ссылку у преподавателя." />;
+      if (v.state === 'closed') return <Message title={examTexts(v.lang).closedTitle} text={examTexts(v.lang).closedText} lang={v.lang} />;
       if (v.state === 'new') {
         return <NameForm view={v} onStart={async (name, lang) => {
           const next = await apiStart(CODE, name, lang);

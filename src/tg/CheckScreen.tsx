@@ -1,65 +1,48 @@
-import React, { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import {
-  BLANKS, MATCHING_ROWS, blankFor, keyToText, maxPoints, parseKey, scoreAnswers,
-  type Answers, type Composition, type TicketKey,
-} from '../../supabase/functions/_shared/omrScore';
-import { OMR_LAYOUTS } from '../lib/omr/layouts.generated';
-import { omrDebug, omrReadAny } from '../lib/omr/recognize';
-import { debugPicture, loadGrayImage } from '../lib/omr/image';
-import { answersFromResult, doubts, keyFromAnswers, qualityWarnings, variantFromResult, type Doubt } from '../lib/omr/answers';
-import type { OmrResult } from '../lib/omr/types';
-import { PIX, pixFromBase64 } from '../lib/omr/digits';
-import { collectEnabled, collectSamples, guessOpen, loadDigitModel, setCollectEnabled, type OpenHint } from '../lib/omr/model';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChartNoAxesColumn, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, CircleX, ClipboardList, Download, Hash, KeyRound, Play, RotateCcw, X } from 'lucide-react';
+import { blankFor, type Composition, type TicketKey } from '../../supabase/functions/_shared/omrScore';
 import { exportOmrChecksToExcel } from '../lib/omr/exportExcel';
+import { collectEnabled, setCollectEnabled } from '../lib/omr/model';
+import { DebugPicture, QueueCapture, RefCapture, type Item } from './check/capture';
+import { CustomEdit, CustomList, type CustomKey } from './check/CustomKeys';
+import { DigitsAdmin } from './check/DigitsAdmin';
+import { cloudAvailable, loadCloudKeys, mergeKeys, removeCloudKey, saveCloudKey } from './check/keySync';
+import { SheetPhoto } from './check/pictures';
+import type { Sheet } from '../lib/omr/process';
+import { RefReview, Review, type Draft, type KeySource, type Saved } from './check/Review';
+import { ResultDetail, Results, type Api } from './check/Results';
+import { compText, count, nextReady, parseLastSource, queueNote, queueStatus, type LastSource, type Ok, type SavedCheck } from './check/logic';
+import { confirmDialog, hasNativeBack, useBack, useClosingGuard } from './check/telegram';
+import './check/check.css';
 
-// Раздел «Проверка» мини-приложения: фото бланка → ответы → баллы.
-// Ключ берётся из набора билетов, вводится вручную или снимается с эталонного бланка (один билет — одно фото).
-// Цифры в клетках открытых вопросов подсказывает классификатор (ближайшие соседи по собранным картинкам); последнее слово за проверяющим.
-
-type Api = <T>(action: string, payload?: Record<string, unknown>) => Promise<T>;
-type Ok = Extract<OmrResult, { ok: true }>;
+// Раздел «Проверка» мини-приложения: фото бланка → ответы → баллы. Здесь — переходы между экранами, сами экраны в check/.
+// Ключ берётся из набора билетов, вводится вручную или читается с фото эталонного бланка — с камеры или из галереи (один билет — одно фото).
+// Цифры в клетках открытых вопросов подсказывает классификатор; последнее слово за проверяющим.
 
 interface SetRow { id: string; title: string; createdAt: string; subject: string; tickets: number | null; comp: Composition; supported: boolean }
-interface KeySource {
-  kind: 'set' | 'custom';
-  id: string;
-  batchId?: string;
-  title: string;
-  comp: Composition;
-  layouts: string[];
-  keys: Record<number, TicketKey>;
-}
-interface CustomKey { id: string; name: string; comp: Composition; layouts: string[]; keys: Record<number, TicketKey> }
-/** Снимок в стопке на проверку: прочитан (res) или не удалось прочитать (error) */
-interface QItem { id: number; name: string; res?: Ok; error?: string; debug?: string }
-interface SavedCheck { id: string; created_at: string; student: string; ticket_number: number | null; score: number; max_score: number }
 
 const CUSTOM_KEY = 'omr_custom_keys_v1';
+const LAST_KEY = 'omr_last_source_v1';
+const read = (k: string): string | null => { try { return localStorage.getItem(k); } catch { return null; } };
+const write = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* память недоступна */ } };
 function loadCustom(): CustomKey[] {
-  try { const v = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+  try { const v = JSON.parse(read(CUSTOM_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
 }
-function saveCustom(list: CustomKey[]) {
-  try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(list)); } catch { /* память недоступна */ }
-}
-
-const FAIL_TEXT = 'Не видно четыре чёрных метки по углам бланка. Снимите бланк целиком при хорошем свете, чтобы все метки попали в кадр.';
-const CODE_TEXT = 'Не удалось определить вид бланка. Проверьте, что снят бланк нужного предмета, и переснимите: бланк целиком, без бликов и теней.';
-
-const compText = (c: Composition) => `тестов: ${c.test}, соответствий: ${c.matching}, открытых: ${c.open}`;
-const doubtLabel = (d: Doubt) => (d.kind === 'test' ? `Тест ${d.q}` : d.kind === 'matching' ? `Соответствие ${d.q}, пункт ${d.row}` : d.kind === 'variant' ? 'Вариант' : `Открытый ${d.q}`);
-const WHY: Record<Doubt['why'], string> = { multi: 'отмечено несколько — засчитано неверно', unsure: 'неуверенно', empty: 'не отмечено', digit: 'цифры' };
 
 type View =
   | { name: 'home' }
   | { name: 'sets' }
   | { name: 'custom' }
-  | { name: 'customEdit'; id: string }
+  | { name: 'customEdit'; id: string; variant?: number }
   | { name: 'scan'; src: KeySource }
   | { name: 'review'; src: KeySource; itemId: number }
-  | { name: 'refScan'; custom: string }
-  | { name: 'refReview'; custom: string; res: Ok }
+  | { name: 'refScan'; custom: string; from?: 'camera' | 'gallery' }
+  | { name: 'refReview'; custom: string; res: Ok; sheet?: Sheet }
   | { name: 'results' }
+  | { name: 'result'; row: SavedCheck }
   | { name: 'digits' };
+
+interface Toast { text: string; undo?: () => void }
 
 export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit: () => void; haptic: (kind: 'light' | 'ok' | 'err') => void }) {
   const [view, setView] = useState<View>({ name: 'home' });
@@ -69,23 +52,71 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
   const [custom, setCustom] = useState<CustomKey[]>(() => loadCustom());
   const [sets, setSets] = useState<SetRow[] | null>(null);
   const [search, setSearch] = useState('');
-  const [done, setDone] = useState<Array<{ student: string; score: number; max: number; ticket?: number; createdAt?: string }>>([]);
+  const [done, setDone] = useState<Saved[]>([]);
   const [owner, setOwner] = useState(false);
-  const [queue, setQueue] = useState<QItem[]>([]);
+  const [queue, setQueue] = useState<Item[]>([]);
+  const [live, setLive] = useState(false);
+  const [last, setLast] = useState<LastSource | null>(() => parseLastSource(read(LAST_KEY)));
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [collect, setCollect] = useState(() => collectEnabled());
   const nextId = useRef(1);
+  const shotNumber = useRef(1);
+  const drafts = useRef(new Map<number, Draft>());
+  const editDirty = useRef(false);
   useEffect(() => { void api<{ owner: boolean }>('digits_admin').then((r) => setOwner(!!r.owner)).catch(() => {}); }, [api]);
+  useClosingGuard(queue.length > 0);
 
-  const upCustom = (fn: (l: CustomKey[]) => CustomKey[]) => setCustom((l) => { const n = fn(l); saveCustom(n); return n; });
-  const viewName = useRef<View['name']>('home');
-  const go = (v: View) => { viewName.current = v.name; setError(''); setDebug(''); setView(v); };
-  const addToQueue = (items: Array<Omit<QItem, 'id'>>) => setQueue((q) => [...q, ...items.map((i) => ({ ...i, id: nextId.current++ }))]);
-  const dropFromQueue = (id: number) => setQueue((q) => q.filter((i) => i.id !== id));
-  const leaveScan = (to: View) => {
-    if (queue.length && !window.confirm(`Снимков в стопке без сохранения: ${queue.length}. Выйти и потерять их?`)) return;
-    setQueue([]);
-    go(to);
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(id);
+  }, [toast]);
+
+  // Свои ключи: память устройства и хранилище Telegram (одинаковы на всех устройствах пользователя)
+  const customRef = useRef(custom);
+  const putCustom = useCallback((n: CustomKey[]) => { customRef.current = n; write(CUSTOM_KEY, JSON.stringify(n)); setCustom(n); }, []);
+  const pushKey = useCallback(async (k: CustomKey) => {
+    if (await saveCloudKey(k)) putCustom(customRef.current.map((x) => (x.id === k.id && x.updatedAt === k.updatedAt ? { ...x, synced: true } : x)));
+  }, [putCustom]);
+  const saveKey = (k: CustomKey) => {
+    const n = { ...k, updatedAt: Date.now(), synced: false };
+    putCustom(customRef.current.some((x) => x.id === k.id) ? customRef.current.map((x) => (x.id === k.id ? n : x)) : [...customRef.current, n]);
+    void pushKey(n);
   };
+  const removedKeys = useRef(new Set<string>());
+  const dropKey = (id: string) => { removedKeys.current.add(id); putCustom(customRef.current.filter((x) => x.id !== id)); void removeCloudKey(id); };
+  useEffect(() => {
+    let off = false;
+    const known = new Set(customRef.current.filter((k) => k.synced).map((k) => k.id));
+    void loadCloudKeys().then((cloud) => {
+      if (off || !cloud) return;
+      const r = mergeKeys(customRef.current, cloud, { known, removed: removedKeys.current });
+      putCustom(r.list);
+      r.push.forEach((k) => void pushKey(k));
+    });
+    return () => { off = true; };
+  }, [putCustom, pushKey]);
+
+  const viewName = useRef<View['name']>('home');
+  const go = (v: View) => { viewName.current = v.name; editDirty.current = false; setError(''); setDebug(''); setView(v); setLive(false); window.scrollTo(0, 0); if (v.name !== 'scan' && v.name !== 'review') setToast(null); };
   const fail = (e: unknown) => { haptic('err'); setError((e as Error).message || 'Ошибка'); };
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: 'center' }); }, [error]);
+
+  const addToQueue = (i: Omit<Item, 'id'>) => { const id = nextId.current++; setQueue((q) => [...q, { ...i, id }]); };
+  const dropFromQueue = (id: number) => setQueue((q) => q.filter((i) => i.id !== id));
+  /** Переснять: прежний снимок уходит из стопки, сразу открывается камера */
+  const retake = (id: number, src: KeySource) => { dropFromQueue(id); go({ name: 'scan', src }); setLive(true); };
+
+  const startScan = (src: KeySource) => {
+    const l: LastSource = { kind: src.kind, id: src.id, title: src.title };
+    setLast(l);
+    write(LAST_KEY, JSON.stringify(l));
+    setDone([]);
+    shotNumber.current = 1;
+    go({ name: 'scan', src });
+  };
+  const scanCustom = (c: CustomKey) => startScan({ kind: 'custom', id: c.id, title: c.name, comp: c.comp, layouts: c.layouts, keys: c.keys });
 
   // Список наборов: при открытии и при поиске (с небольшой задержкой, чтобы не слать запрос на каждую букву)
   useEffect(() => {
@@ -100,91 +131,137 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
     }, search ? 300 : 0);
     return () => { off = true; clearTimeout(id); setBusy(false); };
   }, [view.name, search]); // eslint-disable-line react-hooks/exhaustive-deps
-  const openSets = () => go({ name: 'sets' });
 
-  async function pickSet(s: SetRow) {
+  async function openSet(id: string, from: View['name']) {
     setBusy(true); setError('');
     try {
-      const r = await api<{ title: string; comp: Composition; layouts: string[]; tickets: Array<{ number: number; key: TicketKey }> }>('check_key', { batchId: s.id });
+      const r = await api<{ title: string; comp: Composition; layouts: string[]; tickets: Array<{ number: number; key: TicketKey }> }>('check_key', { batchId: id });
       const keys: Record<number, TicketKey> = {};
       r.tickets.forEach((t) => { keys[t.number] = t.key; });
-      if (viewName.current !== 'sets') return; // пока шёл запрос, пользователь ушёл со списка
-      go({ name: 'scan', src: { kind: 'set', id: s.id, batchId: s.id, title: r.title, comp: r.comp, layouts: r.layouts, keys } });
+      if (viewName.current !== from) return; // пока шёл запрос, пользователь ушёл с экрана
+      startScan({ kind: 'set', id, batchId: id, title: r.title, comp: r.comp, layouts: r.layouts, keys });
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
+  const lastCustom = last?.kind === 'custom' ? custom.find((c) => c.id === last.id && Object.keys(c.keys).length) : undefined;
+  const canContinue = last && (last.kind === 'set' || lastCustom);
 
-  const back = () => {
-    setError('');
+  async function back() {
     if (view.name === 'home') return onExit();
-    if (view.name === 'review') return setView({ name: 'scan', src: view.src });
-    if (view.name === 'refScan' || view.name === 'refReview') return setView({ name: 'customEdit', id: view.custom });
-    if (view.name === 'customEdit') return setView({ name: 'custom' });
-    if (view.name === 'scan') return leaveScan(view.src.kind === 'set' ? { name: 'sets' } : { name: 'custom' });
-    setView({ name: 'home' });
-  };
+    if (view.name === 'review') return go({ name: 'scan', src: view.src });
+    if (view.name === 'refReview') return go({ name: 'refScan', custom: view.custom });
+    if (view.name === 'refScan') return go({ name: 'customEdit', id: view.custom });
+    if (view.name === 'result') return go({ name: 'results' });
+    if (view.name === 'customEdit') {
+      if (editDirty.current && !(await confirmDialog('Ключ не записан. Выйти и потерять правки?'))) return;
+      return go({ name: 'custom' });
+    }
+    if (view.name === 'scan') {
+      if (live) return setLive(false);
+      if (queue.length && !(await confirmDialog(`В стопке ${count(queue.length, 'несохранённый снимок', 'несохранённых снимка', 'несохранённых снимков')}. Выйти и потерять?`))) return;
+      setQueue([]);
+      return go(view.src.kind === 'set' ? { name: 'sets' } : { name: 'custom' });
+    }
+    go({ name: 'home' });
+  }
+  useBack(() => void back());
+
+  function onSaved(src: KeySource, item: Item, r: Saved) {
+    setDone((d) => [...d, r]);
+    haptic('ok');
+    const next = nextReady(queue, item.id);
+    dropFromQueue(item.id);
+    go(next ? { name: 'review', src, itemId: next.id } : { name: 'scan', src });
+    setToast({
+      text: `Сохранено: ${r.student || item.name}, ${r.score} из ${r.max}`,
+      undo: () => {
+        setToast(null);
+        api('check_delete', { id: r.id }).then(() => {
+          setDone((d) => d.filter((x) => x.id !== r.id));
+          setQueue((q) => [item, ...q]);
+          if (viewName.current === 'scan' || viewName.current === 'review') go({ name: 'review', src, itemId: item.id });
+        }).catch((e) => fail(/Неизвестное действие/.test((e as Error).message) ? new Error('Отмена пока недоступна: сервер ещё обновляется. Результат сохранён.') : e));
+      },
+    });
+  }
 
   return (
-    <>
-      <div className="tg-actions">
-        <button className="tg-link" onClick={back}>← Назад</button>
-      </div>
-      {error && <div className="tg-error" role="alert">{error}</div>}
-      {error && debug && <DebugPicture src={debug} />}
-      {busy && <p className="tg-hint">Загрузка…</p>}
+    <div className="ck">
+      {!hasNativeBack() && <button className="ck-back" onClick={() => void back()}><ChevronLeft size={20} aria-hidden="true" />Назад</button>}
+      {error && <div ref={errorRef} className="ck-note bad" role="alert">{error}{debug && <DebugPicture src={debug} />}</div>}
 
       {view.name === 'home' && (
         <>
           <h1>Проверка работ</h1>
-          <p className="tg-hint">Сфотографируйте заполненный бланк — приложение прочитает отметки и посчитает баллы: тест 1, каждый пункт соответствия 1, открытый вопрос 2.</p>
-          <button className="tg-row" onClick={() => void openSets()}><span className="tg-subject-icon">📋</span><span className="tg-grow"><b>По моим билетам</b><br /><span className="tg-hint">ключ берётся из созданного набора</span></span><span className="tg-chev">›</span></button>
-          <button className="tg-row" onClick={() => go({ name: 'custom' })}><span className="tg-subject-icon">🔑</span><span className="tg-grow"><b>По своему ключу</b><br /><span className="tg-hint">ввести ответы или снять эталонный бланк</span></span><span className="tg-chev">›</span></button>
-          <button className="tg-row" onClick={() => go({ name: 'results' })}><span className="tg-subject-icon">📊</span><span className="tg-grow"><b>Результаты</b></span><span className="tg-chev">›</span></button>
-          {owner && <button className="tg-row" onClick={() => go({ name: 'digits' })}><span className="tg-subject-icon">🔢</span><span className="tg-grow"><b>Собранные цифры</b><br /><span className="tg-hint">просмотр и чистка картинок для подсказок</span></span><span className="tg-chev">›</span></button>}
+          <p className="ck-p">Снимите заполненный бланк — приложение прочитает отметки и посчитает балл.</p>
+          {canContinue && (
+            <button className="tg-btn-primary ck-continue" disabled={busy} onClick={() => (lastCustom ? scanCustom(lastCustom) : void openSet(last!.id, 'home'))}>
+              <Play size={18} aria-hidden="true" /><span>{busy ? 'Открываю…' : `Продолжить: ${lastCustom?.name ?? last!.title}`}</span>
+            </button>
+          )}
+          <button className="tg-row" onClick={() => go({ name: 'sets' })}><span className="ck-leading"><ClipboardList size={22} aria-hidden="true" /></span><span className="tg-grow"><b>По набору билетов</b><span className="ck-sub">ключ уже есть в созданном наборе</span></span><ChevronRight size={20} className="tg-chev" aria-hidden="true" /></button>
+          <button className="tg-row" onClick={() => go({ name: 'custom' })}><span className="ck-leading"><KeyRound size={22} aria-hidden="true" /></span><span className="tg-grow"><b>По своему ключу</b><span className="ck-sub">ввести ответы или снять эталонный бланк</span></span><ChevronRight size={20} className="tg-chev" aria-hidden="true" /></button>
+          <button className="tg-row" onClick={() => go({ name: 'results' })}><span className="ck-leading"><ChartNoAxesColumn size={22} aria-hidden="true" /></span><span className="tg-grow"><b>Результаты</b><span className="ck-sub">сохранённые работы и выгрузка в Excel</span></span><ChevronRight size={20} className="tg-chev" aria-hidden="true" /></button>
+          <p className="ck-p" style={{ marginTop: 14 }}>Баллы: тест — 1, пункт соответствия — 1, открытый вопрос — 2.</p>
+          <h2 className="ck-section">Настройки</h2>
+          <label className="ck-toggle">
+            <input type="checkbox" checked={collect} onChange={(e) => { setCollect(e.target.checked); setCollectEnabled(e.target.checked); }} />
+            <span>Помогать распознаванию цифр<span className="ck-sub">сохранять маленькие картинки цифр, без имён и без фото бланка</span></span>
+          </label>
+          {owner && <button className="ck-text" style={{ paddingLeft: 0 }} onClick={() => go({ name: 'digits' })}><Hash size={18} aria-hidden="true" />Собранные цифры</button>}
         </>
       )}
 
       {view.name === 'sets' && (
         <>
           <h1>Набор билетов</h1>
-          <p className="tg-hint">Подходят наборы с составом 18/2/7, 20/4/2 или 8/2/2 (тесты / соответствия / открытые).</p>
-          <label className="tg-field"><span>Поиск</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="название, предмет или дата (например 14.11.2026)" /></label>
-          {sets?.length === 0 && <p className="tg-hint">{search.trim() ? 'Ничего не найдено.' : 'Наборов пока нет — создайте билеты в конструкторе.'}</p>}
-          {sets?.map((s) => (
-            <button key={s.id} className="tg-row" disabled={busy || !s.supported} onClick={() => void pickSet(s)}>
-              <span className="tg-grow"><b>{s.title}</b><br /><span className="tg-hint">{s.subject} · {new Date(s.createdAt).toLocaleDateString('ru-RU')} · {s.comp.test}/{s.comp.matching}/{s.comp.open}{s.tickets ? ` · ${s.tickets} вар.` : ''}{s.supported ? '' : ' · нет бланка'}</span></span>
-              <span className="tg-chev">›</span>
-            </button>
-          ))}
+          <label className="tg-field"><span>Поиск</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="название, предмет или дата 14.11.2026" /></label>
+          {!sets && busy && <div className="ck-loading" aria-label="Загрузка"><i /><i /><i /></div>}
+          {sets?.length === 0 && <p className="ck-p">{search.trim() ? 'Ничего не найдено.' : 'Наборов пока нет. Создайте билеты в разделе «Сделать билет».'}</p>}
+          {!!sets?.length && (
+            <div className="ck-list" aria-busy={busy}>
+              {sets.map((s) => (
+                <button key={s.id} className="ck-item" disabled={busy || !s.supported} onClick={() => void openSet(s.id, 'sets')}>
+                  <span className="tg-grow">{s.title}<span className="ck-sub">{s.subject}, {new Date(s.createdAt).toLocaleDateString('ru-RU')}{s.tickets ? `, ${count(s.tickets, 'вариант', 'варианта', 'вариантов')}` : ''}</span>{!s.supported && <span className="ck-sub ck-mid">для состава {s.comp.test}/{s.comp.matching}/{s.comp.open} нет бланка</span>}</span>
+                  {s.supported && <ChevronRight size={18} className="tg-chev" aria-hidden="true" />}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="ck-p" style={{ marginTop: 14 }}>Бланки есть для составов 18/2/7, 20/4/2 и 8/2/2 (тесты, соответствия, открытые).</p>
         </>
       )}
 
       {view.name === 'custom' && (
         <CustomList
           list={custom}
-          onUse={(c) => go({ name: 'scan', src: { kind: 'custom', id: c.id, title: c.name, comp: c.comp, layouts: c.layouts, keys: c.keys } })}
-          onEdit={(c) => go({ name: 'customEdit', id: c.id })}
+          note={cloudAvailable() ? 'Ключи сохраняются в вашем Telegram и видны на всех ваших устройствах.' : 'Ключи хранятся на этом устройстве.'}
+          onOpen={(c) => go({ name: 'customEdit', id: c.id, variant: Number(Object.keys(c.keys)[0]) || 1 })}
           onCreate={(name, comp) => {
             const b = blankFor(comp);
             if (!b || !name.trim()) return;
             const c: CustomKey = { id: `c${Date.now()}`, name: name.trim().slice(0, 60), comp, layouts: b.layouts, keys: {} };
-            upCustom((l) => [...l, c]);
+            saveKey(c);
             go({ name: 'customEdit', id: c.id });
           }}
-          onDelete={(c) => upCustom((l) => l.filter((x) => x.id !== c.id))}
         />
       )}
 
       {view.name === 'customEdit' && (() => {
         const c = custom.find((x) => x.id === view.id);
-        if (!c) return <p className="tg-hint">Ключ не найден.</p>;
+        if (!c) return <p className="ck-p">Ключ не найден.</p>;
         return (
-          <CustomEdit
-            c={c}
-            onSave={(n, key) => upCustom((l) => l.map((x) => (x.id === c.id ? { ...x, keys: { ...x.keys, [n]: key } } : x)))}
-            onRemove={(n) => upCustom((l) => l.map((x) => { const k = { ...x.keys }; if (x.id === c.id) delete k[n]; return { ...x, keys: k }; }))}
-            onScan={() => go({ name: 'refScan', custom: c.id })}
-            onUse={() => go({ name: 'scan', src: { kind: 'custom', id: c.id, title: c.name, comp: c.comp, layouts: c.layouts, keys: c.keys } })}
-          />
+          <div className="ck-withdock">
+            <CustomEdit
+              c={c}
+              startVariant={view.variant}
+              onDirty={(d) => { editDirty.current = d; }}
+              onSave={(n, key) => { saveKey({ ...c, keys: { ...c.keys, [n]: key } }); haptic('ok'); setToast({ text: `Ключ варианта ${n} записан` }); }}
+              onRemove={(n) => { const k = { ...c.keys }; delete k[n]; saveKey({ ...c, keys: k }); }}
+              onScan={(from) => go({ name: 'refScan', custom: c.id, from })}
+              onDelete={() => { dropKey(c.id); go({ name: 'custom' }); }}
+              onUse={() => scanCustom(c)}
+            />
+          </div>
         );
       })()}
 
@@ -192,64 +269,68 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
         const src = view.src;
         const ready = queue.filter((i) => i.res);
         return (
-          <>
+          <div className={ready.length ? 'ck-withdock' : ''}>
             <h1>{src.title}</h1>
-            <p className="tg-hint">Варианты с ключом: {Object.keys(src.keys).sort((a, b) => Number(a) - Number(b)).join(', ') || 'нет'}. Состав: {compText(src.comp)}.</p>
-            <QueueCapture
-              layouts={src.layouts}
-              hasItems={queue.length > 0}
-              onAdd={addToQueue}
-              onFirstError={() => haptic('err')}
-            />
-            <p className="tg-hint">Снимайте один бланк целиком (одну полоску): все четыре чёрных метки по углам в кадре, свет ровный, без бликов. Можно снимать бланк за бланком или выбрать из галереи сразу много фото — они встанут в стопку, потом проверите их по очереди.</p>
+            <p className="ck-p">{compText(src.comp)}. Ключ есть для вариантов: {Object.keys(src.keys).sort((a, b) => Number(a) - Number(b)).join(', ') || 'нет'}.</p>
+            <QueueCapture layouts={src.layouts} queue={queue} live={live} setLive={setLive} nextNumber={() => shotNumber.current++} onAdd={(i) => { addToQueue(i); if (i.res) haptic('ok'); }} onFail={() => haptic('err')} />
             {queue.length > 0 && (
               <>
-                <h2>Стопка: {queue.length}</h2>
-                {queue.map((i) => (
-                  <div key={i.id} className="tg-row" style={{ cursor: 'default' }}>
-                    <span className="tg-grow"><b>{i.name}</b><br /><span className="tg-hint">{i.res ? 'прочитан, ждёт проверки' : i.error}</span>{i.debug && <DebugPicture src={i.debug} />}</span>
-                    {i.res && <button className="tg-link" onClick={() => go({ name: 'review', src, itemId: i.id })}>Открыть</button>}
-                    <button className="tg-link" aria-label={`Убрать ${i.name}`} onClick={() => dropFromQueue(i.id)}>✕</button>
-                  </div>
-                ))}
-                {ready.length > 0 && <button className="tg-btn-primary" onClick={() => go({ name: 'review', src, itemId: ready[0].id })}>Проверить по очереди ({ready.length})</button>}
+                <h2 className="ck-section">Стопка<small>{queue.length}</small></h2>
+                <div className="ck-list">
+                  {queue.map((i) => {
+                    const st = queueStatus(i);
+                    return (
+                      <div key={i.id} className={`ck-shot ${st}`}>
+                        <div className="ck-shot-row">
+                          <button className="ck-item-main" disabled={!i.res} onClick={() => go({ name: 'review', src, itemId: i.id })}>
+                            {i.sheet && <SheetPhoto sheet={i.sheet} small />}
+                            <span className="tg-grow">{i.name}<span className="ck-sub ck-shot-note">{st === 'ok' ? <CircleCheck size={15} aria-hidden="true" /> : st === 'warn' ? <CircleAlert size={15} aria-hidden="true" /> : <CircleX size={15} aria-hidden="true" />}<span>{queueNote(i)}</span></span></span>
+                            {i.res && <ChevronRight size={18} className="tg-chev" aria-hidden="true" />}
+                          </button>
+                          <button className="ck-icon" aria-label={`Убрать ${i.name}`} onClick={() => dropFromQueue(i.id)}><X size={18} aria-hidden="true" /></button>
+                        </div>
+                        {st !== 'ok' && <button className="ck-text" style={{ paddingLeft: 0 }} onClick={() => retake(i.id, src)}><RotateCcw size={16} aria-hidden="true" />Переснять</button>}
+                        {i.debug && <DebugPicture src={i.debug} />}
+                      </div>
+                    );
+                  })}
+                </div>
               </>
             )}
             {done.length > 0 && (
               <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '16px 4px 6px' }}>
-                  <h2 style={{ margin: 0 }}>Проверено за сеанс: {done.length}</h2>
-                  <button className="tg-link" onClick={() => void exportOmrChecksToExcel(done.map((d) => ({ student: d.student, score: d.score, max_score: d.max, ticket_number: d.ticket, created_at: d.createdAt })), src.title).catch(() => fail(new Error('Не удалось сохранить файл Excel. Попробуйте ещё раз.')))}>📥 Скачать в Excel</button>
+                <h2 className="ck-section">Проверено сейчас<small>{done.length}</small></h2>
+                <div className="ck-list">
+                  {done.slice(-30).reverse().map((d) => <div key={d.id} className="ck-item" style={{ cursor: 'default' }}><span className="tg-grow">{d.student || 'Без имени'}<span className="ck-sub">вариант {d.ticket}</span></span><span className="pts">{d.score} из {d.max}</span></div>)}
                 </div>
-                {done.slice(-30).map((d, k) => <p key={k} className="tg-hint">{d.student || 'без имени'} — {d.score} из {d.max}{d.ticket ? ` (вар. ${d.ticket})` : ''}</p>)}
+                <button className="tg-btn-secondary" style={{ marginTop: 10 }} onClick={() => void exportOmrChecksToExcel(done.map((d) => ({ student: d.student, score: d.score, max_score: d.max, ticket_number: d.ticket, created_at: d.createdAt })), src.title).catch(() => fail(new Error('Не удалось сохранить файл Excel. Попробуйте ещё раз.')))}><Download size={18} aria-hidden="true" />Скачать в Excel</button>
               </>
             )}
-          </>
+            {ready.length > 0 && (
+              <div className="ck-dock"><div className="ck-dock-in"><button className="tg-btn-primary wide" onClick={() => go({ name: 'review', src, itemId: ready[0].id })}>Проверить {count(ready.length, 'работу', 'работы', 'работ')}</button></div></div>
+            )}
+          </div>
         );
       })()}
 
       {view.name === 'review' && (() => {
         const item = queue.find((i) => i.id === view.itemId);
         const src = view.src;
-        if (!item?.res) return <p className="tg-hint">Снимок уже проверен или убран. <button className="tg-link" onClick={() => go({ name: 'scan', src })}>К стопке</button></p>;
-        const left = queue.filter((i) => i.res).length;
+        if (!item?.res) return <p className="ck-p">Снимок уже проверен или убран. <button className="ck-text" onClick={() => go({ name: 'scan', src })}>К стопке</button></p>;
         return (
           <Review
             key={`${src.id}-${item.id}`}
             api={api}
             src={src}
             res={item.res}
+            sheet={item.sheet}
             title={item.name}
-            left={left}
-            onDone={(r) => {
-              setDone((d) => [...d, r]);
-              haptic('ok');
-              const nextItem = queue.find((i) => i.res && i.id !== item.id);
-              dropFromQueue(item.id);
-              go(nextItem ? { name: 'review', src, itemId: nextItem.id } : { name: 'scan', src });
-            }}
+            draft={drafts.current.get(item.id)}
+            onDraft={(d) => drafts.current.set(item.id, d)}
+            left={queue.filter((i) => i.res).length}
+            onDone={(r) => onSaved(src, item, r)}
             onError={fail}
-            onRetake={() => { dropFromQueue(item.id); go({ name: 'scan', src }); }}
+            onRetake={() => retake(item.id, src)}
           />
         );
       })()}
@@ -260,8 +341,14 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
         return (
           <>
             <h1>Эталонный бланк</h1>
-            <p className="tg-hint">Заполните бланк правильными ответами, отметьте номер варианта, впишите цифры открытых вопросов и сфотографируйте: ключ этого варианта запишется по снимку.</p>
-            <Capture label="📷 Сфотографировать эталон" layouts={c.layouts} onResult={(res) => go({ name: 'refReview', custom: c.id, res })} onError={(m, d) => { haptic('err'); setError(m); setDebug(d ?? ''); }} />
+            <p className="ck-p">На фото должен быть один бланк целиком: отмечен вариант, заполнены все ответы, видны четыре чёрных метки по углам. Фото читается в телефоне и никуда не отправляется.</p>
+            <RefCapture
+              layouts={c.layouts}
+              from={view.from}
+              onStart={() => { setError(''); setDebug(''); }}
+              onResult={(r) => go({ name: 'refReview', custom: c.id, res: r.res, sheet: r.sheet })}
+              onError={(m, d) => { haptic('err'); setError(m); setDebug(d ?? ''); }}
+            />
           </>
         );
       })()}
@@ -274,575 +361,23 @@ export default function CheckScreen({ api, onExit, haptic }: { api: Api; onExit:
             api={api}
             c={c}
             res={view.res}
+            sheet={view.sheet}
+            onRetake={() => go({ name: 'refScan', custom: c.id })}
             onSave={(n, key) => {
-              upCustom((l) => l.map((x) => (x.id === c.id ? { ...x, keys: { ...x.keys, [n]: key } } : x)));
+              saveKey({ ...c, keys: { ...c.keys, [n]: key } });
               haptic('ok');
-              go({ name: 'customEdit', id: c.id });
+              go({ name: 'customEdit', id: c.id, variant: n });
+              setToast({ text: `Ключ варианта ${n} записан` });
             }}
           />
         );
       })()}
 
-      {view.name === 'results' && <Results api={api} onError={fail} />}
+      {view.name === 'results' && <Results api={api} onError={fail} onOpen={(row) => go({ name: 'result', row })} />}
+      {view.name === 'result' && <ResultDetail api={api} row={view.row} onError={fail} onDeleted={() => { haptic('ok'); go({ name: 'results' }); setToast({ text: 'Результат удалён' }); }} />}
       {view.name === 'digits' && <DigitsAdmin api={api} onError={fail} />}
-    </>
-  );
-}
 
-/** Подсказка при неудачном снимке: как программа «увидела» фото */
-function DebugPicture({ src }: { src: string }) {
-  return (
-    <details className="tg-hint" style={{ marginTop: 6 }}>
-      <summary>Что видит программа</summary>
-      <img src={src} alt="Снимок в чёрно-белом виде с найденными метками" style={{ width: '100%', borderRadius: 6, marginTop: 4 }} />
-      <p>Чёрное — то, что программа сочла тёмным; красные кружки — найденные угловые метки. Если кружков нет или они не на четырёх углах бланка, переснимите: ровнее, при хорошем свете, чтобы все четыре чёрных квадрата попали в кадр.</p>
-    </details>
-  );
-}
-
-// ---------- съёмка и чтение ----------
-/** Что видит программа на снимке, который не прочитался (чёрно-белая картинка и найденные метки) */
-const debugOf = (img: Awaited<ReturnType<typeof loadGrayImage>>, layout: (typeof OMR_LAYOUTS)[string]): string => {
-  try { const d = omrDebug(img, layout); return debugPicture(img, d.bin, d.markers); } catch { return ''; }
-};
-
-const readFile = async (f: File, layouts: string[]): Promise<{ res?: Ok; error?: string; debug?: string }> => {
-  try {
-    const img = await loadGrayImage(f);
-    const { res, layout } = omrReadAny(img, layouts.map((id) => OMR_LAYOUTS[id]));
-    if (!res.ok) return { error: res.missingHint || FAIL_TEXT, debug: debugOf(img, layout) };
-    if (!res.codeOk) return { error: res.missingHint || CODE_TEXT, debug: debugOf(img, layout) };
-    return { res };
-  } catch {
-    return { error: 'Не удалось обработать фото. Попробуйте ещё раз.' };
-  }
-};
-
-// ---------- живой видоискатель камеры ----------
-function LiveCameraModal({ onSnap, onClose, onFallback, busy }: {
-  onSnap: (file: File) => void;
-  onClose: () => void;
-  onFallback: () => void;
-  busy: boolean;
-}) {
-  // Родитель передаёт новую функцию на каждый рендер: держим её в ref, чтобы камера не перезапускалась
-  const fallbackRef = useRef(onFallback);
-  fallbackRef.current = onFallback;
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [ready, setReady] = useState(false);
-  const [err, setErr] = useState('');
-
-  useEffect(() => {
-    let active = true;
-    if (typeof navigator.mediaDevices?.getUserMedia !== 'function') {
-      fallbackRef.current();
-      return;
-    }
-    navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
-      audio: false,
-    }).then((stream) => {
-      if (!active) {
-        stream.getTracks().forEach((t) => t.stop());
-        return;
-      }
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
-        setReady(true);
-      }
-    }).catch((e) => {
-      if (!active) return;
-      setErr((e as Error).message || 'Не удалось запустить камеру');
-      fallbackRef.current();
-    });
-
-    return () => {
-      active = false;
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-    };
-  }, []);
-
-  const snap = () => {
-    const video = videoRef.current;
-    if (!video || !ready || busy) return;
-    const w = video.videoWidth || 1280;
-    const h = video.videoHeight || 720;
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, w, h);
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const file = new File([blob], `blank_${Date.now()}.jpg`, { type: 'image/jpeg' });
-      onSnap(file);
-    }, 'image/jpeg', 0.92);
-  };
-
-  return (
-    <div className="tg-viewfinder" role="dialog" aria-modal="true">
-      <div className="tg-viewfinder-video-wrap">
-        <video ref={videoRef} className="tg-viewfinder-video" playsInline muted autoPlay />
-        <div className="tg-viewfinder-overlay">
-          <div className="tg-viewfinder-hint">Поместите полоску бланка в рамку, чтобы все 4 угловые метки были в кадре</div>
-          <div className="tg-viewfinder-frame">
-            <div className="tg-viewfinder-corner tl" />
-            <div className="tg-viewfinder-corner tr" />
-            <div className="tg-viewfinder-corner bl" />
-            <div className="tg-viewfinder-corner br" />
-          </div>
-        </div>
-      </div>
-      <div className="tg-viewfinder-controls">
-        <button className="tg-link" style={{ color: '#fff' }} onClick={onClose}>✕ Закрыть</button>
-        <button className="tg-viewfinder-shutter" onClick={snap} disabled={busy || !ready} aria-label="Сделать снимок">📷</button>
-        <button className="tg-link" style={{ color: '#fff' }} onClick={onFallback}>Обычная камера</button>
-      </div>
-      {err && <div className="tg-error" style={{ margin: 8 }}>{err}</div>}
+      {toast && <div className="ck-toast" role="status"><span>{toast.text}</span>{toast.undo && <button onClick={toast.undo}>Отменить</button>}</div>}
     </div>
-  );
-}
-
-/** Съёмка в стопку: камера (снимок за снимком) и галерея (много фото сразу); каждое фото читается сразу */
-function QueueCapture({ layouts, hasItems, onAdd, onFirstError }: { layouts: string[]; hasItems: boolean; onAdd: (items: Array<Omit<QItem, 'id'>>) => void; onFirstError: () => void }) {
-  const cam = useRef<HTMLInputElement>(null);
-  const gal = useRef<HTMLInputElement>(null);
-  const counter = useRef(1);
-  const [progress, setProgress] = useState<{ i: number; n: number } | null>(null);
-  const [showLive, setShowLive] = useState(false);
-
-  const processFile = async (f: File, fromCamera: boolean) => {
-    setProgress({ i: 1, n: 1 });
-    const r = await readFile(f, layouts);
-    const name = fromCamera ? `Бланк ${counter.current}` : (f.name || `Бланк ${counter.current}`).slice(0, 60);
-    counter.current++;
-    onAdd([{ name, ...r }]);
-    setProgress(null);
-    if (r.error) onFirstError();
-  };
-
-  async function onFiles(e: React.ChangeEvent<HTMLInputElement>, fromCamera: boolean) {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = '';
-    if (!files.length) return;
-    let failed = false;
-    for (let i = 0; i < files.length; i++) {
-      setProgress({ i: i + 1, n: files.length });
-      const r = await readFile(files[i], layouts);
-      if (r.error) failed = true;
-      const name = fromCamera ? `Бланк ${counter.current}` : (files[i].name || `Бланк ${counter.current}`).slice(0, 60);
-      counter.current++;
-      onAdd([{ name, ...r }]);
-    }
-    setProgress(null);
-    if (failed) onFirstError();
-  }
-
-  const openLive = () => {
-    if (typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function') {
-      setShowLive(true);
-    } else {
-      cam.current?.click();
-    }
-  };
-
-  return (
-    <>
-      <input ref={cam} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => void onFiles(e, true)} />
-      <input ref={gal} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={(e) => void onFiles(e, false)} />
-      {showLive && (
-        <LiveCameraModal
-          busy={!!progress}
-          onSnap={(file) => {
-            void processFile(file, true);
-          }}
-          onClose={() => setShowLive(false)}
-          onFallback={() => {
-            setShowLive(false);
-            cam.current?.click();
-          }}
-        />
-      )}
-      <button className="tg-btn-primary" disabled={!!progress} onClick={openLive}>
-        {progress ? `Распознаю ${progress.i} из ${progress.n}…` : hasItems ? '📷 Навести камеру ещё' : '📷 Навести камеру на бланк'}
-      </button>
-      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-        <button className="tg-btn-secondary" style={{ flex: 1 }} disabled={!!progress} onClick={() => cam.current?.click()}>Обычная камера</button>
-        <button className="tg-btn-secondary" style={{ flex: 1 }} disabled={!!progress} onClick={() => gal.current?.click()}>Из галереи</button>
-      </div>
-    </>
-  );
-}
-
-function Capture({ label, layouts, onResult, onError }: { label: string; layouts: string[]; onResult: (r: Ok) => void; onError: (m: string, debug?: string) => void }) {
-  const ref = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    e.target.value = '';
-    if (!f) return;
-    setBusy(true);
-    try {
-      const img = await loadGrayImage(f);
-      const { res, layout } = omrReadAny(img, layouts.map((id) => OMR_LAYOUTS[id]));
-      if (!res.ok) return onError(res.missingHint || FAIL_TEXT, debugOf(img, layout));
-      if (!res.codeOk) return onError(res.missingHint || CODE_TEXT, debugOf(img, layout));
-      onResult(res);
-    } catch {
-      onError('Не удалось обработать фото. Попробуйте ещё раз.');
-    } finally { setBusy(false); }
-  }
-  return (
-    <>
-      <input ref={ref} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => void onFile(e)} />
-      <button className="tg-btn-primary" disabled={busy} onClick={() => ref.current?.click()}>{busy ? 'Распознаю…' : label}</button>
-    </>
-  );
-}
-
-// ---------- просмотр и правка ответов ----------
-function DigitPic({ box }: { box: Ok['open'][number]['boxes'][number] }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const cv = ref.current;
-    if (!cv) return;
-    const k = 3;
-    cv.width = box.cols * k;
-    cv.height = box.rows * k;
-    const ctx = cv.getContext('2d');
-    if (!ctx) return;
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, cv.width, cv.height);
-    ctx.fillStyle = '#000';
-    for (let r = 0; r < box.rows; r++) for (let c = 0; c < box.cols; c++) if (box.bitmap[r * box.cols + c]) ctx.fillRect(c * k, r * k, k, k);
-  }, [box]);
-  return <canvas ref={ref} style={{ height: 44, width: 'auto', border: '1px solid var(--hint)', borderRadius: 4, background: '#fff' }} />;
-}
-
-/** Подставляет подсказки по цифрам в пустые поля открытых вопросов, когда модель загрузилась */
-function useDigitHints(api: Api, res: Ok, setAnswers: Dispatch<SetStateAction<Answers>>): Array<OpenHint | null> {
-  const [hints, setHints] = useState<Array<OpenHint | null>>([]);
-  const apiRef = useRef(api);
-  apiRef.current = api;
-  useEffect(() => {
-    let off = false;
-    void loadDigitModel(async () => (await apiRef.current<{ samples: Array<{ d: number; px: string }> }>('digits_get')).samples).then((knn) => {
-      if (off) return;
-      const h = res.open.map((o) => guessOpen(knn, o));
-      setHints(h);
-      setAnswers((a) => ({ ...a, open: a.open.map((x, i) => (x === '' && h[i] ? h[i]!.text : x)) }));
-    });
-    return () => { off = true; };
-  }, [res, setAnswers]);
-  return hints;
-}
-
-function Choice({ value, options, onChange }: { value: string | null; options: string[]; onChange: (v: string | null) => void }) {
-  return (
-    <div className="tg-chips">
-      {options.map((o) => (
-        <button key={o} className={`tg-chip ${value === o ? 'on' : ''}`} onClick={() => onChange(value === o ? null : o)}>{o}</button>
-      ))}
-    </div>
-  );
-}
-
-function AnswerEditor({ res, answers, setAnswers, onlyDoubts, withEmpty, hints }: { res: Ok; answers: Answers; setAnswers: (a: Answers) => void; onlyDoubts: boolean; withEmpty: boolean; hints?: Array<OpenHint | null> }) {
-  const dl = useMemo(() => doubts(res).filter((d) => d.kind !== 'variant' && (withEmpty || d.why !== 'empty')), [res, withEmpty]);
-  const isDoubt = (kind: Doubt['kind'], q: number, row?: string) => dl.find((d) => d.kind === kind && d.q === q && d.row === row);
-  const setTest = (i: number, v: string | null) => setAnswers({ ...answers, tests: answers.tests.map((x, j) => (j === i ? v : x)) });
-  const setMatch = (i: number, r: number, v: string | null) => setAnswers({ ...answers, matching: answers.matching.map((row, j) => (j === i ? row.map((x, k) => (k === r ? v : x)) : row)) });
-  const setOpen = (i: number, v: string) => setAnswers({ ...answers, open: answers.open.map((x, j) => (j === i ? v.replace(/\D/g, '').slice(0, res.open[i]?.boxes.length ?? 4) : x)) });
-  const LET = ['A', 'B', 'C', 'D'];
-  const ROWS = ['A', 'B', 'C', 'D'].slice(0, MATCHING_ROWS);
-
-  return (
-    <>
-      {res.tests.map((t, i) => {
-        const d = isDoubt('test', t.q);
-        if (onlyDoubts && !d) return null;
-        return (
-          <div key={`t${t.q}`} className="tg-card">
-            <b>Тест {t.q}</b> {d && <span className="tg-badge warn">{WHY[d.why]}</span>}
-            <Choice value={answers.tests[i]} options={LET} onChange={(v) => setTest(i, v)} />
-          </div>
-        );
-      })}
-      {res.matching.map((m, i) => m.rows.map((r, k) => {
-        const d = isDoubt('matching', m.q, r.row);
-        if (onlyDoubts && !d) return null;
-        return (
-          <div key={`m${m.q}${r.row}`} className="tg-card">
-            <b>Соответствие {m.q}, пункт {ROWS[k]}</b> {d && <span className="tg-badge warn">{WHY[d.why]}</span>}
-            <Choice value={answers.matching[i][k]} options={['1', '2', '3', '4', '5']} onChange={(v) => setMatch(i, k, v)} />
-          </div>
-        );
-      }))}
-      {res.open.map((o, i) => (
-        <div key={`o${o.q}`} className="tg-card">
-          <b>Открытый {o.q}</b> {hints?.[i] && answers.open[i] === hints[i]!.text && <span className={`tg-badge ${hints[i]!.unsure ? 'warn' : ''}`}>{hints[i]!.unsure ? 'подсказка — проверьте' : 'подсказка'}</span>}
-          <div style={{ display: 'flex', gap: 6, margin: '6px 0' }}>
-            {o.boxes.map((b, j) => (b.hasDigit ? <DigitPic key={j} box={b} /> : <span key={j} className="tg-hint" style={{ width: 28, textAlign: 'center' }}>·</span>))}
-          </div>
-          <label className="tg-field">
-            <span>Число (целое, цифр не больше {o.boxes.length})</span>
-            <input inputMode="numeric" maxLength={o.boxes.length} value={answers.open[i]} onChange={(e) => setOpen(i, e.target.value)} placeholder={o.boxes.some((b) => b.hasDigit) ? 'впишите цифры с картинки' : 'пусто'} />
-          </label>
-        </div>
-      ))}
-    </>
-  );
-}
-
-function Review({ api, src, res, title, left, onDone, onError, onRetake }: { api: Api; src: KeySource; res: Ok; title: string; left: number; onDone: (r: { student: string; score: number; max: number; ticket?: number; createdAt?: string }) => void; onError: (e: unknown) => void; onRetake: () => void }) {
-  const warnings = useMemo(() => qualityWarnings(res), [res]);
-  const [answers, setAnswers] = useState<Answers>(() => answersFromResult(res));
-  const [variant, setVariant] = useState<string>(() => String(variantFromResult(res) ?? ''));
-  const [student, setStudent] = useState('');
-  const [all, setAll] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [collect, setCollect] = useState<boolean>(() => collectEnabled());
-  const hints = useDigitHints(api, res, setAnswers);
-  const key = src.keys[Number(variant)];
-  const score = key ? scoreAnswers(key, answers) : null;
-  const variants = Object.keys(src.keys).sort((a, b) => Number(a) - Number(b));
-  const max = maxPoints(src.comp);
-
-  async function save() {
-    if (!key || !score) return;
-    setSaving(true);
-    try {
-      await api('check_save', {
-        batchId: src.batchId, ticketNumber: Number(variant), comp: src.comp, layout: src.layouts[0], student,
-        answers, ...(src.kind === 'custom' ? { key } : {}),
-      });
-      if (collect) {
-        const samples = collectSamples(res.open, answers.open, hints);
-        if (samples.length) void api('digits_save', { samples, layout: src.layouts[0] }).catch(() => { /* сбор не мешает работе */ });
-      }
-      onDone({ student, score: score.score, max: score.max, ticket: Number(variant), createdAt: new Date().toISOString() });
-    } catch (e) { onError(e); } finally { setSaving(false); }
-  }
-
-  return (
-    <>
-      <h1>Проверка бланка</h1>
-      <p className="tg-hint">{title}{left > 1 ? ` · в стопке ещё ${left - 1}` : ''}</p>
-      {warnings.length > 0 && (
-        <div className="tg-card" style={{ borderLeft: '4px solid #e0a100' }}>
-          <b>⚠️ Снимок читается ненадёжно</b>
-          {warnings.map((w) => <p key={w} className="tg-hint">{w}</p>)}
-          <button className="tg-btn-primary" onClick={onRetake}>📷 Убрать и переснять</button>
-        </div>
-      )}
-      <div className="tg-card">
-        <b>Вариант</b>
-        {variantFromResult(res) === null && <p className="tg-hint">Вариант на бланке не отмечен или отмечено несколько кружков — выберите вручную.</p>}
-        <Choice value={variant || null} options={variants} onChange={(v) => setVariant(v ?? '')} />
-        {variant && !key && <p className="tg-error">Для варианта {variant} нет ключа.</p>}
-        <label className="tg-field"><span>Ученик (по желанию)</span><input value={student} maxLength={120} onChange={(e) => setStudent(e.target.value)} placeholder="ФИО или номер" /></label>
-      </div>
-      {score && (
-        <div className="tg-card">
-          <b style={{ fontSize: 22 }}>{score.score} из {score.max}</b>
-          <p className="tg-hint">Тесты {score.tests.filter(Boolean).length}/{score.tests.length} · пункты соответствий {score.matching.flat().filter(Boolean).length}/{score.matching.length * MATCHING_ROWS} · открытые {score.open.filter(Boolean).length}/{score.open.length} (максимум {max})</p>
-        </div>
-      )}
-      <p className="tg-hint">{all ? 'Все ответы.' : 'Показаны только сомнительные ответы и открытые вопросы.'} <button className="tg-link" onClick={() => setAll(!all)}>{all ? 'Только сомнительные' : 'Показать все'}</button></p>
-      <AnswerEditor res={res} answers={answers} setAnswers={setAnswers} onlyDoubts={!all} withEmpty={false} hints={hints} />
-      <label className="tg-hint" style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-        <input type="checkbox" checked={collect} onChange={(e) => { setCollect(e.target.checked); setCollectEnabled(e.target.checked); }} />
-        <span>Помочь улучшить распознавание цифр: сохранять маленькие картинки цифр (без имён и без фото бланка).</span>
-      </label>
-      <button className="tg-btn-primary" disabled={saving || !key} onClick={() => void save()}>{saving ? 'Сохраняю…' : 'Сохранить результат'}</button>
-    </>
-  );
-}
-
-function RefReview({ api, c, res, onSave }: { api: Api; c: CustomKey; res: Ok; onSave: (n: number, key: TicketKey) => void }) {
-  const [answers, setAnswers] = useState<Answers>(() => answersFromResult(res));
-  const [variant, setVariant] = useState<string>(() => String(variantFromResult(res) ?? ''));
-  const [all, setAll] = useState(false);
-  const hints = useDigitHints(api, res, setAnswers);
-  const missing = answers.tests.filter((x) => x === null).length + answers.matching.flat().filter((x) => x === null).length + answers.open.filter((x) => x.trim() === '').length;
-  return (
-    <>
-      <h1>Ключ по эталону</h1>
-      <div className="tg-card">
-        <b>Номер варианта</b>
-        <Choice value={variant || null} options={Array.from({ length: 4 }, (_, i) => String(i + 1))} onChange={(v) => setVariant(v ?? '')} />
-      </div>
-      <p className="tg-hint">В ключе должны быть заполнены все задания. Не заполнено: {missing}. <button className="tg-link" onClick={() => setAll(!all)}>{all ? 'Только сомнительные' : 'Показать все'}</button></p>
-      <AnswerEditor res={res} answers={answers} setAnswers={setAnswers} onlyDoubts={!all} withEmpty hints={hints} />
-      <button className="tg-btn-primary" disabled={!variant || missing > 0} onClick={() => onSave(Number(variant), keyFromAnswers(answers, c.comp))}>Записать ключ варианта {variant || '…'}</button>
-    </>
-  );
-}
-
-// ---------- свои ключи ----------
-function CustomList({ list, onUse, onEdit, onCreate, onDelete }: { list: CustomKey[]; onUse: (c: CustomKey) => void; onEdit: (c: CustomKey) => void; onCreate: (name: string, comp: Composition) => void; onDelete: (c: CustomKey) => void }) {
-  const [name, setName] = useState('');
-  const [blank, setBlank] = useState(0);
-  return (
-    <>
-      <h1>Свои ключи</h1>
-      <p className="tg-hint">Ключи хранятся на этом устройстве.</p>
-      {list.map((c) => (
-        <div key={c.id} className="tg-card">
-          <b>{c.name}</b>
-          <p className="tg-hint">{compText(c.comp)} · вариантов с ключом: {Object.keys(c.keys).length}</p>
-          <div className="tg-actions">
-            <button className="tg-link" disabled={!Object.keys(c.keys).length} onClick={() => onUse(c)}>Проверять</button>
-            <button className="tg-link" onClick={() => onEdit(c)}>Ключи</button>
-            <button className="tg-link" onClick={() => { if (window.confirm(`Удалить ключ «${c.name}»?`)) onDelete(c); }}>Удалить</button>
-          </div>
-        </div>
-      ))}
-      <h2>Новый ключ</h2>
-      <label className="tg-field"><span>Название</span><input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="Например: химия, пробный экзамен" /></label>
-      <div className="tg-seg" style={{ flexDirection: 'column' }}>
-        {BLANKS.map((b, i) => <button key={b.label} className={blank === i ? 'on' : ''} onClick={() => setBlank(i)}>{b.label}</button>)}
-      </div>
-      <button className="tg-btn-primary" disabled={!name.trim()} onClick={() => onCreate(name, BLANKS[blank].comp)}>Создать</button>
-    </>
-  );
-}
-
-function CustomEdit({ c, onSave, onRemove, onScan, onUse }: { c: CustomKey; onSave: (n: number, key: TicketKey) => void; onRemove: (n: number) => void; onScan: () => void; onUse: () => void }) {
-  const [n, setN] = useState<string>('1');
-  const [t, setT] = useState({ tests: '', matching: '', open: '' });
-  const [err, setErr] = useState('');
-  useEffect(() => { const k = c.keys[Number(n)]; setT(k ? keyToText(k) : { tests: '', matching: '', open: '' }); setErr(''); }, [n, c.keys]);
-  const have = Object.keys(c.keys).map(Number).sort((a, b) => a - b);
-  return (
-    <>
-      <h1>{c.name}</h1>
-      <p className="tg-hint">{compText(c.comp)}. Варианты с ключом: {have.join(', ') || 'пока нет'}.</p>
-      <button className="tg-btn-secondary" onClick={onScan}>📷 Снять эталонный бланк</button>
-      <h2>Ввести ключ вручную</h2>
-      <Choice value={n} options={Array.from({ length: 4 }, (_, i) => String(i + 1))} onChange={(v) => setN(v ?? n)} />
-      <label className="tg-field"><span>Тесты: {c.comp.test} букв (ABCD…)</span><input value={t.tests} onChange={(e) => setT({ ...t, tests: e.target.value })} placeholder="ABCDABCD…" /></label>
-      {c.comp.matching > 0 && <label className="tg-field"><span>Соответствия: {c.comp.matching} групп по 4 цифры 1–5</span><input value={t.matching} onChange={(e) => setT({ ...t, matching: e.target.value })} placeholder="3124 2541" /></label>}
-      {c.comp.open > 0 && <label className="tg-field"><span>Открытые: {c.comp.open} чисел через пробел</span><input value={t.open} onChange={(e) => setT({ ...t, open: e.target.value })} placeholder="12 5 700" /></label>}
-      {err && <div className="tg-error">{err}</div>}
-      <button className="tg-btn-secondary" onClick={() => {
-        const r = parseKey(t, c.comp);
-        if ('error' in r) return setErr(r.error);
-        onSave(Number(n), r.value);
-      }}>Записать ключ варианта {n}</button>
-      {c.keys[Number(n)] && <button className="tg-link" onClick={() => onRemove(Number(n))}>Удалить ключ варианта {n}</button>}
-      <button className="tg-btn-primary" disabled={!have.length} onClick={onUse}>Проверять работы</button>
-    </>
-  );
-}
-
-function Results({ api, onError }: { api: Api; onError: (e: unknown) => void }) {
-  const [rows, setRows] = useState<SavedCheck[] | null>(null);
-  useEffect(() => { api<{ checks: SavedCheck[] }>('check_list').then((r) => setRows(r.checks)).catch(onError); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
-  return (
-    <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Результаты</h1>
-        {rows && rows.length > 0 && (
-          <button className="tg-link" onClick={() => void exportOmrChecksToExcel(rows, 'Все_результаты').catch(() => onError(new Error('Не удалось сохранить файл Excel. Попробуйте ещё раз.')))}>📥 В Excel</button>
-        )}
-      </div>
-      {!rows && <p className="tg-hint">Загрузка…</p>}
-      {rows?.length === 0 && <p className="tg-hint">Проверенных работ пока нет.</p>}
-      {rows?.map((r) => (
-        <div key={r.id} className="tg-row" style={{ cursor: 'default' }}>
-          <span className="tg-grow"><b>{r.student || 'Без имени'}</b><br /><span className="tg-hint">{new Date(r.created_at).toLocaleString('ru-RU')}{r.ticket_number ? ` · вариант ${r.ticket_number}` : ''}</span></span>
-          <span className="tg-badge">{r.score} / {r.max_score}</span>
-        </div>
-      ))}
-    </>
-  );
-}
-
-// ---------- чистка собранных цифр (главный админ) ----------
-function PxPic({ px, on, onClick }: { px: string; on: boolean; onClick: () => void }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const cv = ref.current, p = pixFromBase64(px);
-    if (!cv || !p) return;
-    const k = 3;
-    cv.width = cv.height = PIX * k;
-    const ctx = cv.getContext('2d');
-    if (!ctx) return;
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, cv.width, cv.height);
-    for (let y = 0; y < PIX; y++) for (let x = 0; x < PIX; x++) {
-      const v = p[y * PIX + x];
-      if (v) { ctx.fillStyle = 'rgba(0,0,0,' + v / 255 + ')'; ctx.fillRect(x * k, y * k, k, k); }
-    }
-  }, [px]);
-  return <canvas ref={ref} onClick={onClick} style={{ width: 48, height: 48, border: on ? '2px solid #d33' : '1px solid var(--hint)', borderRadius: 4, background: '#fff' }} />;
-}
-
-function DigitsAdmin({ api, onError }: { api: Api; onError: (e: unknown) => void }) {
-  const [counts, setCounts] = useState<number[]>([]);
-  const [digit, setDigit] = useState<number | null>(null);
-  const [items, setItems] = useState<Array<{ id: number; px: string }>>([]);
-  const [sel, setSel] = useState<Set<number>>(new Set());
-  const [busy, setBusy] = useState(false);
-
-  async function load(d: number | null) {
-    setBusy(true);
-    try {
-      const r = await api<{ counts: number[]; items?: Array<{ id: number; px: string }> }>('digits_admin', d === null ? {} : { digit: d });
-      setCounts(r.counts);
-      setItems(r.items ?? []);
-      setSel(new Set());
-    } catch (e) { onError(e); } finally { setBusy(false); }
-  }
-  useEffect(() => { void load(null); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function act(action: 'digits_admin_delete' | 'digits_admin_relabel', extra: Record<string, unknown> = {}) {
-    if (!sel.size) return;
-    setBusy(true);
-    try {
-      await api(action, { ids: [...sel], ...extra });
-      await load(digit);
-    } catch (e) { onError(e); setBusy(false); }
-  }
-
-  return (
-    <>
-      <h1>Собранные цифры</h1>
-      <p className="tg-hint">Картинки, из которых строятся подсказки. Выберите цифру, отметьте ошибочные картинки и удалите их или перенесите в нужную цифру. Показаны 150 последних.</p>
-      <div className="tg-chips">
-        {Array.from({ length: 10 }, (_, d) => (
-          <button key={d} className={'tg-chip ' + (digit === d ? 'on' : '')} onClick={() => { setDigit(d); void load(d); }}>{d} · {counts[d] ?? '…'}</button>
-        ))}
-      </div>
-      {busy && <p className="tg-hint">Загрузка…</p>}
-      {digit !== null && !busy && items.length === 0 && <p className="tg-hint">Картинок этой цифры пока нет.</p>}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '10px 0' }}>
-        {items.map((it) => (
-          <PxPic key={it.id} px={it.px} on={sel.has(it.id)} onClick={() => setSel((s) => { const n = new Set(s); if (n.has(it.id)) n.delete(it.id); else n.add(it.id); return n; })} />
-        ))}
-      </div>
-      {sel.size > 0 && (
-        <div className="tg-card">
-          <b>Выбрано: {sel.size}</b>
-          <button className="tg-btn-primary" disabled={busy} onClick={() => { if (window.confirm('Удалить выбранные картинки (' + sel.size + ')? Это нельзя отменить.')) void act('digits_admin_delete'); }}>Удалить выбранные</button>
-          <p className="tg-hint">Перенести в цифру:</p>
-          <div className="tg-chips">
-            {Array.from({ length: 10 }, (_, d) => (d === digit ? null : <button key={d} className="tg-chip" disabled={busy} onClick={() => void act('digits_admin_relabel', { digit: d })}>{d}</button>))}
-          </div>
-        </div>
-      )}
-    </>
   );
 }

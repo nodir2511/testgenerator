@@ -13,6 +13,7 @@ import { Upload, FileText, Download } from 'lucide-react';
 import { checkImportRows, type RowCheck } from '../lib/importCheck';
 import { Button, PageHeader } from './ui';
 import { answerWarning, type ImportLang, type ImportReport, type ParsedRow } from '../lib/importParse';
+import { withOpenAnswerError } from '../lib/openAnswer';
 import { DefaultTaxonomyBar } from './bulk-import/DefaultTaxonomyBar';
 import { FileTab } from './bulk-import/FileTab';
 import { TextTab } from './bulk-import/TextTab';
@@ -27,7 +28,9 @@ export const BulkImport: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =
 
   const [activeTab, setActiveTab] = useState<'file' | 'text' | 'history'>('file');
   const [pastedText, setPastedText] = useState('');
-  const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
+  const [rawRows, setParsedRows] = useState<ParsedRow[]>([]);
+  // Открытый вопрос с ключом не для клеток бланка (дробь, минус, слишком длинный) — ошибка строки; считается по текущему предмету строки
+  const parsedRows = React.useMemo(() => rawRows.map(withOpenAnswerError), [rawRows]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);

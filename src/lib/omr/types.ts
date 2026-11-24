@@ -43,6 +43,8 @@ export type OmrResult =
       quality: { pxPerMm: number; skew: number; ring: number };
       /** Во сколько градусов повёрнут снимок относительно бланка (0, 90, 180, 270) */
       rotation: number;
+      /** Гомография «миллиметры бланка → пиксели снимка» (9 чисел): по ней снимок выпрямляется для показа */
+      toPhoto: number[];
       variant: Picked;
       tests: Array<{ q: number } & Picked>;
       matching: Array<{ q: number; rows: Array<{ row: string } & Picked> }>;

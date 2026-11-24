@@ -1,0 +1,197 @@
+/* Раздел «Проверка работ» мини-приложения. Цвета — переменные tg.css плюс три состояния: верно, внимание, ошибка. */
+body.tg-body {
+  --ok: #047857; --ok-bg: #ecfdf5; --ok-line: #a7f3d0;
+  --mid: #b45309; --mid-bg: #fffbeb; --mid-line: #fde68a;
+  --bad: #b91c1c; --bad-bg: #fef2f2; --bad-line: #fecaca;
+  --bubble-line: #94a3b8;
+}
+body.tg-body.tg-dark {
+  --ok: #6ee7b7; --ok-bg: rgba(16, 185, 129, 0.16); --ok-line: rgba(16, 185, 129, 0.4);
+  --mid: #fcd34d; --mid-bg: rgba(245, 158, 11, 0.16); --mid-line: rgba(245, 158, 11, 0.4);
+  --bad: #fca5a5; --bad-bg: rgba(239, 68, 68, 0.16); --bad-line: rgba(239, 68, 68, 0.4);
+  --bubble-line: #64748b;
+}
+
+.ck-good { color: var(--ok); }
+.ck-mid { color: var(--mid); }
+.ck-low { color: var(--bad); }
+
+/* ---- общее ---- */
+.ck-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 4px; }
+.ck-head h1 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ck-back { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 0 12px 0 2px; border: 0; background: none; color: var(--link); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer; }
+.ck-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex: none; border: 0; border-radius: 12px; background: none; color: var(--hint); cursor: pointer; }
+.ck-icon:active { background: var(--tint); }
+.ck-text { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 10px; border: 0; border-radius: 10px; background: none; color: var(--link); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.ck-text.danger { color: var(--bad); }
+.ck-text:disabled { opacity: 0.45; cursor: default; }
+.tg-app .ck-sub { display: block; color: var(--hint); font-size: 13px; line-height: 1.35; margin-top: 2px; }
+.ck-p { color: var(--hint); font-size: 14px; line-height: 1.4; margin: 0 2px 14px; }
+.tg-app .ck-section { font-size: 15px; font-weight: 700; margin: 22px 2px 8px; text-transform: none; letter-spacing: 0; color: var(--fg); }
+.ck-section small { font-weight: 500; font-size: 13px; color: var(--hint); margin-left: 6px; }
+.ck-leading { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px; background: var(--tint); color: var(--btn); flex: none; }
+.ck-card { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 12px; }
+.ck-note { border-radius: 12px; padding: 10px 12px; font-size: 14px; line-height: 1.4; margin-bottom: 12px; border: 1px solid; overflow-wrap: anywhere; }
+.ck-note.warn { background: var(--mid-bg); border-color: var(--mid-line); color: var(--mid); }
+.ck-note.bad { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad); }
+.ck-note b { display: block; margin-bottom: 2px; }
+.ck-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ck-pair .tg-btn-secondary, .ck-pair .tg-btn-primary { margin: 0; }
+.ck-toggle { display: flex; align-items: center; gap: 12px; min-height: 44px; font-size: 14px; cursor: pointer; }
+.ck-toggle input { width: 22px; height: 22px; flex: none; accent-color: var(--btn); }
+.ck-loading { display: grid; gap: 8px; }
+.ck-loading i { display: block; height: 64px; border-radius: 16px; background: var(--line); animation: ck-pulse 1.1s ease-in-out infinite alternate; }
+@keyframes ck-pulse { from { opacity: 0.45; } to { opacity: 0.9; } }
+.ck :is(button, input, summary):focus-visible { outline: 2px solid var(--btn); outline-offset: 2px; }
+
+.ck-toggle-row { display: flex; gap: 8px; overflow-x: auto; }
+.ck .tg-chip { min-height: 44px; font-size: 15px; background: var(--bg2); border-color: var(--line); }
+.ck .tg-chip.on { background: var(--btn); border-color: var(--btn); color: #fff; box-shadow: none; }
+.ck .tg-chips { margin: 8px 0 0; }
+
+.ck .tg-field span { text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 600; }
+.ck .tg-field input { font-size: 16px; font-weight: 500; border-color: var(--line); }
+.ck .tg-seg button { min-height: 44px; }
+
+/* Нижняя панель: итог и главное действие всегда под рукой */
+.ck-withdock { padding-bottom: 84px; }
+.ck-dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; background: var(--bg); border-top: 1px solid var(--line); padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); }
+.ck-dock-in { max-width: 532px; margin: 0 auto; display: flex; align-items: center; gap: 14px; }
+.ck-dock-in > div { flex: 1; min-width: 0; }
+.ck-dock .tg-btn-primary { margin: 0; width: auto; flex: none; padding: 0 22px; }
+.ck-dock .tg-btn-primary.wide { width: 100%; flex: 1; }
+.tg-btn-primary:disabled, .tg-btn-secondary:disabled { opacity: 0.5; }
+.ck-score { font-size: 24px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.ck-score small { font-size: 14px; font-weight: 600; color: var(--hint); letter-spacing: 0; }
+
+.ck-toast { position: fixed; left: 14px; right: 14px; bottom: calc(92px + env(safe-area-inset-bottom)); z-index: 60; max-width: 532px; margin: 0 auto; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 4px 6px 4px 14px; border-radius: 14px; background: #0f172a; color: #f8fafc; font-size: 14px; box-sizing: border-box; border: 1px solid rgba(148, 163, 184, 0.25); }
+.ck:not(:has(.ck-dock)) .ck-toast { bottom: calc(16px + env(safe-area-inset-bottom)); }
+.ck-toast span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ck-toast button { min-height: 40px; padding: 0 12px; border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.14); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+
+/* ---- сетка кружков, как на бумажном бланке ---- */
+.ck-sheet { display: grid; gap: 14px; }
+.ck-tests { display: grid; grid-auto-flow: column; grid-template-columns: 1fr 1fr; column-gap: 10px; }
+.ck-line { display: flex; align-items: center; gap: 2px; border-radius: 10px; padding: 0 2px; }
+.ck-line.doubt { background: var(--mid-bg); }
+.ck-num { width: 24px; flex: none; font-size: 13px; font-weight: 600; color: var(--hint); text-align: right; padding-right: 4px; font-variant-numeric: tabular-nums; }
+.ck-bub { flex: 1 1 0; min-width: 0; height: 40px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; color: var(--fg); }
+.ck-bub i { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; max-width: 100%; border-radius: 50%; border: 1.5px solid var(--bubble-line); font-style: normal; font-size: 12px; font-weight: 600; box-sizing: border-box; }
+.ck-bub.on i { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.ck-bub.right i { background: #059669; border-color: #059669; color: #fff; }
+.ck-bub.wrong i { background: #dc2626; border-color: #dc2626; color: #fff; }
+.ck-bub.key i { border-color: #059669; border-width: 2.5px; color: var(--ok); }
+.ck-bub:disabled { cursor: default; }
+.ck-matches { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+.ck-match { min-width: 0; }
+.ck-match b { font-size: 13px; color: var(--hint); font-weight: 600; }
+.ck-match .ck-num { width: 18px; }
+.ck-open { display: flex; align-items: center; gap: 10px; min-height: 52px; border-top: 1px solid var(--line); padding: 4px 0; }
+.ck-open:first-child { border-top: 0; }
+.ck-open .ck-num { width: 26px; }
+.ck-open-pic { flex: 1; min-width: 0; display: flex; gap: 4px; align-items: center; overflow: hidden; }
+.ck-open input { width: 92px; height: 44px; flex: none; box-sizing: border-box; border: 1.5px solid var(--line); border-radius: 12px; background: var(--bg2); color: var(--fg); font: inherit; font-size: 17px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+.ck-open input.check { border-color: #d97706; background: var(--mid-bg); }
+.ck-open .ck-val { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ck-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--hint); margin: 0 0 10px; }
+.ck-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ck-legend i { width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; }
+@media (max-width: 339px) { .ck-tests, .ck-matches { grid-template-columns: 1fr; grid-auto-flow: row; grid-template-rows: none !important; } }
+
+/* ---- сомнительные ответы ---- */
+.ck-doubt { border-top: 1px solid var(--line); padding: 8px 0; }
+.ck-doubt:first-child { border-top: 0; padding-top: 0; }
+.ck-doubt-head { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.ck-doubt-head span { flex: 1; font-size: 13px; color: var(--mid); }
+.ck-doubt.ok .ck-doubt-head span { color: var(--ok); }
+.ck-doubt .ck-bub { height: 44px; }
+.ck-doubt .ck-bub i { width: 34px; height: 34px; font-size: 14px; }
+
+/* ---- стопка ---- */
+.ck-item-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ck-item-main:disabled { cursor: default; }
+.ck-item:has(.ck-debug) { flex-wrap: wrap; }
+.ck-debug { width: 100%; font-size: 13px; color: var(--hint); }
+.ck-debug summary { min-height: 32px; display: flex; align-items: center; cursor: pointer; font-weight: 600; }
+.ck-debug p { margin: 6px 0; }
+.ck-continue { height: auto; min-height: 54px; padding: 10px 16px; margin-bottom: 14px; }
+.ck-continue span { min-width: 0; overflow-wrap: anywhere; text-align: left; line-height: 1.25; }
+
+.ck-shot { border-top: 1px solid var(--line); padding: 6px 4px 6px 14px; }
+.ck-shot:first-child { border-top: 0; }
+.ck-shot-row { display: flex; align-items: center; gap: 6px; }
+.ck-shot .tg-grow { font-weight: 600; font-size: 15px; }
+.ck .ck-shot-note { display: flex; align-items: flex-start; gap: 5px; font-weight: 400; }
+.ck-shot-note svg { flex: none; margin-top: 1px; }
+.ck .ck-shot.ok .ck-shot-note svg { color: var(--ok); }
+.ck .ck-shot.warn .ck-shot-note { color: var(--mid); }
+.ck .ck-shot.error .ck-shot-note { color: var(--bad); }
+.ck-shot .ck-debug { padding-right: 10px; box-sizing: border-box; }
+
+/* ---- снимок, фрагменты, просмотр крупно ---- */
+.ck-thumb { width: 76px; height: auto; flex: none; border-radius: 6px; border: 1px solid var(--line); background: #fff; }
+.ck-photo { display: block; width: 100%; padding: 0; margin: 0 0 12px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #fff; cursor: zoom-in; }
+.ck-photo canvas { display: block; width: 100%; height: auto; }
+.ck-crop { display: block; max-width: 100%; height: 44px; width: auto; border-radius: 6px; border: 1px solid var(--line); background: #fff; }
+.ck-doubt .ck-crop { height: 48px; margin: 4px 0; }
+.ck-zoom { position: fixed; inset: 0; z-index: 1100; background: #0b1120; color: #fff; display: flex; flex-direction: column; }
+.ck-zoom-head { display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 8px 8px 16px; font-size: 14px; }
+.ck-zoom-head span { flex: 1; }
+.ck-zoom-head .ck-icon { color: #fff; }
+.ck-zoom-body { flex: 1; overflow: auto; display: flex; touch-action: pan-x pan-y pinch-zoom; }
+.ck-zoom-body button { display: block; padding: 0; border: 0; background: none; margin: auto; width: 100%; flex: none; cursor: zoom-in; }
+.ck-zoom-body button.big { width: 300%; cursor: zoom-out; }
+.ck-zoom-body canvas { display: block; width: 100%; height: auto; }
+
+/* ---- памятка ---- */
+.ck-howto { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 12px; }
+.ck-howto svg { display: block; width: 100%; height: auto; }
+.ck-howto .paper { fill: #fff; stroke: #cbd5e1; }
+.ck-howto .mark { fill: #0f172a; }
+.ck-howto .dot { fill: none; stroke: #cbd5e1; stroke-width: 0.6; }
+.ck-howto ul { margin: 12px 0 0; padding-left: 18px; font-size: 14px; line-height: 1.45; color: var(--fg); }
+.ck-howto li + li { margin-top: 4px; }
+
+/* ---- видоискатель ---- */
+.ck-cam { position: fixed; inset: 0; z-index: 1000; background: #000; color: #fff; display: flex; flex-direction: column; }
+.ck-cam-top { display: flex; align-items: center; gap: 10px; padding: calc(8px + env(safe-area-inset-top)) 14px 8px; font-size: 14px; font-weight: 600; }
+.ck-cam-top span { flex: 1; min-width: 0; line-height: 1.25; }
+.ck-cam-auto { min-height: 44px; padding: 0 14px; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 22px; background: none; color: #fff; font: inherit; white-space: nowrap; cursor: pointer; }
+.ck-cam-auto[aria-checked='true'] { background: #fff; color: #0f172a; border-color: #fff; }
+.ck-cam-view { position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding-bottom: 60px; }
+.ck-cam-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ck-cam-frame { position: relative; aspect-ratio: var(--r); height: min(92%, calc(88vw / var(--r))); border-radius: 10px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.42); outline: 1px solid rgba(255, 255, 255, 0.4); }
+.ck-cam-frame i { position: absolute; width: 26px; height: 26px; border: 0 solid #fff; }
+.ck-cam-frame i:nth-child(1) { top: -2px; left: -2px; border-width: 4px 0 0 4px; border-top-left-radius: 10px; }
+.ck-cam-frame i:nth-child(2) { top: -2px; right: -2px; border-width: 4px 4px 0 0; border-top-right-radius: 10px; }
+.ck-cam-frame i:nth-child(3) { bottom: -2px; left: -2px; border-width: 0 0 4px 4px; border-bottom-left-radius: 10px; }
+.ck-cam-frame i:nth-child(4) { bottom: -2px; right: -2px; border-width: 0 4px 4px 0; border-bottom-right-radius: 10px; }
+.ck-cam-frame.seen i { border-color: #34d399; }
+.ck-cam-frame.seen { outline-color: #34d399; }
+@media (orientation: landscape) { .ck-cam-frame { aspect-ratio: calc(1 / var(--r)); height: min(88%, calc(70vw * var(--r))); } }
+.ck-cam-note { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 11px 14px; border-radius: 12px; background: rgba(15, 23, 42, 0.9); font-size: 15px; line-height: 1.35; text-align: center; }
+.ck-cam-note.ok { background: #047857; }
+.ck-cam-note.warn { background: #92400e; }
+.ck-cam-note.error { background: #b91c1c; }
+.ck-cam-flash { position: absolute; inset: 0; background: #fff; pointer-events: none; animation: ck-flash 0.25s ease-out forwards; }
+@keyframes ck-flash { from { opacity: 0.7; } to { opacity: 0; } }
+.ck-cam-bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); }
+.ck-cam-side { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 64px; border: 0; background: none; color: #fff; font: inherit; font-size: 15px; cursor: pointer; }
+.ck-cam-side small { font-size: 13px; color: rgba(255, 255, 255, 0.8); }
+.ck-cam-side .ck-thumb { width: 60px; border: 0; }
+.ck-cam-shutter { width: 72px; height: 72px; border-radius: 50%; border: 5px solid rgba(255, 255, 255, 0.45); background: #fff; background-clip: padding-box; cursor: pointer; }
+.ck-cam-shutter:active { transform: scale(0.94); }
+.ck-cam-shutter:disabled { opacity: 0.45; }
+.ck-cam :focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* ---- результаты ---- */
+.ck-list { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.ck-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 8px 14px; box-sizing: border-box; border: 0; border-top: 1px solid var(--line); background: none; color: var(--fg); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }
+.ck-item:first-child { border-top: 0; }
+.ck-item:active { background: var(--tint); }
+.ck-item .tg-grow { font-weight: 600; }
+.ck-item .ck-sub { font-weight: 400; }
+.ck-item .pts { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.ck-item .pts small { display: block; font-size: 12px; font-weight: 500; color: var(--hint); }
+
+@media (prefers-reduced-motion: reduce) { .ck-loading i { animation: none; } .ck-cam-flash { display: none; } }

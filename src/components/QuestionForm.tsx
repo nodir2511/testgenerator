@@ -17,6 +17,7 @@ import { QuestionTextFields } from './question-form/QuestionTextFields';
 import { TestOptionsEditor } from './question-form/TestOptionsEditor';
 import { MatchingEditor } from './question-form/MatchingEditor';
 import { OpenAnswerEditor } from './question-form/OpenAnswerEditor';
+import { openAnswerProblem } from '../lib/openAnswer';
 import { FormActions } from './question-form/FormActions';
 import { useSaveQuestion } from './question-form/useSaveQuestion';
 
@@ -301,9 +302,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
   };
 
   // Сохранение вопроса (Create / Update)
+  const subjectName = subjects.find((s) => s.id === subjectId)?.name ?? '';
   const saveMutation = useSaveQuestion({
     initialData, uploadingImage, pendingUploads,
-    subjectId, chapterId, topicId, sourceId, nctType, nctDifficulty,
+    subjectId, subjectName, chapterId, topicId, sourceId, nctType, nctDifficulty,
     type, withPassage, passageId, passageOrder,
     contentRu, contentTg, imageUrl, correctNumeric,
     options, leftItems, rightItems,
@@ -328,6 +330,10 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
       const matches = left.map((l) => l.match);
       const ok = left.length > 0 && rightItems.some(isFilled) && left.every((l) => rightOk(l.match)) && new Set(matches).size === matches.length;
       steps.push({ id: 'pairs', label: 'Пары для соответствия', status: ok ? 'done' : 'todo', target: 'qf-answers', required: true });
+    } else if (type === 'open' && correctNumeric.trim() !== '') {
+      // Ключ не для клеток бланка (дробь, минус, слишком длинный) сохранение не пропустит
+      const fits = !openAnswerProblem(Number(correctNumeric), subjectName);
+      steps.push({ id: 'key', label: 'Ответ вписывается в клетки бланка', status: fits ? 'done' : 'todo', target: 'qf-answers', required: true });
     }
     if (formMode === 'both') steps.push({ id: 'tg', label: 'Перевод на таджикский', status: contentTg.trim() ? 'done' : 'optional', target: 'qf-text' });
     return steps;
@@ -429,7 +435,7 @@ export const QuestionForm: React.FC<QuestionFormProps> = ({
 
         {/* 6. ТИП: ОТКРЫТЫЙ */}
         {type === 'open' && (
-          <OpenAnswerEditor correctNumeric={correctNumeric} setCorrectNumeric={setCorrectNumeric} />
+          <OpenAnswerEditor correctNumeric={correctNumeric} setCorrectNumeric={setCorrectNumeric} subjectName={subjectName} />
         )}
 
         </div>

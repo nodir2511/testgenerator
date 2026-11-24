@@ -38,7 +38,7 @@ export function solveHomography(src: number[][], dst: number[][]): H3 | null {
   return [...h, 1];
 }
 
-const applyH = (H: H3, x: number, y: number): [number, number] => {
+export const applyH = (H: H3, x: number, y: number): [number, number] => {
   const w = H[6] * x + H[7] * y + H[8];
   return [(H[0] * x + H[1] * y + H[2]) / w, (H[3] * x + H[4] * y + H[5]) / w];
 };
@@ -385,7 +385,7 @@ export interface OmrOptions {
   codes?: number[];
 }
 
-interface Located { best: { score: number; mism: number; rot: number; at: At; ring: Blob[]; fit: number } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number; missingHint?: string }
+interface Located { best: { score: number; mism: number; rot: number; H: H3; at: At; ring: Blob[]; fit: number } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number; missingHint?: string }
 
 function findMissingHint(sq: Blob[], w: number, h: number, want: number): string | undefined {
   if (sq.length < 3) return undefined;
@@ -463,7 +463,7 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
         // Код сошёлся — проверяем, что и кружки бланка лежат на своих местах
         const fit = mism === 0 ? ringScore(at, layout) : 0;
         const score = mism * 10 - first - (fit >= RING_MIN ? 100 : 0) - fit;
-        if (!best || score < best.score) { best = { score, mism, rot, at, ring, fit }; kUsed = k; }
+        if (!best || score < best.score) { best = { score, mism, rot, H, at, ring, fit }; kUsed = k; }
       }
     }
     const b = best as Located['best'];
@@ -505,6 +505,7 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
     ...(missingHint && !codeOk ? { missingHint } : {}),
     quality: { pxPerMm, skew, ring: best.fit },
     rotation: best.rot * 90,
+    toPhoto: best.H,
     variant: pickOne(layout.variant, at),
     tests: layout.tests.map((t) => ({ q: t.q, ...pickOne(t.options, at) })),
     matching: layout.matching.map((m) => ({ q: m.q, rows: m.rows.map((r) => ({ row: r.row, ...pickOne(r.options, at) })) })),

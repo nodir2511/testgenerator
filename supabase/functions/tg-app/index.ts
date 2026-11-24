@@ -147,6 +147,7 @@ async function batchKeys(userId: string, batchId: string) {
   return { title: batch.title as string, tickets };
 }
 
+const isUuid = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(v);
 const isLetter = (v: unknown) => v === null || (typeof v === 'string' && /^[A-D]$/.test(v));
 const isDigit5 = (v: unknown) => v === null || (typeof v === 'string' && /^[1-5]$/.test(v));
 
@@ -303,11 +304,25 @@ Deno.serve(async (req) => {
         return json({ ok: true, id: data.id, score: score.score, max: score.max || maxPoints(comp) });
       }
       case 'check_list': {
-        let q = sb.from('omr_checks').select('id, created_at, student, ticket_number, score, max_score, batch_id').eq('user_id', user.id).order('created_at', { ascending: false }).limit(40);
+        let q = sb.from('omr_checks').select('id, created_at, student, ticket_number, score, max_score, batch_id').eq('user_id', user.id).order('created_at', { ascending: false }).limit(300);
         if (typeof body.batchId === 'string') q = q.eq('batch_id', body.batchId);
         const { data, error } = await q;
         if (error) return json({ error: 'Не удалось загрузить результаты' }, 500);
         return json({ checks: data ?? [] });
+      }
+      // Одна сохранённая проверка с ответами и ключом — только своя
+      case 'check_get': {
+        if (!isUuid(body.id)) return json({ error: 'Не выбрана работа' }, 400);
+        const { data, error } = await sb.from('omr_checks').select('id, created_at, student, ticket_number, score, max_score, details').eq('id', body.id).eq('user_id', user.id).maybeSingle();
+        if (error) return json({ error: 'Не удалось загрузить работу' }, 500);
+        if (!data) return json({ error: 'Работа не найдена' }, 404);
+        return json({ check: data });
+      }
+      case 'check_delete': {
+        if (!isUuid(body.id)) return json({ error: 'Не выбрана работа' }, 400);
+        const { error } = await sb.from('omr_checks').delete().eq('id', body.id).eq('user_id', user.id);
+        if (error) return json({ error: 'Не удалось удалить результат' }, 500);
+        return json({ ok: true });
       }
       // Картинки цифр: общий набор для подсказок; без имён, только 14×14 пикселей и цифра
       case 'digits_get': {

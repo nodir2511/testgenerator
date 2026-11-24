@@ -4,6 +4,7 @@ import { describeError, must } from '../../lib/errors';
 import type { Question, QuestionType } from '../../types/database';
 import { useAuth } from '../../hooks/useAuth';
 import { PASSAGE_QUESTIONS } from '../../lib/passages';
+import { openAnswerProblem } from '../../lib/openAnswer';
 import type { MatchingItemState, TestOptionState } from '../../lib/questionDraft';
 
 // Всё, что сохранение читает из формы (состояние остаётся в QuestionForm)
@@ -12,6 +13,8 @@ export interface SaveQuestionDeps {
   uploadingImage: boolean;
   pendingUploads: number;
   subjectId: string;
+  /** Название предмета: по нему считается число клеток открытого ответа */
+  subjectName: string;
   chapterId: string;
   topicId: string;
   sourceId: string;
@@ -41,7 +44,7 @@ export function useSaveQuestion(deps: SaveQuestionDeps) {
   const { user, isOwner } = useAuth();
   const {
     initialData, uploadingImage, pendingUploads,
-    subjectId, chapterId, topicId, sourceId, nctType, nctDifficulty,
+    subjectId, subjectName, chapterId, topicId, sourceId, nctType, nctDifficulty,
     type, withPassage, passageId, passageOrder,
     contentRu, contentTg, imageUrl, correctNumeric,
     options, leftItems, rightItems,
@@ -92,6 +95,9 @@ export function useSaveQuestion(deps: SaveQuestionDeps) {
       }
 
       const numericVal = type === 'open' && correctNumeric.trim() !== '' ? Number(correctNumeric) : null;
+      // Ключ открытого вопроса должен вписываться в клетки бланка: целое, без минуса, не длиннее клеток предмета
+      const keyProblem = type === 'open' ? openAnswerProblem(numericVal, subjectName) : null;
+      if (keyProblem) throw new Error(keyProblem);
       const primaryContent = contentRu.trim() || contentTg.trim();
 
       const buildOptionRows = (qid: string) =>

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExamApiError, apiFocus, apiOpen, apiSave, apiSubmit, getServerOffset, tgApp } from './api';
 import { applyFocusSignal, createAwayReporter, isAway, NO_FOCUS_FLAGS, type FocusSignal } from './awayReporter';
-import { timesRu } from '../lib/examView';
+import { examErrorText, examTexts } from './i18n';
 import { ExamQuestion } from './ExamQuestion';
 import { isAnswered as isAnsweredQ, openCellsFor, saveOutcome, saveStatus, SAVE_WAIT_MAX_TRIES, SAVE_WAIT_RETRY_MS } from './examLogic';
 import { countAnswered, firstUnansweredPos, formatRemaining, navIndexes, progressFraction, remainingMs, stepNav, type Answer, type Answers, type ExamQ, type Lang } from './examLogic';
@@ -13,6 +13,9 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
   code: string; lang: Lang; subject: string; deadline: string; questions: ExamQ[]; initialAnswers: Answers;
   onFinished: (r: { score: number; max: number }) => void;
 }) {
+  const t = examTexts(lang); // весь интерфейс билета и предупреждения — на языке, который выбрал ученик
+  const tRef = useRef(t);
+  tRef.current = t;
   const [answers, setAnswers] = useState<Answers>(initialAnswers);
   const [unsaved, setUnsaved] = useState<Set<string>>(new Set());
   const [failed, setFailed] = useState<Set<string>>(new Set()); // последняя отправка не удалась (красное)
@@ -72,13 +75,13 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
       doneRef.current = true;
       onFinishedRef.current(r);
     } catch (e) {
-      setNotice(e instanceof ExamApiError ? e.message : 'Не удалось сдать билет. Повторите.');
+      setNotice(e instanceof ExamApiError ? examErrorText(e, lang) : tRef.current.submitFailed);
       if (auto) setConfirm(false);
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
     }
-  }, [code]);
+  }, [code, lang]);
 
   const send = useCallback((tqId: string): Promise<void> => {
     if (flying.current.has(tqId) || doneRef.current) return flying.current.get(tqId) ?? Promise.resolve();
@@ -101,8 +104,8 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
           if ((ver.current[tqId] ?? 0) === v) { markUnsaved(tqId, false); flag('saved', tqId, true); setNotice(''); return; }
         }
       } catch (e) {
-        if (e instanceof ExamApiError && e.status === 401) setNotice('Сессия Telegram устарела: ответ не сохранён. Закройте страницу и откройте ссылку на билет заново.');
-        else if (e instanceof ExamApiError && !e.retryable) { markUnsaved(tqId, false); setNotice(e.message); }
+        if (e instanceof ExamApiError && e.status === 401) setNotice(tRef.current.sessionExpired);
+        else if (e instanceof ExamApiError && !e.retryable) { markUnsaved(tqId, false); setNotice(examErrorText(e, lang)); }
         // сеть: остаётся «не сохранено», повтор по таймеру
         else flag('failed', tqId, true);
       } finally {
@@ -111,7 +114,7 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
       })();
     flying.current.set(tqId, p);
     return p;
-  }, [code, finish]);
+  }, [code, lang, finish]);
 
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   useEffect(() => { const m = timers.current; return () => m.forEach(clearTimeout); }, []);
@@ -217,10 +220,10 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
       <div className="exam-bar" style={{ flexWrap: 'wrap' }}>
         <span className={`timer${left < 60_000 ? ' low' : ''}`}>{formatRemaining(left)}</span>
         <span className="count">
-          Вопрос {pos + 1} из {total} · отвечено {answered}
+          {t.progress(pos + 1, total, answered)}
           {unsaved.size > 0 && (failed.size > 0
-            ? <span className="unsaved"> · не сохранено: {failed.size}</span>
-            : <span className="saving"> · сохраняем…</span>)}
+            ? <span className="unsaved"> · {t.unsavedCount(failed.size)}</span>
+            : <span className="saving"> · {t.saving}</span>)}
         </span>
         <div className="exam-progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={answered}>
           <div style={{ width: `${Math.round(progressFraction(answered, total) * 100)}%` }} />
@@ -228,7 +231,7 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
         <div className="exam-strip">
           {nav.map((idx, p) => (
             <button
-              key={questions[idx].tqId} id={`strip-${p}`} type="button" aria-label={`Вопрос ${p + 1}`}
+              key={questions[idx].tqId} id={`strip-${p}`} type="button" aria-label={t.questionAria(p + 1)}
               className={`${p === pos ? 'cur ' : ''}${isAnsweredQ(questions[idx].snapshot.type, answers[questions[idx].tqId]) ? 'done' : ''}`}
               onClick={() => setPos(p)}
             >{p + 1}</button>
@@ -239,7 +242,7 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
       {notice && <div className="exam-card lost">{notice}</div>}
       {awayCount > 0 && (
         <div className="exam-card lost" role="status">
-          Вы уходили со страницы билета: {timesRu(awayCount)}. Преподаватель это видит.
+          {t.away(awayCount)}
         </div>
       )}
 
@@ -253,20 +256,18 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
       )}
 
       <div className="exam-nav">
-        <button type="button" className="exam-btn ghost" disabled={pos === 0} onClick={() => setPos(stepNav(nav.length, pos, -1))}>Назад</button>
-        <button type="button" className="exam-btn" disabled={submitting} onClick={() => (last ? setConfirm(true) : setPos(stepNav(nav.length, pos, 1)))}>{last ? 'Сдать' : 'Далее'}</button>
+        <button type="button" className="exam-btn ghost" disabled={pos === 0} onClick={() => setPos(stepNav(nav.length, pos, -1))}>{t.back}</button>
+        <button type="button" className="exam-btn" disabled={submitting} onClick={() => (last ? setConfirm(true) : setPos(stepNav(nav.length, pos, 1)))}>{last ? t.submit : t.next}</button>
       </div>
 
       {confirm && (
         <div className="exam-modal" onClick={() => !submitting && setConfirm(false)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <b style={{ fontSize: 18 }}>{unanswered > 0 ? `Не отвечено: ${unanswered}. Сдать?` : 'Сдать билет?'}</b>
-            <div className="hint">
-              Отвечено {answered} из {total}.{unanswered > 0 ? ' Вопросы без ответа получат 0 баллов.' : ''} После сдачи изменить ответы нельзя.
-            </div>
+            <b style={{ fontSize: 18 }}>{t.confirmTitle(unanswered)}</b>
+            <div className="hint">{t.confirmHint(answered, total, unanswered)}</div>
             {notice && <div style={{ color: 'var(--bad)' }}>{notice}</div>}
-            <button type="button" className="exam-btn" disabled={submitting} onClick={() => void finish(false)}>{submitting ? 'Сдаём…' : 'Да, сдать'}</button>
-            <button type="button" className="exam-btn ghost" disabled={submitting} onClick={() => setConfirm(false)}>Вернуться к билету</button>
+            <button type="button" className="exam-btn" disabled={submitting} onClick={() => void finish(false)}>{submitting ? t.submitting : t.confirmYes}</button>
+            <button type="button" className="exam-btn ghost" disabled={submitting} onClick={() => setConfirm(false)}>{t.confirmBack}</button>
           </div>
         </div>
       )}

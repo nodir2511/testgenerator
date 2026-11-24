@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FormattedText } from '../components/FormulaEditor';
 import { isEmptyQ, matchingAnswer, openDigits, OPEN_CELLS, pickText, sortByOrder, type Answer, type Lang, type SaveStatus } from './examLogic';
+import { examTexts, type ExamTexts } from './i18n';
 
 const LETTERS = 'ABCDEFGH';
 
@@ -49,13 +50,13 @@ function OptionBody({ o, lang }: { o: any; lang: Lang }) {
 }
 
 /** Поле числа: клетки по одной цифре, как на бланке (cells — 4 или 5 по предмету). Каждое изменение сразу идёт наверх (там ответ учитывается в счётчике и сдаче), отправка на сервер — с паузой или по blur */
-function OpenField({ value, cells, onChange, onEnter }: { value: string; cells: number; onChange: (v: string, deferred: boolean) => void; onEnter?: () => void }) {
+function OpenField({ value, cells, t, onChange, onEnter }: { value: string; cells: number; t: ExamTexts; onChange: (v: string, deferred: boolean) => void; onEnter?: () => void }) {
   const [draft, setDraft] = useState(openDigits(value, cells));
   const refs = React.useRef<Array<HTMLInputElement | null>>([]);
   const focusAt = (i: number) => setTimeout(() => refs.current[Math.max(0, Math.min(cells - 1, i))]?.focus(), 0);
   const set = (v: string, at: number) => { setDraft(v); onChange(v, true); focusAt(at); };
   return (
-    <div className="open-cells" role="group" aria-label="Ответ — число, по одной цифре в клетке" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onChange(draft, false); }}>
+    <div className="open-cells" role="group" aria-label={t.openAria} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onChange(draft, false); }}>
       {Array.from({ length: cells }, (_, i) => (
         <input
           key={i}
@@ -63,7 +64,7 @@ function OpenField({ value, cells, onChange, onEnter }: { value: string; cells: 
           className="open-cell"
           inputMode="numeric"
           autoComplete="off"
-          aria-label={`Цифра ${i + 1}`}
+          aria-label={t.digitAria(i + 1)}
           value={draft[i] ?? ''}
           // клик в любую клетку ведёт к первой свободной: цифры идут слева направо без пропусков
           onFocus={(e) => { const t = Math.min(draft.length, cells - 1); if (i !== t) { refs.current[t]?.focus(); } else e.target.select(); }}
@@ -96,18 +97,47 @@ function OpenField({ value, cells, onChange, onEnter }: { value: string; cells: 
   );
 }
 
+/** Таблица ответа на соответствие, как на бумажном бланке: строки — левые пункты (A–D), столбцы — правые (1–5), в строке отмечается один кружок */
+export function MatchTable({ left, right, answer, onAnswer }: { left: Array<{ id: string }>; right: Array<{ id: string }>; answer: Answer | undefined; onAnswer: (a: Answer) => void }) {
+  const current = answer && typeof answer === 'object' ? answer : {};
+  return (
+    <div className="m-table" style={{ gridTemplateColumns: `32px repeat(${right.length}, minmax(0, 48px))` }}>
+      <i aria-hidden="true" />
+      {right.map((r, k) => <b key={r.id} aria-hidden="true">{k + 1}</b>)}
+      {left.map((l, i) => (
+        <div className="m-tr" key={l.id} role="radiogroup" aria-label={LETTERS[i]}>
+          <b aria-hidden="true">{LETTERS[i]}</b>
+          {right.map((r, k) => {
+            const on = current[l.id] === r.id;
+            return (
+              <button
+                key={r.id} type="button" role="radio" aria-checked={on} className={on ? 'on' : ''}
+                aria-label={`${LETTERS[i]} — ${k + 1}`}
+                onClick={() => {
+                  const next = matchingAnswer(answer, l.id, on ? null : r.id);
+                  onAnswer(Object.keys(next).length ? next : null);
+                }}
+              ><i /></button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Вопрос для ответа: варианты, пары, число. Каждое изменение сразу уходит наверх (там сохраняется на сервере). */
 export function ExamQuestion({ snap, n, lang, prevPassageId, answer, saveState, onAnswer, onEnter, openCells = OPEN_CELLS }: CommonProps & {
   answer: Answer | undefined; saveState: SaveStatus; onAnswer: (a: Answer, deferred?: boolean) => void; onEnter?: () => void;
   /** сколько клеток у открытого ответа (по предмету, как на бланке) */
   openCells?: number;
 }) {
+  const t = examTexts(lang);
   if (isEmptyQ(snap)) {
-    return <div className="exam-card"><b>{n}.</b> <span className="hint">Это место в билете пустое — пропустите его.</span></div>;
+    return <div className="exam-card"><b>{n}.</b> <span className="hint">{t.emptyPlace}</span></div>;
   }
   const options = [...(snap.options ?? [])].sort(sortByOrder);
   const { left, right } = sides(snap);
-  const current = answer && typeof answer === 'object' ? answer : {};
 
   return (
     <div className="exam-card" id={`q-${n}`}>
@@ -131,40 +161,29 @@ export function ExamQuestion({ snap, n, lang, prevPassageId, answer, saveState, 
 
       {snap.type === 'matching' && (
         <>
-          <div className="m-rights">
+          <div className="m-items">
+            {left.map((l, i) => (
+              <div key={l.id}><b>{LETTERS[i]})</b><FormattedText text={pickText(l, lang)} />{l.image_url && <img className="q-img" src={l.image_url} alt="" loading="lazy" />}</div>
+            ))}
+          </div>
+          <div className="m-items m-second">
             {right.map((r, i) => (
               <div key={r.id}><b>{i + 1})</b><FormattedText text={pickText(r, lang)} />{r.image_url && <img className="q-img" src={r.image_url} alt="" loading="lazy" />}</div>
             ))}
           </div>
-          {left.map((l, i) => (
-            <div className="m-row" key={l.id}>
-              <div><b className="hint">{LETTERS[i]})</b> <FormattedText text={pickText(l, lang)} />{l.image_url && <img className="q-img" src={l.image_url} alt="" loading="lazy" />}</div>
-              <div className="m-pick">
-                {right.map((r, k) => (
-                  <button
-                    key={r.id} type="button" className={current[l.id] === r.id ? 'on' : ''}
-                    aria-label={`${LETTERS[i]} — ${k + 1}`}
-                    onClick={() => {
-                      const next = matchingAnswer(answer, l.id, current[l.id] === r.id ? null : r.id);
-                      onAnswer(Object.keys(next).length ? next : null);
-                    }}
-                  >{k + 1}</button>
-                ))}
-              </div>
-            </div>
-          ))}
+          <MatchTable left={left} right={right} answer={answer} onAnswer={onAnswer} />
         </>
       )}
 
       {snap.type === 'open' && (
         <div style={{ marginTop: 10 }}>
-          <OpenField value={typeof answer === 'string' ? answer : ''} cells={openCells} onChange={(v, deferred) => onAnswer(v === '' ? null : v, deferred)} onEnter={onEnter} />
+          <OpenField value={typeof answer === 'string' ? answer : ''} cells={openCells} t={t} onChange={(v, deferred) => onAnswer(v === '' ? null : v, deferred)} onEnter={onEnter} />
         </div>
       )}
 
-      {saveState === 'saving' && <div className="q-saving">сохраняем…</div>}
-      {saveState === 'failed' && <div className="q-unsaved">не сохранено — повторяем отправку…</div>}
-      {saveState === 'saved' && <div className="q-saved">✓ сохранено</div>}
+      {saveState === 'saving' && <div className="q-saving">{t.saving}</div>}
+      {saveState === 'failed' && <div className="q-unsaved">{t.saveFailed}</div>}
+      {saveState === 'saved' && <div className="q-saved">{t.saved}</div>}
     </div>
   );
 }
@@ -174,6 +193,7 @@ const None = '—';
 /** Вопрос в разборе: условие, ответ ученика и верный ответ. Верное — зелёным, ошибка — красным. */
 export function ReviewQuestion({ snap, n, lang, prevPassageId, answer, points, max }: CommonProps & { answer: Answer; points: number; max: number }) {
   if (isEmptyQ(snap)) return null;
+  const t = examTexts(lang);
   const options = [...(snap.options ?? [])].sort(sortByOrder);
   const { left, right } = sides(snap);
   const given = answer && typeof answer === 'object' ? answer : {};
@@ -182,7 +202,7 @@ export function ReviewQuestion({ snap, n, lang, prevPassageId, answer, points, m
     <div className="exam-card lost">
       <Passage snap={snap} prevPassageId={prevPassageId} />
       <Head snap={snap} n={n} lang={lang} />
-      <div className="hint" style={{ marginTop: 4 }}>Баллы: {points} из {max}</div>
+      <div className="hint" style={{ marginTop: 4 }}>{t.points(points, max)}</div>
 
       {snap.type === 'test' && (
         <div className="opts">
@@ -192,11 +212,11 @@ export function ReviewQuestion({ snap, n, lang, prevPassageId, answer, points, m
               <div key={o.id} className={`opt${cls}`}>
                 <span className="let">{LETTERS[i]})</span>
                 <OptionBody o={o} lang={lang} />
-                <span style={{ marginLeft: 'auto', fontSize: 13 }}>{o.is_correct ? 'верный' : answer === o.id ? 'ваш' : ''}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 13 }}>{o.is_correct ? t.correct : answer === o.id ? t.yours : ''}</span>
               </div>
             );
           })}
-          {answer == null && <div className="rv-line bad">Вы не ответили</div>}
+          {answer == null && <div className="rv-line bad">{t.notAnswered}</div>}
         </div>
       )}
 
@@ -213,8 +233,8 @@ export function ReviewQuestion({ snap, n, lang, prevPassageId, answer, points, m
               <div className="m-row" key={l.id}>
                 <div><b className="hint">{LETTERS[i]})</b> <FormattedText text={pickText(l, lang)} /></div>
                 <div className={`rv-line ${ok ? 'good' : 'bad'}`}>
-                  <span className="lbl">Ваш ответ: </span>{mine >= 0 ? mine + 1 : None}
-                  {' · '}<span className="lbl">Верный: </span>{key >= 0 ? key + 1 : None}
+                  <span className="lbl">{t.yourAnswer}</span>{mine >= 0 ? mine + 1 : None}
+                  {' · '}<span className="lbl">{t.rightShort}</span>{key >= 0 ? key + 1 : None}
                 </div>
               </div>
             );
@@ -224,8 +244,8 @@ export function ReviewQuestion({ snap, n, lang, prevPassageId, answer, points, m
 
       {snap.type === 'open' && (
         <>
-          <div className="rv-line bad"><span className="lbl">Ваш ответ: </span>{typeof answer === 'string' && answer.trim() ? answer : None}</div>
-          <div className="rv-line good"><span className="lbl">Верный ответ: </span>{snap.correct_numeric_answer == null ? None : String(snap.correct_numeric_answer)}</div>
+          <div className="rv-line bad"><span className="lbl">{t.yourAnswer}</span>{typeof answer === 'string' && answer.trim() ? answer : None}</div>
+          <div className="rv-line good"><span className="lbl">{t.rightAnswer}</span>{snap.correct_numeric_answer == null ? None : String(snap.correct_numeric_answer)}</div>
         </>
       )}
     </div>
