@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ExamApiError, apiOpen, apiSave, apiSubmit, getServerOffset } from './api';
+import { ExamApiError, apiFocus, apiOpen, apiSave, apiSubmit, getServerOffset, tgApp } from './api';
+import { applyFocusSignal, createAwayReporter, isAway, NO_FOCUS_FLAGS, type FocusSignal } from './awayReporter';
+import { timesRu } from '../lib/examView';
 import { ExamQuestion } from './ExamQuestion';
 import { isAnswered as isAnsweredQ, saveOutcome, saveStatus, SAVE_WAIT_MAX_TRIES, SAVE_WAIT_RETRY_MS } from './examLogic';
 import { countAnswered, firstUnansweredPos, formatRemaining, navIndexes, progressFraction, remainingMs, stepNav, type Answer, type Answers, type ExamQ, type Lang } from './examLogic';
@@ -157,6 +159,50 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
     return () => clearInterval(t);
   }, [unsaved.size, send]);
 
+  // Уход со страницы (свернули Telegram, другое окно или приложение поверх): сообщаем серверу, преподаватель видит это в таблице
+  const [awayCount, setAwayCount] = useState(0);
+  useEffect(() => {
+    const reporter = createAwayReporter((away, ms) => apiFocus(code, away, ms), {
+      isRetryable: (e) => !(e instanceof ExamApiError) || e.retryable,
+    });
+    let flags = { ...NO_FOCUS_FLAGS, hidden: document.hidden };
+    if (isAway(flags)) reporter.leave(); else reporter.arrive();
+    const on = (s: FocusSignal) => () => {
+      const was = isAway(flags);
+      flags = applyFocusSignal(flags, s);
+      // Страница снова видна и фокус уже у неё: отдельное событие focus приходит не во всех приложениях
+      if ((s === 'visible' || s === 'active') && document.hasFocus()) flags = applyFocusSignal(flags, 'focus');
+      const away = isAway(flags);
+      if (away && !was) reporter.leave();
+      else if (!away && was) { reporter.back(); setAwayCount(reporter.count); }
+    };
+    const onVisibility = () => on(document.hidden ? 'hidden' : 'visible')();
+    const onHidden = on('hidden'), onBlur = on('blur'), onFocus = on('focus'), onTouch = on('touch');
+    const onInactive = on('inactive'), onActive = on('active');
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', onHidden);
+    window.addEventListener('pageshow', onVisibility);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pointerdown', onTouch, true);
+    window.addEventListener('keydown', onTouch, true);
+    const tg = tgApp();
+    tg?.onEvent?.('deactivated', onInactive);
+    tg?.onEvent?.('activated', onActive);
+    return () => {
+      reporter.stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', onHidden);
+      window.removeEventListener('pageshow', onVisibility);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pointerdown', onTouch, true);
+      window.removeEventListener('keydown', onTouch, true);
+      tg?.offEvent?.('deactivated', onInactive);
+      tg?.offEvent?.('activated', onActive);
+    };
+  }, [code]);
+
   useEffect(() => {
     document.getElementById(`strip-${pos}`)?.scrollIntoView({ block: 'nearest', inline: 'center' });
     window.scrollTo({ top: 0 });
@@ -191,6 +237,11 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
       </div>
 
       {notice && <div className="exam-card lost">{notice}</div>}
+      {awayCount > 0 && (
+        <div className="exam-card lost" role="status">
+          Вы уходили со страницы билета: {timesRu(awayCount)}. Преподаватель это видит.
+        </div>
+      )}
 
       {q && (
         <ExamQuestion

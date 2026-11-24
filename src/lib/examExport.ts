@@ -15,7 +15,7 @@ export async function exportExamToExcel(title: string, attempts: SheetAttempt[],
     head.map((c) => ({ ...c, fontWeight: 'bold' as const, backgroundColor: '#6C5DD3', color: '#FFFFFF', align: 'center' as const })),
     ...body,
   ];
-  const columns = [{ width: 30 }, { width: 22 }, { width: 10 }, { width: 10 }, { width: 12 }, { width: 8 }, { width: 12 }];
+  const columns = [{ width: 30 }, { width: 22 }, { width: 10 }, { width: 10 }, { width: 12 }, { width: 8 }, { width: 12 }, { width: 13 }, { width: 17 }];
   const blob = await writeExcelFile([{ data: rows, sheet: 'Попытки', columns }] as any).toBlob();
   saveAs(blob, examExcelName(title));
 }

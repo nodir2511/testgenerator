@@ -91,7 +91,63 @@ export function formatScore(score: number | null, max: number | null): string {
   return score == null || max == null ? '' : `${score} / ${max}`;
 }
 
-export interface AttemptInput extends Finishable {
+/** Уходы ученика со страницы билета (exam_attempts): сколько раз, сколько всего мс и с какого момента не на странице сейчас */
+export interface AwayFields { away_count?: number | null; away_ms?: number | null; away_since?: string | null }
+
+/** «1 раз», «2 раза», «5 раз», «21 раз», «22 раза» */
+export function timesRu(n: number): string {
+  const d = n % 10, h = n % 100;
+  return `${n} ${d >= 2 && d <= 4 && !(h >= 12 && h <= 14) ? 'раза' : 'раз'}`;
+}
+
+/** Длительность словами: «48 с», «2 мин», «1 мин 20 с»; меньше секунды — «1 с» */
+export function formatAwayMs(ms: number): string {
+  const s = Math.max(1, Math.round(Math.max(0, ms) / 1000));
+  const m = Math.floor(s / 60);
+  if (m === 0) return `${s} с`;
+  return s % 60 === 0 ? `${m} мин` : `${m} мин ${s % 60} с`;
+}
+
+/** «0:14», «12:05»: минуты и секунды, меньше нуля — «0:00» */
+export const formatClock = (ms: number): string => {
+  const s = Math.floor(Math.max(0, ms) / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+
+export interface AwayView {
+  /** Текст столбца «Уходил»; пусто — не уходил */
+  text: string;
+  /** Не на странице прямо сейчас (и билет ещё идёт) */
+  now: boolean;
+  count: number;
+}
+
+/** Столбец «Уходил»: кто не на странице сейчас и как давно, иначе — сколько раз уходил и на сколько всего */
+export function awayView(a: AwayFields, status: AttemptState, now: number): AwayView {
+  const count = Math.max(0, a.away_count ?? 0);
+  const since = a.away_since ? Date.parse(a.away_since) : NaN;
+  if (status === 'running' && !Number.isNaN(since)) {
+    return { text: `сейчас не на странице · ${formatClock(now - since)}${count > 1 ? ` · уже ${timesRu(count)}` : ''}`, now: true, count };
+  }
+  if (count === 0) return { text: '', now: false, count };
+  return { text: `${timesRu(count)} · всего ${formatAwayMs(a.away_ms ?? 0)}`, now: false, count };
+}
+
+/**
+ * Кто ушёл со страницы с прошлого опроса таблицы: имена тех, у кого вырос счётчик уходов.
+ * prev — счётчики прошлого опроса по id попытки; null — первый опрос (о старых уходах не сообщаем).
+ */
+export function newAwayNames(
+  prev: ReadonlyMap<string, number> | null,
+  attempts: Array<{ id: string; student_name: string } & AwayFields>,
+): string[] {
+  if (!prev) return [];
+  return attempts.filter((a) => (a.away_count ?? 0) > (prev.get(a.id) ?? 0)).map((a) => a.student_name);
+}
+
+export const awayToastText = (names: string[]): string => `Уход со страницы билета: ${names.join(', ')}`;
+
+export interface AttemptInput extends Finishable, AwayFields {
   id: string;
   student_name: string;
   tg_username: string | null;
@@ -112,6 +168,9 @@ export interface AttemptRowView {
   /** Для идущих и просроченных — пояснение вместо баллов */
   note: string;
   finishedAt: string | null;
+  /** Столбец «Уходил» (пусто — не уходил) и признак «не на странице сейчас» */
+  away: string;
+  awayNow: boolean;
 }
 
 export function mapAttemptRow(a: AttemptInput, now: number, link: SessionLinkTimes): AttemptRowView {
@@ -121,7 +180,10 @@ export function mapAttemptRow(a: AttemptInput, now: number, link: SessionLinkTim
   const note = status === 'running' ? (end ? `идёт, осталось ${remainingMinutes(end, now)} мин` : 'ждёт начала')
     : status === 'timeout' ? 'время вышло, баллы появятся после подсчёта'
     : status === 'not_started' ? 'не начал' : '';
+  const away = awayView(a, status, now);
   return {
+    away: away.text,
+    awayNow: away.now,
     id: a.id,
     name: a.student_name,
     account: a.tg_username ? `@${a.tg_username}` : (a.tg_name ?? ''),

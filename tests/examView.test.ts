@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  canLaunchByUser, sessionEndOf, canStartSession, finishedInSession, startedMinutesNotice, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, canLaunchBatch, formatScore, summaryText, reviewSendState, reviewConfirmText, reviewResultText,
+  canLaunchByUser, sessionEndOf, canStartSession, finishedInSession, startedMinutesNotice, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, timesRu, formatAwayMs, awayView, newAwayNames, awayToastText, canLaunchBatch, formatScore, summaryText, reviewSendState, reviewConfirmText, reviewResultText,
 } from '../src/lib/examView';
 
 const NOW = Date.parse('2026-11-22T10:00:00.000Z');
@@ -135,6 +135,51 @@ describe('строка таблицы', () => {
     const r = mapAttemptRow(run, NOW, L());
     expect(r.status).toBe('running');
     expect(r.note).toBe('ждёт начала');
+  });
+  it('столбец «Уходил»: не уходил — пусто; уходил — сколько раз и на сколько; сейчас не на странице — отдельно', () => {
+    expect(mapAttemptRow(run, NOW, link)).toMatchObject({ away: '', awayNow: false });
+    expect(mapAttemptRow({ ...run, away_count: 2, away_ms: 48_000, away_since: null }, NOW, link)).toMatchObject({ away: '2 раза · всего 48 с', awayNow: false });
+    expect(mapAttemptRow({ ...run, away_count: 1, away_ms: 0, away_since: new Date(NOW - 14_000).toISOString() }, NOW, link)).toMatchObject({ away: 'сейчас не на странице · 0:14', awayNow: true });
+  });
+});
+
+describe('уходы со страницы билета', () => {
+  const since = (sec: number) => new Date(NOW - sec * 1000).toISOString();
+  it('число раз по-русски', () => {
+    expect([1, 2, 4, 5, 11, 12, 14, 21, 22, 25, 111, 112].map(timesRu)).toEqual(
+      ['1 раз', '2 раза', '4 раза', '5 раз', '11 раз', '12 раз', '14 раз', '21 раз', '22 раза', '25 раз', '111 раз', '112 раз'],
+    );
+  });
+  it('длительность словами', () => {
+    expect([0, 400, 48_000, 60_000, 80_000, 125_400].map(formatAwayMs)).toEqual(['1 с', '1 с', '48 с', '1 мин', '1 мин 20 с', '2 мин 5 с']);
+  });
+  it('сейчас не на странице: счёт времени, со второго раза — сколько уже раз', () => {
+    expect(awayView({ away_count: 1, away_ms: 0, away_since: since(75) }, 'running', NOW)).toEqual({ text: 'сейчас не на странице · 1:15', now: true, count: 1 });
+    expect(awayView({ away_count: 3, away_ms: 20_000, away_since: since(5) }, 'running', NOW).text).toBe('сейчас не на странице · 0:05 · уже 3 раза');
+  });
+  it('часы преподавателя отстают от сервера — счёт не уходит в минус', () => {
+    expect(awayView({ away_count: 1, away_since: since(-30) }, 'running', NOW).text).toBe('сейчас не на странице · 0:00');
+  });
+  it('билет уже не идёт — «сейчас не на странице» не показываем, даже если уход не закрыт', () => {
+    expect(awayView({ away_count: 2, away_ms: 30_000, away_since: since(600) }, 'timeout', NOW)).toEqual({ text: '2 раза · всего 30 с', now: false, count: 2 });
+    expect(awayView({ away_count: 1, away_ms: 90_000, away_since: null }, 'finished', NOW).text).toBe('1 раз · всего 1 мин 30 с');
+  });
+  it('старая база без этих полей — как «не уходил»', () => {
+    expect(awayView({}, 'running', NOW)).toEqual({ text: '', now: false, count: 0 });
+  });
+  it('предупреждение — только о новых уходах: первый опрос запоминает, дальше — у кого вырос счётчик', () => {
+    const rows = [
+      { id: 'a', student_name: 'Алиев Али', away_count: 2 },
+      { id: 'b', student_name: 'Каримова Зарина', away_count: 0 },
+      { id: 'c', student_name: 'Назаров Фаррух' },
+    ];
+    expect(newAwayNames(null, rows)).toEqual([]);
+    const prev = new Map([['a', 2], ['b', 0]]);
+    expect(newAwayNames(prev, rows)).toEqual([]);
+    expect(newAwayNames(prev, [{ ...rows[0], away_count: 3 }, { ...rows[1], away_count: 1 }, rows[2]])).toEqual(['Алиев Али', 'Каримова Зарина']);
+    // опоздавший, которого в прошлом опросе не было
+    expect(newAwayNames(prev, [...rows, { id: 'd', student_name: 'Новый', away_count: 1 }])).toEqual(['Новый']);
+    expect(awayToastText(['Алиев Али', 'Каримова Зарина'])).toBe('Уход со страницы билета: Алиев Али, Каримова Зарина');
   });
 });
 

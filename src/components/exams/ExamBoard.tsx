@@ -1,27 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart3, Loader2, Lock, Send } from 'lucide-react';
+import { BarChart3, Loader2, Lock, Presentation, Send } from 'lucide-react';
+import { examScreenPath } from '../../lib/examScreen';
 import { ExamExcelButton } from './ExamExcelButton';
 import { SessionLobby } from './SessionLobby';
 import { QuestionStats } from './QuestionStats';
 import { callExamTeacher, NotLinkedError, sendReview, closeExamLink, EXAM_LINKS_KEY, examAttemptsKey, examAttemptsFullKey, fetchAttempts, type ExamLinkRow } from '../../lib/examLinks';
-import { linkState, mapAttemptRow, reviewConfirmText, reviewResultText, reviewSendState } from '../../lib/examView';
+import { awayToastText, linkState, mapAttemptRow, newAwayNames, reviewConfirmText, reviewResultText, reviewSendState } from '../../lib/examView';
 import { confirmAction } from '../../lib/confirm';
 import { notifyError, notifyInfo, notifySuccess } from '../../lib/errors';
 import { Button } from '../ui';
 
 const fmtTime = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '');
 
-/** Таблица попыток одного запуска; пока запуск открыт, обновляется каждые 5 секунд */
+const BOARD_POLL_MS = 3000;
+
+/** Таблица попыток одного запуска; пока запуск открыт, обновляется каждые 3 секунды (так же быстро видно, кто ушёл со страницы билета) */
 export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
   const queryClient = useQueryClient();
   const [now, setNow] = useState(() => Date.now());
   const [showStats, setShowStats] = useState(false);
-  // Остаток времени у идущих пересчитывается без запроса к базе
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 15_000);
-    return () => clearInterval(t);
-  }, []);
 
   const state = linkState(link, now);
   const waiting = state === 'waiting';
@@ -30,13 +28,29 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
     queryKey: examAttemptsKey(link.code),
     queryFn: () => fetchAttempts(link.code),
     // В ожидании список опрашивает SessionLobby (каждые 3 с)
-    refetchInterval: waiting ? false : open ? 5000 : false,
+    refetchInterval: waiting ? false : open ? BOARD_POLL_MS : false,
     enabled: !waiting,
     meta: { action: 'Не удалось загрузить попытки учеников' },
   });
   useEffect(() => { setNow(Date.now()); }, [data]);
 
   const rows = (data ?? []).map((a) => mapAttemptRow(a, now, link));
+
+  // Остаток времени у идущих пересчитывается без запроса к базе; пока кто-то не на странице — каждую секунду (идёт счёт «0:14»)
+  const someoneAway = rows.some((r) => r.awayNow);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), someoneAway ? 1000 : 15_000);
+    return () => clearInterval(t);
+  }, [someoneAway]);
+
+  // Предупреждение, как только у кого-то вырос счётчик уходов со страницы билета (первый опрос — только запоминаем)
+  const awaySeen = useRef<Map<string, number> | null>(null);
+  useEffect(() => {
+    if (!data) return;
+    const names = open ? newAwayNames(awaySeen.current, data) : [];
+    if (names.length) notifyInfo(awayToastText(names));
+    awaySeen.current = new Map(data.map((a) => [a.id, a.away_count ?? 0]));
+  }, [data, open]);
 
   const close = useMutation({
     mutationFn: async () => {
@@ -105,6 +119,12 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-slate-600">{waiting ? 'Ждём учеников: начните, когда все придут.' : open ? 'Таблица обновляется сама.' : 'Запуск закрыт.'}</p>
         <div className="flex items-center gap-2">
+          {open && (
+            <Button
+              variant="secondary" size="sm" icon={Presentation} title="Откроется в новой вкладке: QR-код, список вошедших, таймер и кто ушёл со страницы"
+              onClick={() => window.open(examScreenPath(link.code), '_blank', 'noopener')}
+            >На экран</Button>
+          )}
           <Button variant="secondary" size="sm" icon={BarChart3} onClick={() => setShowStats((v) => !v)}>{showStats ? 'Скрыть разбор' : 'Разбор по вопросам'}</Button>
           <ExamExcelButton link={link} />
           <Button variant="secondary" size="sm" icon={Send} loading={send.isPending} disabled={!review.enabled} title={review.hint || undefined} onClick={onSendReview}>Отправить разбор ученикам</Button>
@@ -128,6 +148,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
                 <th className="px-2 py-2 font-semibold">Имя</th>
                 <th className="px-2 py-2 font-semibold">Аккаунт</th>
                 <th className="px-2 py-2 font-semibold">Вариант</th>
+                <th className="px-2 py-2 font-semibold">Уходил</th>
                 <th className="px-2 py-2 font-semibold">Баллы</th>
                 <th className="px-2 py-2 font-semibold">Сдал</th>
               </tr>
@@ -138,6 +159,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
                   <td className="px-2 py-2.5 font-semibold text-slate-900">{r.name}</td>
                   <td className="px-2 py-2.5 text-slate-600">{r.account}</td>
                   <td className="px-2 py-2.5 text-slate-700">{r.variant}</td>
+                  <td className={r.awayNow ? 'px-2 py-2.5 font-semibold text-rose-700' : r.away ? 'px-2 py-2.5 text-amber-700' : 'px-2 py-2.5 text-slate-400'}>{r.away || '—'}</td>
                   {r.status === 'finished' ? (
                     <>
                       <td className="px-2 py-2.5 font-semibold text-slate-900 whitespace-nowrap">{r.score}</td>

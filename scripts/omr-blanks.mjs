@@ -15,14 +15,17 @@ const PAGE = { w: 210, h: 297 };
 const LETTERS = ['A', 'B', 'C', 'D'];
 const VARIANTS = 4; // на бланке четыре варианта (кружки 1–4)
 
-// Виды бланков: высота, сколько на листе, отступ сверху, вертикали шапки и меток
+// Виды бланков: высота, сколько на листе, отступ сверху, вертикали шапки и меток.
+// pitch — шаг бланков на листе, если он больше высоты: бланк стоит посередине своей доли листа,
+// линии разреза идут между долями. Координаты внутри бланка от pitch не зависят.
 const KINDS = {
   // 18 тестов, 2 соответствия, 7 открытых
   k18: { h: 99, perPage: 3, top: 0, total: 27, markY: [6, 88], headY: 15.5, ruleY: 17.2, titleY: 24.2, varNumY: 10.9, varY: 14.3, varX: 175, varStep: 5.4, varD: 4.2, codeY: 88.5, footY: 91 },
   // 20 тестов, 4 соответствия, 2 открытых
   k20: { h: 99, perPage: 3, top: 0, total: 26, markY: [6, 88], headY: 15.5, ruleY: 17.2, titleY: 24.2, varNumY: 10.9, varY: 14.3, varX: 175, varStep: 5.4, varD: 4.2, codeY: 88.5, footY: 91 },
-  // 8 тестов, 2 соответствия, 2 открытых — расположение как в прежнем бланке, шесть на листе
-  k12: { h: 47.5, perPage: 6, top: 6, total: 12, markY: [1.5, 42], headY: 8.3, ruleY: 9.8, titleY: 14, varNumY: 3.9, varY: 7.2, varX: 175, varStep: 5, varD: 4, codeY: 43.2, footY: 45.7 },
+  // 8 тестов, 2 соответствия, 2 открытых — расположение как в прежнем бланке, пять на листе:
+  // лист режется на пять равных частей (по 59,4 мм), от линии разреза до угловых меток по 7,45 мм
+  k12: { h: 47.5, perPage: 5, pitch: PAGE.h / 5, top: 0, total: 12, markY: [1.5, 42], headY: 8.3, ruleY: 9.8, titleY: 14, varNumY: 3.9, varY: 7.2, varX: 175, varStep: 5, varD: 4, codeY: 43.2, footY: 45.7 },
 };
 
 const SUBJECTS = [
@@ -155,12 +158,13 @@ function buildPage(subject) {
   const { svg, layout, K } = buildStrip(subject);
   const parts = [];
   const cut = (y) => parts.push(`<line x1="0" y1="${n(y)}" x2="${PAGE.w}" y2="${n(y)}" stroke="#000" stroke-width="0.25" stroke-dasharray="1 1.2"/>`);
+  const pitch = K.pitch ?? K.h, pad = (pitch - K.h) / 2;
   for (let i = 0; i < K.perPage; i++) {
-    const y = K.top + i * K.h;
-    parts.push(`<g transform="translate(0 ${n(y)})">\n${svg}\n</g>`);
+    const y = K.top + i * pitch;
+    parts.push(`<g transform="translate(0 ${n(y + pad)})">\n${svg}\n</g>`);
     if (i || K.top) cut(y);
   }
-  if (K.top) cut(K.top + K.perPage * K.h);
+  if (K.top) cut(K.top + K.perPage * pitch);
   const page = `<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE.w}mm" height="${PAGE.h}mm" viewBox="0 0 ${PAGE.w} ${PAGE.h}" font-family="'Times New Roman', Times, serif">\n${parts.join('\n')}\n</svg>`;
   return { page, layout, K };
 }
@@ -173,7 +177,7 @@ for (const s of SUBJECTS) {
   fs.writeFileSync(path.join(OUT, `${s.id}.html`), html);
   fs.writeFileSync(
     path.join(OUT, `${s.id}.layout.json`),
-    JSON.stringify({ id: s.id, code: s.code, title: s.title, kind: s.kind, strip: { w: PAGE.w, h: K.h }, perPage: K.perPage, pageTop: K.top, ...layout }, null, 1),
+    JSON.stringify({ id: s.id, code: s.code, title: s.title, kind: s.kind, strip: { w: PAGE.w, h: K.h }, perPage: K.perPage, pageTop: K.top, pagePitch: n(K.pitch ?? K.h), ...layout }, null, 1),
   );
   if (s.like) continue;
   all[s.id] = { id: s.id, code: s.code, kind: s.kind, strip: { w: PAGE.w, h: K.h }, markers: layout.markers, codeCells: layout.code, variant: layout.variant, tests: layout.tests, matching: layout.matching, open: layout.open };

@@ -10,6 +10,7 @@ export interface TgWebApp {
   expand(): void;
   colorScheme?: 'light' | 'dark';
   onEvent?(e: string, cb: () => void): void;
+  offEvent?(e: string, cb: () => void): void;
   HapticFeedback?: { notificationOccurred(s: string): void };
 }
 export const tgApp = (): TgWebApp | undefined => (window as unknown as { Telegram?: { WebApp?: TgWebApp } }).Telegram?.WebApp;
@@ -38,12 +39,14 @@ const FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tg-exam`;
 let serverOffsetMs: number | null = null;
 export const getServerOffset = (): number | null => serverOffsetMs;
 
-export async function examApi<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {
+/** keepalive — запрос должен уйти, даже если страницу тут же свернули или закрыли (сообщение об уходе) */
+export async function examApi<T>(action: string, body: Record<string, unknown> = {}, opts: { keepalive?: boolean } = {}): Promise<T> {
   let res: Response;
   const sentAt = Date.now();
   try {
     res = await fetch(FN_URL, {
       method: 'POST',
+      keepalive: opts.keepalive === true,
       headers: { 'Content-Type': 'application/json', 'X-Tg-Init-Data': tgApp()?.initData ?? '' },
       body: JSON.stringify({ action, ...body }),
     });
@@ -75,5 +78,8 @@ export const apiStart = (code: string, name: string, lang: Lang = 'ru') => examA
 export const apiSave = (code: string, tqId: string, answer: Answer) =>
   // waiting — по часам сервера сессия ещё не началась (граница старта): ответ не записан, повторить
   examApi<{ ok: boolean; state?: 'new' | 'closed' | 'finished' | 'waiting'; now?: number }>('save', { code, tqId, answer });
-export const apiSubmit = (code: string) => examApi<{ score: number; max: number; now?: number }>('submit', { code });
+/** Ученик ушёл со страницы билета (away) или вернулся (ms — сколько его не было по часам телефона) */
+export const apiFocus = (code: string, away: boolean, ms?: number) =>
+  examApi<{ ok: boolean }>('focus', { code, away, ...(ms == null ? {} : { ms }) }, { keepalive: true });
+export const apiSubmit =(code: string) => examApi<{ score: number; max: number; now?: number }>('submit', { code });
 export const apiReview = (code: string) => examApi<{ questions: ReviewItem[] }>('review', { code });

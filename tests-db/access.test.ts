@@ -325,6 +325,59 @@ describe('билеты классу', () => {
     expect(err).toMatch(/Кластерный набор/);
   });
 
+  it('exam_attempt_focus: уходы со страницы считаются только в идущей сессии, сдача закрывает незавершённый уход', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      const ticket = (await q('select id from public.tickets where batch_id = $1', [r.batch.id]))[0].id;
+      const denied = await rejected(q, 'select public.exam_attempt_focus($1, true)', ['00000000-0000-0000-0000-000000000000']);
+      await q('reset role');
+      await newAttempt(q, link.code, ticket);
+      const id = (await q('select id from public.exam_attempts where code = $1', [link.code]))[0].id;
+      const focus = async (away: boolean, ms: number | null = null) =>
+        (await q('select public.exam_attempt_focus($1, $2, $3) as ok', [id, away, ms]))[0].ok as boolean;
+      const row = async () => {
+        const x = (await q('select away_count, away_ms, away_since is not null as away, finished_at is not null as done from public.exam_attempts where id = $1', [id]))[0];
+        return { count: x.away_count as number, ms: Number(x.away_ms), away: x.away as boolean, done: x.done as boolean };
+      };
+      // now() внутри транзакции стоит на месте, поэтому «прошло N секунд» задаём сдвигом away_since назад
+      const ago = (sec: number) => q(`update public.exam_attempts set away_since = now() - make_interval(secs => $2) where id = $1`, [id, sec]);
+
+      const beforeStart = await focus(true); // сессия не начата — не считается
+      await q("update public.exam_links set session_start_at = now() - interval '1 minute' where code = $1", [link.code]);
+      const left = await focus(true);
+      const leftTwice = await focus(true);
+      const afterLeave = await row();
+      await ago(10);
+      const back = await focus(false, 999_999); // уход записан — длительность по часам базы, не клиента
+      const afterBack = await row();
+      const backAgain = await focus(false); // уже на странице и без длительности — нечего писать
+      const lost = await focus(false, 5000); // уход не дошёл: засчитывается по длительности клиента
+      const afterLost = await row();
+      await focus(false, 36_000_000); // клиент прислал 10 часов — не больше времени от старта сессии (1 минута)
+      const afterHuge = await row();
+      await focus(true);
+      await ago(20);
+      await q('select public.exam_attempt_close($1)', [id]);
+      const afterClose = await row();
+      const afterFinish = await focus(true);
+      return { denied, beforeStart, left, leftTwice, afterLeave, back, afterBack, backAgain, lost, afterLost, afterHuge, afterClose, afterFinish };
+    });
+    expect(res.denied).toMatch(/permission denied/);
+    expect(res.beforeStart).toBe(false);
+    expect(res.left).toBe(true);
+    expect(res.leftTwice).toBe(false);
+    expect(res.afterLeave).toEqual({ count: 1, ms: 0, away: true, done: false });
+    expect(res.back).toBe(true);
+    expect(res.afterBack).toEqual({ count: 1, ms: 10_000, away: false, done: false });
+    expect(res.backAgain).toBe(false);
+    expect(res.lost).toBe(true);
+    expect(res.afterLost).toEqual({ count: 2, ms: 15_000, away: false, done: false });
+    expect(res.afterHuge).toEqual({ count: 3, ms: 75_000, away: false, done: false });
+    expect(res.afterClose).toEqual({ count: 4, ms: 95_000, away: false, done: true });
+    expect(res.afterFinish).toBe(false);
+  });
+
   it('прямая запись из приложения запрещена', async () => {
     const res = await as(db.admin, s.users.teacher, async (q) => {
       const r = await saveBatch(q, s.subjects.chem, s.questions.chem);

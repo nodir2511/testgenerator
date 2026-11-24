@@ -3,7 +3,7 @@ import {
   EXAM_LINK_HOURS, publicSnapshot, reviewSnapshot, parseOpen, scoreAttempt, pickVariant, examCode,
   parseStartPayload, tgPlain, reviewLines, chunkLines, examLang, reviewHead, reviewButtonText, reviewJustSent, REVIEW_RESEND_GUARD_MS,
   EXAM_MIN_MINUTES, EXAM_MAX_MINUTES, EXAM_COUNTDOWN_SEC, EXAM_START_LEAD_SEC, EXAM_POLL_MS, sessionEnd, sessionPhase, clampMinutes, countdownDigit,
-  shuffleOptions,
+  shuffleOptions, awayMs, AWAY_MS_MAX,
 } from '../supabase/functions/_shared/exam';
 import * as examShared from '../supabase/functions/_shared/exam';
 
@@ -144,6 +144,17 @@ describe('время', () => {
   it('старый срок попытки (30 мин от входа) удалён: конец у всех общий — от старта сессии', () => {
     const mod: Record<string, unknown> = examShared;
     for (const dead of ['EXAM_MINUTES', 'deadlineOf', 'attemptState']) expect(mod[dead]).toBeUndefined();
+  });
+});
+
+describe('awayMs: длительность ухода со страницы от клиента', () => {
+  it('целое число миллисекунд больше нуля', () => {
+    expect(awayMs(1500)).toBe(1500);
+    expect(awayMs(1499.6)).toBe(1500);
+  });
+  it('не больше суток', () => expect(awayMs(1e15)).toBe(AWAY_MS_MAX));
+  it('мусор, ноль и отрицательное — null', () => {
+    for (const v of [0, -5, 0.4, NaN, Infinity, '1500', null, undefined, {}, true]) expect(awayMs(v)).toBeNull();
   });
 });
 

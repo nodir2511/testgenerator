@@ -656,8 +656,24 @@ const examMisses = createMissLimiter(10, 10 * 60_000); // неизвестные
 const sendPlain = (chat: number, text: string, markup?: Record<string, unknown>) =>
   tg('sendMessage', { chat_id: chat, text, parse_mode: 'HTML', ...(markup ? { reply_markup: markup } : {}) });
 
+/** Ученику (аккаунт не привязан) не нужна кнопка «Конструктор» внизу чата: убираем её только в этом чате (ошибки не важны). */
+async function hideBuilderButton(chat: number) {
+  try {
+    await tg('setMyCommands', { commands: [], scope: { type: 'chat', chat_id: chat } });
+    await tg('setChatMenuButton', { chat_id: chat, menu_button: { type: 'commands' } });
+  } catch (e) { console.warn('hideBuilderButton', (e as Error).message); }
+}
+/** После привязки аккаунта возвращаем кнопку и команды, заданные для бота по умолчанию. */
+async function restoreBuilderButton(chat: number) {
+  try {
+    await tg('deleteMyCommands', { scope: { type: 'chat', chat_id: chat } });
+    await tg('setChatMenuButton', { chat_id: chat, menu_button: { type: 'default' } });
+  } catch (e) { console.warn('restoreBuilderButton', (e as Error).message); }
+}
+
 async function onExamStart(chat: number, tgUserId: number, code: string) {
   if (examMisses.blocked(tgUserId)) return sendPlain(chat, EXAM_TOO_MANY_TEXT);
+  if (!(await linkedUser(chat))) await hideBuilderButton(chat);
   const { data: link, error } = await sb.from('exam_links')
     .select('closed_at, closes_at, duration_min, batch:ticket_batches(title)').eq('code', code).maybeSingle();
   if (error) {
@@ -703,6 +719,7 @@ async function onMessage(m: any) {
     const { error } = await sb.from('telegram_links').upsert({ chat_id: chat, user_id: row.user_id });
     await sb.from('telegram_link_codes').delete().eq('code', code);
     if (error) return send(chat, '❌ Не удалось привязать аккаунт.');
+    await restoreBuilderButton(chat);
     const u = await linkedUser(chat);
     return screenStart(chat, u);
   }

@@ -99,11 +99,31 @@ export async function fetchExamLinks(withAuthors = false): Promise<ExamLinkRow[]
   return sortLinks(links.map((l) => ({ ...l, creator: authors.get(l.created_by) ?? null, counts: countAttempts(byCode.get(l.code) ?? [], now, l) })) as ExamLinkRow[], now);
 }
 
+export const examLinkKey = (code: string) => ['exam_link', code] as const;
+export type ExamLinkView = ExamLink & { batch: { title: string; subject: { name: string } | null } | null };
+
+/** Один запуск по коду (для экрана классу); null — запуска нет или он чужой (RLS) */
+export async function fetchExamLink(code: string): Promise<ExamLinkView | null> {
+  const { data, error } = await supabase
+    .from('exam_links')
+    .select('code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, session_start_at, batch:ticket_batches(title, subject:subjects(name))')
+    .eq('code', code)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as unknown as ExamLinkView) ?? null;
+}
+
+/** Часы сервера (мс) — та же функция, что у «Своей игры»: по ним экран показывает отсчёт и таймер, как у учеников */
+export async function fetchServerNow(): Promise<number | null> {
+  const { data, error } = await supabase.rpc('game_time');
+  return error || typeof data !== 'number' ? null : data;
+}
+
 /** Попытки одного запуска: имя, аккаунт Telegram, номер билета, баллы */
 export async function fetchAttempts(code: string): Promise<Attempt[]> {
   const { data, error } = await supabase
     .from('exam_attempts')
-    .select('id, code, ticket_id, lang, student_name, tg_username, tg_name, started_at, finished_at, score, max_score, ticket:tickets(ticket_number)')
+    .select('id, code, ticket_id, lang, student_name, tg_username, tg_name, started_at, finished_at, score, max_score, away_count, away_ms, away_since, ticket:tickets(ticket_number)')
     .eq('code', code)
     .order('started_at', { ascending: true })
     .limit(1000);
@@ -148,7 +168,7 @@ export async function fetchExamTickets(batchId: string): Promise<StatTicket[]> {
 /** Попытки запуска вместе с ответами — для разбора и Excel */
 export async function fetchAttemptsWithAnswers(code: string): Promise<AttemptWithAnswers[]> {
   const { data, error } = await fetchAllPages<AttemptWithAnswers>(
-    () => supabase.from('exam_attempts').select('id, code, ticket_id, student_name, tg_username, tg_name, finished_at, score, max_score, answers').eq('code', code),
+    () => supabase.from('exam_attempts').select('id, code, ticket_id, student_name, tg_username, tg_name, finished_at, score, max_score, answers, away_count, away_ms').eq('code', code),
   );
   if (error) throw error;
   return data ?? [];

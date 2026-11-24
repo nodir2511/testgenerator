@@ -11,6 +11,7 @@ import { prefetchOnStartup } from './lib/startupPrefetch';
 import { clearSavedQueryCache } from './lib/queryPersist';
 import { installGlobalErrorReporting } from './lib/errorReporter';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
+import { examScreenCode } from './lib/examScreen';
 import './index.css';
 import './dark.css';
 
@@ -63,6 +64,21 @@ if (screenMatch || playMatch || path === '/play' || path === '/play/' || path ==
   );
 } else if (clinicMatch) {
   root.render(<React.StrictMode><QueryClientProvider client={queryClient}><React.Suspense fallback={null}><ClinicScreenPage code={clinicMatch[1].toUpperCase()} /></React.Suspense></QueryClientProvider></React.StrictMode>);
+} else if (examScreenCode(path)) {
+  // «Билеты классу» на проекторе: /exam/screen/КОД — под входом преподавателя (данные читаются по его правам);
+  // без всплывающих сообщений: на общем экране ошибки связи показывает сама страница
+  const ExamScreenPage = React.lazy(() => import('./components/exams/ExamScreen'));
+  root.render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <React.Suspense fallback={null}>
+            <ExamScreenPage code={examScreenCode(path)!} />
+          </React.Suspense>
+        </AuthProvider>
+      </QueryClientProvider>
+    </React.StrictMode>
+  );
 } else // /tg/exam — билет ученика в Telegram (отдельно от мини-приложения преподавателя; до общего /tg)
 if (window.location.pathname === '/tg/exam' || window.location.pathname === '/tg/exam/') {
   const ExamApp = React.lazy(() => import('./exam/ExamApp'));

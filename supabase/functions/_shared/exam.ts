@@ -102,6 +102,13 @@ export function parseStartPayload(text: string): string | null {
 /** Язык вопросов запуска: только 'tg' даёт таджикский, остальное — русский */
 export const examLang = (v: unknown): 'ru' | 'tg' => (v === 'tg' ? 'tg' : 'ru');
 
+/** Сколько ученик был не на странице билета, по словам клиента (мс): целое больше нуля и не больше суток; иначе null */
+export const AWAY_MS_MAX = 24 * 3600 * 1000;
+export function awayMs(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 1) return null;
+  return Math.min(Math.round(v), AWAY_MS_MAX);
+}
+
 /** Разбор отправляли меньше 10 секунд назад — вторую рассылку (двойной щелчок) не начинаем */
 export const REVIEW_RESEND_GUARD_MS = 10_000;
 export function reviewJustSent(reviewSentAt: string | null | undefined, now: Date): boolean {

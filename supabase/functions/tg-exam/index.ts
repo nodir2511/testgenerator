@@ -3,7 +3,8 @@
 // «Билеты классу»: ученик проходит билет набора на странице /tg/exam внутри Telegram,
 // преподаватель рассылает разбор и получает ссылку и итог в бот.
 //
-// Ученик (заголовок X-Tg-Init-Data, подпись Telegram): open, start, save, submit, review.
+// Ученик (заголовок X-Tg-Init-Data, подпись Telegram): open, start, save, focus, submit, review.
+//   focus — ученик ушёл со страницы билета или вернулся (RPC exam_attempt_focus); преподаватель видит это в таблице запуска.
 //   start — вход в зал ожидания (вариант, имя, язык); вопросы ученик получает только когда часы сервера дошли
 //   до exam_links.session_start_at (преподаватель нажал «Начать»); конец у всех общий — effEnd(запуска).
 //   Привязка к аккаунту сайта не нужна; личность — id из подписи. Данных tg-app здесь нет.
@@ -24,7 +25,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
-  chunkLines, closedSummary, examLang, LINK_SEND_BUTTON, linkSendText, pickVariant, publicSnapshot, reviewButtonText, reviewHead, reviewJustSent, reviewLines, reviewSnapshot, scoreAttempt,
+  awayMs, chunkLines, closedSummary, examLang, LINK_SEND_BUTTON, linkSendText, pickVariant, publicSnapshot, reviewButtonText, reviewHead, reviewJustSent, reviewLines, reviewSnapshot, scoreAttempt,
   sessionEnd, sessionPhase, shuffleOptions, tgPlain,
   type ExamAnswer, type ExamAnswers, type ExamQuestion,
 } from '../_shared/exam.ts';
@@ -48,6 +49,8 @@ const OPEN_MAX = 20;
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'content-type, x-tg-init-data, authorization, apikey, x-client-info',
+  // Браузер помнит разрешение 10 минут: сообщение об уходе со страницы уходит одним запросом, без предварительного
+  'Access-Control-Max-Age': '600',
 };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -344,7 +347,8 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
   // open в ожидании и отсчёте (опрос раз в 3 с от каждого ученика) — без подчистки: по уже загруженной строке
   // запуска он не закрыт и не истёк, сдавать нечего; лишние запросы к базе не нужны
   const lobby = action === 'open' && ['waiting', 'countdown'].includes(phaseOf(l, now));
-  if (action !== 'save' && !lobby) await finishExpired(l, now, cache);
+  // focus (уход со страницы и возвращение) тоже лёгкий: одно обновление своей попытки
+  if (action !== 'save' && action !== 'focus' && !lobby) await finishExpired(l, now, cache);
   let a = await readAttempt(code, tgUser.id);
 
   switch (action) {
@@ -402,6 +406,18 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       // старта (миллисекунды): ответ не записан, клиент перечитает состояние
       if (cur && !cur.finished_at && phaseOf(fresh, new Date()) !== 'ended') return json({ ok: false, state: 'waiting', now: Date.now() });
       return json({ ok: false, state: cur?.finished_at && inSession(cur, fresh) ? 'finished' : 'closed', now: Date.now() });
+    }
+
+    case 'focus': {
+      // Только пока билет идёт: до старта и после конца уходы не считаются (незавершённый уход закроет сдача).
+      // Без now в ответе: ответ, дошедший после «заморозки» страницы в фоне, сбил бы у клиента часы сервера
+      if (!a || stateOf(a, l, now) !== 'running') return json({ ok: false });
+      const away = body.away === true;
+      const { data: changed, error } = await sb.rpc('exam_attempt_focus', {
+        p_attempt_id: a.id, p_away: away, p_ms: away ? null : awayMs(body.ms),
+      });
+      if (error) throw error;
+      return json({ ok: changed === true });
     }
 
     case 'submit': {
@@ -510,7 +526,7 @@ async function teacherAction(action: string, body: any, userId: string): Promise
   return json({ error: 'Неизвестное действие' }, 400);
 }
 
-const STUDENT_ACTIONS = new Set(['open', 'start', 'save', 'submit', 'review']);
+const STUDENT_ACTIONS = new Set(['open', 'start', 'save', 'focus', 'submit', 'review']);
 const TEACHER_ACTIONS = new Set(['review_send', 'link_send', 'notify_closed']);
 
 Deno.serve(async (req) => {

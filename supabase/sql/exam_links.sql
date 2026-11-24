@@ -60,6 +60,13 @@ begin
   end if;
 end $$;
 
+-- Уходы со страницы билета во время сессии (ученик свернул Telegram, открыл другое окно или приложение):
+-- away_count — сколько раз уходил, away_ms — сколько всего был не на странице (законченные уходы),
+-- away_since — с какого момента не на странице сейчас (пусто = на странице). Пишет только exam_attempt_focus.
+alter table public.exam_attempts add column if not exists away_count int not null default 0;
+alter table public.exam_attempts add column if not exists away_ms bigint not null default 0;
+alter table public.exam_attempts add column if not exists away_since timestamptz;
+
 create index if not exists exam_links_batch_idx on public.exam_links (batch_id);
 create index if not exists exam_links_created_by_idx on public.exam_links (created_by);
 create index if not exists exam_attempts_ticket_idx on public.exam_attempts (ticket_id);
@@ -181,7 +188,7 @@ $$;
 -- Сдать попытку (вызывает только tg-exam сервисным ключом): finished_at = раньшее из «сейчас», конца сессии
 -- (session_start_at + duration_min, если сессия запущена) и закрытия ссылки. После этого exam_attempt_save ответы не меняет, поэтому балл, посчитанный по возвращённым
 -- ответам, всегда соответствует сохранённым. Уже сданная попытка не меняется — возвращаются её ответы;
--- нет попытки — null.
+-- нет попытки — null. Незавершённый уход со страницы (away_since) закрывается моментом сдачи.
 create or replace function public.exam_attempt_close(p_attempt_id uuid)
 returns jsonb
 language plpgsql
@@ -192,12 +199,20 @@ declare
   r jsonb;
 begin
   update public.exam_attempts a
-     set finished_at = least(
-           now(),
-           coalesce(l.session_start_at + make_interval(mins => l.duration_min), 'infinity'::timestamptz),
-           coalesce(l.closed_at, 'infinity'::timestamptz)
-         )
+     set finished_at = f.at,
+         away_ms = a.away_ms + case
+           when a.away_since is null then 0
+           else greatest(0, (extract(epoch from (f.at - a.away_since)) * 1000)::bigint)
+         end,
+         away_since = null
     from public.exam_links l
+   cross join lateral (
+     select least(
+       now(),
+       coalesce(l.session_start_at + make_interval(mins => l.duration_min), 'infinity'::timestamptz),
+       coalesce(l.closed_at, 'infinity'::timestamptz)
+     ) as at
+   ) f
    where a.id = p_attempt_id
      and l.code = a.code
      and a.finished_at is null
@@ -206,6 +221,56 @@ begin
     select answers into r from public.exam_attempts where id = p_attempt_id;
   end if;
   return r;
+end;
+$$;
+
+-- Ученик ушёл со страницы билета или вернулся (вызывает только tg-exam сервисным ключом). Одно атомарное обновление.
+-- p_away = true: уход считается только пока попытка идёт (как в exam_attempt_save) и только если ученик сейчас «на странице»:
+--   away_since = сейчас, away_count + 1. Повторный уход без возвращения ничего не меняет.
+-- p_away = false: возвращение. Уход был записан — к away_ms добавляется время по часам базы. Не был (сообщение об уходе
+--   не дошло: не было связи) и p_ms > 0 — уход засчитывается сейчас: away_count + 1, а длительность берётся у клиента,
+--   но не больше времени от старта сессии.
+-- Возвращает, изменилась ли попытка.
+create or replace function public.exam_attempt_focus(p_attempt_id uuid, p_away boolean, p_ms bigint default null)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n int;
+begin
+  if p_away then
+    update public.exam_attempts a
+       set away_since = now(), away_count = a.away_count + 1
+      from public.exam_links l
+     where a.id = p_attempt_id
+       and l.code = a.code
+       and a.finished_at is null
+       and a.away_since is null
+       and l.session_start_at is not null
+       and now() >= l.session_start_at
+       and now() < l.session_start_at + make_interval(mins => l.duration_min)
+       and l.closed_at is null
+       and l.closes_at > now();
+  else
+    update public.exam_attempts a
+       set away_ms = a.away_ms + case
+             when a.away_since is not null then greatest(0, (extract(epoch from (now() - a.away_since)) * 1000)::bigint)
+             else least(p_ms, greatest(0, (extract(epoch from (now() - l.session_start_at)) * 1000)::bigint))
+           end,
+           away_count = a.away_count + case when a.away_since is null then 1 else 0 end,
+           away_since = null
+      from public.exam_links l
+     where a.id = p_attempt_id
+       and l.code = a.code
+       and a.finished_at is null
+       and l.session_start_at is not null
+       and now() >= l.session_start_at
+       and (a.away_since is not null or coalesce(p_ms, 0) > 0);
+  end if;
+  get diagnostics n = row_count;
+  return n > 0;
 end;
 $$;
 
@@ -276,6 +341,8 @@ revoke all on function public.exam_attempt_save(uuid, text, jsonb) from public, 
 grant execute on function public.exam_attempt_save(uuid, text, jsonb) to service_role;
 revoke all on function public.exam_attempt_close(uuid) from public, anon, authenticated;
 grant execute on function public.exam_attempt_close(uuid) to service_role;
+revoke all on function public.exam_attempt_focus(uuid, boolean, bigint) from public, anon, authenticated;
+grant execute on function public.exam_attempt_focus(uuid, boolean, bigint) to service_role;
 
 revoke all on function public.exam_link_create(uuid) from public, anon;
 grant execute on function public.exam_link_create(uuid) to authenticated;

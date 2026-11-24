@@ -15,6 +15,9 @@ export interface SheetAttempt extends StatAttempt {
   tg_name?: string | null;
   score?: number | null;
   max_score?: number | null;
+  /** Уходы со страницы билета: сколько раз и сколько всего миллисекунд */
+  away_count?: number | null;
+  away_ms?: number | null;
 }
 
 export interface QuestionStat {
@@ -100,7 +103,7 @@ export function questionStats(tickets: StatTicket[], attempts: StatAttempt[], se
   return out.sort((a, b) => a.avgShare - b.avgShare || b.total - a.total || a.label.localeCompare(b.label, 'ru'));
 }
 
-export const SHEET_HEADER = ['Имя', 'Аккаунт', 'Вариант', 'Баллы', 'Максимум', '%', 'Статус'];
+export const SHEET_HEADER = ['Имя', 'Аккаунт', 'Вариант', 'Баллы', 'Максимум', '%', 'Статус', 'Уходил, раз', 'Вне страницы, с'];
 
 /**
  * Строки ведомости для write-excel-file: заголовок и по строке на каждую попытку. Баллы — сохранённые, иначе пересчёт по снимкам.
@@ -129,6 +132,8 @@ export function attemptsSheet(attempts: SheetAttempt[], tickets: StatTicket[], s
       { value: max ?? '' },
       { value: pct },
       { value: status },
+      { value: a.away_count ?? 0 },
+      { value: Math.round((a.away_ms ?? 0) / 1000) },
     ]);
   }
   return rows;
