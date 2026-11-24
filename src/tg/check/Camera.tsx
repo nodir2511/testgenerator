@@ -46,6 +46,8 @@ export function Camera({ layouts, label, count, last, keys, loadDigits, onShot, 
   const [note, setNote] = useState<ShotNote | null>(null);
   const [auto, setAuto] = useState(autoSaved);
   const [seen, setSeen] = useState(false);
+  // Рамка видоискателя — по форме последнего найденного бланка (у составов бывает несколько видов полоски)
+  const [seenLayout, setSeenLayout] = useState<string | null>(null);
   const [view, setView] = useState<LiveView | null>(null);
   const digits = useRef<DigitKnn | null>(null);
   const [flash, setFlash] = useState(0);
@@ -130,6 +132,7 @@ export function Camera({ layouts, label, count, last, keys, loadDigits, onShot, 
           if (off) return;
           setSeen(!!p);
           if (p) {
+            setSeenLayout(p.layout);
             const result = liveMarks(p.res, OMR_LAYOUTS[p.layout], cb.current.keys, p.res.open.map((o) => guessOpen(digits.current, o)));
             setView({ result, toPhoto: p.res.toPhoto, w: c.width, h: c.height, stale: false });
           } else setView((v) => (v && !v.stale ? { ...v, stale: true } : null)); // один пропущенный кадр — бледнее, второй — убрать
@@ -146,7 +149,7 @@ export function Camera({ layouts, label, count, last, keys, loadDigits, onShot, 
     return () => { off = true; clearTimeout(timer); };
   }, [auto, ready, busy, layouts, shoot]);
 
-  const strip = OMR_LAYOUTS[layouts[0]]?.strip ?? { w: 210, h: 99 };
+  const strip = OMR_LAYOUTS[seenLayout && layouts.includes(seenLayout) ? seenLayout : layouts[0]]?.strip ?? { w: 210, h: 99 };
   const toggleAuto = () => {
     const v = !auto;
     setAuto(v);

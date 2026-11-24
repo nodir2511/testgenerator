@@ -20,6 +20,7 @@ const BLANK_FILES: Array<{ file: string; name: string; hint: string }> = [
   { file: 'phys-27', name: 'Физика', hint: '27 заданий' },
   { file: 'math-27', name: 'Математика', hint: '27 заданий' },
   { file: 'bio-26', name: 'Биология', hint: '26 заданий' },
+  { file: 'bioday-26', name: 'Биология (ежедневный)', hint: '20 от руки + 26 заданий' },
   { file: 'taj-26', name: 'Таджикский язык', hint: '26 заданий' },
   { file: 'hist-26', name: 'История', hint: '26 заданий' },
   { file: 'law-26', name: 'Право', hint: '26 заданий' },

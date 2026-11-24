@@ -111,14 +111,14 @@ function parseGenerate(b: any, limits: Limits): { error: string } | { subjectId:
 /** Бланки для печати: файлы лежат в репозитории (public/blanks); бот берёт их с GitHub по фиксированному адресу */
 const BLANK_FILES: Record<string, string> = {
   'chem-27': 'Бланк химия 27', 'phys-27': 'Бланк физика 27', 'math-27': 'Бланк математика 27',
-  'bio-26': 'Бланк биология 26', 'taj-26': 'Бланк таджикский язык 26', 'hist-26': 'Бланк история 26',
+  'bio-26': 'Бланк биология 26', 'bioday-26': 'Бланк биология ежедневный', 'taj-26': 'Бланк таджикский язык 26', 'hist-26': 'Бланк история 26',
   'law-26': 'Бланк право 26', 'eng-26': 'Бланк английский язык 26', 'chemphys-12': 'Бланк химия-физика 12',
 };
 const BLANKS_URL = 'https://raw.githubusercontent.com/nodir2511/testgenerator/main/public/blanks';
 
 /** Сколько примеров каждой цифры хранить; более старые удаляются при сохранении новых */
 const MAX_DIGIT_SAMPLES = 2000;
-const LAYOUT_IDS = ['chem', 'phys', 'bio', 'taj', 'chemphys'];
+const LAYOUT_IDS = ['chem', 'phys', 'bio', 'taj', 'chemphys', 'bioday'];
 
 // Ключ билета по снимкам вопросов: порядок как в билете, у соответствия всегда четыре пункта A–D
 function ticketKeyOf(questions: any[]): { key: TicketKey; comp: Composition } {

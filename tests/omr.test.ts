@@ -8,9 +8,9 @@ import { render } from './omrRender';
 const ids = Object.keys(OMR_LAYOUTS);
 
 describe('распознавание бланка по снимку', () => {
-  it('в раскладках пять бланков с ожидаемым числом заданий', () => {
+  it('в раскладках шесть бланков с ожидаемым числом заданий', () => {
     const size = (id: string) => [OMR_LAYOUTS[id].tests.length, OMR_LAYOUTS[id].matching.length, OMR_LAYOUTS[id].open.length].join('/');
-    expect(ids.map((id) => `${id}:${size(id)}`).sort()).toEqual(['bio:20/4/2', 'chem:18/2/7', 'chemphys:8/2/2', 'phys:18/2/7', 'taj:20/4/2']);
+    expect(ids.map((id) => `${id}:${size(id)}`).sort()).toEqual(['bio:20/4/2', 'bioday:20/4/2', 'chem:18/2/7', 'chemphys:8/2/2', 'phys:18/2/7', 'taj:20/4/2']);
   });
 
   for (const id of ids) {
@@ -93,8 +93,9 @@ describe('распознавание бланка по снимку', () => {
       expect(o.boxes[0].x).toBeGreaterThan(165);
       expect(o.boxes[4].x + o.boxes[4].w).toBeLessThan(199);
     }
-    const pair = [OMR_LAYOUTS.bio, OMR_LAYOUTS.taj];
-    for (const id of ['taj', 'bio'] as const) {
+    // «Биология ежедневный» (bioday) — третий вид бланка того же состава, со своими метками и кодом
+    const pair = [OMR_LAYOUTS.bio, OMR_LAYOUTS.taj, OMR_LAYOUTS.bioday];
+    for (const id of ['taj', 'bio', 'bioday'] as const) {
       const { img, truth } = render(OMR_LAYOUTS[id], 5, 2);
       const { res, layout } = omrReadAny(img, pair);
       expect(layout.id, id).toBe(id);

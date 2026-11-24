@@ -46,7 +46,7 @@ describe('баллы за бланк', () => {
 describe('вид бланка по составу билета', () => {
   it('находит бланк по составу', () => {
     expect(blankFor({ test: 18, matching: 2, open: 7 })?.layouts).toEqual(['chem', 'phys']);
-    expect(blankFor({ test: 20, matching: 4, open: 2 })?.layouts).toEqual(['bio', 'taj']);
+    expect(blankFor({ test: 20, matching: 4, open: 2 })?.layouts).toEqual(['bio', 'taj', 'bioday']);
     expect(blankFor({ test: 8, matching: 2, open: 2 })?.layouts).toEqual(['chemphys']);
     expect(blankFor({ test: 10, matching: 2, open: 3 })).toBeNull();
   });
