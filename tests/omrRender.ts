@@ -10,7 +10,7 @@ const rng = (seed: number) => () => {
 
 export interface Truth { variant: number | null; tests: Array<string | null>; matching: Array<Array<number | null>>; open: number[]; openText: string[] }
 
-export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean } = {}): { img: GrayImage; truth: Truth } {
+export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number } = {}): { img: GrayImage; truth: Truth } {
   const r = rng(seed);
   const W = Math.round(layout.strip.w * S), H = Math.round(layout.strip.h * S);
   const d = new Float32Array(W * H).fill(235);
@@ -82,10 +82,16 @@ export function render(layout: OmrLayout, seed: number, deg: number, opts: { gly
   // Фото: поворот на угол deg вокруг центра полоски, масштаб 6 px/мм, поля со столом
   const sc = 6 / S, PW = Math.round(layout.strip.w * 6 + 160), PH = Math.round(layout.strip.h * 6 + 160) + 200;
   const data = new Float32Array(PW * PH).fill(120);
+  const bend = opts.bend ?? 0;
   const a = (deg * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
   for (let y = 0; y < PH; y++) for (let x = 0; x < PW; x++) {
     const dx = (x - PW / 2) / 6, dy = (y - PH / 2) / 6;
-    const mx = (dx * ca + dy * sa) + layout.strip.w / 2, my = (-dx * sa + dy * ca) + layout.strip.h / 2;
+    let mx = (dx * ca + dy * sa) + layout.strip.w / 2, my = (-dx * sa + dy * ca) + layout.strip.h / 2;
+    // Изгиб листа: плавное смещение до bend мм в середине, на угловых метках нулевое (метки лежат на месте, кружки и рамки — нет)
+    if (bend) {
+      const f = bend * Math.sin(Math.PI * mx / layout.strip.w) * Math.sin(Math.PI * my / layout.strip.h);
+      mx -= f; my -= 0.7 * f;
+    }
     if (mx < 0 || my < 0 || mx >= layout.strip.w || my >= layout.strip.h) continue;
     data[y * PW + x] = d[Math.floor(my * S) * W + Math.floor(mx * S)];
   }

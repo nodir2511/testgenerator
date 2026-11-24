@@ -30,6 +30,34 @@ describe('распознавание бланка по снимку', () => {
     }
   }
 
+  // Реальные снимки (бланк химии/физики, рука держит полоску): бумага изогнута, печатные кружки и рамки клеток
+  // лежат не там, где в раскладке, на 0,5–1 мм. Раньше такие бланки отбраковывались как «не тот бланк».
+  for (const id of ids) {
+    for (const bend of [0.6, 1.0]) {
+      it(`${id}: изгиб листа до ${bend} мм — бланк принимается, отметки и клетки открытых читаются`, () => {
+        const layout = OMR_LAYOUTS[id];
+        const { img, truth } = render(layout, id.length * 17 + 3, 180 - 4, { bend });
+        const res = omrRead(img, layout);
+        expect(res.ok).toBe(true);
+        if (!res.ok) return;
+        expect(res.codeOk).toBe(true);
+        expect(res.variant.answer).toBe(truth.variant);
+        expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+        expect(res.matching.map((m) => m.rows.map((r) => r.answer))).toEqual(truth.matching);
+        // пустая клетка с изогнутой рамкой не считается цифрой
+        expect(res.open.map((o) => o.boxes.filter((b) => b.hasDigit).length)).toEqual(truth.open);
+      });
+    }
+  }
+
+  it('изгиб листа не делает чужую раскладку «своей»: код и кружки другого бланка не сходятся', () => {
+    const { img } = render(OMR_LAYOUTS.chemphys, 9, 180 - 4, { bend: 1.0 });
+    for (const id of ids.filter((x) => x !== 'chemphys')) {
+      const res = omrRead(img, OMR_LAYOUTS[id]);
+      expect(res.ok && res.codeOk).toBe(false);
+    }
+  });
+
   it('химия и физика отличаются кодом бланка: свой код проходит, чужой — нет', () => {
     const { img } = render(OMR_LAYOUTS.chem, 5, 4);
     const own = omrRead(img, OMR_LAYOUTS.chem);

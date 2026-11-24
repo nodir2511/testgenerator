@@ -206,20 +206,25 @@ function circleRingMatch(at: At, c: OmrCircle, dx: number, dy: number): number {
   return tot ? (ring - out) / tot : 0;
 }
 
-/** Локальная адаптивная автоподстройка ряда: компенсирует небольшой изгиб бумаги в центре полоски */
-function refineRowOffset(options: OmrCircle[], at: At): { dx: number; dy: number } {
-  const shifts = [-0.3, 0, 0.3];
+/** Смещения ряда, которые перебирает подстройка (мм). Сначала нулевое: при равной оценке выбирается меньший сдвиг */
+const ROW_SHIFTS = [0, -0.3, 0.3, -0.6, 0.6, -0.9, 0.9];
+
+/**
+ * Локальная адаптивная автоподстройка ряда: компенсирует изгиб бумаги. На реальных снимках печатные
+ * рамки уезжают относительно раскладки до 0,9 мм (лист изогнут, рука держит полоску), поэтому ±0,3 мм мало.
+ */
+function refineRowOffset(options: OmrCircle[], at: At): { dx: number; dy: number; score: number } {
   let bestDx = 0, bestDy = 0, bestScore = -999;
-  for (const dy of shifts) for (const dx of shifts) {
+  for (const dy of ROW_SHIFTS) for (const dx of ROW_SHIFTS) {
     let sum = 0;
     for (const o of options) sum += circleRingMatch(at, o, dx, dy);
-    if (sum > bestScore) {
+    if (sum > bestScore + 1e-9) {
       bestScore = sum;
       bestDx = dx;
       bestDy = dy;
     }
   }
-  return bestScore > 0 ? { dx: bestDx, dy: bestDy } : { dx: 0, dy: 0 };
+  return bestScore > 0 ? { dx: bestDx, dy: bestDy, score: bestScore } : { dx: 0, dy: 0, score: bestScore };
 }
 
 function pickOne(options: OmrCircle[], at: At): Picked {
@@ -231,6 +236,39 @@ function pickOne(options: OmrCircle[], at: At): Picked {
   if (on.length === 0) return { answer: null, unsure, fills };
   if (on.length > 1) return { answer: 'multi', unsure: true, fills, candidates: on.map((i) => options[i].value) };
   return { answer: options[on[0]].value, unsure, fills };
+}
+
+/**
+ * Положение печатной рамки клеток открытого ответа. Лист изогнут, и рамка уезжает от раскладки до ~1 мм; окно чтения
+ * (на 0,9 мм внутрь клетки) тогда захватывает линию рамки, и пустая клетка выглядит «с цифрой». Перебираем сдвиг
+ * всей строки клеток и берём тот, при котором больше всего точек на линиях рамки (границы клеток, верх и низ) тёмные.
+ */
+export function fitOpenFrame(at: At, boxes: Array<{ x: number; y: number; w: number; h: number }>): { dx: number; dy: number } {
+  const n = boxes.length;
+  if (!n) return { dx: 0, dy: 0 };
+  const x0 = boxes[0].x, y0 = boxes[0].y, x1 = boxes[n - 1].x + boxes[n - 1].w, y1 = y0 + boxes[0].h;
+  const vert: Array<[number, number]> = [], horiz: Array<[number, number]> = [];
+  for (let i = 0; i <= n; i++) {
+    const x = i < n ? boxes[i].x : x1;
+    for (let y = y0 + 0.4; y <= y1 - 0.4; y += 0.25) vert.push([x, y]);
+  }
+  for (const y of [y0, y1]) for (let x = x0 + 0.4; x <= x1 - 0.4; x += 0.25) horiz.push([x, y]);
+  const PERP = [-0.2, 0, 0.2];
+  const score = (dx: number, dy: number) => {
+    let hit = 0;
+    for (const [x, y] of vert) { for (const o of PERP) if (at(x + dx + o, y + dy) > 0) { hit++; break; } }
+    for (const [x, y] of horiz) { for (const o of PERP) if (at(x + dx, y + dy + o) > 0) { hit++; break; } }
+    return hit / (vert.length + horiz.length);
+  };
+  let best = { dx: 0, dy: 0, s: score(0, 0) };
+  for (let iy = -10; iy <= 10; iy++) for (let ix = -10; ix <= 10; ix++) {
+    const dx = ix * 0.15, dy = iy * 0.15;
+    // при равной оценке — меньший сдвиг
+    const sc = score(dx, dy) - 0.004 * Math.hypot(dx, dy);
+    if (sc > best.s + 1e-9) best = { dx, dy, s: sc };
+  }
+  // линии рамки не нашлись (клетка пустая и без рамки в кадре, засветка) — оставляем как в раскладке
+  return best.s >= 0.3 ? { dx: best.dx, dy: best.dy } : { dx: 0, dy: 0 };
 }
 
 function openBox(at: At, b: { x: number; y: number; w: number; h: number }): OpenBox {
@@ -251,26 +289,37 @@ function openBox(at: At, b: { x: number; y: number; w: number; h: number }): Ope
     }
   }
 
-  // Очистка типографской рамки клетки (Border Clearing):
-  // Если вдоль наружного края клетки идёт сплошная тёмная полоска (>40% пикселей края), это край рамки клетки
-  const clearEdge = (r0: number, r1: number, c0: number, c1: number, isRow: boolean) => {
-    let count = 0;
-    const total = isRow ? (c1 - c0) : (r1 - r0);
-    for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) {
-      if (bitmap[r * cols + c]) count++;
-    }
-    if (total > 0 && count / total > 0.4) {
-      for (let r = r0; r < r1; r++) for (let c = c0; c < c1; c++) {
-        if (bitmap[r * cols + c]) { bitmap[r * cols + c] = 0; on--; }
+  // Очистка типографской рамки клетки. Лист изогнут, поэтому рамка уезжает от раскладки до ~1 мм (и идёт чуть
+  // наклонно) и попадает в окно, даже когда положение рамки уже найдено (fitOpenFrame). Убираем пятна, которые целиком
+  // лежат в краевой полосе окна (1,2 мм) и тянутся почти на всю его высоту (ширину): это остаток линии рамки.
+  const bandPx = Math.round(1.2 / step), minSpan = 0.8;
+  const seen = new Uint8Array(cols * rows);
+  const stack: number[] = [];
+  for (let i0 = 0; i0 < cols * rows; i0++) {
+    if (!bitmap[i0] || seen[i0]) continue;
+    const comp: number[] = [];
+    let cx0 = cols, cx1 = -1, cy0 = rows, cy1 = -1;
+    stack.push(i0);
+    seen[i0] = 1;
+    while (stack.length) {
+      const p = stack.pop() as number;
+      comp.push(p);
+      const x = p % cols, y = (p / cols) | 0;
+      if (x < cx0) cx0 = x;
+      if (x > cx1) cx1 = x;
+      if (y < cy0) cy0 = y;
+      if (y > cy1) cy1 = y;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+        const q = ny * cols + nx;
+        if (bitmap[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
       }
-      return true;
     }
-    return false;
-  };
-  clearEdge(0, 1, 0, cols, true);
-  clearEdge(rows - 1, rows, 0, cols, true);
-  clearEdge(0, rows, 0, 1, false);
-  clearEdge(0, rows, cols - 1, cols, false);
+    const tall = (cy1 - cy0 + 1) >= rows * minSpan, wide = (cx1 - cx0 + 1) >= cols * minSpan;
+    const inSide = cx1 < bandPx || cx0 >= cols - bandPx, inEnd = cy1 < bandPx || cy0 >= rows - bandPx;
+    if ((tall && inSide) || (wide && inEnd)) for (const p of comp) { bitmap[p] = 0; on--; }
+  }
 
   // Пересчитываем габариты чернил после очистки рамки
   top = rows; bottom = -1; left = cols; right = -1;
@@ -297,25 +346,29 @@ function openBox(at: At, b: { x: number; y: number; w: number; h: number }): Ope
  * тогда ответы читались со сдвигом. Эта проверка такие четвёрки отсекает.
  */
 export function ringScore(at: At, layout: OmrLayout): number {
-  const circles: OmrCircle[] = [...layout.variant, ...layout.tests.flatMap((t) => t.options), ...layout.matching.flatMap((m) => m.rows.flatMap((r) => r.options))];
+  const groups: OmrCircle[][] = [layout.variant, ...layout.tests.map((t) => t.options), ...layout.matching.flatMap((m) => m.rows.map((r) => r.options))];
   const N = 16;
   const per: number[] = [];
-  for (const c of circles) {
-    const R = c.d / 2;
-    let ring = 0, out = 0, tot = 0;
-    for (let i = 0; i < N; i++) {
-      const a = (i / N) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
-      let hit = 0, bad = false;
-      for (const dr of [-0.35, -0.15, 0, 0.15]) {
-        const v = at(c.x + (R + dr) * ca, c.y + (R + dr) * sa);
-        if (v < 0) { bad = true; break; }
-        if (v > 0) hit = 1;
+  for (const g of groups) {
+    // Ряд ищется со своим небольшим сдвигом: у изогнутого листа кружки лежат не там, где в раскладке, но рядом
+    const { dx, dy } = refineRowOffset(g, at);
+    for (const c of g) {
+      const R = c.d / 2;
+      let ring = 0, out = 0, tot = 0;
+      for (let i = 0; i < N; i++) {
+        const a = (i / N) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+        let hit = 0, bad = false;
+        for (const dr of [-0.35, -0.15, 0, 0.15]) {
+          const v = at(c.x + dx + (R + dr) * ca, c.y + dy + (R + dr) * sa);
+          if (v < 0) { bad = true; break; }
+          if (v > 0) hit = 1;
+        }
+        const o = at(c.x + dx + (R + 0.6) * ca, c.y + dy + (R + 0.6) * sa);
+        if (bad || o < 0) continue;
+        tot++; ring += hit; out += o;
       }
-      const o = at(c.x + (R + 0.6) * ca, c.y + (R + 0.6) * sa);
-      if (bad || o < 0) continue;
-      tot++; ring += hit; out += o;
+      if (tot) per.push((ring - out) / tot);
     }
-    if (tot) per.push((ring - out) / tot);
   }
   if (!per.length) return 0;
   per.sort((p, q) => p - q);
@@ -455,7 +508,10 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
     variant: pickOne(layout.variant, at),
     tests: layout.tests.map((t) => ({ q: t.q, ...pickOne(t.options, at) })),
     matching: layout.matching.map((m) => ({ q: m.q, rows: m.rows.map((r) => ({ row: r.row, ...pickOne(r.options, at) })) })),
-    open: layout.open.map((o) => ({ q: o.q, boxes: o.boxes.map((b) => openBox(at, b)) })),
+    open: layout.open.map((o) => {
+      const { dx, dy } = fitOpenFrame(at, o.boxes);
+      return { q: o.q, boxes: o.boxes.map((b) => openBox(at, { ...b, x: b.x + dx, y: b.y + dy })) };
+    }),
   };
 }
 
