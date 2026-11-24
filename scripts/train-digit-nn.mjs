@@ -1,4 +1,9 @@
 // Обучение компактной нейросети (196 -> 48 -> 10) для рукописных цифр и генерация digitWeights.generated.ts
+// Данные: нарисованные эталоны (GLYPHS) + реальные цифры с бланков (scripts/real-digits.json, картинки 14×14 с меткой
+// и пачкой). Каждая реальная цифра повторяется REAL_REP раз со сдвигом на пиксель и утолщением штриха.
+// Запуск: node scripts/train-digit-nn.mjs — обучение на всём, запись весов.
+//         node scripts/train-digit-nn.mjs --holdout batch-3 — честная проверка: пачка batch-3 в обучение не идёт,
+//         точность считается на ней, веса не записываются.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -124,9 +129,52 @@ for (let i = samples.length - 1; i > 0; i--) {
   [samples[i], samples[j]] = [samples[j], samples[i]];
 }
 
-const nTrain = Math.floor(samples.length * 0.85);
+// Реальные цифры с бланков
+const REAL_REP = 20;
+const holdIdx = process.argv.indexOf('--holdout');
+const HOLDOUT = holdIdx > 0 ? process.argv[holdIdx + 1] : null;
+const REAL = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'real-digits.json'), 'utf8'));
+const toF = (b64) => { const u = Buffer.from(b64, 'base64'); const f = new Float32Array(196); for (let i = 0; i < 196; i++) f[i] = u[i] / 255; return f; };
+const shift = (f, dx, dy) => {
+  const o = new Float32Array(196);
+  for (let y = 0; y < 14; y++) for (let x = 0; x < 14; x++) {
+    const xx = x - dx, yy = y - dy;
+    if (xx >= 0 && yy >= 0 && xx < 14 && yy < 14) o[y * 14 + x] = f[yy * 14 + xx];
+  }
+  return o;
+};
+const thick = (f) => {
+  const o = new Float32Array(196);
+  for (let y = 0; y < 14; y++) for (let x = 0; x < 14; x++) {
+    let m = f[y * 14 + x];
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const xx = x + dx, yy = y + dy;
+      if (xx >= 0 && yy >= 0 && xx < 14 && yy < 14) m = Math.max(m, f[yy * 14 + xx] * 0.6);
+    }
+    o[y * 14 + x] = m;
+  }
+  return o;
+};
+const realTrain = REAL.filter((r) => r.batch !== HOLDOUT);
+const realTest = REAL.filter((r) => r.batch === HOLDOUT).map((r) => ({ label: r.d, x: toF(r.px) }));
+for (const r of realTrain) {
+  const f = toF(r.px);
+  for (let k = 0; k < REAL_REP; k++) {
+    let g = shift(f, Math.floor(rnd() * 3) - 1, Math.floor(rnd() * 3) - 1);
+    if (rnd() < 0.5) g = thick(g);
+    samples.push({ label: r.d, x: g });
+  }
+}
+for (let i = samples.length - 1; i > 0; i--) {
+  const j = Math.floor(rnd() * (i + 1));
+  [samples[i], samples[j]] = [samples[j], samples[i]];
+}
+console.log(`Реальных цифр в обучении: ${realTrain.length} (×${REAL_REP})${HOLDOUT ? `, отложено для проверки (${HOLDOUT}): ${realTest.length}` : ''}`);
+
+// Валидация: с --holdout — отложенная пачка реальных цифр, иначе 15 % выборки
+const nTrain = HOLDOUT ? samples.length : Math.floor(samples.length * 0.85);
 const train = samples.slice(0, nTrain);
-const test = samples.slice(nTrain);
+const test = HOLDOUT ? realTest : samples.slice(nTrain);
 
 console.log(`Обучающая выборка: ${train.length}, валидация: ${test.length}`);
 
@@ -273,6 +321,10 @@ export const DIGIT_NN_CONFIG = { in: ${IN}, hid: ${HID}, out: ${OUT} } as const;
 export const DIGIT_NN_WEIGHTS_BASE64 = "${base64Weights}";
 `;
 
-const targetPath = path.resolve(__dirname, '../src/lib/omr/digitWeights.generated.ts');
-fs.writeFileSync(targetPath, code, 'utf-8');
-console.log(`Сохранено в ${targetPath}`);
+if (HOLDOUT) {
+  console.log('Режим проверки (--holdout): веса не записаны.');
+} else {
+  const targetPath = path.resolve(__dirname, '../src/lib/omr/digitWeights.generated.ts');
+  fs.writeFileSync(targetPath, code, 'utf-8');
+  console.log(`Сохранено в ${targetPath}`);
+}
