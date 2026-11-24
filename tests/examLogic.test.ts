@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   formatRemaining, remainingMs, countAnswered, isAnswered, pickText, normalizeOpen, matchingAnswer, reviewMistakes, nameOk, sortByOrder, lobbyView, waitText, minutesLeft,
-  lobbyWaitText, lobbyMinutesText, saveOutcome, SAVE_WAIT_RETRY_MS, SAVE_WAIT_MAX_TRIES, saveStatus, openDigits, OPEN_CELLS } from '../src/exam/examLogic';
+  lobbyWaitText, lobbyMinutesText, saveOutcome, SAVE_WAIT_RETRY_MS, SAVE_WAIT_MAX_TRIES, saveStatus, openDigits, openCellsFor, OPEN_CELLS } from '../src/exam/examLogic';
+import { openBoxesFor } from '../src/lib/docxExport';
 
 describe('saveOutcome: что делать по ответу save', () => {
   it('ok — сохранено', () => expect(saveOutcome({ ok: true })).toBe('saved'));
@@ -223,4 +224,31 @@ describe('openDigits', () => {
   it('оставляет только цифры', () => expect(openDigits('1a2,5')).toBe('125'));
   it('не больше четырёх', () => expect(openDigits('123456')).toBe('1234'));
   it('пусто', () => expect(openDigits('')).toBe(''));
+  it('пять клеток — пять цифр', () => expect(openDigits('135799', 5)).toBe('13579'));
+});
+
+describe('openCellsFor', () => {
+  it('таджикский и английский — 5 клеток, как на бланке', () => {
+    expect(openCellsFor('Таджикский язык')).toBe(5);
+    expect(openCellsFor('Забони тоҷикӣ')).toBe(5);
+    expect(openCellsFor('Английский язык')).toBe(5);
+  });
+  it('остальные предметы и пустое имя — 4', () => {
+    for (const s of ['Математика', 'Физика', 'Химия', 'Биология', 'История', 'Право', '', null, undefined]) expect(openCellsFor(s)).toBe(4);
+  });
+  it('совпадает с числом клеток в Word-билете', () => {
+    for (const s of ['Таджикский язык', 'Английский язык', 'English', 'Математика', 'Физика', 'Право', '']) expect(openCellsFor(s)).toBe(openBoxesFor(s));
+  });
+  it('страница ученика рисует столько клеток, сколько задано, и показывает сохранённый ответ целиком', async () => {
+    const React = (await import('react')).default;
+    const { renderToStaticMarkup } = await import('react-dom/server');
+    const { ExamQuestion } = await import('../src/exam/ExamQuestion');
+    const html = (answer: string | undefined, openCells?: number) => renderToStaticMarkup(React.createElement(ExamQuestion, {
+      snap: { id: 'q', type: 'open', content: 'Условие' }, n: 1, lang: 'ru', prevPassageId: null, answer, saveState: 'none', onAnswer: () => {}, openCells,
+    }));
+    const values = (s: string) => [...s.matchAll(/class="open-cell"[^>]*value="(\d?)"/g)].map((m) => m[1]);
+    expect(values(html(undefined))).toHaveLength(4);
+    expect(values(html('13579', openCellsFor('Таджикский язык')))).toEqual(['1', '3', '5', '7', '9']);
+    expect(values(html('13579', openCellsFor('Физика')))).toEqual(['1', '3', '5', '7']);
+  });
 });

@@ -3,14 +3,14 @@ import { ExamApiError, apiFocus, apiOpen, apiSave, apiSubmit, getServerOffset, t
 import { applyFocusSignal, createAwayReporter, isAway, NO_FOCUS_FLAGS, type FocusSignal } from './awayReporter';
 import { timesRu } from '../lib/examView';
 import { ExamQuestion } from './ExamQuestion';
-import { isAnswered as isAnsweredQ, saveOutcome, saveStatus, SAVE_WAIT_MAX_TRIES, SAVE_WAIT_RETRY_MS } from './examLogic';
+import { isAnswered as isAnsweredQ, openCellsFor, saveOutcome, saveStatus, SAVE_WAIT_MAX_TRIES, SAVE_WAIT_RETRY_MS } from './examLogic';
 import { countAnswered, firstUnansweredPos, formatRemaining, navIndexes, progressFraction, remainingMs, stepNav, type Answer, type Answers, type ExamQ, type Lang } from './examLogic';
 
 const RETRY_MS = 4000;
 
 /** Экран билета: все вопросы подряд, сверху таймер, счётчик и «Сдать». Каждый ответ сразу уходит на сервер. */
-export function ExamTicket({ code, lang, deadline, questions, initialAnswers, onFinished }: {
-  code: string; lang: Lang; deadline: string; questions: ExamQ[]; initialAnswers: Answers;
+export function ExamTicket({ code, lang, subject, deadline, questions, initialAnswers, onFinished }: {
+  code: string; lang: Lang; subject: string; deadline: string; questions: ExamQ[]; initialAnswers: Answers;
   onFinished: (r: { score: number; max: number }) => void;
 }) {
   const [answers, setAnswers] = useState<Answers>(initialAnswers);
@@ -248,6 +248,7 @@ export function ExamTicket({ code, lang, deadline, questions, initialAnswers, on
           key={q.tqId} snap={q.snapshot} n={pos + 1} lang={lang} prevPassageId={null}
           answer={answers[q.tqId]} saveState={saveStatus(q.tqId, unsaved, failed, saved)} onAnswer={(a, d) => onAnswer(q.tqId, a, d)}
           onEnter={() => (last ? setConfirm(true) : setPos(stepNav(nav.length, pos, 1)))}
+          openCells={openCellsFor(subject)}
         />
       )}
 

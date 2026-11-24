@@ -117,7 +117,7 @@ body.exam-body {
 
 .open-cells { display: flex; gap: 10px; margin-top: 12px; }
 .open-cell {
-  width: 56px; height: 64px; text-align: center; font: inherit; font-size: 28px; font-weight: 800; color: var(--fg);
+  width: 56px; flex: 0 1 56px; min-width: 0; height: 64px; text-align: center; font: inherit; font-size: 28px; font-weight: 800; color: var(--fg);
   background: var(--bg); border: 2px solid var(--line); border-radius: 12px; padding: 0; caret-color: transparent;
 }
 .open-cell:focus { outline: none; border-color: var(--btn); }

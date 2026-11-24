@@ -48,15 +48,15 @@ function OptionBody({ o, lang }: { o: any; lang: Lang }) {
   );
 }
 
-/** Поле числа: 4 клетки по одной цифре, как на бланке. Каждое изменение сразу идёт наверх (там ответ учитывается в счётчике и сдаче), отправка на сервер — с паузой или по blur */
-function OpenField({ value, onChange, onEnter }: { value: string; onChange: (v: string, deferred: boolean) => void; onEnter?: () => void }) {
-  const [draft, setDraft] = useState(openDigits(value));
+/** Поле числа: клетки по одной цифре, как на бланке (cells — 4 или 5 по предмету). Каждое изменение сразу идёт наверх (там ответ учитывается в счётчике и сдаче), отправка на сервер — с паузой или по blur */
+function OpenField({ value, cells, onChange, onEnter }: { value: string; cells: number; onChange: (v: string, deferred: boolean) => void; onEnter?: () => void }) {
+  const [draft, setDraft] = useState(openDigits(value, cells));
   const refs = React.useRef<Array<HTMLInputElement | null>>([]);
-  const focusAt = (i: number) => setTimeout(() => refs.current[Math.max(0, Math.min(OPEN_CELLS - 1, i))]?.focus(), 0);
+  const focusAt = (i: number) => setTimeout(() => refs.current[Math.max(0, Math.min(cells - 1, i))]?.focus(), 0);
   const set = (v: string, at: number) => { setDraft(v); onChange(v, true); focusAt(at); };
   return (
     <div className="open-cells" role="group" aria-label="Ответ — число, по одной цифре в клетке" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onChange(draft, false); }}>
-      {Array.from({ length: OPEN_CELLS }, (_, i) => (
+      {Array.from({ length: cells }, (_, i) => (
         <input
           key={i}
           ref={(el) => { refs.current[i] = el; }}
@@ -66,12 +66,12 @@ function OpenField({ value, onChange, onEnter }: { value: string; onChange: (v: 
           aria-label={`Цифра ${i + 1}`}
           value={draft[i] ?? ''}
           // клик в любую клетку ведёт к первой свободной: цифры идут слева направо без пропусков
-          onFocus={(e) => { const t = Math.min(draft.length, OPEN_CELLS - 1); if (i !== t) { refs.current[t]?.focus(); } else e.target.select(); }}
+          onFocus={(e) => { const t = Math.min(draft.length, cells - 1); if (i !== t) { refs.current[t]?.focus(); } else e.target.select(); }}
           onChange={(e) => {
-            const d = openDigits(e.target.value);
+            const d = openDigits(e.target.value, cells);
             if (!d) return;
             // вставка нескольких цифр или ввод в заполненную клетку: пишем с этой позиции
-            const next = openDigits(draft.slice(0, i) + d + draft.slice(i + 1));
+            const next = openDigits(draft.slice(0, i) + d + draft.slice(i + 1), cells);
             set(next, next.length);
           }}
           onKeyDown={(e) => {
@@ -87,7 +87,7 @@ function OpenField({ value, onChange, onEnter }: { value: string; onChange: (v: 
           }}
           onPaste={(e) => {
             e.preventDefault();
-            const d = openDigits(e.clipboardData.getData('text'));
+            const d = openDigits(e.clipboardData.getData('text'), cells);
             if (d) set(d, d.length);
           }}
         />
@@ -97,8 +97,10 @@ function OpenField({ value, onChange, onEnter }: { value: string; onChange: (v: 
 }
 
 /** Вопрос для ответа: варианты, пары, число. Каждое изменение сразу уходит наверх (там сохраняется на сервере). */
-export function ExamQuestion({ snap, n, lang, prevPassageId, answer, saveState, onAnswer, onEnter }: CommonProps & {
+export function ExamQuestion({ snap, n, lang, prevPassageId, answer, saveState, onAnswer, onEnter, openCells = OPEN_CELLS }: CommonProps & {
   answer: Answer | undefined; saveState: SaveStatus; onAnswer: (a: Answer, deferred?: boolean) => void; onEnter?: () => void;
+  /** сколько клеток у открытого ответа (по предмету, как на бланке) */
+  openCells?: number;
 }) {
   if (isEmptyQ(snap)) {
     return <div className="exam-card"><b>{n}.</b> <span className="hint">Это место в билете пустое — пропустите его.</span></div>;
@@ -156,7 +158,7 @@ export function ExamQuestion({ snap, n, lang, prevPassageId, answer, saveState, 
 
       {snap.type === 'open' && (
         <div style={{ marginTop: 10 }}>
-          <OpenField value={typeof answer === 'string' ? answer : ''} onChange={(v, deferred) => onAnswer(v === '' ? null : v, deferred)} onEnter={onEnter} />
+          <OpenField value={typeof answer === 'string' ? answer : ''} cells={openCells} onChange={(v, deferred) => onAnswer(v === '' ? null : v, deferred)} onEnter={onEnter} />
         </div>
       )}
 

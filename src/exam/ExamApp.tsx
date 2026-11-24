@@ -184,7 +184,7 @@ export default function ExamApp() {
       if (v.state === 'running') {
         return (
           <ExamTicket
-            code={CODE} lang={v.lang} deadline={v.attempt.deadline}
+            code={CODE} lang={v.lang} subject={v.subject} deadline={v.attempt.deadline}
             questions={v.attempt.questions} initialAnswers={v.attempt.answers}
             onFinished={(r) => void onFinished(r, v.lang, v.title)}
           />

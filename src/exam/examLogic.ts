@@ -167,6 +167,9 @@ export function saveStatus(tqId: string, unsaved: ReadonlySet<string>, failed: R
   return saved.has(tqId) ? 'saved' : 'none';
 }
 
-/** Открытый ответ: до OPEN_CELLS цифр (как клетки на бланке); всё, кроме цифр, отбрасывается */
+/** Клеток под открытый ответ, как на бланке: у таджикского и английского языков 5, у остальных предметов 4 (то же правило — openBoxesFor в lib/docxExport, совпадение проверяет тест) */
 export const OPEN_CELLS = 4;
-export const openDigits = (raw: string): string => raw.replace(/\D/g, '').slice(0, OPEN_CELLS);
+export const openCellsFor = (subject: string | null | undefined): number =>
+  /англ|инглис|english|тоҷик|таджик|забони/.test((subject || '').toLowerCase()) ? 5 : OPEN_CELLS;
+/** Открытый ответ: до cells цифр (как клетки на бланке); всё, кроме цифр, отбрасывается */
+export const openDigits = (raw: string, cells: number = OPEN_CELLS): string => raw.replace(/\D/g, '').slice(0, cells);
