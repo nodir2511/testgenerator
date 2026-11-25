@@ -293,6 +293,26 @@ function openBox(at: At, b: { x: number; y: number; w: number; h: number }): Ope
   // наклонно) и попадает в окно, даже когда положение рамки уже найдено (fitOpenFrame). Убираем пятна, которые целиком
   // лежат в краевой полосе окна (1,2 мм) и тянутся почти на всю его высоту (ширину): это остаток линии рамки.
   const bandPx = Math.round(1.2 / step), minSpan = 0.8;
+  // Но тонкая «1», написанная вплотную к линии клетки, выглядит так же: высокое пятно в краевой полосе. Отличие —
+  // настоящая линия рамки при этом видна отдельно, снаружи окна, и между ней и пятном светлый зазор.
+  // side: с какой стороны окна пятно; from…to — его протяжённость вдоль этой стороны (в точках окна).
+  const frameApart = (side: 'L' | 'R' | 'T' | 'B', from: number, to: number): boolean => {
+    let gap = false;
+    for (let k = 1; k <= Math.round(1.5 / step); k++) {
+      let dark = 0;
+      for (let i = from; i <= to; i++) {
+        const v = side === 'L' ? at(x0 - k * step, y0 + i * step)
+          : side === 'R' ? at(x0 + (cols - 1 + k) * step, y0 + i * step)
+            : side === 'T' ? at(x0 + i * step, y0 - k * step)
+              : at(x0 + i * step, y0 + (rows - 1 + k) * step);
+        if (v > 0) dark++;
+      }
+      const share = dark / (to - from + 1);
+      if (share <= 0.2) gap = true;
+      else if (gap && share >= 0.7) return true;
+    }
+    return false;
+  };
   const seen = new Uint8Array(cols * rows);
   const stack: number[] = [];
   for (let i0 = 0; i0 < cols * rows; i0++) {
@@ -318,7 +338,8 @@ function openBox(at: At, b: { x: number; y: number; w: number; h: number }): Ope
     }
     const tall = (cy1 - cy0 + 1) >= rows * minSpan, wide = (cx1 - cx0 + 1) >= cols * minSpan;
     const inSide = cx1 < bandPx || cx0 >= cols - bandPx, inEnd = cy1 < bandPx || cy0 >= rows - bandPx;
-    if ((tall && inSide) || (wide && inEnd)) for (const p of comp) { bitmap[p] = 0; on--; }
+    const isFrame = (tall && inSide && !frameApart(cx1 < bandPx ? 'L' : 'R', cy0, cy1)) || (wide && inEnd && !frameApart(cy1 < bandPx ? 'T' : 'B', cx0, cx1));
+    if (isFrame) for (const p of comp) { bitmap[p] = 0; on--; }
   }
 
   // Пересчитываем габариты чернил после очистки рамки
@@ -376,6 +397,13 @@ export function ringScore(at: At, layout: OmrLayout): number {
 }
 /** Начиная с какого ringScore раскладка считается совпавшей со снимком */
 export const RING_MIN = 0.5;
+
+/**
+ * Порог повторного чтения клетки открытого ответа. Бледный карандаш темнее бумаги всего на 15–30 %, строгая бинаризация
+ * (0,8) его не видит, и клетка выглядит пустой. Клетку, где цифра не нашлась, перечитываем с этим порогом; клетки с
+ * найденной цифрой не трогаем — их рисунок (по нему подсказывается цифра) остаётся прежним.
+ */
+const OPEN_SOFT_K = 0.88;
 
 /** Пороги поиска меток: сначала строгий (метки почти чёрные), потом мягче — у тёмного стола или в тени краевая метка не всегда темнее 0,4 от среднего окна */
 const MARKER_K = [0.4, 0.55, 0.7];
@@ -499,6 +527,8 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
   const skew = Math.max(Math.max(e[0], e[2]) / Math.min(e[0], e[2]), Math.max(e[1], e[3]) / Math.min(e[1], e[3]));
 
   const codeOk = best.mism === 0 && best.fit >= RING_MIN;
+  let soft: At | null = null;
+  const atSoft = () => (soft ??= sampler(adaptiveBinary(img, Math.max(31, Math.round(w / 8) | 1), OPEN_SOFT_K), w, h, best.H));
   return {
     ok: true,
     codeOk,
@@ -511,7 +541,16 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
     matching: layout.matching.map((m) => ({ q: m.q, rows: m.rows.map((r) => ({ row: r.row, ...pickOne(r.options, at) })) })),
     open: layout.open.map((o) => {
       const { dx, dy } = fitOpenFrame(at, o.boxes);
-      return { q: o.q, boxes: o.boxes.map((b) => openBox(at, { ...b, x: b.x + dx, y: b.y + dy })) };
+      return {
+        q: o.q,
+        boxes: o.boxes.map((b) => {
+          const cell = { ...b, x: b.x + dx, y: b.y + dy };
+          const strict = openBox(at, cell);
+          if (strict.hasDigit) return strict;
+          const faint = openBox(atSoft(), cell);
+          return faint.hasDigit ? faint : strict;
+        }),
+      };
     }),
   };
 }

@@ -10,7 +10,8 @@ const rng = (seed: number) => () => {
 
 export interface Truth { variant: number | null; tests: Array<string | null>; matching: Array<Array<number | null>>; open: number[]; openText: string[] }
 
-export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number } = {}): { img: GrayImage; truth: Truth } {
+/** draw — дорисовать на бланке свои штрихи (координаты в мм бланка; v — яркость штриха, бумага 235), например цифру у самого края клетки или бледным карандашом */
+export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
   const r = rng(seed);
   const W = Math.round(layout.strip.w * S), H = Math.round(layout.strip.h * S);
   const d = new Float32Array(W * H).fill(235);
@@ -28,13 +29,13 @@ export function render(layout: OmrLayout, seed: number, deg: number, opts: { gly
   };
   for (const m of layout.markers) rect(m.x - m.size / 2, m.y - m.size / 2, m.size, m.size);
   for (const c of layout.codeCells) if (c.bit) rect(c.x - c.size / 2, c.y - c.size / 2, c.size, c.size);
-  const stroke = (ax: number, ay: number, bx: number, by: number, wmm: number) => {
+  const stroke = (ax: number, ay: number, bx: number, by: number, wmm: number, v = 35) => {
     const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1e-9;
     for (let py = Math.floor((Math.min(ay, by) - wmm) * S); py < Math.ceil((Math.max(ay, by) + wmm) * S); py++) {
       for (let px = Math.floor((Math.min(ax, bx) - wmm) * S); px < Math.ceil((Math.max(ax, bx) + wmm) * S); px++) {
         const x = (px + 0.5) / S, y = (py + 0.5) / S;
         const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L2));
-        if (Math.hypot(x - (ax + t * dx), y - (ay + t * dy)) <= wmm / 2) dot(px, py, 35);
+        if (Math.hypot(x - (ax + t * dx), y - (ay + t * dy)) <= wmm / 2) dot(px, py, v);
       }
     }
   };
@@ -78,6 +79,7 @@ export function render(layout: OmrLayout, seed: number, deg: number, opts: { gly
     }
     truth.openText.push(text);
   }
+  opts.draw?.(stroke);
 
   // Фото: поворот на угол deg вокруг центра полоски, масштаб 6 px/мм, поля со столом
   const sc = 6 / S, PW = Math.round(layout.strip.w * 6 + 160), PH = Math.round(layout.strip.h * 6 + 160) + 200;

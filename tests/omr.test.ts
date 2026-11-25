@@ -85,6 +85,39 @@ describe('распознавание бланка по снимку', () => {
     expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
   });
 
+  // Реальный бланк таджикского: «1» написана тонко и вплотную к левой линии клетки. Очистка рамки принимала такой
+  // штрих за остаток линии (высокий, в краевой полосе окна) и стирала — клетка выглядела пустой.
+  for (const deg of [0, 3, 180 - 4]) {
+    it(`тонкая единица у левого края клетки — цифра, а не остаток рамки (снимок под ${deg}°)`, () => {
+      const layout = OMR_LAYOUTS.taj;
+      const empty = render(layout, 5, deg).truth.open[0]; // первая пустая клетка первого открытого вопроса
+      const b = layout.open[0].boxes[empty];
+      const { img, truth } = render(layout, 5, deg, { draw: (stroke) => stroke(b.x + 1.7, b.y + 1.5, b.x + 1.05, b.y + 5.7, 0.45) });
+      const res = omrRead(img, layout);
+      expect(res.ok && res.codeOk).toBe(true);
+      if (!res.ok) return;
+      expect(res.open[0].boxes.map((x) => x.hasDigit)).toEqual(layout.open[0].boxes.map((_, i) => i <= empty));
+      expect(res.open[1].boxes.filter((x) => x.hasDigit).length).toBe(truth.open[1]);
+    });
+  }
+
+  // Реальный бланк: цифра написана бледным карандашом (темнее бумаги всего на четверть). Строгая бинаризация её не видела,
+  // и клетка считалась пустой. Пустая клетка перечитывается с мягким порогом.
+  for (const deg of [0, 3, 180 - 4]) {
+    it(`цифра бледным карандашом в клетке находится (снимок под ${deg}°)`, () => {
+      const layout = OMR_LAYOUTS.taj;
+      const empty = render(layout, 5, deg).truth.open[0];
+      const b = layout.open[0].boxes[empty];
+      const four = [[0.7, 1], [0.7, 0], [0, 0.7], [1, 0.7]].map(([x, y]) => [b.x + 1.3 + x * 2.9, b.y + 1.4 + y * 4.2]);
+      const { img, truth } = render(layout, 5, deg, { draw: (stroke) => { for (let k = 0; k + 1 < four.length; k++) stroke(four[k][0], four[k][1], four[k + 1][0], four[k + 1][1], 0.45, 175); } });
+      const res = omrRead(img, layout);
+      expect(res.ok && res.codeOk).toBe(true);
+      if (!res.ok) return;
+      expect(res.open[0].boxes.map((x) => x.hasDigit)).toEqual(layout.open[0].boxes.map((_, i) => i <= empty));
+      expect(res.open[1].boxes.filter((x) => x.hasDigit).length).toBe(truth.open[1]);
+    });
+  }
+
   it('бланк таджикского — пять клеток под открытый ответ, раскладка выбирается по коду бланка', () => {
     expect(OMR_LAYOUTS.taj.open.map((o) => o.boxes.length)).toEqual([5, 5]);
     expect(OMR_LAYOUTS.bio.open.map((o) => o.boxes.length)).toEqual([4, 4]);
