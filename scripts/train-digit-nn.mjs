@@ -4,6 +4,7 @@
 // Запуск: node scripts/train-digit-nn.mjs — обучение на всём, запись весов.
 //         node scripts/train-digit-nn.mjs --holdout batch-3 — честная проверка: пачка batch-3 в обучение не идёт,
 //         точность считается на ней, веса не записываются.
+//         --seed N — начальное число (по умолчанию 42); наборы данных сравнивают по сумме нескольких чисел.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -115,7 +116,10 @@ function drawSample(digit, rnd, cols = 28, rows = 34) {
 
 console.log('Генерация тренировочной выборки...');
 const N_PER_DIGIT = 300;
-const rnd = mulberry(42);
+// Начальное число: одна и та же выборка при разных числах даёт на отложенной пачке разброс в несколько процентов,
+// поэтому сравнивать наборы данных надо по нескольким числам (--seed 1, 2, 3), а не по одному запуску.
+const seedIdx = process.argv.indexOf('--seed');
+const rnd = mulberry(seedIdx > 0 ? Number(process.argv[seedIdx + 1]) : 42);
 const samples = [];
 for (let d = 0; d < 10; d++) {
   for (let i = 0; i < N_PER_DIGIT; i++) {
