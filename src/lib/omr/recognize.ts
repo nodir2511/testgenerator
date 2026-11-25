@@ -147,6 +147,55 @@ function findMarkers(bin: Uint8Array, w: number, h: number, want: number): Corne
   return found.slice(0, 8).map(({ TL, TR, BL, BR }) => ({ TL, TR, BL, BR }));
 }
 
+/**
+ * Запасной поиск меток — когда обычный (самые крайние квадраты кадра) не дал бланка. На снимке стопки в кадр попадают
+ * соседние листы: их метки и квадратики кода лежат ближе к углам кадра, чем метки своего бланка, и вытесняют их из
+ * кандидатов. Здесь четвёрка собирается по форме: две диагонали с общей серединой и длиной, которая соответствует
+ * размеру самих меток (диагональ бланка = diagPerSide сторон метки), стороны — как у бланка. Подходящих четвёрок бывает
+ * много (метки нижних листов рядом со своими), поэтому отдаётся до 80 самых больших: какая из них настоящая, решают
+ * код бланка и кружки.
+ */
+function findMarkersWide(sq: Blob[], want: number, diagPerSide: number): Corners[] {
+  if (sq.length < 4 || sq.length > 140) return [];
+  const dist = (p: Blob, q: Blob) => Math.hypot(p.cx - q.cx, p.cy - q.cy);
+  const diags: Array<{ p: Blob; q: Blob; d: number }> = [];
+  for (let i = 0; i < sq.length; i++) for (let j = i + 1; j < sq.length; j++) {
+    const p = sq[i], q = sq[j];
+    if (Math.max(p.area, q.area) > Math.min(p.area, q.area) * 2.6) continue;
+    const d = dist(p, q), rel = d / (Math.sqrt((p.area + q.area) / 2) * diagPerSide);
+    if (rel > 0.6 && rel < 1.7) diags.push({ p, q, d });
+  }
+  const found: Array<Corners & { area2: number }> = [];
+  for (let i = 0; i < diags.length; i++) for (let j = i + 1; j < diags.length; j++) {
+    const A = diags[i], B = diags[j];
+    if (A.p === B.p || A.p === B.q || A.q === B.p || A.q === B.q) continue;
+    const mid = Math.hypot((A.p.cx + A.q.cx - B.p.cx - B.q.cx) / 2, (A.p.cy + A.q.cy - B.p.cy - B.q.cy) / 2);
+    if (mid > 0.15 * Math.min(A.d, B.d)) continue;
+    const areas = [A.p.area, A.q.area, B.p.area, B.q.area];
+    if (Math.max(...areas) > Math.min(...areas) * 2.6) continue;
+    // Обход по часовой стрелке (ось y вниз), иначе гомография получится зеркальной
+    const cw = (B.p.cx - A.p.cx) * (A.q.cy - B.p.cy) - (B.p.cy - A.p.cy) * (A.q.cx - B.p.cx) > 0;
+    let P = cw ? [A.p, B.p, A.q, B.q] : [A.p, B.q, A.q, B.p];
+    // Насколько четвёрка похожа на прямоугольник бланка: противоположные стороны равны, стороны относятся как у бланка,
+    // диагонали делят друг друга пополам. Снимок под углом всё это немного нарушает, случайная четвёрка — сильно.
+    const e = [dist(P[0], P[1]), dist(P[1], P[2]), dist(P[2], P[3]), dist(P[3], P[0])];
+    const s1 = (e[0] + e[2]) / 2, s2 = (e[1] + e[3]) / 2;
+    const off = Math.abs(Math.log(e[0] / e[2])) + Math.abs(Math.log(e[1] / e[3])) + Math.abs(Math.log(Math.max(s1, s2) / Math.min(s1, s2) / want)) + mid / Math.min(A.d, B.d);
+    if (off > WIDE_OFF_MAX) continue;
+    // Первым идёт левый верхний угол кадра — как в обычном поиске, чтобы поворот снимка считался одинаково
+    let first = 0;
+    for (let n = 1; n < 4; n++) if (P[n].cx + P[n].cy < P[first].cx + P[first].cy) first = n;
+    P = [0, 1, 2, 3].map((n) => P[(first + n) % 4]);
+    let area2 = 0;
+    for (let n = 0; n < 4; n++) area2 += P[n].cx * P[(n + 1) % 4].cy - P[(n + 1) % 4].cx * P[n].cy;
+    found.push({ TL: P[0], TR: P[1], BR: P[2], BL: P[3], area2: Math.abs(area2) });
+  }
+  found.sort((x, y) => y.area2 - x.area2);
+  return found.slice(0, 80).map(({ TL, TR, BL, BR }) => ({ TL, TR, BL, BR }));
+}
+/** Наибольшее отклонение четвёрки от прямоугольника бланка в запасном поиске (сумма долей, см. findMarkersWide) */
+const WIDE_OFF_MAX = 0.35;
+
 // ---------- чтение отметок ----------
 /** Доля закрашенной площади кружка, начиная с которой он считается отмеченным */
 export const FILL_ON = 0.40;
@@ -367,6 +416,11 @@ function openBox(at: At, b: { x: number; y: number; w: number; h: number }): Ope
  * тогда ответы читались со сдвигом. Эта проверка такие четвёрки отсекает.
  */
 export function ringScore(at: At, layout: OmrLayout): number {
+  const per = ringParts(at, layout);
+  return per.length ? per[per.length >> 1] : 0;
+}
+/** Оценка каждого кружка бланка по возрастанию (см. ringScore) */
+function ringParts(at: At, layout: OmrLayout): number[] {
   const groups: OmrCircle[][] = [layout.variant, ...layout.tests.map((t) => t.options), ...layout.matching.flatMap((m) => m.rows.map((r) => r.options))];
   const N = 16;
   const per: number[] = [];
@@ -391,12 +445,16 @@ export function ringScore(at: At, layout: OmrLayout): number {
       if (tot) per.push((ring - out) / tot);
     }
   }
-  if (!per.length) return 0;
   per.sort((p, q) => p - q);
-  return per[per.length >> 1];
+  return per;
 }
 /** Начиная с какого ringScore раскладка считается совпавшей со снимком */
 export const RING_MIN = 0.5;
+/**
+ * Средняя оценка кружков, при которой четвёрка меток не вызывает сомнений. На реальных снимках у настоящей четвёрки
+ * она 0,84–0,98, у «смешанной» с меткой нижнего листа стопки — 0,61–0,65; ниже порога включается запасной поиск.
+ */
+const RING_AVG_SURE = 0.75;
 
 /**
  * Порог повторного чтения клетки открытого ответа. Бледный карандаш темнее бумаги всего на 15–30 %, строгая бинаризация
@@ -413,7 +471,7 @@ export interface OmrOptions {
   codes?: number[];
 }
 
-interface Located { best: { score: number; mism: number; rot: number; H: H3; at: At; ring: Blob[]; fit: number } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number; missingHint?: string }
+interface Located { best: { score: number; mism: number; rot: number; H: H3; at: At; ring: Blob[]; fit: number; avg: number } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number; missingHint?: string }
 
 function findMissingHint(sq: Blob[], w: number, h: number, want: number): string | undefined {
   if (sq.length < 3) return undefined;
@@ -459,19 +517,11 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
   let anyMarkers = false;
   let kUsed = MARKER_K[0];
   let missingHint: string | undefined;
-  for (const k of MARKER_K) {
-    const sqCandidates = components(adaptiveBinary(img, win, k), w, h).filter((c) => {
-      const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
-      const minArea = w * h * 0.00007;
-      return c.area >= minArea && c.iso > 0.45 && c.solid > 0.8 && c.solid < 1.35 && Math.max(bw, bh) < w * 0.12;
-    });
-    const cands = findMarkers(adaptiveBinary(img, win, k), w, h, Math.max(want, 1 / want));
-    if (!cands.length) {
-      if (!missingHint) missingHint = findMissingHint(sqCandidates, w, h, Math.max(want, 1 / want));
-      continue;
-    }
-    anyMarkers = true;
-    // Кандидатов несколько (в кадр может попасть соседняя полоска листа): выбираем того, у кого сходится код бланка
+  const found = () => !!best && best.mism === 0 && best.fit >= RING_MIN;
+  const sure = () => found() && (best as NonNullable<Located['best']>).avg >= RING_AVG_SURE;
+  const squares: Blob[][] = [];
+  // Кандидатов несколько (в кадр может попасть соседняя полоска листа): выбираем того, у кого сходится код бланка
+  const tryQuads = (cands: Corners[], k: number) => {
     for (const mk of cands) {
       const d = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
       const got = (d(mk.TL, mk.TR) + d(mk.BL, mk.BR)) / (d(mk.TL, mk.BL) + d(mk.TR, mk.BR));
@@ -489,15 +539,43 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
         let mism = Math.min(...codes.map((c) => popcount(c ^ value)));
         if (first < 0.5) mism += 2;
         // Код сошёлся — проверяем, что и кружки бланка лежат на своих местах
-        const fit = mism === 0 ? ringScore(at, layout) : 0;
-        const score = mism * 10 - first - (fit >= RING_MIN ? 100 : 0) - fit;
-        if (!best || score < best.score) { best = { score, mism, rot, H, at, ring, fit }; kUsed = k; }
+        const per = mism === 0 ? ringParts(at, layout) : [];
+        const fit = per.length ? per[per.length >> 1] : 0;
+        const avg = per.length ? per.reduce((a, v) => a + v, 0) / per.length : 0;
+        // Из четвёрок, прошедших проверку, берётся та, у которой на месте больше кружков (средняя оценка): у «смешанной»
+        // четвёрки (три свои метки и метка нижнего листа стопки) медиана тоже высокая, а средняя заметно ниже
+        const score = mism * 10 - first - (fit >= RING_MIN ? 100 + 10 * avg : 0) - fit;
+        if (!best || score < best.score) { best = { score, mism, rot, H, at, ring, fit, avg }; kUsed = k; }
       }
     }
-    const b = best as Located['best'];
-    if (b && b.mism === 0 && b.fit >= RING_MIN) break;
+  };
+  for (const k of MARKER_K) {
+    const sqCandidates = components(adaptiveBinary(img, win, k), w, h).filter((c) => {
+      const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
+      const minArea = w * h * 0.00007;
+      return c.area >= minArea && c.iso > 0.45 && c.solid > 0.8 && c.solid < 1.35 && Math.max(bw, bh) < w * 0.12;
+    });
+    squares.push(sqCandidates);
+    const cands = findMarkers(adaptiveBinary(img, win, k), w, h, Math.max(want, 1 / want));
+    if (!cands.length) {
+      if (!missingHint) missingHint = findMissingHint(sqCandidates, w, h, Math.max(want, 1 / want));
+      continue;
+    }
+    anyMarkers = true;
+    tryQuads(cands, k);
+    if (found()) break;
   }
-  if ((!best || best.mism !== 0 || best.fit < RING_MIN) && !missingHint) {
+  // Бланк не нашёлся среди самых крайних квадратов кадра (их заслонили метки соседних листов стопки) либо нашёлся
+  // сомнительно: кружки совпали не все — возможно, одна из меток взята с нижнего листа
+  if (!sure()) {
+    const before = { best, kUsed, shapeBad };
+    const diagPerSide = Math.hypot(lm[3].x - lm[0].x, lm[3].y - lm[0].y) / lm[0].size;
+    for (let i = 0; i < squares.length && !sure(); i++) tryQuads(findMarkersWide(squares[i], Math.max(want, 1 / want), diagPerSide), MARKER_K[i]);
+    // Не помогло — итог и причина отказа остаются такими, какими были без запасного поиска
+    if (found()) anyMarkers = true;
+    else ({ best, kUsed, shapeBad } = before);
+  }
+  if (!found() && !missingHint) {
     for (const k of MARKER_K) {
       const minArea = w * h * 0.00007;
       const sqCandidates = components(adaptiveBinary(img, win, k), w, h).filter((c) => {

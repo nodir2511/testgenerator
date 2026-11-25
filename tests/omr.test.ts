@@ -118,6 +118,63 @@ describe('распознавание бланка по снимку', () => {
     });
   }
 
+  // Реальные снимки: бланк лежит на стопке, в кадр попали соседние бланки. Их метки и квадратики кода ближе к углу
+  // кадра, чем метка своего бланка, и вытесняли её из кандидатов — бланк отклонялся, хотя все четыре метки видны.
+  it('соседние бланки в углу кадра: чужие метки дальше к углу, свой бланк всё равно читается', () => {
+    const layout = OMR_LAYOUTS.taj;
+    const { img, truth } = render(layout, 5, 2);
+    const d = img.data as Float32Array;
+    const paint = (x0: number, y0: number, x1: number, y1: number, v: number) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) d[y * img.w + x] = v; };
+    // лист соседнего бланка в правом верхнем углу кадра и восемь чёрных квадратов на нём
+    paint(img.w - 290, 10, img.w, 165, 235);
+    for (const [cx, cy] of [[250, 45], [200, 45], [150, 45], [100, 45], [50, 45], [150, 115], [100, 115], [50, 115]]) paint(img.w - cx - 12, cy - 12, img.w - cx + 12, cy + 12, 15);
+    const res = omrRead(img, layout);
+    expect(res.ok && res.codeOk).toBe(true);
+    if (!res.ok) return;
+    expect(res.variant.answer).toBe(truth.variant);
+    expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+    expect(res.matching.map((m) => m.rows.map((r) => r.answer))).toEqual(truth.matching);
+  });
+
+  // Бланк лежит на стопке таких же: из-под него выглядывают метки нижних листов, рядом с каждой своей. Четвёрок с
+  // подходящей формой получается много, своя — самая маленькая из них и раньше не попадала в число проверяемых.
+  it('метки нижних листов стопки рядом со своими: читается верхний бланк', () => {
+    const layout = OMR_LAYOUTS.taj;
+    const { img, truth } = render(layout, 5, 0);
+    const d = img.data as Float32Array;
+    const paint = (x0: number, y0: number, x1: number, y1: number, v: number) => { for (let y = Math.round(y0); y < y1; y++) for (let x = Math.round(x0); x < x1; x++) d[y * img.w + x] = v; };
+    // снимок без поворота: мм бланка → пиксели кадра (6 пикс/мм, поля 80 и 180); метка нижнего листа — на 12 мм наружу
+    const m = layout.markers;
+    const k = (m[1].x - m[0].x) / (m[2].y - m[0].y);
+    m.forEach((c, i) => {
+      const px = 80 + 6 * (c.x + (i % 2 ? 12 : -12)), py = 180 + 6 * (c.y + (i < 2 ? -12 : 12) / k);
+      paint(px - 22, py - 22, px + 22, py + 22, 235);
+      paint(px - 12, py - 12, px + 12, py + 12, 15);
+    });
+    const res = omrRead(img, layout);
+    expect(res.ok && res.codeOk).toBe(true);
+    if (!res.ok) return;
+    expect(res.variant.answer).toBe(truth.variant);
+    expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+    expect(res.matching.map((m2) => m2.rows.map((r) => r.answer))).toEqual(truth.matching);
+  });
+
+  // Метка нижнего листа совсем рядом со своей (5 мм): четвёрка с ней тоже проходит проверку кода и кружков (кружки идут
+  // с постоянным шагом и частично совпадают со сдвигом), а ответы читаются не там. Берётся четвёрка, где совпали все кружки.
+  it('метка нижнего листа в 5 мм от своей: ответы читаются по своим меткам', () => {
+    const layout = OMR_LAYOUTS.taj;
+    const m = layout.markers;
+    const k = (m[1].x - m[0].x) / (m[2].y - m[0].y);
+    const decoys = m.map((c, i) => ({ x: c.x + (i % 2 ? 5 : -5), y: c.y + (i < 2 ? -5 : 5) / k }));
+    const { img, truth } = render(layout, 5, 2, { draw: (stroke) => { for (const c of decoys) stroke(c.x - 0.01, c.y, c.x + 0.01, c.y, 4.2, 15); } });
+    const res = omrRead(img, layout);
+    expect(res.ok && res.codeOk).toBe(true);
+    if (!res.ok) return;
+    expect(res.variant.answer).toBe(truth.variant);
+    expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+    expect(res.matching.map((m2) => m2.rows.map((r) => r.answer))).toEqual(truth.matching);
+  });
+
   it('бланк таджикского — пять клеток под открытый ответ, раскладка выбирается по коду бланка', () => {
     expect(OMR_LAYOUTS.taj.open.map((o) => o.boxes.length)).toEqual([5, 5]);
     expect(OMR_LAYOUTS.bio.open.map((o) => o.boxes.length)).toEqual([4, 4]);
