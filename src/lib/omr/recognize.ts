@@ -447,7 +447,9 @@ export function ringScore(at: At, layout: OmrLayout): number {
 }
 /** Оценка каждого кружка бланка по возрастанию (см. ringScore) */
 function ringParts(at: At, layout: OmrLayout): number[] {
-  const groups: OmrCircle[][] = [layout.variant, ...layout.tests.map((t) => t.options), ...layout.matching.flatMap((m) => m.rows.map((r) => r.options))];
+  return ringPartsOf(at, [layout.variant, ...layout.tests.map((t) => t.options), ...layout.matching.flatMap((m) => m.rows.map((r) => r.options))]);
+}
+function ringPartsOf(at: At, groups: OmrCircle[][]): number[] {
   const N = 16;
   const per: number[] = [];
   for (const g of groups) {
@@ -474,6 +476,66 @@ function ringParts(at: At, layout: OmrLayout): number[] {
   per.sort((p, q) => p - q);
   return per;
 }
+const mean = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
+
+/**
+ * Лист, сложенный пополам: у сгиба излом, половинки выгнуты, и по четырём меткам кружки за сгибом оказываются на 2–3 мм
+ * в стороне, а столбцы одного задания на соответствие — с разным сдвигом. Общий сдвиг ряда тут не помогает, поэтому
+ * место ищется по блокам (столбик тестов, таблица соответствия): у каждого столбца кружков свой сдвиг, соседние
+ * столбцы расходятся не больше чем на SEAT_HOP шагов. Все строки блока сдвигаются вместе, поэтому на соседний ряд
+ * или столбец блок не «перескакивает» (крайний ряд тогда остался бы без колец). Отдаёт раскладку с кружками на
+ * найденных местах; годится она, только если кружки совпали везде (avg) и в каждом блоке отдельно (worst).
+ */
+function seatCircles(at: At, layout: OmrLayout): { seat: OmrLayout; avg: number; worst: number } {
+  const byCols = new Map<string, OmrCircle[][]>();
+  for (const t of layout.tests) {
+    const key = t.options.map((o) => o.x).join(',');
+    byCols.set(key, [...(byCols.get(key) ?? []), t.options]);
+  }
+  const blocks = [...byCols.values(), ...layout.matching.map((m) => m.rows.map((r) => r.options))];
+  const n = 2 * SEAT_RANGE + 1, total = n * n;
+  const moved = new Map<OmrCircle[], OmrCircle[]>();
+  for (const rows of blocks) {
+    const back: Int32Array[] = [];
+    let cur = new Float64Array(0);
+    rows[0].forEach((_, c) => {
+      const next = new Float64Array(total), from = new Int32Array(total);
+      for (let i = 0; i < total; i++) {
+        const x = i % n, y = (i / n) | 0, dx = (x - SEAT_RANGE) * SEAT_STEP, dy = (y - SEAT_RANGE) * SEAT_STEP;
+        let prev = 0;
+        if (c) {
+          prev = -Infinity;
+          for (let yy = Math.max(0, y - SEAT_HOP); yy <= Math.min(n - 1, y + SEAT_HOP); yy++) for (let xx = Math.max(0, x - SEAT_HOP); xx <= Math.min(n - 1, x + SEAT_HOP); xx++) {
+            const v = cur[yy * n + xx] - 0.02 * (Math.abs(xx - x) + Math.abs(yy - y));
+            if (v > prev) { prev = v; from[i] = yy * n + xx; }
+          }
+        }
+        // Чуть дороже дальние сдвиги: при равном совпадении кольца берутся ближние
+        next[i] = prev + mean(rows.map((r) => circleRingMatch(at, r[c], dx, dy))) - 0.004 * Math.hypot(dx, dy);
+      }
+      back.push(from);
+      cur = next;
+    });
+    let i = 0;
+    for (let k = 1; k < total; k++) if (cur[k] > cur[i]) i = k;
+    const shift: Array<{ dx: number; dy: number }> = [];
+    for (let c = back.length - 1; c >= 0; c--) {
+      shift[c] = { dx: ((i % n) - SEAT_RANGE) * SEAT_STEP, dy: (((i / n) | 0) - SEAT_RANGE) * SEAT_STEP };
+      i = back[c][i];
+    }
+    for (const r of rows) moved.set(r, r.map((o, c) => ({ ...o, x: o.x + shift[c].dx, y: o.y + shift[c].dy })));
+  }
+  const to = (o: OmrCircle[]) => moved.get(o) ?? o;
+  const seat: OmrLayout = {
+    ...layout,
+    tests: layout.tests.map((t) => ({ ...t, options: to(t.options) })),
+    matching: layout.matching.map((m) => ({ ...m, rows: m.rows.map((r) => ({ ...r, options: to(r.options) })) })),
+  };
+  return { seat, avg: mean(ringParts(at, seat)), worst: Math.min(...blocks.map((rows) => mean(ringPartsOf(at, rows.map(to))))) };
+}
+/** Поиск места блока: шаг и предел сдвига (в шагах; до 3,2 мм), наибольшее расхождение соседних столбцов (в шагах) */
+const SEAT_STEP = 0.4, SEAT_RANGE = 8, SEAT_HOP = 2;
+
 /** Начиная с какого ringScore раскладка считается совпавшей со снимком */
 export const RING_MIN = 0.5;
 /**
@@ -497,7 +559,7 @@ export interface OmrOptions {
   codes?: number[];
 }
 
-interface Located { best: { score: number; mism: number; rot: number; H: H3; at: At; ring: Blob[]; fit: number; avg: number } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number; missingHint?: string }
+interface Located { best: { score: number; mism: number; rot: number; H: H3; at: At; ring: Blob[]; fit: number; avg: number; seat?: OmrLayout } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number; missingHint?: string }
 
 /**
  * Какого угла бланка не видно. Три квадрата принимаются за метки, только если по ним бланк ложится на снимок: остальные
@@ -576,6 +638,12 @@ function findMissingHint(sq: Blob[], w: number, h: number, layout: OmrLayout): s
 /** Подсказка «не виден угол»: сколько самых больших троек проверяем, допуск места пятна (мм), нужная доля и число пятен */
 const HINT_TRIPLES = 80, HINT_NEAR = 2, HINT_SHARE = 0.9, HINT_MIN_SPOTS = 5;
 
+/**
+ * Сложенный лист: сколько четвёрок проверять и какими должны быть оценки кружков (в среднем и в худшем блоке), чтобы
+ * принять. На 60 фото у настоящих четвёрок 0,89–0,97 и 0,76–0,94, у ложных (метка закрыта, взята с нижнего листа) худший блок до 0,67.
+ */
+const SEAT_TRIES = 4, SEAT_AVG = 0.8, SEAT_WORST = 0.72;
+
 /** Ищет метки и поворот бланка: порог меток ослабляем, пока не сойдётся код бланка */
 function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
   const { w, h } = img;
@@ -594,6 +662,8 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
   const found = () => !!best && best.mism === 0 && best.fit >= RING_MIN;
   const sure = () => found() && (best as NonNullable<Located['best']>).avg >= RING_AVG_SURE;
   const squares: Blob[][] = [];
+  // Четвёрки, у которых сошёлся код бланка: среди них ищется лист, сложенный пополам
+  const coded = new Map<string, NonNullable<Located['best']>>();
   // Кандидатов несколько (в кадр может попасть соседняя полоска листа): выбираем того, у кого сходится код бланка
   const tryQuads = (cands: Corners[], k: number) => {
     for (const mk of cands) {
@@ -615,10 +685,11 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
         // Код сошёлся — проверяем, что и кружки бланка лежат на своих местах
         const per = mism === 0 ? ringParts(at, layout) : [];
         const fit = per.length ? per[per.length >> 1] : 0;
-        const avg = per.length ? per.reduce((a, v) => a + v, 0) / per.length : 0;
+        const avg = mean(per);
         // Из четвёрок, прошедших проверку, берётся та, у которой на месте больше кружков (средняя оценка): у «смешанной»
         // четвёрки (три свои метки и метка нижнего листа стопки) медиана тоже высокая, а средняя заметно ниже
         const score = mism * 10 - first - (fit >= RING_MIN ? 100 + 10 * avg : 0) - fit;
+        if (mism === 0) coded.set(ring.map((c) => `${c.cx | 0},${c.cy | 0}`).join(';') + rot, { score, mism, rot, H, at, ring, fit, avg });
         if (!best || score < best.score) { best = { score, mism, rot, H, at, ring, fit, avg }; kUsed = k; }
       }
     }
@@ -649,6 +720,15 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
     if (found()) anyMarkers = true;
     else ({ best, kUsed, shapeBad } = before);
   }
+  if (!sure() && coded.size) {
+    // Кружки не сошлись — возможно, лист сложен пополам. Настоящая четвёрка — та, у которой они находятся по блокам
+    let pick: Located['best'] = null;
+    for (const c of [...coded.values()].sort((a, b) => b.avg - a.avg).slice(0, SEAT_TRIES)) {
+      const { seat, avg, worst } = seatCircles(c.at, layout);
+      if (avg >= SEAT_AVG && worst >= SEAT_WORST && (!pick || avg > pick.avg)) pick = { ...c, seat, avg, fit: Math.max(c.fit, RING_MIN) };
+    }
+    if (pick) { best = pick; anyMarkers = true; missingHint = undefined; }
+  }
   if (!found() && !missingHint) {
     for (const k of MARKER_K) {
       const minArea = w * h * 0.00007;
@@ -670,6 +750,7 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
   if (!anyMarkers) return missingHint ? { ok: false, reason: 'markers', missingHint } : { ok: false, reason: 'markers' };
   if (!best) return missingHint ? { ok: false, reason: shapeBad ? 'shape' : 'homography', missingHint } : { ok: false, reason: shapeBad ? 'shape' : 'homography' };
   const { at, ring } = best;
+  const read = best.seat ?? layout; // лист сложен пополам — кружки читаются на найденных местах
 
   // Качество снимка: сколько пикселей приходится на мм бланка и насколько сильно он снят под углом
   const edge = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
@@ -690,9 +771,9 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
     quality: { pxPerMm, skew, ring: best.fit },
     rotation: best.rot * 90,
     toPhoto: best.H,
-    variant: pickOne(layout.variant, at, codeOk),
-    tests: layout.tests.map((t) => ({ q: t.q, ...pickOne(t.options, at, codeOk) })),
-    matching: layout.matching.map((m) => ({ q: m.q, rows: m.rows.map((r) => ({ row: r.row, ...pickOne(r.options, at, codeOk) })) })),
+    variant: pickOne(read.variant, at, codeOk),
+    tests: read.tests.map((t) => ({ q: t.q, ...pickOne(t.options, at, codeOk) })),
+    matching: read.matching.map((m) => ({ q: m.q, rows: m.rows.map((r) => ({ row: r.row, ...pickOne(r.options, at, codeOk) })) })),
     open: layout.open.map((o) => {
       const { dx, dy } = fitOpenFrame(at, o.boxes);
       return {

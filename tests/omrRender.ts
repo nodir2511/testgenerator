@@ -8,10 +8,19 @@ const rng = (seed: number) => () => {
   return seed / 4294967296;
 };
 
+/** Профиль сгиба: [x бланка, мм; сдвиг в долях fold] */
+const FOLD_X = [[9, 0], [35, -0.25], [60, 0.25], [90, 0.2], [105, -0.3], [118, -1], [145, -1], [183, -0.35], [201, 0]];
+const FOLD_Y = [[9, 0], [60, 0.15], [105, 0.5], [145, 0.3], [201, 0]];
+const along = (p: number[][], x: number) => {
+  if (x <= p[0][0]) return p[0][1];
+  for (let i = 1; i < p.length; i++) if (x <= p[i][0]) return p[i - 1][1] + ((p[i][1] - p[i - 1][1]) * (x - p[i - 1][0])) / (p[i][0] - p[i - 1][0]);
+  return p[p.length - 1][1];
+};
+
 export interface Truth { variant: number | null; tests: Array<string | null>; matching: Array<Array<number | null>>; open: number[]; openText: string[] }
 
 /** draw — дорисовать на бланке свои штрихи (координаты в мм бланка; v — яркость штриха, бумага 235), например цифру у самого края клетки или бледным карандашом */
-export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; curl?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
+export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; curl?: number; fold?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
   const r = rng(seed);
   const W = Math.round(layout.strip.w * S), H = Math.round(layout.strip.h * S);
   const d = new Float32Array(W * H).fill(235);
@@ -98,6 +107,13 @@ export function render(layout: OmrLayout, seed: number, deg: number, opts: { gly
     if (opts.curl) {
       const [a0, b0, c0] = layout.markers, unit = (v: number, lo: number, hi: number) => Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
       mx += opts.curl * Math.sin(Math.PI * unit(mx, a0.x, b0.x) ** 6) * Math.sqrt(Math.sin(Math.PI * unit(my, a0.y, c0.y)));
+    }
+    // Лист сложен пополам и расправлен: половинки выгнуты, у сгиба (середина полоски) — излом. Профиль снят с реального
+    // фото (пачка batch-7, №1): сразу за сгибом кружки уезжают влево на fold мм, у краёв листа и меток сдвига нет
+    if (opts.fold) {
+      const dx = along(FOLD_X, mx) * opts.fold;
+      my -= along(FOLD_Y, mx) * opts.fold;
+      mx -= dx;
     }
     if (mx < 0 || my < 0 || mx >= layout.strip.w || my >= layout.strip.h) continue;
     data[y * PW + x] = d[Math.floor(my * S) * W + Math.floor(mx * S)];
