@@ -1,6 +1,6 @@
 // Чтение одного фото бланка: общий путь для снимка с камеры и для фото из галереи.
 // Без браузера (файл → серое изображение делает image.ts), поэтому проверяется тестами.
-import { omrReadAny } from './recognize';
+import { countBlanks, omrReadAny } from './recognize';
 import type { GrayImage, OmrLayout, OmrResult } from './types';
 
 type Ok = Extract<OmrResult, { ok: true }>;
@@ -8,6 +8,7 @@ type Ok = Extract<OmrResult, { ok: true }>;
 export const FAIL_TEXT = 'Не видно четыре чёрных метки по углам бланка. Снимите бланк целиком при хорошем свете, чтобы все метки попали в кадр.';
 export const CODE_TEXT = 'Не удалось определить вид бланка. Проверьте, что снят бланк нужного предмета, и переснимите: бланк целиком, без бликов и теней.';
 export const OTHER_SUBJECT_TEXT = 'На фото бланк другого предмета: заданий столько же, но отметка вида бланка (квадратики внизу справа) другая. Возьмите бланк нужного предмета.';
+export const MANY_TEXT = 'На фото несколько бланков. Снимите каждый отдельно: один бланк на весь кадр.';
 export const NOT_IMAGE_TEXT = 'Это не фото. Выберите снимок бланка (картинку) из галереи.';
 export const EMPTY_FILE_TEXT = 'Файл пустой. Выберите другое фото.';
 export const DECODE_TEXT = 'Не удалось открыть фото. Выберите другой снимок (JPG или PNG) или сфотографируйте бланк заново.';
@@ -33,12 +34,14 @@ export type PhotoRead = { res: Ok; error?: undefined; layout: OmrLayout } | { re
 /**
  * Читает бланк по серому изображению и переводит отказ в текст для пользователя:
  * нет угловых меток (не бланк, обрезан) — подсказка про метки; метки есть, но код бланка не сошёлся — подсказка про вид бланка.
+ * Бланк прочитан, но на фото есть ещё (групповой снимок), — отметка more; ни один не прочитан, а их несколько, — MANY_TEXT.
  * Если фото не подошло, оно сверяется с остальными видами бланков (others): целый бланк другого вида называется прямо,
  * иначе подсказка «не виден угол» вводила бы в заблуждение. Если известно, какой угол не виден, говорится про него.
  */
 export function readGray(img: GrayImage, layouts: OmrLayout[], others: OmrLayout[] = []): PhotoRead {
   const { res, layout } = omrReadAny(img, layouts);
-  if (res.ok && res.codeOk) return { res, layout };
+  if (res.ok && res.codeOk) return { res: countBlanks(img, layouts, { toPhoto: res.toPhoto, layout }, 1) ? { ...res, more: true } : res, layout };
+  if (countBlanks(img, layouts, null, 2) > 1) return { error: MANY_TEXT, layout };
   // Совсем нет меток — это не бланк, сверять не с чем (и не тратим время на повторное чтение)
   const rest = !res.ok && res.reason === 'markers' ? [] : others.filter((o) => !layouts.includes(o));
   if (rest.length) {

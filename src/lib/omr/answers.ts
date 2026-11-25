@@ -45,9 +45,12 @@ export function variantFromResult(res: Ok): number | null {
   return typeof res.variant.answer === 'number' ? res.variant.answer : null;
 }
 
+export const MORE_TEXT = 'На фото несколько бланков, прочитан только один. Остальные снимите отдельно, по одному в кадре.';
+
 /** Предупреждения о снимке: что мешает прочитать надёжно (пустой список — всё хорошо) */
 export function qualityWarnings(res: Ok): string[] {
   const out: string[] = [];
+  if (res.more) out.push(MORE_TEXT);
   if (res.quality.pxPerMm < 4) out.push('Бланк снят слишком далеко или в низком разрешении: приблизьте камеру так, чтобы бланк занял весь кадр.');
   if (res.quality.skew > 1.25) out.push('Бланк снят под сильным углом: держите телефон прямо над бланком.');
   const picks: Picked[] = [res.variant, ...res.tests, ...res.matching.flatMap((m) => m.rows)];

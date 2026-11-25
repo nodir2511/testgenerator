@@ -764,6 +764,73 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
   return { best, shapeBad, anyMarkers, dstRing, k: kUsed, missingHint };
 }
 
+/** Подходит ли раскладка к снимку по кружкам: средняя оценка высокая либо (лист изогнут) ряды находятся дальним поиском */
+const ringsOk = (at: At, layout: OmrLayout, avg: number) => avg >= RING_AVG_SURE || ringsFar(at, layout) >= RINGS_FAR_MIN;
+
+/** Прочитанный бланк: его место на снимке — чтобы искать рядом с ним другие */
+export interface Place { toPhoto: number[]; layout: OmrLayout }
+
+/**
+ * Сколько бланков целиком видно на снимке, не считая уже прочитанного (seen), — до limit. Нужен только счёт: на
+ * групповом фото обычный поиск берёт один бланк или отказывает, и проверяющий не узнаёт, что остальные не прочитаны.
+ * Четвёрки собираются из пар «длинная сторона» подходящего для меток размера, настоящие отбирают код бланка и кружки.
+ */
+export function countBlanks(img: GrayImage, layouts: OmrLayout[], seen: Place | null, limit: number): number {
+  const { w, h } = img;
+  const win = Math.max(31, Math.round(w / 8) | 1);
+  const places: Place[] = seen ? [seen] : [];
+  const center = (p: Place) => applyH(p.toPhoto, p.layout.strip.w / 2, p.layout.strip.h / 2);
+  const inSeen = (x: number, y: number) => {
+    if (!seen) return false;
+    const { strip } = seen.layout;
+    const q = [[0, 0], [strip.w, 0], [strip.w, strip.h], [0, strip.h]].map(([a, b]) => applyH(seen.toPhoto, a, b));
+    const turn = q.map((p, i) => { const n = q[(i + 1) % 4]; return (n[0] - p[0]) * (y - p[1]) - (n[1] - p[1]) * (x - p[0]); });
+    return turn.every((t) => t >= 0) || turn.every((t) => t <= 0);
+  };
+  const dist = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
+  let bin: Uint8Array | null = null;
+  for (const k of MANY_K) {
+    const sq = components(adaptiveBinary(img, win, k), w, h).filter((c) => {
+      const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
+      return c.area >= w * h * 0.00005 && c.iso > 0.35 && c.solid > 0.8 && c.solid < 1.35 && Math.max(bw, bh) < w * 0.12 && !inSeen(c.cx, c.cy);
+    });
+    if (sq.length < 4 || sq.length > 220) continue;
+    bin ??= adaptiveBinary(img, win, 0.8);
+    for (const layout of layouts) {
+      const lm = layout.markers; // TL, TR, BL, BR
+      const LW = lm[1].x - lm[0].x, LH = lm[2].y - lm[0].y;
+      const dst = [[lm[0].x, lm[0].y], [lm[1].x, lm[1].y], [lm[3].x, lm[3].y], [lm[2].x, lm[2].y]];
+      const sides: Array<{ a: Blob; b: Blob; d: number }> = [];
+      for (const a of sq) for (const b of sq) {
+        if (a === b || Math.max(a.area, b.area) > Math.min(a.area, b.area) * 2.6) continue;
+        const d = dist(a, b), rel = d / ((Math.sqrt((a.area + b.area) / 2) * LW) / lm[0].size);
+        if (rel > 0.75 && rel < 1.4) sides.push({ a, b, d });
+      }
+      for (const T of sides) for (const B of sides) {
+        if (T.a === B.a || T.b === B.b || T.a === B.b || T.b === B.a || Math.abs(Math.log(T.d / B.d)) > 0.15) continue;
+        const l = dist(T.a, B.a), r = dist(T.b, B.b);
+        if (Math.abs(Math.log(l / r)) > 0.3 || Math.abs(Math.log(((T.d + B.d) * LH) / ((l + r) * LW))) > 0.35) continue;
+        const ux = T.b.cx - T.a.cx, uy = T.b.cy - T.a.cy, vx = B.a.cx - T.a.cx, vy = B.a.cy - T.a.cy;
+        if (ux * vy - uy * vx <= 0 || Math.abs(ux * vx + uy * vy) / (T.d * l) > 0.3) continue;
+        const toPhoto = solveHomography(dst, [[T.a.cx, T.a.cy], [T.b.cx, T.b.cy], [B.b.cx, B.b.cy], [B.a.cx, B.a.cy]]);
+        if (!toPhoto) continue;
+        const [x, y] = center({ toPhoto, layout });
+        if (places.some((p) => { const c = center(p); return Math.hypot(c[0] - x, c[1] - y) < 0.7 * Math.min(l, r); })) continue;
+        const at = sampler(bin, w, h, toPhoto);
+        const bits = layout.codeCells.map((c) => squareFill(at, c.x, c.y, c.size));
+        if (bits[0] < 0.5 || bits.slice(1).reduce((v, f) => (v << 1) | (f > 0.5 ? 1 : 0), 0) !== layout.code) continue;
+        const per = ringParts(at, layout);
+        if (per[per.length >> 1] < RING_MIN || !ringsOk(at, layout, per.reduce((v, f) => v + f, 0) / per.length)) continue;
+        places.push({ toPhoto, layout });
+        if (places.length - (seen ? 1 : 0) >= limit) return limit;
+      }
+    }
+  }
+  return places.length - (seen ? 1 : 0);
+}
+/** Пороги меток при счёте бланков: на групповом фото метки мелкие и бледные, поэтому начинаем с самых мягких */
+const MANY_K = [0.8, 0.7, 0.55];
+
 /** Считывает одну полоску бланка. Если codeOk = false, снимок лучше не использовать. */
 export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}): OmrResult {
   const { w, h } = img;
@@ -782,7 +849,7 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
 
   // Средняя оценка кружков низкая: либо лист сильно изогнут (с дальним поиском кольца ряда находятся все), либо одна из
   // меток чужая (нижний лист стопки) — тогда ряды не сходятся и с дальним поиском, и ответы читались бы со сдвигом
-  const codeOk = best.mism === 0 && best.fit >= RING_MIN && (best.avg >= RING_AVG_SURE || ringsFar(at, layout) >= RINGS_FAR_MIN);
+  const codeOk = best.mism === 0 && best.fit >= RING_MIN && ringsOk(at, layout, best.avg);
   let soft: At | null = null;
   const atSoft = () => (soft ??= sampler(adaptiveBinary(img, Math.max(31, Math.round(w / 8) | 1), OPEN_SOFT_K), w, h, best.H));
   return {

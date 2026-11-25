@@ -93,6 +93,8 @@ describe('сомнения и стопка', () => {
     expect(queueNote({ res: far })).toMatch(/ненадёжно/);
     expect(queueStatus({ error: 'Не видно метки' })).toBe('error');
     expect(queueNote({ error: 'Не видно метки' })).toBe('Не видно метки');
+    expect(queueStatus({ res: { ...res, more: true } })).toBe('warn');
+    expect(queueNote({ res: { ...res, more: true } })).toMatch(/^Вариант \d, на фото несколько бланков, прочитан один$/);
     const noVar: Ok = { ...res, variant: { ...res.variant, answer: null } };
     expect(queueNote({ res: noVar })).toMatch(/^Вариант не отмечен/);
   });

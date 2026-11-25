@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { OMR_LAYOUTS } from '../src/lib/omr/layouts.generated';
-import { CODE_TEXT, DECODE_TEXT, EMPTY_FILE_TEXT, FAIL_TEXT, NOT_IMAGE_TEXT, OTHER_SUBJECT_TEXT, fileProblem, otherBlankText, readGray } from '../src/lib/omr/readPhoto';
-import { keyFromAnswers, answersFromResult, variantFromResult } from '../src/lib/omr/answers';
+import { CODE_TEXT, DECODE_TEXT, MANY_TEXT, EMPTY_FILE_TEXT, FAIL_TEXT, NOT_IMAGE_TEXT, OTHER_SUBJECT_TEXT, fileProblem, otherBlankText, readGray } from '../src/lib/omr/readPhoto';
+import { MORE_TEXT, keyFromAnswers, answersFromResult, qualityWarnings, variantFromResult } from '../src/lib/omr/answers';
 import type { GrayImage } from '../src/lib/omr/types';
 import { BLANKS } from '../supabase/functions/_shared/omrScore';
 
-import { render } from './omrRender';
+import { render, renderPile } from './omrRender';
 
 const ALL = Object.values(OMR_LAYOUTS);
 
@@ -110,6 +110,51 @@ describe('чтение фото бланка (камера и галерея)', 
   });
 });
 
+// Преподаватели снимают несколько бланков одним кадром (4 снимка химии/физики, 11 бланков): бот молча брал один из
+// 2–4, остальные работы терялись, либо отказывал с непонятной причиной.
+describe('несколько бланков на одном фото', () => {
+  const layout = OMR_LAYOUTS.chemphys;
+
+  for (const degs of [[2, -2], [4, -5]]) {
+    it(`один прочитан, рядом есть ещё (наклон ${degs.join('°, ')}°): предупреждение, ответы — одного из бланков целиком`, () => {
+      const { img, truths } = renderPile(layout, 9, degs);
+      const r = readGray(img, [layout], ALL);
+      expect(r.error).toBeUndefined();
+      if (!r.res) return;
+      expect(r.res.more).toBe(true);
+      expect(qualityWarnings(r.res)).toContain(MORE_TEXT);
+      expect(truths.map((t) => t.tests)).toContainEqual(r.res.tests.map((x) => x.answer));
+    });
+  }
+
+  it('четыре бланка: отказ называет причину либо один прочитан с предупреждением', () => {
+    const { img, truths } = renderPile(layout, 9, [2, -2, 1, -1]);
+    const r = readGray(img, [layout], ALL);
+    // либо отказ с причиной, либо один бланк прочитан целиком и с предупреждением — но не молча
+    if (!r.res) { expect(r.error).toBe(MANY_TEXT); return; }
+    expect(r.res.more).toBe(true);
+    expect(truths.map((t) => t.tests)).toContainEqual(r.res.tests.map((x) => x.answer));
+  });
+
+  it('один бланк — предупреждения нет, ни у одного вида', () => {
+    for (const b of BLANKS) for (const id of b.layouts) {
+      const { img } = render(OMR_LAYOUTS[id], 7, 4);
+      const r = readGray(img, b.layouts.map((l) => OMR_LAYOUTS[l]), ALL);
+      expect(r.res, id).toBeDefined();
+      expect(r.res?.more, id).toBeUndefined();
+    }
+  }, 60000);
+
+  it('соседний бланк виден не целиком — предупреждения нет', () => {
+    const { img } = renderPile(layout, 9, [2, -2]);
+    // нижний бланк срезан краем кадра: его нижних меток не видно
+    const h = Math.round(img.h * 0.72);
+    const r = readGray({ w: img.w, h, data: (img.data as Float32Array).subarray(0, img.w * h) }, [layout], ALL);
+    expect(r.res).toBeDefined();
+    expect(r.res?.more).toBeUndefined();
+  });
+});
+
 describe('проверка выбранного файла до распознавания', () => {
   it('картинки пропускаются, в том числе с неизвестным типом (решит попытка открыть)', () => {
     expect(fileProblem({ type: 'image/jpeg', size: 1000 })).toBeNull();
@@ -125,7 +170,7 @@ describe('проверка выбранного файла до распозна
   });
 
   it('тексты отказов разные и не пустые', () => {
-    const all = [FAIL_TEXT, CODE_TEXT, OTHER_SUBJECT_TEXT, NOT_IMAGE_TEXT, EMPTY_FILE_TEXT, DECODE_TEXT];
+    const all = [FAIL_TEXT, CODE_TEXT, MANY_TEXT, OTHER_SUBJECT_TEXT, NOT_IMAGE_TEXT, EMPTY_FILE_TEXT, DECODE_TEXT];
     expect(new Set(all).size).toBe(all.length);
     for (const t of all) expect(t.length).toBeGreaterThan(10);
   });

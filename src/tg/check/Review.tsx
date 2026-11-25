@@ -67,7 +67,7 @@ function QualityNote({ res, onRetake, label }: { res: Ok; onRetake: () => void; 
   if (!warnings.length || hidden) return null;
   return (
     <div className="ck-note warn" role="status">
-      <b>Снимок читается ненадёжно</b>
+      <b>{res.more ? 'На фото несколько бланков' : 'Снимок читается ненадёжно'}</b>
       {warnings.map((w) => <span key={w} style={{ display: 'block' }}>{w}</span>)}
       <div className="ck-pair" style={{ marginTop: 10 }}>
         <button className="tg-btn-secondary" onClick={onRetake}><RotateCcw size={18} aria-hidden="true" />{label}</button>

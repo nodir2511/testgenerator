@@ -115,6 +115,7 @@ export function queueStatus(i: Pick<QItem, 'res' | 'error'>): QStatus {
 export function queueNote(i: Pick<QItem, 'res' | 'error'>): string {
   if (!i.res) return i.error || 'Не прочитан';
   const v = typeof i.res.variant.answer === 'number' ? `Вариант ${i.res.variant.answer}` : 'Вариант не отмечен';
+  if (i.res.more) return `${v}, на фото несколько бланков, прочитан один`;
   if (qualityWarnings(i.res).length) return `${v}, снимок читается ненадёжно`;
   const n = doubtRows(i.res, false).length;
   return n ? `${v}, проверить ${count(n, 'ответ', 'ответа', 'ответов')}` : `${v}, всё читается`;

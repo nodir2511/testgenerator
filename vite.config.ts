@@ -31,6 +31,8 @@ export default defineConfig(({ command }) => ({
   // Тесты прав доступа (tests-db) поднимают встроенный Postgres и запускаются отдельно: npm run test:db
   test: {
     exclude: ['**/node_modules/**', '**/dist/**', 'tests-db/**'],
+    // Сборка на Vercel запускает тесты на медленном сервере: тесты распознавания бланков там не укладываются в 5 секунд
+    testTimeout: 60000,
   },
   server: {
     watch: {

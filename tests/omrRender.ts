@@ -122,3 +122,11 @@ export function render(layout: OmrLayout, seed: number, deg: number, opts: { gly
   return { img: { w: PW, h: PH, data }, truth };
 }
 
+/** Несколько бланков на одном фото: снимки друг под другом, поля сверху и снизу каждого урезаны на cut пикселей */
+export function renderPile(layout: OmrLayout, seed: number, degs: number[], cut = 120): { img: GrayImage; truths: Truth[] } {
+  const parts = degs.map((deg, i) => render(layout, seed + i, deg));
+  const w = parts[0].img.w, h = parts[0].img.h - 2 * cut;
+  const data = new Float32Array(w * h * parts.length);
+  parts.forEach((p, i) => data.set((p.img.data as Float32Array).subarray(cut * w, (cut + h) * w), i * w * h));
+  return { img: { w, h: h * parts.length, data }, truths: parts.map((p) => p.truth) };
+}
