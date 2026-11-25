@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { OMR_LAYOUTS } from '../src/lib/omr/layouts.generated';
 import { omrRead, omrReadAny } from '../src/lib/omr/recognize';
 import type { GrayImage } from '../src/lib/omr/types';
@@ -6,6 +6,9 @@ import type { GrayImage } from '../src/lib/omr/types';
 import { render } from './omrRender';
 
 const ids = Object.keys(OMR_LAYOUTS);
+
+// Сервер сборки Vercel заметно медленнее рабочей машины: с лимитом vitest по умолчанию (5 с) деплой иногда падал
+vi.setConfig({ testTimeout: 60000 });
 
 describe('распознавание бланка по снимку', () => {
   it('в раскладках шесть бланков с ожидаемым числом заданий', () => {
@@ -88,7 +91,7 @@ describe('распознавание бланка по снимку', () => {
           const no = omrRead(img, OMR_LAYOUTS[other]);
           expect(no.ok && no.codeOk, other).toBe(false);
         }
-      }, 20000);
+      });
     }
   }
 
@@ -355,9 +358,10 @@ describe('качество снимка и несколько отметок', (
   });
   // Закрытая пальцем или бликом метка: раньше четвёрка из закрашенных кружков иногда «проходила» код бланка,
   // и ответы читались со сдвигом. Теперь такой снимок либо отклоняется, либо читается верно — но не неверно.
-  it('метка закрыта: снимок отклоняется или читается верно, белиберды нет', () => {
-    let wrong = 0, okCount = 0;
-    for (const id of ids) for (let s = 0; s < 12; s++) {
+  // Отдельный тест на каждый бланк: все 72 снимка в одном тесте не укладывались в лимит времени на сервере сборки.
+  it.each(ids)('%s: метка закрыта — снимок отклоняется или читается верно, белиберды нет', (id) => {
+    let wrong = 0;
+    for (let s = 0; s < 12; s++) {
       const layout = OMR_LAYOUTS[id];
       const deg = [0, 4, -5, 180][s % 4];
       const { img, truth } = render(layout, 3000 + s * 13 + id.length, deg);
@@ -368,12 +372,10 @@ describe('качество снимка и несколько отметок', (
       for (let y = Math.round(cy - 25); y < cy + 25; y++) for (let x = Math.round(cx - 25); x < cx + 25; x++) data[y * img.w + x] = 230;
       const res = omrRead({ w: img.w, h: img.h, data }, layout);
       if (!res.ok || !res.codeOk) continue;
-      okCount++;
       if (res.variant.answer !== truth.variant || JSON.stringify(res.tests.map((t) => t.answer)) !== JSON.stringify(truth.tests)) wrong++;
     }
     expect(wrong).toBe(0);
-    expect(okCount).toBeGreaterThanOrEqual(0);
-  }, 60000);
+  });
 
   it('на прочитанном снимке кружки бланка совпадают с раскладкой', () => {
     for (const id of ids) {
