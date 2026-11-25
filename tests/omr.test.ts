@@ -88,7 +88,7 @@ describe('распознавание бланка по снимку', () => {
           const no = omrRead(img, OMR_LAYOUTS[other]);
           expect(no.ok && no.codeOk, other).toBe(false);
         }
-      });
+      }, 20000);
     }
   }
 

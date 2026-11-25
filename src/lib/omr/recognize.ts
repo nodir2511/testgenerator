@@ -153,26 +153,27 @@ function findMarkers(bin: Uint8Array, w: number, h: number, want: number): Corne
  * кандидатов. Здесь четвёрка собирается по форме: две диагонали с общей серединой и длиной, которая соответствует
  * размеру самих меток (диагональ бланка = diagPerSide сторон метки), стороны — как у бланка. Подходящих четвёрок бывает
  * много (метки нижних листов рядом со своими), поэтому отдаётся до 80 самых больших: какая из них настоящая, решают
- * код бланка и кружки.
+ * код бланка и кружки. В последней попытке (last) допуски шире, первыми идут самые похожие на прямоугольник бланка.
  */
-function findMarkersWide(sq: Blob[], want: number, diagPerSide: number): Corners[] {
+function findMarkersWide(sq: Blob[], want: number, diagPerSide: number, last = false): Corners[] {
   if (sq.length < 4 || sq.length > 140) return [];
+  const areaMax = last ? LAST_AREA_MAX : 2.6;
   const dist = (p: Blob, q: Blob) => Math.hypot(p.cx - q.cx, p.cy - q.cy);
   const diags: Array<{ p: Blob; q: Blob; d: number }> = [];
   for (let i = 0; i < sq.length; i++) for (let j = i + 1; j < sq.length; j++) {
     const p = sq[i], q = sq[j];
-    if (Math.max(p.area, q.area) > Math.min(p.area, q.area) * 2.6) continue;
+    if (Math.max(p.area, q.area) > Math.min(p.area, q.area) * areaMax) continue;
     const d = dist(p, q), rel = d / (Math.sqrt((p.area + q.area) / 2) * diagPerSide);
     if (rel > 0.6 && rel < 1.7) diags.push({ p, q, d });
   }
-  const found: Array<Corners & { area2: number }> = [];
+  const found: Array<Corners & { area2: number; off: number }> = [];
   for (let i = 0; i < diags.length; i++) for (let j = i + 1; j < diags.length; j++) {
     const A = diags[i], B = diags[j];
     if (A.p === B.p || A.p === B.q || A.q === B.p || A.q === B.q) continue;
     const mid = Math.hypot((A.p.cx + A.q.cx - B.p.cx - B.q.cx) / 2, (A.p.cy + A.q.cy - B.p.cy - B.q.cy) / 2);
     if (mid > 0.15 * Math.min(A.d, B.d)) continue;
     const areas = [A.p.area, A.q.area, B.p.area, B.q.area];
-    if (Math.max(...areas) > Math.min(...areas) * 2.6) continue;
+    if (Math.max(...areas) > Math.min(...areas) * areaMax) continue;
     // Обход по часовой стрелке (ось y вниз), иначе гомография получится зеркальной
     const cw = (B.p.cx - A.p.cx) * (A.q.cy - B.p.cy) - (B.p.cy - A.p.cy) * (A.q.cx - B.p.cx) > 0;
     let P = cw ? [A.p, B.p, A.q, B.q] : [A.p, B.q, A.q, B.p];
@@ -181,20 +182,27 @@ function findMarkersWide(sq: Blob[], want: number, diagPerSide: number): Corners
     const e = [dist(P[0], P[1]), dist(P[1], P[2]), dist(P[2], P[3]), dist(P[3], P[0])];
     const s1 = (e[0] + e[2]) / 2, s2 = (e[1] + e[3]) / 2;
     const off = Math.abs(Math.log(e[0] / e[2])) + Math.abs(Math.log(e[1] / e[3])) + Math.abs(Math.log(Math.max(s1, s2) / Math.min(s1, s2) / want)) + mid / Math.min(A.d, B.d);
-    if (off > WIDE_OFF_MAX) continue;
+    if (off > (last ? LAST_OFF_MAX : WIDE_OFF_MAX)) continue;
     // Первым идёт левый верхний угол кадра — как в обычном поиске, чтобы поворот снимка считался одинаково
     let first = 0;
     for (let n = 1; n < 4; n++) if (P[n].cx + P[n].cy < P[first].cx + P[first].cy) first = n;
     P = [0, 1, 2, 3].map((n) => P[(first + n) % 4]);
     let area2 = 0;
     for (let n = 0; n < 4; n++) area2 += P[n].cx * P[(n + 1) % 4].cy - P[(n + 1) % 4].cx * P[n].cy;
-    found.push({ TL: P[0], TR: P[1], BR: P[2], BL: P[3], area2: Math.abs(area2) });
+    found.push({ TL: P[0], TR: P[1], BR: P[2], BL: P[3], area2: Math.abs(area2), off });
   }
-  found.sort((x, y) => y.area2 - x.area2);
-  return found.slice(0, 80).map(({ TL, TR, BL, BR }) => ({ TL, TR, BL, BR }));
+  found.sort((x, y) => (last ? x.off - y.off : y.area2 - x.area2));
+  return found.slice(0, last ? LAST_LIMIT : 80).map(({ TL, TR, BL, BR }) => ({ TL, TR, BL, BR }));
 }
 /** Наибольшее отклонение четвёрки от прямоугольника бланка в запасном поиске (сумма долей, см. findMarkersWide) */
 const WIDE_OFF_MAX = 0.35;
+/**
+ * Последняя попытка, когда бланк так и не нашёлся: бледная печать (порог меток 0,8 — при строгом часть метки выпадает
+ * и она уже не квадрат), сильный наклон камеры и лист рядом с чужими (четвёрок больше). Отбирают те же код и кружки.
+ */
+const LAST_K = 0.8, LAST_OFF_MAX = 0.6, LAST_AREA_MAX = 3, LAST_LIMIT = 600;
+/** Сдвиги квадратиков кода в последней попытке (мм): у поднятого края листа они уезжают; до соседнего квадратика 5 мм */
+const CODE_SHIFTS = [0, -0.6, 0.6, -1.2, 1.2];
 
 // ---------- чтение отметок ----------
 /** Доля закрашенной площади кружка, начиная с которой он считается отмеченным */
@@ -318,9 +326,9 @@ function pickOne(options: OmrCircle[], at: At, far: boolean): Picked {
  * (на 0,9 мм внутрь клетки) тогда захватывает линию рамки, и пустая клетка выглядит «с цифрой». Перебираем сдвиг
  * всей строки клеток и берём тот, при котором больше всего точек на линиях рамки (границы клеток, верх и низ) тёмные.
  */
-export function fitOpenFrame(at: At, boxes: Array<{ x: number; y: number; w: number; h: number }>): { dx: number; dy: number } {
+export function fitOpenFrame(at: At, boxes: Array<{ x: number; y: number; w: number; h: number }>): { dx: number; dy: number; here: number; s: number } {
   const n = boxes.length;
-  if (!n) return { dx: 0, dy: 0 };
+  if (!n) return { dx: 0, dy: 0, here: 0, s: 0 };
   const x0 = boxes[0].x, y0 = boxes[0].y, x1 = boxes[n - 1].x + boxes[n - 1].w, y1 = y0 + boxes[0].h;
   const vert: Array<[number, number]> = [], horiz: Array<[number, number]> = [];
   for (let i = 0; i <= n; i++) {
@@ -335,7 +343,8 @@ export function fitOpenFrame(at: At, boxes: Array<{ x: number; y: number; w: num
     for (const [x, y] of horiz) { for (const o of PERP) if (at(x + dx, y + dy + o) > 0) { hit++; break; } }
     return hit / (vert.length + horiz.length);
   };
-  let best = { dx: 0, dy: 0, s: score(0, 0) };
+  const here = score(0, 0); // совпадение рамки без сдвига
+  let best = { dx: 0, dy: 0, s: here };
   for (let iy = -10; iy <= 10; iy++) for (let ix = -10; ix <= 10; ix++) {
     const dx = ix * 0.15, dy = iy * 0.15;
     // при равной оценке — меньший сдвиг
@@ -343,8 +352,11 @@ export function fitOpenFrame(at: At, boxes: Array<{ x: number; y: number; w: num
     if (sc > best.s + 1e-9) best = { dx, dy, s: sc };
   }
   // линии рамки не нашлись (клетка пустая и без рамки в кадре, засветка) — оставляем как в раскладке
-  return best.s >= 0.3 ? { dx: best.dx, dy: best.dy } : { dx: 0, dy: 0 };
+  return best.s >= 0.3 ? { ...best, here } : { dx: 0, dy: 0, here, s: best.s };
 }
+
+/** Рамка клетки: ниже какой доли совпадения место клетки считается неверным и выше какой — найденным заново */
+const CELL_OFF = 0.5, CELL_SURE = 0.8;
 
 function openBox(at: At, b: { x: number; y: number; w: number; h: number }): OpenBox {
   const inset = 0.9, step = 0.15;
@@ -662,10 +674,14 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
   const found = () => !!best && best.mism === 0 && best.fit >= RING_MIN;
   const sure = () => found() && (best as NonNullable<Located['best']>).avg >= RING_AVG_SURE;
   const squares: Blob[][] = [];
+  const squaresAt = (k: number) => components(adaptiveBinary(img, win, k), w, h).filter((c) => {
+    const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
+    return c.area >= w * h * 0.00007 && c.iso > 0.45 && c.solid > 0.8 && c.solid < 1.35 && Math.max(bw, bh) < w * 0.12;
+  });
   // Четвёрки, у которых сошёлся код бланка: среди них ищется лист, сложенный пополам
   const coded = new Map<string, NonNullable<Located['best']>>();
   // Кандидатов несколько (в кадр может попасть соседняя полоска листа): выбираем того, у кого сходится код бланка
-  const tryQuads = (cands: Corners[], k: number) => {
+  const tryQuads = (cands: Corners[], k: number, shifts: number[] = [0]) => {
     for (const mk of cands) {
       const d = (a: Blob, b: Blob) => Math.hypot(a.cx - b.cx, a.cy - b.cy);
       const got = (d(mk.TL, mk.TR) + d(mk.BL, mk.BR)) / (d(mk.TL, mk.BL) + d(mk.TR, mk.BR));
@@ -677,7 +693,15 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
         const H = solveHomography(dstRing, src);
         if (!H) continue;
         const at = sampler(bin, w, h, H);
-        const bits = layout.codeCells.map((c) => squareFill(at, c.x, c.y, c.size));
+        let bits = layout.codeCells.map((c) => squareFill(at, c.x, c.y, c.size));
+        // Квадратики кода рядом, но не на месте: берём общий сдвиг, при котором тёмного в них больше всего
+        if (shifts.length > 1 && bits[0] >= 0.15 && bits[0] < 0.9) {
+          const sum = (b: number[]) => b.reduce((a, f) => a + f, 0);
+          for (const dy of shifts) for (const dx of shifts) {
+            const moved = layout.codeCells.map((c) => squareFill(at, c.x + dx, c.y + dy, c.size));
+            if (sum(moved) > sum(bits) + 1e-9) bits = moved;
+          }
+        }
         const first = bits[0];
         const value = bits.slice(1).reduce((a, f) => (a << 1) | (f > 0.5 ? 1 : 0), 0);
         let mism = Math.min(...codes.map((c) => popcount(c ^ value)));
@@ -695,11 +719,7 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
     }
   };
   for (const k of MARKER_K) {
-    const sqCandidates = components(adaptiveBinary(img, win, k), w, h).filter((c) => {
-      const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
-      const minArea = w * h * 0.00007;
-      return c.area >= minArea && c.iso > 0.45 && c.solid > 0.8 && c.solid < 1.35 && Math.max(bw, bh) < w * 0.12;
-    });
+    const sqCandidates = squaresAt(k);
     squares.push(sqCandidates);
     const cands = findMarkers(adaptiveBinary(img, win, k), w, h, Math.max(want, 1 / want));
     if (!cands.length) {
@@ -716,6 +736,7 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
     const before = { best, kUsed, shapeBad };
     const diagPerSide = Math.hypot(lm[3].x - lm[0].x, lm[3].y - lm[0].y) / lm[0].size;
     for (let i = 0; i < squares.length && !sure(); i++) tryQuads(findMarkersWide(squares[i], Math.max(want, 1 / want), diagPerSide), MARKER_K[i]);
+    if (!found()) tryQuads(findMarkersWide(squaresAt(LAST_K), Math.max(want, 1 / want), diagPerSide, true), LAST_K, CODE_SHIFTS);
     // Не помогло — итог и причина отказа остаются такими, какими были без запасного поиска
     if (found()) anyMarkers = true;
     else ({ best, kUsed, shapeBad } = before);
@@ -779,7 +800,10 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
       return {
         q: o.q,
         boxes: o.boxes.map((b) => {
-          const cell = { ...b, x: b.x + dx, y: b.y + dy };
+          let cell = { ...b, x: b.x + dx, y: b.y + dy };
+          // У загнутого края листа клетки одной строки уезжают по-разному: рамка этой клетки ищется отдельно
+          const own = fitOpenFrame(at, [cell]);
+          if (own.here < CELL_OFF && own.s > CELL_SURE) cell = { ...cell, x: cell.x + own.dx, y: cell.y + own.dy };
           const strict = openBox(at, cell);
           if (strict.hasDigit) return strict;
           const faint = openBox(atSoft(), cell);
