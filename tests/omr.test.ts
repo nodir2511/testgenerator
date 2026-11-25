@@ -71,30 +71,6 @@ describe('распознавание бланка по снимку', () => {
     });
   }
 
-  // Реальные снимки химии/физики (№1, 6, 8, 9 пачки batch-7): лист сложен пополам, соответствие 10 за сгибом уехало на
-  // 2,4 мм, а столбцы задания 9 — по разные стороны сгиба. Бланк отбраковывался («не удалось определить вид бланка»).
-  for (const id of ids) {
-    for (const deg of [0, 180 - 4]) {
-      it(`${id}: лист сложен пополам (снимок под ${deg}°) — бланк принимается, отметки читаются без ложных сомнений`, () => {
-        const layout = OMR_LAYOUTS[id];
-        const { img, truth } = render(layout, id.length * 13 + 5, deg, { fold: id === 'chemphys' ? 2.4 : 1.8 });
-        const res = omrRead(img, layout);
-        expect(res.ok && res.codeOk).toBe(true);
-        if (!res.ok) return;
-        expect(res.variant.answer).toBe(truth.variant);
-        expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
-        expect(res.matching.map((m) => m.rows.map((r) => r.answer))).toEqual(truth.matching);
-        expect(res.tests.filter((t) => t.unsure).map((t) => t.q)).toEqual([]);
-        expect(res.matching.flatMap((m) => m.rows.filter((r) => r.unsure).map((r) => `${m.q}${r.row}`))).toEqual([]);
-        // чужая раскладка от этого не становится «своей»
-        for (const other of ids.filter((x) => x !== id)) {
-          const no = omrRead(img, OMR_LAYOUTS[other]);
-          expect(no.ok && no.codeOk, other).toBe(false);
-        }
-      });
-    }
-  }
-
   it('изгиб листа не делает чужую раскладку «своей»: код и кружки другого бланка не сходятся', () => {
     const { img } = render(OMR_LAYOUTS.chemphys, 9, 180 - 4, { bend: 1.0 });
     for (const id of ids.filter((x) => x !== 'chemphys')) {
@@ -356,27 +332,6 @@ describe('качество снимка и несколько отметок', (
     expect(a.tests.every((x) => x === null)).toBe(true);
     expect(scoreAnswers(key, a).tests.every((x) => x === false)).toBe(true);
   });
-  // Закрытая пальцем или бликом метка: раньше четвёрка из закрашенных кружков иногда «проходила» код бланка,
-  // и ответы читались со сдвигом. Теперь такой снимок либо отклоняется, либо читается верно — но не неверно.
-  // Отдельный тест на каждый бланк: все 72 снимка в одном тесте не укладывались в лимит времени на сервере сборки.
-  it.each(ids)('%s: метка закрыта — снимок отклоняется или читается верно, белиберды нет', (id) => {
-    let wrong = 0;
-    for (let s = 0; s < 12; s++) {
-      const layout = OMR_LAYOUTS[id];
-      const deg = [0, 4, -5, 180][s % 4];
-      const { img, truth } = render(layout, 3000 + s * 13 + id.length, deg);
-      const data = Float32Array.from(img.data as ArrayLike<number>);
-      const m = layout.markers[s % 4], a = (deg * Math.PI) / 180;
-      const dx = (m.x - layout.strip.w / 2) * 6, dy = (m.y - layout.strip.h / 2) * 6;
-      const cx = img.w / 2 + dx * Math.cos(a) - dy * Math.sin(a), cy = img.h / 2 + dx * Math.sin(a) + dy * Math.cos(a);
-      for (let y = Math.round(cy - 25); y < cy + 25; y++) for (let x = Math.round(cx - 25); x < cx + 25; x++) data[y * img.w + x] = 230;
-      const res = omrRead({ w: img.w, h: img.h, data }, layout);
-      if (!res.ok || !res.codeOk) continue;
-      if (res.variant.answer !== truth.variant || JSON.stringify(res.tests.map((t) => t.answer)) !== JSON.stringify(truth.tests)) wrong++;
-    }
-    expect(wrong).toBe(0);
-  });
-
   it('на прочитанном снимке кружки бланка совпадают с раскладкой', () => {
     for (const id of ids) {
       const { img } = render(OMR_LAYOUTS[id], 91, 3);

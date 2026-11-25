@@ -9,6 +9,11 @@ const pkg = JSON.parse(readFileSync(path.resolve(__dirname, './package.json'), '
 // Идентификатор сборки: сайт сверяет его с /version.json и предлагает обновиться, когда вышла новая версия
 const BUILD_ID = String(Date.now());
 
+// Долгие тесты (распознавание бланков, архивы кластера): на сервере сборки Vercel (2 ядра) они шли около пяти минут
+// и задерживали выкладку. Там они пропускаются; целиком тесты идут локально (npm test, npm run build) и в GitHub Actions.
+const SLOW_TESTS = ['omr', 'omrFold', 'omrCovered', 'omrOtherBlank', 'omrReadPhoto', 'omrDigits', 'omrRectify', 'omrHard', 'cluster', 'clusterArchive']
+  .map((name) => `tests/${name}.test.ts`);
+
 export default defineConfig(({ command }) => ({
   define: {
     __BUILD_ID__: JSON.stringify(command === 'build' ? BUILD_ID : 'dev'),
@@ -38,7 +43,7 @@ export default defineConfig(({ command }) => ({
   },
   // Тесты прав доступа (tests-db) поднимают встроенный Postgres и запускаются отдельно: npm run test:db
   test: {
-    exclude: ['**/node_modules/**', '**/dist/**', 'tests-db/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', 'tests-db/**', '.claude/**', ...(process.env.VERCEL ? SLOW_TESTS : [])],
     // Сборка на Vercel запускает тесты на медленном сервере: тесты распознавания бланков там не укладываются в 5 секунд
     testTimeout: 60000,
   },

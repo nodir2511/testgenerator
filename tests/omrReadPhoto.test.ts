@@ -49,24 +49,6 @@ describe('чтение фото бланка (камера и галерея)', 
     expect(r.layout?.id).toBe('phys');
   });
 
-  it('целый бланк другого вида называется прямо, а не «не виден угол»', () => {
-    for (const b of BLANKS) {
-      const wanted = b.layouts.map((id) => OMR_LAYOUTS[id]);
-      for (const id of Object.keys(OMR_LAYOUTS)) {
-        if (b.layouts.includes(id)) continue;
-        for (const deg of [3, 177]) {
-          const { img } = render(OMR_LAYOUTS[id], 11, deg);
-          const r = readGray(img, wanted, ALL);
-          const tag = `${b.layouts.join('+')} <- ${id}, ${deg}°`;
-          expect(r.res, tag).toBeUndefined();
-          expect(r.error, tag).toBe(otherBlankText(OMR_LAYOUTS[id], wanted[0]));
-          expect(r.error, tag).toMatch(/^На фото бланк другого вида \(тестов: \d+, соответствий: \d+, открытых: \d+\), а нужен бланк на \d+ заданий/);
-          expect(r.error, tag).not.toMatch(/угол/);
-        }
-      }
-    }
-  }, 120000);
-
   it('текст про другой вид: состав найденного и нужного бланка', () => {
     expect(otherBlankText(OMR_LAYOUTS.bio, OMR_LAYOUTS.chem)).toBe('На фото бланк другого вида (тестов: 20, соответствий: 4, открытых: 2), а нужен бланк на 27 заданий (тестов: 18, соответствий: 2, открытых: 7). Возьмите нужный бланк.');
     expect(otherBlankText(OMR_LAYOUTS.taj, OMR_LAYOUTS.bio)).toBe(OTHER_SUBJECT_TEXT);
