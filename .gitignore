@@ -79,3 +79,12 @@ supabase/sql/game_pack_chemistry.sql
 
 # Заглушки Supabase для тестов прав доступа
 !tests-db/*.sql
+
+# Рабочие заметки и планы: сайту не нужны, остаются только на компьютере (репозиторий публичный)
+/docs/*
+!/docs/ARCHITECTURE.md
+!/docs/NCT_SUBJECTS.md
+/implementation_plan.md
+/task.md
+/Билеты без сайта/
+.superpowers/

@@ -2,7 +2,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { readFileSync } from 'fs';
+import { readFileSync, rmSync } from 'fs';
 
 const pkg = JSON.parse(readFileSync(path.resolve(__dirname, './package.json'), 'utf-8'));
 
@@ -16,6 +16,14 @@ export default defineConfig(({ command }) => ({
   },
   plugins: [
     react(),
+    {
+      // Бланки PDF бот берёт с GitHub (public/blanks), самому сайту они не нужны: в сборку не входят
+      name: 'drop-blanks',
+      apply: 'build',
+      closeBundle() {
+        rmSync(path.resolve(__dirname, 'dist/blanks'), { recursive: true, force: true });
+      },
+    },
     {
       name: 'emit-version',
       generateBundle() {
