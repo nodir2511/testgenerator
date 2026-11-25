@@ -11,7 +11,7 @@ const rng = (seed: number) => () => {
 export interface Truth { variant: number | null; tests: Array<string | null>; matching: Array<Array<number | null>>; open: number[]; openText: string[] }
 
 /** draw — дорисовать на бланке свои штрихи (координаты в мм бланка; v — яркость штриха, бумага 235), например цифру у самого края клетки или бледным карандашом */
-export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
+export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; curl?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
   const r = rng(seed);
   const W = Math.round(layout.strip.w * S), H = Math.round(layout.strip.h * S);
   const d = new Float32Array(W * H).fill(235);
@@ -93,6 +93,11 @@ export function render(layout: OmrLayout, seed: number, deg: number, opts: { gly
     if (bend) {
       const f = bend * Math.sin(Math.PI * mx / layout.strip.w) * Math.sin(Math.PI * my / layout.strip.h);
       mx -= f; my -= 0.7 * f;
+    }
+    // Правый край листа приподнят в середине: столбец кружков уезжает влево на curl мм, метки и код бланка на месте
+    if (opts.curl) {
+      const [a0, b0, c0] = layout.markers, unit = (v: number, lo: number, hi: number) => Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+      mx += opts.curl * Math.sin(Math.PI * unit(mx, a0.x, b0.x) ** 6) * Math.sqrt(Math.sin(Math.PI * unit(my, a0.y, c0.y)));
     }
     if (mx < 0 || my < 0 || mx >= layout.strip.w || my >= layout.strip.h) continue;
     data[y * PW + x] = d[Math.floor(my * S) * W + Math.floor(mx * S)];

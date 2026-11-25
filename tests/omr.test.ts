@@ -50,6 +50,24 @@ describe('распознавание бланка по снимку', () => {
     }
   }
 
+  // Реальные снимки таджикского (№29, 32, 36, 38 пачки batch-5): правый столбец тестов уехал на 1,2–2,1 мм, подстройка
+  // ряда до него не дотягивалась, кольцо попадало в кружок — и чистый бланк получал «много неясных отметок».
+  for (const id of ['taj', 'chem']) {
+    it(`${id}: приподнятый край листа (сдвиг столбца 2 мм) — ответы без ложных сомнений`, () => {
+      const layout = OMR_LAYOUTS[id];
+      const { img, truth } = render(layout, 41, 180 - 4, { curl: 2 });
+      const res = omrRead(img, layout);
+      expect(res.ok && res.codeOk).toBe(true);
+      if (!res.ok) return;
+      expect(res.variant.answer).toBe(truth.variant);
+      expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+      expect(res.matching.map((m) => m.rows.map((r) => r.answer))).toEqual(truth.matching);
+      expect(res.tests.filter((t) => t.unsure).map((t) => t.q)).toEqual([]);
+      expect(res.matching.flatMap((m) => m.rows.filter((r) => r.unsure).map((r) => `${m.q}${r.row}`))).toEqual([]);
+      expect(qualityWarnings(res)).toEqual([]);
+    });
+  }
+
   it('изгиб листа не делает чужую раскладку «своей»: код и кружки другого бланка не сходятся', () => {
     const { img } = render(OMR_LAYOUTS.chemphys, 9, 180 - 4, { bend: 1.0 });
     for (const id of ids.filter((x) => x !== 'chemphys')) {
@@ -175,6 +193,20 @@ describe('распознавание бланка по снимку', () => {
     expect(res.matching.map((m2) => m2.rows.map((r) => r.answer))).toEqual(truth.matching);
   });
 
+  // Своя метка закрыта, а рядом видна метка нижнего листа стопки: такая четвёрка проходила и код, и медиану кружков,
+  // и ответы молча читались со сдвигом (проверено на фото №10 и №12 с закрашенной меткой).
+  for (const [corner, dx, dy] of [[0, 12, 0], [0, -9, -7], [0, 10, 8], [1, -10, 0], [1, 8, -5], [1, -8, 6]] as const) {
+    it(`своя метка ${corner} закрыта, рядом метка нижнего листа (${dx}; ${dy} мм): отказ или верные ответы`, () => {
+      const base = OMR_LAYOUTS.taj;
+      const markers = base.markers.map((m, i) => (i === corner ? { ...m, x: m.x + dx, y: m.y + dy } : m));
+      const { img, truth } = render({ ...base, markers }, 5, 2);
+      const res = omrRead(img, base);
+      if (!res.ok || !res.codeOk) return;
+      expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+      expect(res.matching.map((m2) => m2.rows.map((r) => r.answer))).toEqual(truth.matching);
+    });
+  }
+
   it('бланк таджикского — пять клеток под открытый ответ, раскладка выбирается по коду бланка', () => {
     expect(OMR_LAYOUTS.taj.open.map((o) => o.boxes.length)).toEqual([5, 5]);
     expect(OMR_LAYOUTS.bio.open.map((o) => o.boxes.length)).toEqual([4, 4]);
@@ -225,6 +257,33 @@ describe('распознавание бланка по снимку', () => {
     expect(failed).toBe(true);
     expect(res.missingHint).toBeDefined();
     expect(res.missingHint).toMatch(/нижний правый|правый нижний/i);
+  });
+
+  // Реальные отказы (№30: верхний левый угол подогнут; №34: левые метки за кадром): подсказка называла нижний левый и
+  // нижний правый угол, потому что бралась первая попавшаяся тройка квадратов, в том числе из закрашенных кружков.
+  const names = ['верхний левый', 'верхний правый', 'нижний левый', 'нижний правый'];
+  const erased = (idx: number[]) => {
+    const layout = OMR_LAYOUTS.taj;
+    const { img } = render(layout, 41, 0);
+    const data = Float32Array.from(img.data as ArrayLike<number>);
+    for (const n of idx) {
+      const m = layout.markers[n];
+      const cx = img.w / 2 + (m.x - layout.strip.w / 2) * 6, cy = img.h / 2 + (m.y - layout.strip.h / 2) * 6;
+      for (let y = Math.round(cy - 16); y < cy + 16; y++) for (let x = Math.round(cx - 16); x < cx + 16; x++) data[y * img.w + x] = 230;
+    }
+    return omrRead({ w: img.w, h: img.h, data }, layout);
+  };
+  for (let n = 0; n < 4; n++) {
+    it(`taj: закрыт ${names[n]} угол — назван именно он`, () => {
+      const res = erased([n]);
+      expect(res.ok && res.codeOk).toBe(false);
+      expect(res.missingHint).toContain(`Не виден ${names[n]} угол`);
+    });
+  }
+  it('taj: нет обеих левых меток — угол не называется наугад', () => {
+    const res = erased([0, 2]);
+    expect(res.ok && res.codeOk).toBe(false);
+    expect(res.missingHint ?? '').not.toMatch(/прав/);
   });
 });
 

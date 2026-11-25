@@ -262,9 +262,9 @@ const ROW_SHIFTS = [0, -0.3, 0.3, -0.6, 0.6, -0.9, 0.9];
  * Локальная адаптивная автоподстройка ряда: компенсирует изгиб бумаги. На реальных снимках печатные
  * рамки уезжают относительно раскладки до 0,9 мм (лист изогнут, рука держит полоску), поэтому ±0,3 мм мало.
  */
-function refineRowOffset(options: OmrCircle[], at: At): { dx: number; dy: number; score: number } {
+function refineRowOffset(options: OmrCircle[], at: At, shifts: number[] = ROW_SHIFTS): { dx: number; dy: number; score: number } {
   let bestDx = 0, bestDy = 0, bestScore = -999;
-  for (const dy of ROW_SHIFTS) for (const dx of ROW_SHIFTS) {
+  for (const dy of shifts) for (const dx of shifts) {
     let sum = 0;
     for (const o of options) sum += circleRingMatch(at, o, dx, dy);
     if (sum > bestScore + 1e-9) {
@@ -276,8 +276,34 @@ function refineRowOffset(options: OmrCircle[], at: At): { dx: number; dy: number
   return bestScore > 0 ? { dx: bestDx, dy: bestDy, score: bestScore } : { dx: 0, dy: 0, score: bestScore };
 }
 
-function pickOne(options: OmrCircle[], at: At): Picked {
-  const { dx, dy } = refineRowOffset(options, at);
+/**
+ * Дальний поиск ряда: у края приподнятого листа столбец кружков уезжает на 1,2–2,1 мм, обычная подстройка до него не
+ * достаёт, и в кружок попадает само кольцо — пустой выглядит на 20 % закрашенным. Нужен только для чтения отметок:
+ * проверка раскладки (ringParts) остаётся с обычной подстройкой, чтобы не стать мягче к чужим бланкам. До соседнего
+ * кружка не меньше 4,8 мм, поэтому 2,1 мм чужой ряд не захватывают.
+ */
+const ROW_SHIFTS_FAR = [0, ...[0.3, 0.6, 0.9, 1.2, 1.5, 1.8, 2.1].flatMap((v) => [-v, v])];
+/** Доля совпадения колец ряда, при которой обычной подстройке можно верить; ниже — включается дальний поиск */
+const ROW_SURE = 0.8;
+
+function rowOffset(options: OmrCircle[], at: At): { dx: number; dy: number } {
+  const near = refineRowOffset(options, at);
+  if (near.score >= ROW_SURE * options.length) return near;
+  const far = refineRowOffset(options, at, ROW_SHIFTS_FAR);
+  // Дальний сдвиг берём, только если кольца совпали заметно лучше: у небрежно закрашенного ряда разница — шум
+  return far.score > near.score + 0.1 * options.length ? far : near;
+}
+
+/** Средняя по рядам доля совпавших колец с дальним поиском ряда */
+function ringsFar(at: At, layout: OmrLayout): number {
+  const groups = [layout.variant, ...layout.tests.map((t) => t.options), ...layout.matching.flatMap((m) => m.rows.map((r) => r.options))];
+  return groups.reduce((a, g) => a + refineRowOffset(g, at, ROW_SHIFTS_FAR).score / g.length, 0) / groups.length;
+}
+/** На 27 фото бланка taj у настоящей четвёрки меток ringsFar 0,94–0,96, у четвёрки с меткой нижнего листа — до 0,79 */
+const RINGS_FAR_MIN = 0.87;
+
+function pickOne(options: OmrCircle[], at: At, far: boolean): Picked {
+  const { dx, dy } = far ? rowOffset(options, at) : refineRowOffset(options, at);
   const fills = options.map((o) => discFill(at, o.x + dx, o.y + dy, o.d / 2 * 0.62));
   const on: number[] = [];
   fills.forEach((f, i) => { if (f >= FILL_ON) on.push(i); });
@@ -473,34 +499,82 @@ export interface OmrOptions {
 
 interface Located { best: { score: number; mism: number; rot: number; H: H3; at: At; ring: Blob[]; fit: number; avg: number } | null; shapeBad: boolean; anyMarkers: boolean; dstRing: number[][]; k: number; missingHint?: string }
 
-function findMissingHint(sq: Blob[], w: number, h: number, want: number): string | undefined {
-  if (sq.length < 3) return undefined;
-  for (let i = 0; i < sq.length; i++) {
-    for (let j = 0; j < sq.length; j++) {
-      if (j === i) continue;
-      for (let k = 0; k < sq.length; k++) {
-        if (k === i || k === j) continue;
-        const P = sq[i], Q = sq[j], R = sq[k];
-        const u = [Q.cx - P.cx, Q.cy - P.cy], v = [R.cx - P.cx, R.cy - P.cy];
-        const d1 = Math.hypot(u[0], u[1]), d2 = Math.hypot(v[0], v[1]);
-        if (d1 < w * 0.12 || d2 < w * 0.12) continue;
-        const dot = Math.abs(u[0] * v[0] + u[1] * v[1]) / (d1 * d2);
-        if (dot > 0.25) continue;
-        const ratio = Math.max(d1, d2) / Math.min(d1, d2);
-        if (Math.abs(Math.log(ratio / want)) > 0.38) continue;
-        const sx = Q.cx + R.cx - P.cx, sy = Q.cy + R.cy - P.cy;
-        const cornerName = sy < h / 2
-          ? (sx < w / 2 ? 'верхний левый' : 'верхний правый')
-          : (sx < w / 2 ? 'нижний левый' : 'нижний правый');
-        const outOfFrame = sx < 20 || sx > w - 20 || sy < 20 || sy > h - 20;
-        return outOfFrame
-          ? `Не виден ${cornerName} угол бланка: метка вышла за пределы кадра. Отодвиньте камеру чуть назад.`
-          : `Не виден ${cornerName} угол бланка: метка перекрыта пальцем, бликом или тенью.`;
+/**
+ * Какого угла бланка не видно. Три квадрата принимаются за метки, только если по ним бланк ложится на снимок: остальные
+ * тёмные пятна (закрашенные кружки, квадратики кода) попадают на свои места в раскладке. Просто «похожей» тройки мало:
+ * закрашенные кружки того же размера, что метки, и первая попавшаяся тройка обычно называла не тот угол.
+ */
+function findMissingHint(sq: Blob[], w: number, h: number, layout: OmrLayout): string | undefined {
+  if (sq.length < 3 || sq.length > 140) return undefined;
+  const lm = layout.markers; // TL, TR, BL, BR
+  const LW = Math.hypot(lm[1].x - lm[0].x, lm[1].y - lm[0].y), LH = Math.hypot(lm[2].x - lm[0].x, lm[2].y - lm[0].y);
+  const want = LW / LH, diagPerSide = Math.hypot(LW, LH) / lm[0].size;
+  interface Triple { p: number; q: number; r: number; area: number }
+  const triples: Triple[] = [];
+  for (let p = 0; p < sq.length; p++) for (let q = 0; q < sq.length; q++) {
+    // q — конец длинной стороны, r — короткой, обе выходят из p
+    if (q === p) continue;
+    const ux = sq[q].cx - sq[p].cx, uy = sq[q].cy - sq[p].cy, d1 = Math.hypot(ux, uy);
+    if (d1 < w * 0.12) continue;
+    for (let r = 0; r < sq.length; r++) {
+      if (r === p || r === q) continue;
+      const vx = sq[r].cx - sq[p].cx, vy = sq[r].cy - sq[p].cy, d2 = Math.hypot(vx, vy);
+      if (d2 < h * 0.05 || d2 > d1 || Math.abs(Math.log(d1 / d2 / want)) > 0.38) continue;
+      if (Math.abs(ux * vx + uy * vy) / (d1 * d2) > 0.25) continue;
+      const areas = [sq[p].area, sq[q].area, sq[r].area];
+      if (Math.max(...areas) > Math.min(...areas) * 2.6) continue;
+      const rel = Math.hypot(d1, d2) / (Math.sqrt((areas[0] + areas[1] + areas[2]) / 3) * diagPerSide);
+      if (rel < 0.7 || rel > 1.5) continue;
+      triples.push({ p, q, r, area: d1 * d2 });
+    }
+  }
+  triples.sort((a, b) => b.area - a.area);
+  const spots = [...layout.variant, ...layout.tests.flatMap((t) => t.options), ...layout.matching.flatMap((m) => m.rows.flatMap((x) => x.options)), ...layout.codeCells.filter((c) => c.bit)];
+  let best: { share: number; sx: number; sy: number } | null = null;
+  for (const t of triples.slice(0, HINT_TRIPLES)) {
+    const P = sq[t.p], Q = sq[t.q], R = sq[t.r];
+    const ux = Q.cx - P.cx, uy = Q.cy - P.cy, vx = R.cx - P.cx, vy = R.cy - P.cy, det = ux * vy - uy * vx;
+    if (!det) continue;
+    // Угол p: по направлению обхода это левый верхний или правый нижний (det > 0), иначе правый верхний или левый нижний
+    for (const c of det > 0 ? [0, 3] : [1, 2]) {
+      const sx = c % 2 ? -1 : 1, sy = c > 1 ? -1 : 1;
+      const at3: number[][] = [[0, 0], [LW * sx, 0], [0, LH * sy], [LW * sx, LH * sy]].map(([x, y]) => [lm[c].x + x, lm[c].y + y]);
+      // Доля пятен внутри бланка, попавших на свои места, если четвёртый угол — в точке (fx, fy)
+      const share = (fx: number, fy: number, near: number, min: number) => {
+        const H = solveHomography([[P.cx, P.cy], [Q.cx, Q.cy], [R.cx, R.cy], [fx, fy]], at3);
+        if (!H) return 0;
+        let hit = 0, all = 0;
+        const maxMiss = (1 - min) * sq.length;
+        for (const b of sq) {
+          if (b === P || b === Q || b === R) continue;
+          const [X, Y] = applyH(H, b.cx, b.cy);
+          if (X < lm[0].x || X > lm[3].x || Y < lm[0].y || Y > lm[3].y + 2) continue;
+          all++;
+          if (spots.some((o) => (o.x - X) * (o.x - X) + (o.y - Y) * (o.y - Y) < near * near)) hit++;
+          else if (all - hit > maxMiss) return 0;
+        }
+        return all < HINT_MIN_SPOTS ? 0 : hit / all;
+      };
+      const fx = Q.cx + R.cx - P.cx, fy = Q.cy + R.cy - P.cy;
+      if (share(fx, fy, 3.5, 0.5) < 0.5) continue;
+      // Лист снят под углом — четвёртый угол не точно на параллелограмме: ищем его рядом
+      for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) {
+        const x = fx + a * 0.03 * ux + b * 0.04 * vx, y = fy + a * 0.03 * uy + b * 0.04 * vy;
+        const got = share(x, y, HINT_NEAR, HINT_SHARE);
+        if (got >= HINT_SHARE && (!best || got > best.share)) best = { share: got, sx: x, sy: y };
       }
     }
   }
-  return undefined;
+  if (!best) return undefined;
+  const { sx, sy } = best;
+  const cornerName = `${sy < h / 2 ? 'верхний' : 'нижний'} ${sx < w / 2 ? 'левый' : 'правый'}`;
+  const outOfFrame = sx < 20 || sx > w - 20 || sy < 20 || sy > h - 20;
+  return outOfFrame
+    ? `Не виден ${cornerName} угол бланка: метка вышла за пределы кадра. Отодвиньте камеру чуть назад.`
+    : `Не виден ${cornerName} угол бланка: метка перекрыта пальцем, бликом или тенью.`;
 }
+/** Подсказка «не виден угол»: сколько самых больших троек проверяем, допуск места пятна (мм), нужная доля и число пятен */
+const HINT_TRIPLES = 80, HINT_NEAR = 2, HINT_SHARE = 0.9, HINT_MIN_SPOTS = 5;
 
 /** Ищет метки и поворот бланка: порог меток ослабляем, пока не сойдётся код бланка */
 function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
@@ -558,7 +632,7 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
     squares.push(sqCandidates);
     const cands = findMarkers(adaptiveBinary(img, win, k), w, h, Math.max(want, 1 / want));
     if (!cands.length) {
-      if (!missingHint) missingHint = findMissingHint(sqCandidates, w, h, Math.max(want, 1 / want));
+      if (!missingHint) missingHint = findMissingHint(sqCandidates, w, h, layout);
       continue;
     }
     anyMarkers = true;
@@ -582,7 +656,7 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
         const bw = c.x1 - c.x0 + 1, bh = c.y1 - c.y0 + 1;
         return c.area >= minArea && c.iso > 0.45 && c.solid > 0.8 && c.solid < 1.35 && Math.max(bw, bh) < w * 0.12;
       });
-      missingHint = findMissingHint(sqCandidates, w, h, Math.max(want, 1 / want));
+      missingHint = findMissingHint(sqCandidates, w, h, layout);
       if (missingHint) break;
     }
   }
@@ -604,7 +678,9 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
   const pxPerMm = e.reduce((a, v) => a + v, 0) / mmE.reduce((a, v) => a + v, 0);
   const skew = Math.max(Math.max(e[0], e[2]) / Math.min(e[0], e[2]), Math.max(e[1], e[3]) / Math.min(e[1], e[3]));
 
-  const codeOk = best.mism === 0 && best.fit >= RING_MIN;
+  // Средняя оценка кружков низкая: либо лист сильно изогнут (с дальним поиском кольца ряда находятся все), либо одна из
+  // меток чужая (нижний лист стопки) — тогда ряды не сходятся и с дальним поиском, и ответы читались бы со сдвигом
+  const codeOk = best.mism === 0 && best.fit >= RING_MIN && (best.avg >= RING_AVG_SURE || ringsFar(at, layout) >= RINGS_FAR_MIN);
   let soft: At | null = null;
   const atSoft = () => (soft ??= sampler(adaptiveBinary(img, Math.max(31, Math.round(w / 8) | 1), OPEN_SOFT_K), w, h, best.H));
   return {
@@ -614,9 +690,9 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
     quality: { pxPerMm, skew, ring: best.fit },
     rotation: best.rot * 90,
     toPhoto: best.H,
-    variant: pickOne(layout.variant, at),
-    tests: layout.tests.map((t) => ({ q: t.q, ...pickOne(t.options, at) })),
-    matching: layout.matching.map((m) => ({ q: m.q, rows: m.rows.map((r) => ({ row: r.row, ...pickOne(r.options, at) })) })),
+    variant: pickOne(layout.variant, at, codeOk),
+    tests: layout.tests.map((t) => ({ q: t.q, ...pickOne(t.options, at, codeOk) })),
+    matching: layout.matching.map((m) => ({ q: m.q, rows: m.rows.map((r) => ({ row: r.row, ...pickOne(r.options, at, codeOk) })) })),
     open: layout.open.map((o) => {
       const { dx, dy } = fitOpenFrame(at, o.boxes);
       return {
