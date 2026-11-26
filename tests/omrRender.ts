@@ -11,6 +11,9 @@ const rng = (seed: number) => () => {
 /** Профиль сгиба: [x бланка, мм; сдвиг в долях fold] */
 const FOLD_X = [[9, 0], [35, -0.25], [60, 0.25], [90, 0.2], [105, -0.3], [118, -1], [145, -1], [183, -0.35], [201, 0]];
 const FOLD_Y = [[9, 0], [60, 0.15], [105, 0.5], [145, 0.3], [201, 0]];
+/** Профиль прогиба полоски, лежащей на стопке листов: [x бланка, мм; сдвиг в долях sag]. Снят с реального фото
+ * (пачка batch-13, №9): тесты почти на месте, соответствие 9 уехало влево на ~2,5 мм, соответствие 10 — на ~4 мм */
+const SAG_X = [[9, 0], [40, -0.05], [55, -0.2], [85, -0.65], [105, -0.85], [126, -1], [150, -0.9], [170, -0.5], [201, 0]];
 const along = (p: number[][], x: number) => {
   if (x <= p[0][0]) return p[0][1];
   for (let i = 1; i < p.length; i++) if (x <= p[i][0]) return p[i - 1][1] + ((p[i][1] - p[i - 1][1]) * (x - p[i - 1][0])) / (p[i][0] - p[i - 1][0]);
@@ -20,7 +23,7 @@ const along = (p: number[][], x: number) => {
 export interface Truth { variant: number | null; tests: Array<string | null>; matching: Array<Array<number | null>>; open: number[]; openText: string[] }
 
 /** draw — дорисовать на бланке свои штрихи (координаты в мм бланка; v — яркость штриха, бумага 235), например цифру у самого края клетки или бледным карандашом */
-export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; curl?: number; fold?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
+export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; curl?: number; fold?: number; sag?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
   const r = rng(seed);
   const W = Math.round(layout.strip.w * S), H = Math.round(layout.strip.h * S);
   const d = new Float32Array(W * H).fill(235);
@@ -115,6 +118,8 @@ export function render(layout: OmrLayout, seed: number, deg: number, opts: { gly
       my -= along(FOLD_Y, mx) * opts.fold;
       mx -= dx;
     }
+    // Полоска прогнулась поперёк (лежит на стопке): середина листа уехала влево на sag мм, у меток сдвига нет
+    if (opts.sag) mx -= along(SAG_X, mx) * opts.sag;
     if (mx < 0 || my < 0 || mx >= layout.strip.w || my >= layout.strip.h) continue;
     data[y * PW + x] = d[Math.floor(my * S) * W + Math.floor(mx * S)];
   }

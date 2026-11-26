@@ -505,15 +505,21 @@ function seatCircles(at: At, layout: OmrLayout): { seat: OmrLayout; avg: number;
     byCols.set(key, [...(byCols.get(key) ?? []), t.options]);
   }
   const blocks = [...byCols.values(), ...layout.matching.map((m) => m.rows.map((r) => r.options))];
+  // Кружки повторяются через 5 мм, и при сдвиге больше половины шага столбцы блока садятся на соседние (ответы со
+  // сдвигом на столбец). У таблицы соответствия есть рамка — её место однозначно, поиск столбцов идёт вокруг него
+  const center = new Map<OmrCircle[][], { x: number; y: number }>();
+  for (const m of layout.matching) center.set(blocks[byCols.size + layout.matching.indexOf(m)], fitFrame(at, m.frame));
   const n = 2 * SEAT_RANGE + 1, total = n * n;
   const moved = new Map<OmrCircle[], OmrCircle[]>();
   for (const rows of blocks) {
+    // центр поиска — на той же сетке шагов, что и без рамки
+    const f0 = center.get(rows), c0 = f0 ? { x: Math.round(f0.x / SEAT_STEP) * SEAT_STEP, y: Math.round(f0.y / SEAT_STEP) * SEAT_STEP } : { x: 0, y: 0 };
     const back: Int32Array[] = [];
     let cur = new Float64Array(0);
     rows[0].forEach((_, c) => {
       const next = new Float64Array(total), from = new Int32Array(total);
       for (let i = 0; i < total; i++) {
-        const x = i % n, y = (i / n) | 0, dx = (x - SEAT_RANGE) * SEAT_STEP, dy = (y - SEAT_RANGE) * SEAT_STEP;
+        const x = i % n, y = (i / n) | 0, rx = (x - SEAT_RANGE) * SEAT_STEP, ry = (y - SEAT_RANGE) * SEAT_STEP, dx = c0.x + rx, dy = c0.y + ry;
         let prev = 0;
         if (c) {
           prev = -Infinity;
@@ -523,7 +529,7 @@ function seatCircles(at: At, layout: OmrLayout): { seat: OmrLayout; avg: number;
           }
         }
         // Чуть дороже дальние сдвиги: при равном совпадении кольца берутся ближние
-        next[i] = prev + mean(rows.map((r) => circleRingMatch(at, r[c], dx, dy))) - 0.004 * Math.hypot(dx, dy);
+        next[i] = prev + mean(rows.map((r) => circleRingMatch(at, r[c], dx, dy))) - 0.004 * Math.hypot(rx, ry);
       }
       back.push(from);
       cur = next;
@@ -532,7 +538,7 @@ function seatCircles(at: At, layout: OmrLayout): { seat: OmrLayout; avg: number;
     for (let k = 1; k < total; k++) if (cur[k] > cur[i]) i = k;
     const shift: Array<{ dx: number; dy: number }> = [];
     for (let c = back.length - 1; c >= 0; c--) {
-      shift[c] = { dx: ((i % n) - SEAT_RANGE) * SEAT_STEP, dy: (((i / n) | 0) - SEAT_RANGE) * SEAT_STEP };
+      shift[c] = { dx: c0.x + ((i % n) - SEAT_RANGE) * SEAT_STEP, dy: c0.y + (((i / n) | 0) - SEAT_RANGE) * SEAT_STEP };
       i = back[c][i];
     }
     for (const r of rows) moved.set(r, r.map((o, c) => ({ ...o, x: o.x + shift[c].dx, y: o.y + shift[c].dy })));
@@ -545,7 +551,50 @@ function seatCircles(at: At, layout: OmrLayout): { seat: OmrLayout; avg: number;
   };
   return { seat, avg: mean(ringParts(at, seat)), worst: Math.min(...blocks.map((rows) => mean(ringPartsOf(at, rows.map(to))))) };
 }
-/** Поиск места блока: шаг и предел сдвига (в шагах; до 3,2 мм), наибольшее расхождение соседних столбцов (в шагах) */
+/**
+ * Сдвиг печатной рамки таблицы соответствия (до FRAME_RANGE мм): доля тёмных точек на её сторонах. Кружки внутри дают
+ * на линии рамки лишь отдельные касания, поэтому место рамки однозначно. Боковые стороны считаются по худшей из двух:
+ * иначе рамка, сдвинутая на соседнюю (верх и низ у них на одной линии), сходится одним краем. Не нашлась — сдвиг нулевой.
+ */
+function fitFrame(at: At, f: { x: number; y: number; w: number; h: number }): { x: number; y: number } {
+  // стороны: левая, правая, верх, низ — точки и направление поперёк линии
+  const sides: Array<{ pts: Array<[number, number]>; px: number; py: number }> = [
+    { pts: [], px: 1, py: 0 }, { pts: [], px: 1, py: 0 }, { pts: [], px: 0, py: 1 }, { pts: [], px: 0, py: 1 },
+  ];
+  for (let y = f.y + 0.5; y <= f.y + f.h - 0.5; y += 0.25) { sides[0].pts.push([f.x, y]); sides[1].pts.push([f.x + f.w, y]); }
+  for (let x = f.x + 0.5; x <= f.x + f.w - 0.5; x += 0.25) { sides[2].pts.push([x, f.y]); sides[3].pts.push([x, f.y + f.h]); }
+  // stride — каждая какая точка стороны берётся (грубый поиск идёт по разреженным точкам: он вчетверо быстрее)
+  const score = (dx: number, dy: number, stride: number) => {
+    // у изогнутого листа стороны рамки расходятся до ~0,6 мм: каждая сторона ищется со своим небольшим сдвигом
+    const share = sides.map(({ pts, px, py }) => Math.max(...SIDE_SHIFTS.map((t) => {
+      let hit = 0, tot = 0;
+      for (let i = 0; i < pts.length; i += stride) {
+        const [x, y] = pts[i];
+        tot++;
+        for (const o of [-0.2, 0, 0.2]) if (at(x + dx + (o + t) * px, y + dy + (o + t) * py) > 0) { hit++; break; }
+      }
+      return hit / tot;
+    })));
+    return (2 * Math.min(share[0], share[1]) + share[2] + share[3]) / 4;
+  };
+  let best = { x: 0, y: 0, s: 0 };
+  const scan = (cx: number, cy: number, rx: number, ry: number, step: number, stride: number) => {
+    best = { ...best, s: score(best.x, best.y, stride) - 0.004 * Math.hypot(best.x, best.y) };
+    for (let iy = -Math.round(ry / step); iy <= Math.round(ry / step); iy++) for (let ix = -Math.round(rx / step); ix <= Math.round(rx / step); ix++) {
+      const dx = cx + ix * step, dy = cy + iy * step;
+      // при равной оценке — меньший сдвиг
+      const s = score(dx, dy, stride) - 0.004 * Math.hypot(dx, dy);
+      if (s > best.s + 1e-9) best = { x: dx, y: dy, s };
+    }
+  };
+  scan(0, 0, FRAME_RANGE, FRAME_RANGE / 2, 0.4, 4);
+  scan(best.x, best.y, 0.4, 0.4, 0.1, 1);
+  return best.s >= FRAME_SURE ? { x: best.x, y: best.y } : { x: 0, y: 0 };
+}
+/** Предел поиска рамки (мм), доля тёмных точек, с которой рамка считается найденной, и свои сдвиги сторон (мм) */
+const FRAME_RANGE = 6, FRAME_SURE = 0.7, SIDE_SHIFTS = [-0.6, 0, 0.6];
+
+/** Поиск места блока вокруг рамки (или раскладки): шаг и предел сдвига (в шагах; до 3,2 мм), наибольшее расхождение соседних столбцов (в шагах) */
 const SEAT_STEP = 0.4, SEAT_RANGE = 8, SEAT_HOP = 2;
 
 /** Начиная с какого ringScore раскладка считается совпавшей со снимком */

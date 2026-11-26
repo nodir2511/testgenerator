@@ -33,4 +33,20 @@ describe('распознавание бланка по снимку: лист с
       });
     }
   }
+
+  // Реальный снимок химии/физики (пачка batch-13, №9): полоска лежит на стопке и прогнулась, соответствие 10 уехало влево
+  // на ~4 мм — больше половины шага кружков. Столбцы садились на соседние, бланк принимался с ответами со сдвигом на столбец
+  for (const seed of [8, 22, 29]) {
+    for (const deg of [3, 176]) {
+      it(`chemphys: полоска прогнулась на 4 мм (снимок ${seed}, под ${deg}°) — соответствия не сдвигаются на столбец`, () => {
+        const layout = OMR_LAYOUTS.chemphys;
+        const { img, truth } = render(layout, seed, deg, { sag: 4 });
+        const res = omrRead(img, layout);
+        expect(res.ok && res.codeOk).toBe(true);
+        if (!res.ok) return;
+        expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+        expect(res.matching.map((m) => m.rows.map((r) => r.answer))).toEqual(truth.matching);
+      });
+    }
+  }
 });
