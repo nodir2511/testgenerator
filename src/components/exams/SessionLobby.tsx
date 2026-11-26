@@ -2,11 +2,12 @@ import React, { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Play } from 'lucide-react';
 import { EXAM_LINKS_KEY, examAttemptsKey, examTicketNumbersKey, fetchAttempts, fetchExamTicketNumbers, setAttemptVariant, startSession, type ExamLinkRow } from '../../lib/examLinks';
-import { canStartSession, langName, startedMinutesNotice } from '../../lib/examView';
-import { EXAM_MAX_MINUTES, EXAM_MIN_MINUTES, EXAM_POLL_MS } from '../../../supabase/functions/_shared/exam';
+import { AWAY_STRICT_HINT, NO_BACK_HINT, NO_BACK_LABEL, awayStrictLabel, canStartSession, langName, startedMinutesNotice } from '../../lib/examView';
+import { AWAY_LIMIT_COUNT, AWAY_LIMIT_MS, EXAM_MAX_MINUTES, EXAM_MIN_MINUTES, EXAM_POLL_MS } from '../../../supabase/functions/_shared/exam';
 import { confirmAction } from '../../lib/confirm';
 import { notifyError, notifyInfo } from '../../lib/errors';
 import { Button, inputClass } from '../ui';
+import { InviteStudents } from './InviteStudents';
 
 const DEFAULT_MINUTES = 30;
 const MINUTE_OPTIONS = Array.from({ length: (EXAM_MAX_MINUTES - EXAM_MIN_MINUTES) / 5 + 1 }, (_, i) => EXAM_MIN_MINUTES + i * 5);
@@ -17,6 +18,8 @@ const studentsWord = (n: number) => (n % 10 === 1 && n % 100 !== 11 ? 'учен�
 export const SessionLobby: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
   const queryClient = useQueryClient();
   const [minutes, setMinutes] = useState(DEFAULT_MINUTES);
+  const [awayStrict, setAwayStrict] = useState(true); // правило о выходах включено, пока преподаватель его не снял
+  const [noBack, setNoBack] = useState(false); // без возврата к вопросам — по выбору преподавателя
 
   const { data, isLoading } = useQuery({
     queryKey: examAttemptsKey(link.code),
@@ -42,7 +45,7 @@ export const SessionLobby: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
   });
 
   const start = useMutation({
-    mutationFn: () => startSession(link.code, minutes),
+    mutationFn: () => startSession(link.code, minutes, awayStrict, noBack),
     onSuccess: (started) => {
       // Сессию уже запустили раньше (другая вкладка, двойное нажатие) — время прежнее
       const notice = startedMinutesNotice(minutes, started?.duration_min);
@@ -61,7 +64,7 @@ export const SessionLobby: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
     try {
       if (!(await confirmAction({
         title: `Начать для ${attempts.length} ${studentsWord(attempts.length)}?`,
-        message: `Время: ${minutes} минут. Через несколько секунд у учеников пойдёт отсчёт 3-2-1. Начать?`,
+        message: `Время: ${minutes} минут. ${awayStrict ? `Билет ученика закроется после ${AWAY_LIMIT_COUNT} выходов или ${AWAY_LIMIT_MS / 1000} секунд вне страницы. ` : 'Выходы со страницы только записываются. '}${noBack ? 'Вернуться к прошлому вопросу ученик не сможет. ' : ''}Через несколько секунд у учеников пойдёт отсчёт 3-2-1. Начать?`,
         confirmLabel: 'Начать',
         cancelLabel: 'Отмена',
       }))) return;
@@ -73,6 +76,7 @@ export const SessionLobby: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
 
   return (
     <div className="space-y-3">
+      <InviteStudents code={link.code} />
       <p className="text-sm text-slate-600">Пришло: <span className="font-semibold text-slate-900">{attempts.length}</span>. Список обновляется сам; опоздавшие смогут зайти и после начала.</p>
 
       {isLoading ? (
@@ -122,6 +126,14 @@ export const SessionLobby: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
           <select className={`${inputClass} min-h-[40px] py-1.5 w-28`} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
             {MINUTE_OPTIONS.map((m) => <option key={m} value={m}>{m} мин</option>)}
           </select>
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-700 min-h-[40px]" title={AWAY_STRICT_HINT}>
+          <input type="checkbox" className="w-4 h-4 accent-indigo-600" checked={awayStrict} onChange={(e) => setAwayStrict(e.target.checked)} />
+          {awayStrictLabel(AWAY_LIMIT_COUNT, AWAY_LIMIT_MS)}
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-700 min-h-[40px]" title={NO_BACK_HINT}>
+          <input type="checkbox" className="w-4 h-4 accent-indigo-600" checked={noBack} onChange={(e) => setNoBack(e.target.checked)} />
+          {NO_BACK_LABEL}
         </label>
         <Button size="sm" icon={Play} loading={start.isPending} disabled={!canStart} onClick={onStart} title={canStart ? undefined : 'Начать можно, когда придёт хотя бы один ученик'}>
           Начать для {attempts.length} {studentsWord(attempts.length)}

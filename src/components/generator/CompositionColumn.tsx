@@ -50,6 +50,9 @@ export interface NctGroup {
   diffShares: NctDifficultyShares;
   setDiffShare: (key: keyof NctDifficultyShares, raw: string) => void;
   diffSum: number;
+  /** выбор сложности включён (выключен — сложность при подборе не учитывается) */
+  diffOn: boolean;
+  setDiffOn: React.Dispatch<React.SetStateAction<boolean>>;
   permAvailable: boolean;
   permPref: boolean;
   setPermPref: React.Dispatch<React.SetStateAction<boolean>>;
@@ -125,7 +128,7 @@ export const CompositionColumn: React.FC<CompositionColumnProps> = ({
     editComposition, setEditComposition, testCount, setTestCount, matchingCount, setMatchingCount, openCount, setOpenCount,
     readingCount, setReadingCount, clozeCount, setClozeCount, showTexts, standard, isStandard,
   },
-  nct: { isChem, nctCfg, nctPref, setNctPref, nctMode, diffShares, setDiffShare, diffSum, permAvailable, permPref, setPermPref },
+  nct: { isChem, nctCfg, nctPref, setNctPref, nctMode, diffShares, setDiffShare, diffSum, diffOn, setDiffOn, permAvailable, permPref, setPermPref },
   variants: { variantChoices, ticketCount, setTicketCount },
   quota: { limits, userLimits, leftToday },
   pool: { poolStats, pickEmpty, health, healthDot, fitted, fittedTotal, scopeMode, setScopeMode },
@@ -178,26 +181,46 @@ export const CompositionColumn: React.FC<CompositionColumnProps> = ({
 
       {nctMode && isOwner && (
         <div className="rounded-xl border border-slate-200 p-3 space-y-2.5">
-          <div className="text-sm">
-            <b className="text-slate-900">Сложность тестов и соответствий</b>
-            <span className="block text-slate-500 mt-0.5">Сколько процентов лёгких, средних и сложных заданий в билете. Сумма — 100 %.</span>
+          <div className="flex items-start justify-between gap-3">
+            <div className="text-sm">
+              <b className="text-slate-900">Сложность тестов и соответствий</b>
+              <span className="block text-slate-500 mt-0.5">
+                {diffOn
+                  ? 'Сколько процентов лёгких, средних и сложных заданий в билете. Сумма — 100 %.'
+                  : 'Выключено: задания подбираются без учёта сложности.'}
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={diffOn}
+              aria-label="Учитывать сложность"
+              onClick={() => setDiffOn((v) => { const next = !v; try { localStorage.setItem('examiner_nct_diff_on', String(next)); } catch { /* память недоступна */ } return next; })}
+              className={`relative shrink-0 w-11 h-6 rounded-full transition-colors ${diffOn ? 'bg-indigo-600' : 'bg-slate-300'}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${diffOn ? 'translate-x-5' : ''}`} />
+            </button>
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {([['easy', 'Лёгкие'], ['medium', 'Средние'], ['hard', 'Сложные']] as const).map(([key, label]) => (
-              <label key={key} className="block text-xs font-semibold text-slate-600">
-                {label}, %
-                <input
-                  type="number" inputMode="numeric" min={0} max={100}
-                  value={diffShares[key]}
-                  onChange={(e) => setDiffShare(key, e.target.value)}
-                  className="mt-1 w-full min-h-[40px] rounded-lg border border-slate-300 px-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </label>
-            ))}
-          </div>
-          <div className={`text-xs ${diffSum === 100 ? 'text-slate-500' : 'text-rose-600 font-semibold'}`}>
-            Сумма: {diffSum} %. Открытые задачи всегда: {nctCfg.openDifficulty[0]} лёгких, {nctCfg.openDifficulty[1]} средних, {nctCfg.openDifficulty[2]} сложных.
-          </div>
+          {diffOn && (
+            <>
+              <div className="grid grid-cols-3 gap-2">
+                {([['easy', 'Лёгкие'], ['medium', 'Средние'], ['hard', 'Сложные']] as const).map(([key, label]) => (
+                  <label key={key} className="block text-xs font-semibold text-slate-600">
+                    {label}, %
+                    <input
+                      type="number" inputMode="numeric" min={0} max={100}
+                      value={diffShares[key]}
+                      onChange={(e) => setDiffShare(key, e.target.value)}
+                      className="mt-1 w-full min-h-[40px] rounded-lg border border-slate-300 px-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </label>
+                ))}
+              </div>
+              <div className={`text-xs ${diffSum === 100 ? 'text-slate-500' : 'text-rose-600 font-semibold'}`}>
+                Сумма: {diffSum} %. Открытые задачи всегда: {nctCfg.openDifficulty[0]} лёгких, {nctCfg.openDifficulty[1]} средних, {nctCfg.openDifficulty[2]} сложных.
+              </div>
+            </>
+          )}
         </div>
       )}
 

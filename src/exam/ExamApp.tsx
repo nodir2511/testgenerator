@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { EXAM_POLL_MS } from '../../supabase/functions/_shared/exam';
 import { ExamApiError, apiOpen, apiReview, apiStart, waitTelegram, type OpenResponse } from './api';
 import { ExamTicket } from './ExamTicket';
 import { ExamLobby } from './ExamLobby';
@@ -14,7 +15,7 @@ type Screen =
   | { kind: 'loading' }
   | { kind: 'message'; title: string; text?: string; lang?: Lang; retry?: boolean; onRetry?: () => void; back?: Screen }
   | { kind: 'view'; view: OpenResponse }
-  | { kind: 'result'; score: number; max: number; review: boolean; lang: Lang; title: string; note?: string }
+  | { kind: 'result'; score: number; max: number; review: boolean; lang: Lang; title: string; note?: string; awayClosed?: boolean; canReturn?: boolean }
   | { kind: 'review'; lang: Lang; title: string; items: ReviewItem[]; back?: Screen };
 
 const params = new URLSearchParams(window.location.search);
@@ -96,6 +97,26 @@ function ReviewScreen({ title, lang, items, onBack }: { title: string; lang: Lan
   );
 }
 
+/** Билет закрыт за выходы, сессия ещё идёт: ждём, не вернёт ли преподаватель ученика в билет (опрос раз в 3 с) */
+function ReturnWatcher({ onView }: { onView: (v: OpenResponse) => void }) {
+  const onViewRef = useRef(onView);
+  onViewRef.current = onView;
+  useEffect(() => {
+    let alive = true;
+    const t = setInterval(async () => {
+      try { const v = await apiOpen(CODE); if (alive) onViewRef.current(v); } catch { /* повторим */ }
+    }, EXAM_POLL_MS);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  return null;
+}
+
+type ResultScreen = Extract<Screen, { kind: 'result' }>;
+const resultOf = (view: Extract<OpenResponse, { state: 'finished' }>): ResultScreen => ({
+  kind: 'result', score: view.attempt.score, max: view.attempt.max, review: view.attempt.review, lang: view.lang, title: view.title,
+  awayClosed: view.attempt.awayClosed === true, canReturn: view.attempt.canReturn === true,
+});
+
 // lang не задан — язык ещё не выбран (страница только открывается): по-русски
 const errText = (e: unknown, lang?: Lang) => examErrorText(e, lang);
 
@@ -127,7 +148,7 @@ export default function ExamApp() {
 
   const apply = useCallback((view: OpenResponse) => {
     if (view.state === 'finished') {
-      const result: Extract<Screen, { kind: 'result' }> = { kind: 'result', score: view.attempt.score, max: view.attempt.max, review: view.attempt.review, lang: view.lang, title: view.title };
+      const result = resultOf(view);
       if (WANT_REVIEW) { void showReview(view.lang, view.title, result); return; }
       setScreen(result);
       return;
@@ -152,10 +173,15 @@ export default function ExamApp() {
   useEffect(() => { void load(); }, [load]);
 
   const onFinished = useCallback(async (r: { score: number; max: number }, lang: Lang, title: string) => {
-    let review = false;
-    try { const v = await apiOpen(CODE); if (v.state === 'finished') review = v.attempt.review; } catch { /* не критично */ }
-    setScreen({ kind: 'result', score: r.score, max: r.max, review, lang, title });
+    // Перечитываем состояние: отправлен ли разбор и не закрыло ли билет правило о выходах
+    try { const v = await apiOpen(CODE); if (v.state === 'finished') { setScreen(resultOf(v)); return; } } catch { /* не критично */ }
+    setScreen({ kind: 'result', score: r.score, max: r.max, review: false, lang, title });
   }, []);
+
+  // Правило о выходах закрыло билет (или преподаватель вернул ученика): показываем то, что говорит сервер
+  const reload = useCallback(async () => {
+    try { apply(await apiOpen(CODE)); } catch { void load(); }
+  }, [apply, load]);
 
   switch (screen.kind) {
     case 'loading':
@@ -166,8 +192,17 @@ export default function ExamApp() {
       const t = examTexts(screen.lang);
       return (
         <div className="exam-app exam-center">
-          <div className="hint">{t.done}</div>
+          {screen.awayClosed
+            ? <><div style={{ fontWeight: 800, fontSize: 20, color: 'var(--bad)' }}>{t.awayClosedTitle}</div><div className="hint">{t.awayClosedText}</div></>
+            : <div className="hint">{t.done}</div>}
           <div className="big">{t.score(screen.score, screen.max)}</div>
+          {screen.awayClosed && screen.canReturn && (
+            <>
+              <div className="hint">{t.awayClosedReturn}</div>
+              {/* Вернули в билет — откроется билет; сессия кончилась — подсказка о возврате исчезнет */}
+              <ReturnWatcher onView={(v) => { if (v.state !== 'finished' || !v.attempt.canReturn) apply(v); }} />
+            </>
+          )}
           {screen.note && <div className="hint">{screen.note}</div>}
           {screen.review
             ? <button type="button" className="exam-btn" onClick={() => void showReview(screen.lang, screen.title, screen)}>{t.viewReview}</button>
@@ -194,8 +229,9 @@ export default function ExamApp() {
         return (
           <ExamTicket
             code={CODE} lang={v.lang} subject={v.subject} deadline={v.attempt.deadline}
-            questions={v.attempt.questions} initialAnswers={v.attempt.answers}
-            onFinished={(r) => void onFinished(r, v.lang, v.title)}
+            questions={v.attempt.questions} initialAnswers={v.attempt.answers} away={v.attempt.away}
+            noBack={v.attempt.noBack === true} startPos={v.attempt.pos ?? 0} studentName={v.attempt.studentName}
+            onFinished={(r) => void onFinished(r, v.lang, v.title)} onAwayClosed={() => void reload()}
           />
         );
       }

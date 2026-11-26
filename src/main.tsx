@@ -12,6 +12,7 @@ import { clearSavedQueryCache } from './lib/queryPersist';
 import { installGlobalErrorReporting } from './lib/errorReporter';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import { examScreenCode } from './lib/examScreen';
+import { registerServiceWorker } from './lib/autoUpdate';
 import './index.css';
 import './dark.css';
 
@@ -107,6 +108,7 @@ if (window.location.pathname === '/tg' || window.location.pathname.startsWith('/
     try { localStorage.removeItem('examiner_tg_generated_batch'); } catch { /* память недоступна */ }
   });
   prefetchOnStartup(queryClient);
+  registerServiceWorker(); // при слабой связи сайт открывается из памяти браузера (public/sw.js)
   root.render(
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>

@@ -12,6 +12,15 @@ export interface TgWebApp {
   onEvent?(e: string, cb: () => void): void;
   offEvent?(e: string, cb: () => void): void;
   HapticFeedback?: { notificationOccurred(s: string): void };
+  // Полный экран, подтверждение закрытия и жест «смахнуть вниз» — есть не во всех версиях Telegram
+  isVersionAtLeast?(v: string): boolean;
+  isFullscreen?: boolean;
+  requestFullscreen?(): void;
+  exitFullscreen?(): void;
+  enableClosingConfirmation?(): void;
+  disableClosingConfirmation?(): void;
+  disableVerticalSwipes?(): void;
+  enableVerticalSwipes?(): void;
 }
 export const tgApp = (): TgWebApp | undefined => (window as unknown as { Telegram?: { WebApp?: TgWebApp } }).Telegram?.WebApp;
 
@@ -61,15 +70,18 @@ export async function examApi<T>(action: string, body: Record<string, unknown> =
 
 /** minutes — null, пока преподаватель не назначил время (зал ожидания) */
 export interface ViewBase { now?: number; title: string; subject: string; minutes: number | null; lang: Lang }
+/** Правило о выходах: включено ли (галочка преподавателя), пороги и сколько уже израсходовано (выходов и мс вне страницы) */
+export interface AwayRules { strict: boolean; maxCount: number; maxMs: number; count: number; ms: number }
 export type OpenResponse =
   // new: попытки ещё нет; session — идёт ли уже сессия класса (тогда remainingMs — сколько осталось)
   | (ViewBase & { state: 'new'; session?: 'waiting' | 'running'; remainingMs?: number })
   | (ViewBase & { state: 'closed' })
-  | (ViewBase & { state: 'finished'; attempt: { score: number; max: number; review: boolean } })
+  // awayClosed — билет закрыло правило о выходах; canReturn — сессия ещё идёт, преподаватель может вернуть в билет
+  | (ViewBase & { state: 'finished'; attempt: { score: number; max: number; review: boolean; awayClosed?: boolean; canReturn?: boolean } })
   // зал ожидания и отсчёт: вопросов нет, только номер варианта (и время старта)
   | (ViewBase & { state: 'waiting'; attempt: { ticketNumber: number | null } })
-  | (ViewBase & { state: 'countdown'; attempt: { ticketNumber: number | null; startsAt: string } })
-  | (ViewBase & { state: 'running'; attempt: { ticketNumber: number | null; deadline: string; questions: ExamQ[]; answers: Answers } });
+  | (ViewBase & { state: 'countdown'; attempt: { ticketNumber: number | null; startsAt: string; awayStrict?: boolean } })
+  | (ViewBase & { state: 'running'; attempt: { ticketNumber: number | null; deadline: string; questions: ExamQ[]; answers: Answers; away?: AwayRules; noBack?: boolean; pos?: number; studentName?: string } });
 
 export type LobbyResponse = Extract<OpenResponse, { state: 'waiting' | 'countdown' }>;
 
@@ -80,6 +92,11 @@ export const apiSave = (code: string, tqId: string, answer: Answer) =>
   examApi<{ ok: boolean; state?: 'new' | 'closed' | 'finished' | 'waiting'; now?: number }>('save', { code, tqId, answer });
 /** Ученик ушёл со страницы билета (away) или вернулся (ms — сколько его не было по часам телефона) */
 export const apiFocus = (code: string, away: boolean, ms?: number) =>
-  examApi<{ ok: boolean }>('focus', { code, away, ...(ms == null ? {} : { ms }) }, { keepalive: true });
+  // closed — этим выходом правило закрыло билет; away — счётчики правила после этого сообщения
+  examApi<{ ok: boolean; closed?: boolean; away?: AwayRules }>('focus', { code, away, ...(ms == null ? {} : { ms }) }, { keepalive: true });
+/** Ученик перешёл к вопросу с номером pos (с нуля, по порядку в билете): в режиме «без возврата» сервер закрывает прошлые */
+export const apiAdvance = (code: string, pos: number) => examApi<{ ok: boolean; pos?: number }>('advance', { code, pos });
+/** Попытка скопировать текст билета: преподаватель видит счётчик */
+export const apiCopy = (code: string) => examApi<{ ok: boolean }>('copy', { code }, { keepalive: true });
 export const apiSubmit =(code: string) => examApi<{ score: number; max: number; now?: number }>('submit', { code });
 export const apiReview = (code: string) => examApi<{ questions: ReviewItem[] }>('review', { code });

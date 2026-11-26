@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  canLaunchByUser, sessionEndOf, canStartSession, finishedInSession, startedMinutesNotice, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, timesRu, formatAwayMs, awayView, newAwayNames, awayToastText, canLaunchBatch, formatScore, summaryText, reviewSendState, reviewConfirmText, reviewResultText,
+  canLaunchByUser, sessionEndOf, canStartSession, finishedInSession, startedMinutesNotice, buildExamUrl, linkState, attemptState, remainingMinutes, countAttempts, sortLinks, mapAttemptRow, timesRu, formatAwayMs, awayView, newAwayNames, awayToastText, newCopyNames, copyToastText, awayStrictLabel, canLaunchBatch, formatScore, summaryText, reviewSendState, reviewConfirmText, reviewResultText,
 } from '../src/lib/examView';
 
 const NOW = Date.parse('2026-11-22T10:00:00.000Z');
@@ -180,6 +180,23 @@ describe('уходы со страницы билета', () => {
     // опоздавший, которого в прошлом опросе не было
     expect(newAwayNames(prev, [...rows, { id: 'd', student_name: 'Новый', away_count: 1 }])).toEqual(['Новый']);
     expect(awayToastText(['Алиев Али', 'Каримова Зарина'])).toBe('Уход со страницы билета: Алиев Али, Каримова Зарина');
+  });
+  it('закрытие за выходы и попытки копирования: столбцы таблицы, «Вернуть в билет» только пока идёт сессия', () => {
+    const link = { session_start_at: new Date(NOW - 60_000).toISOString(), duration_min: 30, closed_at: null, closes_at: new Date(NOW + 3_600_000).toISOString() };
+    const base = { id: 'a', student_name: 'Алиев Али', tg_username: null, tg_name: null, ticket: { ticket_number: 2 }, score: 5, max_score: 10 };
+    const closedAt = new Date(NOW - 5000).toISOString();
+    const closed = mapAttemptRow({ ...base, finished_at: closedAt, away_count: 3, away_ms: 4000, away_closed_at: closedAt, copy_count: 2 }, NOW, link);
+    expect(closed).toMatchObject({ away: '3 раза · всего 4 с · билет закрыт за выходы', canReopen: true, copy: '2 раза', status: 'finished' });
+    // сессия закончилась — возвращать некуда
+    expect(mapAttemptRow({ ...base, finished_at: closedAt, away_count: 3, away_closed_at: closedAt }, NOW + 31 * 60_000, link).canReopen).toBe(false);
+    // обычная сдача и идущая попытка — без кнопки и без пометки
+    expect(mapAttemptRow({ ...base, finished_at: closedAt, away_count: 1, away_ms: 2000 }, NOW, link)).toMatchObject({ away: '1 раз · всего 2 с', canReopen: false, copy: '' });
+    expect(mapAttemptRow({ ...base, finished_at: null }, NOW, link)).toMatchObject({ canReopen: false, copy: '' });
+    const rows = [{ id: 'a', student_name: 'Алиев Али', copy_count: 1 }, { id: 'b', student_name: 'Каримова Зарина', copy_count: 0 }];
+    expect(newCopyNames(null, rows)).toEqual([]);
+    expect(newCopyNames(new Map([['a', 1], ['b', 0]]), [rows[0], { ...rows[1], copy_count: 2 }])).toEqual(['Каримова Зарина']);
+    expect(copyToastText(['Каримова Зарина'])).toBe('Попытка скопировать текст билета: Каримова Зарина');
+    expect(awayStrictLabel(3, 10_000)).toBe('Закрывать билет за выходы: 3 выхода или 10 секунд вне страницы');
   });
 });
 

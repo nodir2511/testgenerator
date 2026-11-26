@@ -827,13 +827,13 @@ body.tg-body {
   .tg-app > * { animation: none !important; }
 }
 
-/* ---- Стиль сайта: Plus Jakarta Sans, индиго-акцент, палитра slate, мягкие карточки ---- */
+/* ---- Стиль сайта: шрифт Inter (подключён в index.css), индиго-акцент, палитра slate, мягкие карточки ---- */
 body.tg-body {
   --btn: #4f46e5;
   --btn-fg: #ffffff;
   --link: #4f46e5;
   --tint: rgba(79, 70, 229, 0.08);
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
 /* Светлая тема — как на сайте: slate-50 фон, белые карточки, рамка slate-200 */

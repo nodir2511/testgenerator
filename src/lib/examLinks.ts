@@ -19,6 +19,10 @@ export interface ExamLink {
   review_sent_at: string | null;
   /** Момент старта сессии (с отсчётом); null — преподаватель ещё не нажал «Начать» */
   session_start_at: string | null;
+  /** Правило о выходах: билет ученика закрывается после 3 выходов или 10 секунд вне страницы (галочка при «Начать») */
+  away_strict?: boolean | null;
+  /** Без возврата к вопросам: ученик идёт только вперёд (галочка при «Начать») */
+  no_back?: boolean | null;
 }
 
 export interface ExamLinkRow extends ExamLink {
@@ -50,8 +54,8 @@ export async function closeExamLink(code: string): Promise<void> {
 }
 
 /** «Начать»: старт через несколько секунд у всех сразу, minutes — 5..45; проверяет база. Уже начатая сессия возвращается как есть (duration_min может отличаться) */
-export async function startSession(code: string, minutes: number): Promise<ExamLink> {
-  const { data, error } = await supabase.rpc('exam_session_start', { p_code: code, p_minutes: minutes });
+export async function startSession(code: string, minutes: number, awayStrict: boolean, noBack: boolean): Promise<ExamLink> {
+  const { data, error } = await supabase.rpc('exam_session_start', { p_code: code, p_minutes: minutes, p_away_strict: awayStrict, p_no_back: noBack });
   if (error) throw error;
   return data as ExamLink;
 }
@@ -62,11 +66,17 @@ export async function setAttemptVariant(attemptId: string, ticketId: string): Pr
   if (error) throw error;
 }
 
+/** Вернуть в билет ученика, которого закрыло правило о выходах (пока сессия идёт) */
+export async function reopenAttempt(attemptId: string): Promise<void> {
+  const { error } = await supabase.rpc('exam_attempt_reopen', { p_attempt_id: attemptId });
+  if (error) throw error;
+}
+
 /** Свои запуски (главный админ — все; фильтрует база), открытые сверху, с названием набора, предметом и числом попыток */
 export async function fetchExamLinks(withAuthors = false): Promise<ExamLinkRow[]> {
   const { data, error } = await supabase
     .from('exam_links')
-    .select('code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, session_start_at, batch:ticket_batches(title, generation_params, subject:subjects(name))')
+    .select('code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, session_start_at, away_strict, no_back, batch:ticket_batches(title, generation_params, subject:subjects(name))')
     .order('created_at', { ascending: false })
     .limit(200);
   if (error) throw error;
@@ -106,7 +116,7 @@ export type ExamLinkView = ExamLink & { batch: { title: string; subject: { name:
 export async function fetchExamLink(code: string): Promise<ExamLinkView | null> {
   const { data, error } = await supabase
     .from('exam_links')
-    .select('code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, session_start_at, batch:ticket_batches(title, subject:subjects(name))')
+    .select('code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, session_start_at, away_strict, no_back, batch:ticket_batches(title, subject:subjects(name))')
     .eq('code', code)
     .maybeSingle();
   if (error) throw error;
@@ -123,7 +133,7 @@ export async function fetchServerNow(): Promise<number | null> {
 export async function fetchAttempts(code: string): Promise<Attempt[]> {
   const { data, error } = await supabase
     .from('exam_attempts')
-    .select('id, code, ticket_id, lang, student_name, tg_username, tg_name, started_at, finished_at, score, max_score, away_count, away_ms, away_since, ticket:tickets(ticket_number)')
+    .select('id, code, ticket_id, lang, student_name, tg_username, tg_name, started_at, finished_at, score, max_score, away_count, away_ms, away_since, away_closed_at, copy_count, ticket:tickets(ticket_number)')
     .eq('code', code)
     .order('started_at', { ascending: true })
     .limit(1000);
@@ -168,7 +178,7 @@ export async function fetchExamTickets(batchId: string): Promise<StatTicket[]> {
 /** Попытки запуска вместе с ответами — для разбора и Excel */
 export async function fetchAttemptsWithAnswers(code: string): Promise<AttemptWithAnswers[]> {
   const { data, error } = await fetchAllPages<AttemptWithAnswers>(
-    () => supabase.from('exam_attempts').select('id, code, ticket_id, student_name, tg_username, tg_name, finished_at, score, max_score, answers, away_count, away_ms').eq('code', code),
+    () => supabase.from('exam_attempts').select('id, code, ticket_id, student_name, tg_username, tg_name, finished_at, score, max_score, answers, away_count, away_ms, away_closed_at, copy_count').eq('code', code),
   );
   if (error) throw error;
   return data ?? [];
@@ -196,6 +206,30 @@ export async function callExamTeacher(action: 'link_send' | 'notify_closed', cod
   else if (data?.error) msg = String(data.error);
   if (!msg) return;
   throw /Привяжите Telegram/.test(msg) ? new NotLinkedError(msg) : new Error(msg);
+}
+
+export interface InviteSource { code: string; created_at: string; batch: { title: string } | null }
+
+/** Свои прошлые запуски (кроме текущего), новые сверху — из них выбирают, кого пригласить снова */
+export async function fetchInviteSources(exceptCode: string): Promise<InviteSource[]> {
+  const { data, error } = await supabase
+    .from('exam_links')
+    .select('code, created_at, batch:ticket_batches(title)')
+    .neq('code', exceptCode)
+    .order('created_at', { ascending: false })
+    .limit(30);
+  if (error) throw error;
+  return (data ?? []) as unknown as InviteSource[];
+}
+
+/** Ссылка запуска code — ученикам прошлого запуска from (ids — выбранные попытки). Ответ сервера: { sent, failed } */
+export async function sendInvites(code: string, from: string, ids: string[]): Promise<{ sent: number; failed: number }> {
+  const { data, error } = await supabase.functions.invoke('tg-exam', { body: { action: 'invite_send', code, from, ids } });
+  let msg = '';
+  if (error) msg = await functionErrorMessage(error);
+  else if (data?.error) msg = String(data.error);
+  if (msg) throw new Error(msg);
+  return { sent: Number(data?.sent ?? 0), failed: Number(data?.failed ?? 0) };
 }
 
 /** Рассылка разбора сдавшим ученикам (только для закрытого запуска). Ответ сервера: { sent, failed } */

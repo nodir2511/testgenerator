@@ -131,3 +131,18 @@ body.exam-body {
   background: var(--bg); border: 2px solid var(--line); border-radius: 12px; padding: 0; caret-color: transparent;
 }
 .open-cell:focus { outline: none; border-color: var(--btn); }
+
+/* Билет: текст не выделяется и не копируется (попытки записываются, см. copyGuard.ts); клетки ответа — как обычно */
+.exam-nocopy, .exam-nocopy * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.exam-nocopy input, .exam-nocopy textarea { -webkit-user-select: text; user-select: text; }
+.exam-nocopy img { -webkit-user-drag: none; }
+.exam-rule { font-size: 14px; padding: 10px 14px; }
+.exam-lobby .lobby-rules { color: var(--hint); font-size: 14px; max-width: 420px; margin-top: 8px; }
+
+/* Полный экран Telegram: шапка билета не уходит под вырез и кнопки Telegram (вне полного экрана отступы равны нулю) */
+.exam-nocopy .exam-bar { padding-top: calc(8px + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)); }
+/* Водяной знак с именем ученика поверх билета: нажатия проходят сквозь него */
+.exam-wm { position: fixed; inset: 0; z-index: 30; pointer-events: none; background-repeat: repeat; }
+/* Цитата о честности для всех, кому покажут задание: мелкая, цветом обычного текста (чёрная в светлой теме) */
+.q-ai { font-style: italic; font-size: 9px; line-height: 1.25; margin-top: 6px; color: var(--fg); }
+.exam-strip button:disabled { opacity: 0.55; cursor: default; }

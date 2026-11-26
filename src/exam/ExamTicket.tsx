@@ -1,17 +1,27 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ExamApiError, apiFocus, apiOpen, apiSave, apiSubmit, getServerOffset, tgApp } from './api';
+import { ExamApiError, apiAdvance, apiCopy, apiFocus, apiOpen, apiSave, apiSubmit, getServerOffset, tgApp, type AwayRules } from './api';
+import { COPY_EVENTS, createCopyGuard, isEditable } from './copyGuard';
+import { watermarkImage, watermarkText } from './watermark';
 import { applyFocusSignal, createAwayReporter, isAway, NO_FOCUS_FLAGS, type FocusSignal } from './awayReporter';
 import { examErrorText, examTexts } from './i18n';
 import { ExamQuestion } from './ExamQuestion';
 import { isAnswered as isAnsweredQ, openCellsFor, saveOutcome, saveStatus, SAVE_WAIT_MAX_TRIES, SAVE_WAIT_RETRY_MS } from './examLogic';
-import { countAnswered, firstUnansweredPos, formatRemaining, navIndexes, progressFraction, remainingMs, stepNav, type Answer, type Answers, type ExamQ, type Lang } from './examLogic';
+import { noBackStartPos, countAnswered, firstUnansweredPos, formatRemaining, navIndexes, progressFraction, remainingMs, stepNav, type Answer, type Answers, type ExamQ, type Lang } from './examLogic';
 
 const RETRY_MS = 4000;
 
 /** Экран билета: все вопросы подряд, сверху таймер, счётчик и «Сдать». Каждый ответ сразу уходит на сервер. */
-export function ExamTicket({ code, lang, subject, deadline, questions, initialAnswers, onFinished }: {
+export function ExamTicket({ code, lang, subject, deadline, questions, initialAnswers, away, noBack = false, startPos = 0, studentName, onFinished, onAwayClosed }: {
   code: string; lang: Lang; subject: string; deadline: string; questions: ExamQ[]; initialAnswers: Answers;
+  /** Правило о выходах: включено ли и сколько уже израсходовано (нет — старый сервер, правила нет) */
+  away?: AwayRules;
+  /** Без возврата к вопросам (галочка преподавателя); startPos — номер вопроса, до которого ученик уже дошёл */
+  noBack?: boolean; startPos?: number;
+  /** Имя ученика для водяного знака поверх билета */
+  studentName?: string;
   onFinished: (r: { score: number; max: number }) => void;
+  /** Правило о выходах закрыло билет: наверху перечитают состояние и покажут итог */
+  onAwayClosed: () => void;
 }) {
   const t = examTexts(lang); // весь интерфейс билета и предупреждения — на языке, который выбрал ученик
   const tRef = useRef(t);
@@ -33,7 +43,8 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
   const [submitting, setSubmitting] = useState(false);
   const [now, setNow] = useState(Date.now());
   const nav = useMemo(() => navIndexes(questions), [questions]);
-  const [pos, setPos] = useState(() => firstUnansweredPos(questions, initialAnswers));
+  const [pos, setPos] = useState(() => (noBack ? noBackStartPos(navIndexes(questions), startPos) : firstUnansweredPos(questions, initialAnswers)));
+  const [skipWarn, setSkipWarn] = useState(false); // «без возврата»: предупредили, что вопрос останется без ответа
 
   const answersRef = useRef(answers);
   const unsavedRef = useRef(unsaved);
@@ -43,6 +54,8 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
   const doneRef = useRef(false);
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
+  const onAwayClosedRef = useRef(onAwayClosed);
+  onAwayClosedRef.current = onAwayClosed;
 
   // Срок задаёт сервер; остаток считаем по часам сервера (смещение обновляется с каждым ответом)
   const offset = getServerOffset();
@@ -162,15 +175,45 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
     return () => clearInterval(t);
   }, [unsaved.size, send]);
 
+  // Полный экран на время билета (Telegram 8.0+; на компьютере и в старых версиях просто не включится), подтверждение
+  // при закрытии и без жеста «смахнуть вниз» — меньше случайных выходов. При переходе в полный экран страница может
+  // на миг потерять фокус: первые секунды такие сигналы уходом не считаем (quietUntil)
+  const quietUntil = useRef(0);
+  useEffect(() => {
+    const tg = tgApp();
+    const modern = (v: string) => { try { return tg?.isVersionAtLeast?.(v) === true; } catch { return false; } };
+    const safe = (fn: (() => void) | undefined) => { try { fn?.call(tg); } catch { /* в этой версии Telegram метода нет */ } };
+    const quiet = () => { quietUntil.current = Date.now() + 2500; };
+    const fs = modern('8.0');
+    if (fs) { quiet(); safe(tg?.requestFullscreen); tg?.onEvent?.('fullscreenChanged', quiet); }
+    if (modern('6.2')) safe(tg?.enableClosingConfirmation);
+    if (modern('7.7')) safe(tg?.disableVerticalSwipes);
+    return () => {
+      if (fs) { tg?.offEvent?.('fullscreenChanged', quiet); if (tg?.isFullscreen) safe(tg?.exitFullscreen); }
+      if (modern('6.2')) safe(tg?.disableClosingConfirmation);
+      if (modern('7.7')) safe(tg?.enableVerticalSwipes);
+    };
+  }, []);
+
   // Уход со страницы (свернули Telegram, другое окно или приложение поверх): сообщаем серверу, преподаватель видит это в таблице
   const [awayCount, setAwayCount] = useState(0);
+  const [awayInfo, setAwayInfo] = useState<AwayRules | undefined>(away); // счётчики правила — с сервера
   useEffect(() => {
-    const reporter = createAwayReporter((away, ms) => apiFocus(code, away, ms), {
+    const report = async (isAway: boolean, ms?: number) => {
+      const r = await apiFocus(code, isAway, ms);
+      if (r.away) setAwayInfo(r.away);
+      // Третий выход или больше допустимого времени вне страницы: сервер закрыл билет — дальше ничего не шлём
+      if (r.closed && !doneRef.current) { doneRef.current = true; onAwayClosedRef.current(); }
+      return r;
+    };
+    const reporter = createAwayReporter(report, {
       isRetryable: (e) => !(e instanceof ExamApiError) || e.retryable,
     });
     let flags = { ...NO_FOCUS_FLAGS, hidden: document.hidden };
     if (isAway(flags)) reporter.leave(); else reporter.arrive();
     const on = (s: FocusSignal) => () => {
+      // Переход в полный экран: кратковременная потеря фокуса — не уход
+      if ((s === 'hidden' || s === 'blur' || s === 'inactive') && Date.now() < quietUntil.current) return;
       const was = isAway(flags);
       flags = applyFocusSignal(flags, s);
       // Страница снова видна и фокус уже у неё: отдельное событие focus приходит не во всех приложениях
@@ -206,17 +249,56 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
     };
   }, [code]);
 
+  // Запрет копирования: выделение отключено стилями (.exam-nocopy), а копирование, вырезание, перетаскивание и меню
+  // по долгому нажатию отменяются; каждая попытка уходит на сервер. Снимок экрана страница запретить не может
+  const [copyCount, setCopyCount] = useState(0);
+  useEffect(() => {
+    const guard = createCopyGuard(() => { void apiCopy(code).catch(() => undefined); });
+    const onCopy = (e: Event) => {
+      if (isEditable(e.target as HTMLElement | null)) return; // в клетках ответа меню и выделение нужны ученику
+      e.preventDefault();
+      if (doneRef.current) return;
+      if (guard.hit()) setCopyCount(guard.count);
+    };
+    const onDrag = (e: Event) => e.preventDefault();
+    for (const ev of COPY_EVENTS) document.addEventListener(ev, onCopy, true);
+    document.addEventListener('dragstart', onDrag, true);
+    return () => {
+      for (const ev of COPY_EVENTS) document.removeEventListener(ev, onCopy, true);
+      document.removeEventListener('dragstart', onDrag, true);
+    };
+  }, [code]);
+
   useEffect(() => {
     document.getElementById(`strip-${pos}`)?.scrollIntoView({ block: 'nearest', inline: 'center' });
     window.scrollTo({ top: 0 });
   }, [pos]);
+
+  useEffect(() => { setSkipWarn(false); }, [pos]);
+
+  // «Далее». Без возврата к вопросам: сначала дожидаемся сохранения ответа (потом сервер его уже не примет),
+  // о вопросе без ответа предупреждаем один раз, затем сообщаем серверу новый номер вопроса
+  const goNext = async () => {
+    if (pos >= nav.length - 1) { setConfirm(true); return; }
+    const nextPos = stepNav(nav.length, pos, 1);
+    if (!noBack) { setPos(nextPos); return; }
+    const cur = questions[nav[pos]];
+    if (timers.current.has(cur.tqId)) { clearTimeout(timers.current.get(cur.tqId)); timers.current.delete(cur.tqId); void send(cur.tqId); }
+    if (unsavedRef.current.has(cur.tqId)) {
+      await Promise.race([flying.current.get(cur.tqId) ?? send(cur.tqId), new Promise((r) => setTimeout(r, 3000))]);
+      if (unsavedRef.current.has(cur.tqId)) { setNotice(tRef.current.noBackUnsaved); return; }
+    }
+    if (!isAnsweredQ(cur.snapshot.type, answersRef.current[cur.tqId]) && !skipWarn) { setSkipWarn(true); return; }
+    void apiAdvance(code, nav[nextPos]).catch(() => undefined);
+    setPos(nextPos);
+  };
 
   const qi = nav[pos];
   const q = qi === undefined ? undefined : questions[qi];
   const last = pos >= nav.length - 1;
   const unanswered = total - answered;
   return (
-    <div className="exam-app" style={{ paddingBottom: 100 }}>
+    <div className="exam-app exam-nocopy" style={{ paddingBottom: 100 }}>
       <div className="exam-bar" style={{ flexWrap: 'wrap' }}>
         <span className={`timer${left < 60_000 ? ' low' : ''}`}>{formatRemaining(left)}</span>
         <span className="count">
@@ -233,32 +315,42 @@ export function ExamTicket({ code, lang, subject, deadline, questions, initialAn
             <button
               key={questions[idx].tqId} id={`strip-${p}`} type="button" aria-label={t.questionAria(p + 1)}
               className={`${p === pos ? 'cur ' : ''}${isAnsweredQ(questions[idx].snapshot.type, answers[questions[idx].tqId]) ? 'done' : ''}`}
-              onClick={() => setPos(p)}
+              disabled={noBack && p !== pos} onClick={() => setPos(p)}
             >{p + 1}</button>
           ))}
         </div>
       </div>
 
       {notice && <div className="exam-card lost">{notice}</div>}
-      {awayCount > 0 && (
+      {awayInfo?.strict ? (
+        <div className={`exam-card exam-rule${awayInfo.count > 0 || awayInfo.ms > 0 ? ' lost' : ''}`} role="status">
+          <b>{t.awayRule(awayInfo.maxCount, Math.round(awayInfo.maxMs / 1000))}</b>
+          <div className="hint">{t.awayUsed(awayInfo.count, awayInfo.maxCount, Math.min(Math.round(awayInfo.maxMs / 1000), Math.ceil(awayInfo.ms / 1000)), Math.round(awayInfo.maxMs / 1000))}</div>
+        </div>
+      ) : awayCount > 0 && (
         <div className="exam-card lost" role="status">
           {t.away(awayCount)}
         </div>
       )}
+      {copyCount > 0 && <div className="exam-card lost" role="status">{t.copyBlocked(copyCount)}</div>}
+      {noBack && <div className={`exam-card exam-rule${skipWarn ? ' lost' : ''}`} role="status">{skipWarn ? t.noBackSkip : t.noBackRule}</div>}
 
       {q && (
         <ExamQuestion
           key={q.tqId} snap={q.snapshot} n={pos + 1} lang={lang} prevPassageId={null}
           answer={answers[q.tqId]} saveState={saveStatus(q.tqId, unsaved, failed, saved)} onAnswer={(a, d) => onAnswer(q.tqId, a, d)}
-          onEnter={() => (last ? setConfirm(true) : setPos(stepNav(nav.length, pos, 1)))}
-          openCells={openCellsFor(subject)}
+          onEnter={() => void goNext()}
+          openCells={openCellsFor(subject)} aiNotice
         />
       )}
 
       <div className="exam-nav">
-        <button type="button" className="exam-btn ghost" disabled={pos === 0} onClick={() => setPos(stepNav(nav.length, pos, -1))}>{t.back}</button>
-        <button type="button" className="exam-btn" disabled={submitting} onClick={() => (last ? setConfirm(true) : setPos(stepNav(nav.length, pos, 1)))}>{last ? t.submit : t.next}</button>
+        {!noBack && <button type="button" className="exam-btn ghost" disabled={pos === 0} onClick={() => setPos(stepNav(nav.length, pos, -1))}>{t.back}</button>}
+        <button type="button" className={noBack ? 'exam-btn full' : 'exam-btn'} disabled={submitting} onClick={() => void goNext()}>{last ? t.submit : t.next}</button>
       </div>
+
+      {/* Имя ученика поверх билета: снимок экрана показывает, чей он */}
+      <div className="exam-wm" aria-hidden="true" style={{ backgroundImage: watermarkImage(watermarkText(studentName, code)) }} />
 
       {confirm && (
         <div className="exam-modal" onClick={() => !submitting && setConfirm(false)}>

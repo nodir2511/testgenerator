@@ -30,9 +30,12 @@ const SELECT = `
   chapter:chapters(name), topic:topics(name),
   options:question_options(*), matching_items:matching_items(*)`;
 
-export async function loadBankQuestions(subjectId: string): Promise<BankQ[]> {
-  const { data, error } = await fetchAllPages<BankQ>(() =>
-    supabase.from('questions').select(SELECT).eq('subject_id', subjectId).eq('is_deleted', false));
+/** Вопросы предмета; с `chapterId` — только этой главы */
+export async function loadBankQuestions(subjectId: string, chapterId?: string | null): Promise<BankQ[]> {
+  const { data, error } = await fetchAllPages<BankQ>(() => {
+    const q = supabase.from('questions').select(SELECT).eq('subject_id', subjectId).eq('is_deleted', false);
+    return chapterId ? q.eq('chapter_id', chapterId) : q;
+  });
   if (error) throw error;
   return data ?? [];
 }

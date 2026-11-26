@@ -378,6 +378,83 @@ describe('билеты классу', () => {
     expect(res.afterFinish).toBe(false);
   });
 
+  it('правило о выходах: закрывает билет после 3 выходов или 10 секунд вне страницы, только при away_strict; преподаватель возвращает в билет; попытки копирования считаются', async () => {
+    const res = await as(db.admin, s.users.teacher, async (q) => {
+      const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
+      const link = (await q('select * from public.exam_link_create($1)', [r.batch.id]))[0];
+      const ticket = (await q('select id from public.tickets where batch_id = $1', [r.batch.id]))[0].id;
+      const zero = '00000000-0000-0000-0000-000000000000';
+      const deniedCheck = await rejected(q, 'select public.exam_attempt_away_check($1, 3, 10000)', [zero]);
+      const deniedCopy = await rejected(q, 'select public.exam_attempt_copy($1)', [zero]);
+      await q('reset role');
+      await newAttempt(q, link.code, ticket);
+      const id = (await q('select id from public.exam_attempts where code = $1', [link.code]))[0].id;
+      const focus = (away: boolean) => q('select public.exam_attempt_focus($1, $2, null)', [id, away]);
+      const check = async () => (await q('select public.exam_attempt_away_check($1, 3, 10000) as ok', [id]))[0].ok as boolean;
+      const copy = async () => (await q('select public.exam_attempt_copy($1) as ok', [id]))[0].ok as boolean;
+      const row = async () => {
+        const x = (await q(`select away_count, away_ms, away_base_count, copy_count, away_since is not null as away,
+          finished_at is not null as done, away_closed_at is not null as closed, score from public.exam_attempts where id = $1`, [id]))[0];
+        return { count: x.away_count as number, ms: Number(x.away_ms), base: x.away_base_count as number, copy: x.copy_count as number, away: x.away as boolean, done: x.done as boolean, closed: x.closed as boolean, score: x.score };
+      };
+      // now() внутри транзакции стоит на месте: «прошло N секунд» задаём сдвигом away_since назад
+      const ago = (sec: number) => q('update public.exam_attempts set away_since = now() - make_interval(secs => $2) where id = $1', [id, sec]);
+      const strict = (on: boolean) => q('update public.exam_links set away_strict = $2 where code = $1', [link.code, on]);
+
+      const copyBeforeStart = await copy(); // сессия не начата — не считается
+      await q("update public.exam_links set session_start_at = now() - interval '1 minute' where code = $1", [link.code]);
+      const copied = await copy();
+      for (let i = 0; i < 2; i++) { await focus(true); await focus(false); }
+      await strict(true);
+      const twoLeaves = await check(); // два выхода — ещё не закрывает
+      await focus(true); // третий выход
+      await strict(false);
+      const soft = await check(); // правило выключено — только запись
+      await strict(true);
+      const third = await check();
+      const afterThird = await row();
+      const again = await check(); // уже закрыта
+      const copyAfterClose = await copy();
+      await q('update public.exam_attempts set score = 7, max_score = 10 where id = $1', [id]);
+
+      await switchUser(q, s.users.teacher);
+      await q('select public.exam_attempt_reopen($1)', [id]);
+      const reopenTwice = await rejected(q, 'select public.exam_attempt_reopen($1)', [id]);
+      await q('reset role');
+      const afterReopen = await row();
+      const freshStart = await check(); // счёт для правила начался заново
+      await focus(true);
+      await ago(5);
+      const fiveSec = await check(); // 5 секунд вне страницы — ещё можно
+      await ago(11);
+      const elevenSec = await check(); // больше 10 секунд, ученик ещё не вернулся — закрывает
+      const afterTime = await row();
+
+      // сессия закончилась — возвращать некуда
+      await q("update public.exam_links set session_start_at = now() - interval '2 hours' where code = $1", [link.code]);
+      await switchUser(q, s.users.teacher);
+      const reopenLate = await rejected(q, 'select public.exam_attempt_reopen($1)', [id]);
+      return { deniedCheck, deniedCopy, copyBeforeStart, copied, twoLeaves, soft, third, afterThird, again, copyAfterClose, reopenTwice, afterReopen, freshStart, fiveSec, elevenSec, afterTime, reopenLate };
+    });
+    expect(res.deniedCheck).toMatch(/permission denied/);
+    expect(res.deniedCopy).toMatch(/permission denied/);
+    expect(res.copyBeforeStart).toBe(false);
+    expect(res.copied).toBe(true);
+    expect(res.twoLeaves).toBe(false);
+    expect(res.soft).toBe(false);
+    expect(res.third).toBe(true);
+    expect(res.afterThird).toMatchObject({ count: 3, away: false, done: true, closed: true, copy: 1 });
+    expect(res.again).toBe(false);
+    expect(res.copyAfterClose).toBe(false);
+    expect(res.reopenTwice).toMatch(/не закрыт за выходы/);
+    expect(res.afterReopen).toMatchObject({ count: 3, base: 3, done: false, closed: false, score: null });
+    expect(res.freshStart).toBe(false);
+    expect(res.fiveSec).toBe(false);
+    expect(res.elevenSec).toBe(true);
+    expect(res.afterTime).toMatchObject({ count: 4, ms: 11_000, away: false, done: true, closed: true });
+    expect(res.reopenLate).toMatch(/Сессия уже закончилась/);
+  });
+
   it('прямая запись из приложения запрещена', async () => {
     const res = await as(db.admin, s.users.teacher, async (q) => {
       const r = await saveBatch(q, s.subjects.chem, s.questions.chem);
@@ -615,6 +692,34 @@ describe('билеты классу', () => {
     expect(res.delta).toBeLessThan(7);
     expect(res.again.duration_min).toBe(20);
     expect(new Date(res.again.session_start_at).getTime()).toBe(new Date(res.first.session_start_at).getTime());
+  });
+
+  it('exam_session_start: правило о выходах включается только галочкой преподавателя (прежний вызов без неё — выключено)', async () => {
+    const on = await withLobby(async (q, c) => (await q('select * from public.exam_session_start($1, $2, true)', [c.code, 20]))[0]);
+    const off = await withLobby(async (q, c) => (await start(q, c.code, 20))[0]);
+    expect(on.away_strict).toBe(true);
+    expect(off.away_strict).toBe(false);
+    expect(on.no_back).toBe(false);
+  });
+
+  it('без возврата к вопросам: галочка при старте; номер вопроса только растёт и только в идущей сессии', async () => {
+    const res = await withLobby(async (q, c) => {
+      const denied = await rejected(q, 'select public.exam_attempt_advance($1, 1)', [c.attempt]);
+      const started = (await q('select * from public.exam_session_start($1, $2, false, true)', [c.code, 20]))[0];
+      await q('reset role');
+      const adv = async (p: number | null) => (await q('select public.exam_attempt_advance($1, $2) as pos', [c.attempt, p]))[0].pos as number | null;
+      const early = await adv(2); // отсчёт ещё идёт — попытка не «идёт»
+      await q("update public.exam_links set session_start_at = now() - interval '1 minute' where code = $1", [c.code]);
+      const steps = [await adv(2), await adv(1), await adv(5), await adv(-3), await adv(null), await adv(999_999)];
+      await q('select public.exam_attempt_close($1)', [c.attempt]);
+      const afterFinish = await adv(7);
+      return { denied, noBack: started.no_back as boolean, early, steps, afterFinish };
+    });
+    expect(res.denied).toMatch(/permission denied/);
+    expect(res.noBack).toBe(true);
+    expect(res.early).toBeNull();
+    expect(res.steps).toEqual([2, 2, 5, 5, 5, 1000]);
+    expect(res.afterFinish).toBeNull();
   });
 
   it('exam_session_start: 4 и 46 минут, пустой зал, закрытый запуск, чужой преподаватель, несуществующий код — отказ', async () => {

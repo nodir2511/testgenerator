@@ -5,11 +5,11 @@ import { supabase } from '../lib/supabase';
 import { notifyError, notifyInfo, withUndo } from '../lib/errors';
 import { findPairs } from '../lib/duplicates';
 import { ANY_LABELS, bankDupDoc, bankIssues, loadBankQuestions, snippet, type AnyIssue, type BankQ } from '../lib/bankScan';
-import { compactQuestion, readScanCache, subjectFingerprint, writeScanCache, type CompactQ } from '../lib/scanCache';
+import { compactQuestion, readScanCache, scanScope, subjectFingerprint, writeScanCache, type CompactQ } from '../lib/scanCache';
 import { FormattedText } from './FormulaEditor';
 import { Badge, Button, Card, EmptyState, Hint, PageHeader } from './ui';
 import { useAuth } from '../hooks/useAuth';
-import type { Subject } from '../types/database';
+import type { Chapter, Subject } from '../types/database';
 
 // Раздел «Качество банка» (только главный админ): ошибки в вопросах и возможные дубли внутри предмета.
 // Всё считается в браузере, без внешних сервисов. Ничего не меняет: только показывает, где смотреть.
@@ -69,6 +69,9 @@ const Where: React.FC<{ q: CompactQ }> = ({ q }) => (
 
 export const QualityView: React.FC = () => {
   const [subjectId, setSubjectId] = useState('');
+  // '' — весь предмет; иначе проверяется только эта глава (дубли ищутся внутри неё)
+  const [chapterId, setChapterId] = useState('');
+  const scope = subjectId ? scanScope(subjectId, chapterId) : '';
   const [rawScan, setScan] = useState<Scan | null>(null);
   // Вопросы, которые удалили в этой проверке (сразу скрываются, в базе удаляются через 5 секунд, если не отменить)
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -100,6 +103,15 @@ export const QualityView: React.FC = () => {
   });
   const subjects = allSubjects.filter((s) => canManage(s.id));
   React.useEffect(() => { if (!subjectId && subjects.length) setSubjectId(subjects[0].id); }, [subjects, subjectId]);
+  const { data: chapters = [] } = useQuery({
+    queryKey: ['chapters', subjectId],
+    enabled: !!subjectId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('chapters').select('*').eq('subject_id', subjectId).eq('is_deleted', false).order('order_index');
+      if (error) throw error;
+      return (data || []) as Chapter[];
+    },
+  });
   const loadApproved = async () => {
     // Сервер отдаёт не больше 1000 строк за запрос: читаем страницами
     const rows: Array<{ a: string; b: string }> = [];
@@ -115,18 +127,19 @@ export const QualityView: React.FC = () => {
   // При выборе предмета сразу показываем сохранённую проверку и сверяем её с базой
   React.useEffect(() => {
     setScan(null); setHidden(new Set()); setCode('all'); setFresh(null);
-    if (!subjectId) return;
-    const c = readScanCache(subjectId);
+    if (!scope) return;
+    const c = readScanCache(scope);
     if (!c) return;
     let cancelled = false;
     setScan({ total: c.total, byId: new Map(c.questions.map((q) => [q.id, q])), issues: c.issues.flatMap((x) => { const q = c.questions.find((y) => y.id === x.id); return q ? [{ q, codes: x.codes }] : []; }), pairs: c.pairs, at: c.at });
     setFresh('checking');
     void loadApproved();
-    subjectFingerprint(subjectId).then((fp) => { if (!cancelled) setFresh(fp === c.fingerprint ? 'fresh' : 'stale'); }).catch(() => { if (!cancelled) setFresh('stale'); });
+    subjectFingerprint(subjectId, chapterId).then((fp) => { if (!cancelled) setFresh(fp === c.fingerprint ? 'fresh' : 'stale'); }).catch(() => { if (!cancelled) setFresh('stale'); });
     return () => { cancelled = true; };
-  }, [subjectId]);
+    // scope однозначно задаётся subjectId и chapterId
+  }, [scope]);
 
-  const saveCache = (sid: string, s: Scan, fingerprint: string) => writeScanCache(sid, {
+  const saveCache = (sc: string, s: Scan, fingerprint: string) => writeScanCache(sc, {
     v: 2, at: s.at, fingerprint, total: s.total,
     questions: [...s.byId.values()],
     issues: s.issues.map((x) => ({ id: x.q.id, codes: x.codes })),
@@ -135,8 +148,8 @@ export const QualityView: React.FC = () => {
   // После своего действия (удаление, связь) результат остаётся актуальным: обновляем отпечаток, если до этого он совпадал
   const keepCacheFresh = async () => {
     const cur = latest.current;
-    if (!subjectId || !cur.scan || cur.fresh !== 'fresh') return;
-    try { saveCache(subjectId, cur.scan, await subjectFingerprint(subjectId)); } catch { /* не страшно: просто будет предложена перепроверка */ }
+    if (!scope || !cur.scan || cur.fresh !== 'fresh') return;
+    try { saveCache(scope, cur.scan, await subjectFingerprint(subjectId, chapterId)); } catch { /* не страшно: просто будет предложена перепроверка */ }
   };
 
   const run = async () => {
@@ -145,8 +158,9 @@ export const QualityView: React.FC = () => {
     setHidden(new Set());
     try {
       // Отпечаток снимаем до загрузки: если банк изменят во время проверки, это будет видно при следующем входе
-      const fingerprint = await subjectFingerprint(subjectId).catch(() => '');
-      const qs = await loadBankQuestions(subjectId);
+      const sc = scope, chId = chapterId;
+      const fingerprint = await subjectFingerprint(subjectId, chId).catch(() => '');
+      const qs = await loadBankQuestions(subjectId, chId);
       // Дать браузеру перерисоваться перед тяжёлым расчётом
       await new Promise((r) => setTimeout(r, 30));
       const issues = qs.map((q) => ({ q, codes: bankIssues(q) })).filter((x) => x.codes.length > 0);
@@ -159,7 +173,7 @@ export const QualityView: React.FC = () => {
         issues: issues.map((x) => ({ q: byId.get(x.q.id)!, codes: x.codes })),
       };
       setScan(next);
-      if (fingerprint) { saveCache(subjectId, next, fingerprint); setFresh('fresh'); } else setFresh(null);
+      if (fingerprint) { saveCache(sc, next, fingerprint); setFresh('fresh'); } else setFresh(null);
     } catch (e) {
       notifyError(e, 'Не удалось проверить банк');
     } finally {
@@ -192,7 +206,7 @@ export const QualityView: React.FC = () => {
         }
         // Из сохранённого результата вопрос тоже убираем
         const cur = latest.current.scan;
-        if (cur && subjectId) {
+        if (cur && scope) {
           const trimmed: Scan = { ...cur, total: cur.total - 1, issues: cur.issues.filter((x) => x.q.id !== id), pairs: cur.pairs.filter((p) => p.a !== id && p.b !== id) };
           setScan((prev) => prev && trimmed);
           setHidden((prev) => { const n = new Set(prev); n.delete(id); return n; });
@@ -243,15 +257,25 @@ export const QualityView: React.FC = () => {
       <div className="flex flex-col sm:flex-row gap-3">
         <select
           value={subjectId}
-          onChange={(e) => setSubjectId(e.target.value)}
+          onChange={(e) => { setSubjectId(e.target.value); setChapterId(''); }}
           disabled={busy}
           aria-label="Предмет"
           className="min-h-[44px] text-base px-3 border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:w-72"
         >
           {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
+        <select
+          value={chapterId}
+          onChange={(e) => setChapterId(e.target.value)}
+          disabled={busy || !subjectId}
+          aria-label="Глава"
+          className="min-h-[44px] text-base px-3 border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:w-72"
+        >
+          <option value="">Все главы (весь банк предмета)</option>
+          {chapters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
         <Button variant="primary" onClick={run} disabled={busy || !subjectId} className="sm:w-auto">
-          {busy ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Проверяю…</> : scan ? 'Проверить заново' : 'Проверить банк'}
+          {busy ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Проверяю…</> : scan ? 'Проверить заново' : chapterId ? 'Проверить главу' : 'Проверить банк'}
         </Button>
       </div>
 
@@ -263,7 +287,7 @@ export const QualityView: React.FC = () => {
           {fresh === 'stale' && <span className="text-amber-700 font-semibold">Банк изменился с тех пор — нажмите «Проверить заново», чтобы обновить.</span>}
         </p>
       )}
-      {!scan && !busy && <EmptyState title="Выберите предмет и нажмите «Проверить банк»" description="Проверка занимает несколько секунд и ничего не меняет в вопросах." />}
+      {!scan && !busy && <EmptyState title={chapterId ? 'Нажмите «Проверить главу»' : 'Выберите предмет и нажмите «Проверить банк»'} description="Можно проверить весь предмет или одну главу: тогда ошибки и дубли ищутся только в её вопросах. Проверка занимает несколько секунд и ничего не меняет в вопросах." />}
 
       {scan && (
         <>

@@ -45,8 +45,8 @@ export interface GenCfg {
   /** режим «по формату НЦТ» (химия): 18 + 2 + 7, разделы по номерам */
   nct?: boolean;
   nctPerm?: boolean;
-  /** доли сложности тестов и соответствий, % (режим НЦТ) */
-  nctDiff?: NctDifficultyShares;
+  /** доли сложности тестов и соответствий, % (режим НЦТ); null — выбор сложности выключен, не задано — доли по умолчанию */
+  nctDiff?: NctDifficultyShares | null;
 }
 
 interface GenerateDeps {
@@ -143,7 +143,7 @@ export function useGenerate(deps: GenerateDeps) {
         const nctSources = new Set((srcRows || []).filter((r: any) => (examProfileFor(subjectName)?.sourcePattern ?? /ЦВЭ|НЦТ/i).test(r.name || '')).map((r: any) => r.id));
         allQuestionsRaw.forEach((q: any) => { q.isNct = !!q.source_id && nctSources.has(q.source_id); });
         const permuted = !!cfg.nctPerm && ticketCount >= 4 && ticketCount % 2 === 0;
-        let np = pickNct(allQuestionsRaw, permuted ? 2 : ticketCount, Math.random, totals, cfg.nctDiff ?? NCT_DEFAULT_DIFFICULTY, nctCfg);
+        let np = pickNct(allQuestionsRaw, permuted ? 2 : ticketCount, Math.random, totals, cfg.nctDiff === undefined ? NCT_DEFAULT_DIFFICULTY : cfg.nctDiff, nctCfg);
 
         // Добор недостающих заданий из обычного пула (наши вопросы, подходящие по типу)
         const targetT = permuted ? 2 : ticketCount;
@@ -221,7 +221,7 @@ export function useGenerate(deps: GenerateDeps) {
             requested: { test: testCount, matching: matchingCount, open: openCount },
             auto_title: !cfg.title?.trim(),
             source: 'site',
-            ...(nct ? { nct: true, nct_subject: nctCfg.key, nct_difficulty: cfg.nctDiff ?? NCT_DEFAULT_DIFFICULTY } : {}),
+            ...(nct ? { nct: true, nct_subject: nctCfg.key, nct_difficulty: cfg.nctDiff === undefined ? NCT_DEFAULT_DIFFICULTY : cfg.nctDiff } : {}),
             ...(nct && cfg.nctPerm && ticketCount >= 4 && ticketCount % 2 === 0 ? { nct_perm: true } : {}),
           },
         },

@@ -12,6 +12,7 @@ import { canLaunchBatch, canLaunchByUser, needsRelaunchConfirm, RELAUNCH_WARNING
 import { confirmAction } from '../../lib/confirm';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui';
+import { InviteStudents } from './InviteStudents';
 
 interface BatchOption { id: string; created_by: string | null; title: string; created_at: string; generation_params: any; subject: { name: string } | null }
 
@@ -213,6 +214,7 @@ export const LaunchDialog: React.FC<{ initialBatchId?: string | null; onClose: (
             {!tgLoading && !tgLinked && (
               <p className="text-xs text-slate-500">Telegram не привязан к вашему аккаунту. Привяжите его кнопкой с самолётиком в шапке сайта, и ссылку можно будет отправлять себе.</p>
             )}
+            <InviteStudents code={link.code} />
             <Button variant="ghost" className="w-full" onClick={onClose}>Готово</Button>
           </>
         )}

@@ -92,7 +92,7 @@ export function formatScore(score: number | null, max: number | null): string {
 }
 
 /** Уходы ученика со страницы билета (exam_attempts): сколько раз, сколько всего мс и с какого момента не на странице сейчас */
-export interface AwayFields { away_count?: number | null; away_ms?: number | null; away_since?: string | null }
+export interface AwayFields { away_count?: number | null; away_ms?: number | null; away_since?: string | null; away_closed_at?: string | null }
 
 /** «1 раз», «2 раза», «5 раз», «21 раз», «22 раза» */
 export function timesRu(n: number): string {
@@ -130,7 +130,8 @@ export function awayView(a: AwayFields, status: AttemptState, now: number): Away
     return { text: `сейчас не на странице · ${formatClock(now - since)}${count > 1 ? ` · уже ${timesRu(count)}` : ''}`, now: true, count };
   }
   if (count === 0) return { text: '', now: false, count };
-  return { text: `${timesRu(count)} · всего ${formatAwayMs(a.away_ms ?? 0)}`, now: false, count };
+  // Билет закрыло правило о выходах — это главное, что нужно знать преподавателю
+  return { text: `${timesRu(count)} · всего ${formatAwayMs(a.away_ms ?? 0)}${a.away_closed_at ? ' · билет закрыт за выходы' : ''}`, now: false, count };
 }
 
 /**
@@ -147,6 +148,34 @@ export function newAwayNames(
 
 export const awayToastText = (names: string[]): string => `Уход со страницы билета: ${names.join(', ')}`;
 
+/** Кто пытался скопировать текст билета с прошлого опроса таблицы (как newAwayNames: первый опрос только запоминает) */
+export function newCopyNames(
+  prev: ReadonlyMap<string, number> | null,
+  attempts: Array<{ id: string; student_name: string; copy_count?: number | null }>,
+): string[] {
+  if (!prev) return [];
+  return attempts.filter((a) => (a.copy_count ?? 0) > (prev.get(a.id) ?? 0)).map((a) => a.student_name);
+}
+
+export const copyToastText = (names: string[]): string => `Попытка скопировать текст билета: ${names.join(', ')}`;
+
+/** Текст галочки в зале ожидания и подсказка к ней (пороги — AWAY_LIMIT_COUNT и AWAY_LIMIT_MS) */
+export const awayStrictLabel = (maxCount: number, maxMs: number): string =>
+  `Закрывать билет за выходы: ${maxCount} выхода или ${Math.round(maxMs / 1000)} секунд вне страницы`;
+export const NO_BACK_LABEL = 'Без возврата к вопросам';
+export const NO_BACK_HINT = 'Ученик отвечает по порядку и не может вернуться к прошлому вопросу. Собрать ответы у соседей и расставить их потом не получится.';
+
+/** Подпись прошлого запуска в списке «кого пригласить»: название набора и дата */
+export function inviteSourceLabel(s: { code: string; created_at: string; batch: { title: string } | null }): string {
+  const d = new Date(s.created_at);
+  const date = Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+  return `${s.batch?.title || s.code}${date ? ` · ${date}` : ''}`;
+}
+export const inviteResultText = (sent: number, failed: number): string =>
+  failed > 0 ? `Приглашения отправлены: ${sent}, не доставлено: ${failed}` : `Приглашения отправлены: ${sent}`;
+
+export const AWAY_STRICT_HINT = 'Ученик видит это правило и свой счётчик. Закрытый по ошибке билет можно вернуть кнопкой «Вернуть в билет», пока идёт сессия.';
+
 export interface AttemptInput extends Finishable, AwayFields {
   id: string;
   student_name: string;
@@ -155,6 +184,8 @@ export interface AttemptInput extends Finishable, AwayFields {
   ticket: { ticket_number: number } | null;
   score: number | null;
   max_score: number | null;
+  /** Попытки скопировать текст билета */
+  copy_count?: number | null;
   /** Не используется: срок общий для класса (см. sessionEndOf) */
   deadline_at?: string | null;
 }
@@ -171,6 +202,10 @@ export interface AttemptRowView {
   /** Столбец «Уходил» (пусто — не уходил) и признак «не на странице сейчас» */
   away: string;
   awayNow: boolean;
+  /** Столбец «Копировал»: «2 раза»; пусто — не пытался */
+  copy: string;
+  /** Билет закрыло правило о выходах, и сессия ещё идёт: преподаватель может вернуть ученика в билет */
+  canReopen: boolean;
 }
 
 export function mapAttemptRow(a: AttemptInput, now: number, link: SessionLinkTimes): AttemptRowView {
@@ -184,6 +219,8 @@ export function mapAttemptRow(a: AttemptInput, now: number, link: SessionLinkTim
   return {
     away: away.text,
     awayNow: away.now,
+    copy: (a.copy_count ?? 0) > 0 ? timesRu(a.copy_count ?? 0) : '',
+    canReopen: !!a.away_closed_at && !!a.finished_at && end !== null && Date.parse(end) > now,
     id: a.id,
     name: a.student_name,
     account: a.tg_username ? `@${a.tg_username}` : (a.tg_name ?? ''),

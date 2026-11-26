@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart3, Loader2, Lock, Presentation, Send } from 'lucide-react';
+import { BarChart3, Loader2, Lock, Presentation, Send, Undo2 } from 'lucide-react';
 import { examScreenPath } from '../../lib/examScreen';
 import { ExamExcelButton } from './ExamExcelButton';
 import { SessionLobby } from './SessionLobby';
 import { QuestionStats } from './QuestionStats';
-import { callExamTeacher, NotLinkedError, sendReview, closeExamLink, EXAM_LINKS_KEY, examAttemptsKey, examAttemptsFullKey, fetchAttempts, type ExamLinkRow } from '../../lib/examLinks';
-import { awayToastText, linkState, mapAttemptRow, newAwayNames, reviewConfirmText, reviewResultText, reviewSendState } from '../../lib/examView';
+import { callExamTeacher, NotLinkedError, sendReview, closeExamLink, reopenAttempt, EXAM_LINKS_KEY, examAttemptsKey, examAttemptsFullKey, fetchAttempts, type ExamLinkRow } from '../../lib/examLinks';
+import { awayToastText, copyToastText, linkState, mapAttemptRow, newAwayNames, newCopyNames, reviewConfirmText, reviewResultText, reviewSendState } from '../../lib/examView';
 import { confirmAction } from '../../lib/confirm';
 import { notifyError, notifyInfo, notifySuccess } from '../../lib/errors';
 import { Button } from '../ui';
@@ -45,12 +45,27 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
 
   // Предупреждение, как только у кого-то вырос счётчик уходов со страницы билета (первый опрос — только запоминаем)
   const awaySeen = useRef<Map<string, number> | null>(null);
+  const copySeen = useRef<Map<string, number> | null>(null);
   useEffect(() => {
     if (!data) return;
     const names = open ? newAwayNames(awaySeen.current, data) : [];
     if (names.length) notifyInfo(awayToastText(names));
     awaySeen.current = new Map(data.map((a) => [a.id, a.away_count ?? 0]));
+    const copied = open ? newCopyNames(copySeen.current, data) : [];
+    if (copied.length) notifyInfo(copyToastText(copied));
+    copySeen.current = new Map(data.map((a) => [a.id, a.copy_count ?? 0]));
   }, [data, open]);
+
+  // Вернуть в билет ученика, которого закрыло правило о выходах (ложное срабатывание)
+  const reopen = useMutation({
+    mutationFn: (attemptId: string) => reopenAttempt(attemptId),
+    onSuccess: () => {
+      notifySuccess('Ученик возвращён в билет');
+      queryClient.invalidateQueries({ queryKey: examAttemptsKey(link.code) });
+      queryClient.invalidateQueries({ queryKey: examAttemptsFullKey(link.code) });
+    },
+    onError: (e) => notifyError(e, 'Не удалось вернуть в билет'),
+  });
 
   const close = useMutation({
     mutationFn: async () => {
@@ -149,6 +164,7 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
                 <th className="px-2 py-2 font-semibold">Аккаунт</th>
                 <th className="px-2 py-2 font-semibold">Вариант</th>
                 <th className="px-2 py-2 font-semibold">Уходил</th>
+                <th className="px-2 py-2 font-semibold" title="Попытки скопировать текст билета: копирование, вырезание, меню по долгому нажатию">Копировал</th>
                 <th className="px-2 py-2 font-semibold">Баллы</th>
                 <th className="px-2 py-2 font-semibold">Сдал</th>
               </tr>
@@ -159,7 +175,12 @@ export const ExamBoard: React.FC<{ link: ExamLinkRow }> = ({ link }) => {
                   <td className="px-2 py-2.5 font-semibold text-slate-900">{r.name}</td>
                   <td className="px-2 py-2.5 text-slate-600">{r.account}</td>
                   <td className="px-2 py-2.5 text-slate-700">{r.variant}</td>
-                  <td className={r.awayNow ? 'px-2 py-2.5 font-semibold text-rose-700' : r.away ? 'px-2 py-2.5 text-amber-700' : 'px-2 py-2.5 text-slate-400'}>{r.away || '—'}</td>
+                  <td className={r.awayNow ? 'px-2 py-2.5 font-semibold text-rose-700' : r.away ? 'px-2 py-2.5 text-amber-700' : 'px-2 py-2.5 text-slate-400'}>{r.away || '—'}
+                    {r.canReopen && (
+                      <Button variant="secondary" size="sm" icon={Undo2} className="ml-2" loading={reopen.isPending && reopen.variables === r.id} disabled={reopen.isPending} title="Ответы сохранятся, счёт выходов для правила начнётся заново" onClick={() => reopen.mutate(r.id)}>Вернуть в билет</Button>
+                    )}
+                  </td>
+                  <td className={r.copy ? 'px-2 py-2.5 text-amber-700' : 'px-2 py-2.5 text-slate-400'}>{r.copy || '—'}</td>
                   {r.status === 'finished' ? (
                     <>
                       <td className="px-2 py-2.5 font-semibold text-slate-900 whitespace-nowrap">{r.score}</td>

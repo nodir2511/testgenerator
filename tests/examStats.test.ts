@@ -102,13 +102,13 @@ describe('attemptsSheet', () => {
   it('заголовок и по строке на попытку', () => {
     const tickets = [mk('t1', [['tq1', 'Q1', testSnap('a')]], 3)];
     const rows = attemptsSheet([
-      att('t1', { tq1: 'a' }, T, { student_name: 'Алия', tg_username: 'aliya', tg_name: null, score: 1, max_score: 1, away_count: 2, away_ms: 47_600 }),
+      att('t1', { tq1: 'a' }, T, { student_name: 'Алия', tg_username: 'aliya', tg_name: null, score: 1, max_score: 1, away_count: 2, away_ms: 47_600, away_closed_at: T, copy_count: 3 }),
       att('t1', {}, null, { student_name: 'Борис', tg_username: null, tg_name: 'Boris', score: null, max_score: null }),
     ], tickets, S);
     expect(rows).toHaveLength(3);
-    expect(rows[0].map((c) => c.value)).toEqual(['Имя', 'Аккаунт', 'Вариант', 'Баллы', 'Максимум', '%', 'Статус', 'Уходил, раз', 'Вне страницы, с']);
-    expect(rows[1].map((c) => c.value)).toEqual(['Алия', '@aliya', 3, 1, 1, 100, 'сдал', 2, 48]);
-    expect(rows[2].map((c) => c.value)).toEqual(['Борис', 'Boris', 3, '', '', '', 'не сдал', 0, 0]);
+    expect(rows[0].map((c) => c.value)).toEqual(['Имя', 'Аккаунт', 'Вариант', 'Баллы', 'Максимум', '%', 'Статус', 'Уходил, раз', 'Вне страницы, с', 'Закрыт за выходы', 'Копировал, раз']);
+    expect(rows[1].map((c) => c.value)).toEqual(['Алия', '@aliya', 3, 1, 1, 100, 'сдал', 2, 48, 'да', 3]);
+    expect(rows[2].map((c) => c.value)).toEqual(['Борис', 'Boris', 3, '', '', '', 'не сдал', 0, 0, '', 0]);
   });
 
   it('закрытая в ожидании — «не начал», без баллов', () => {
@@ -116,7 +116,7 @@ describe('attemptsSheet', () => {
     const rows = attemptsSheet([
       att('t1', {}, BEFORE, { student_name: 'Вера', tg_username: 'vera', score: 0, max_score: 1 }),
     ], tickets, S);
-    expect(rows[1].map((c) => c.value)).toEqual(['Вера', '@vera', 3, '', '', '', 'не начал', 0, 0]);
+    expect(rows[1].map((c) => c.value)).toEqual(['Вера', '@vera', 3, '', '', '', 'не начал', 0, 0, '', 0]);
   });
 
   it('без попыток — только заголовок', () => {

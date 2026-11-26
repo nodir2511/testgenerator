@@ -109,6 +109,49 @@ export function awayMs(v: unknown): number | null {
   return Math.min(Math.round(v), AWAY_MS_MAX);
 }
 
+/**
+ * Открытое правило о выходах (запуск с exam_links.away_strict): билет закрывается сам после стольких выходов
+ * или когда вне страницы набралось больше стольких миллисекунд. Пороги передаются в exam_attempt_away_check.
+ */
+export const AWAY_LIMIT_COUNT = 3;
+export const AWAY_LIMIT_MS = 10_000;
+
+/** Счётчики, по которым судит правило: выходы и время сверх тех, что были до возвращения преподавателем */
+export interface AwayCounters { away_count?: number | null; away_ms?: number | null; away_base_count?: number | null; away_base_ms?: number | null }
+export function awayUsed(a: AwayCounters): { count: number; ms: number } {
+  return {
+    count: Math.max(0, (a.away_count ?? 0) - (a.away_base_count ?? 0)),
+    ms: Math.max(0, Number(a.away_ms ?? 0) - Number(a.away_base_ms ?? 0)),
+  };
+}
+
+/** Сколько учеников можно пригласить одним нажатием (повторная отправка ссылки ученикам прошлого запуска) */
+export const INVITE_MAX = 100;
+/**
+ * Кому слать приглашение: ученики прошлого запуска, по одному сообщению на аккаунт Telegram, не больше INVITE_MAX.
+ * ids — выбранные преподавателем попытки (null или не массив — все).
+ */
+export function inviteTargets<T extends { id: string; tg_user_id: number | string | null }>(attempts: T[], ids: unknown): T[] {
+  const pick = Array.isArray(ids) ? new Set(ids.filter((x): x is string => typeof x === 'string')) : null;
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const a of attempts) {
+    if (a.tg_user_id == null || (pick && !pick.has(a.id))) continue;
+    const key = String(a.tg_user_id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(a);
+    if (out.length >= INVITE_MAX) break;
+  }
+  return out;
+}
+/** Приглашение ученику на новый запуск (parse_mode HTML; title уже очищен tgPlain), на языке его прошлой попытки */
+export function inviteText(title: string, lang: unknown): string {
+  return examLang(lang) === 'tg'
+    ? `📝 <b>Билет: ${title}</b>\nОмӯзгор шуморо ба билети нав даъват мекунад. «Войти в билет»-ро пахш кунед ва интизор шавед.`
+    : `📝 <b>Билет: ${title}</b>\nПреподаватель приглашает вас на новый билет. Нажмите «Войти в билет» и ждите начала.`;
+}
+
 /** Разбор отправляли меньше 10 секунд назад — вторую рассылку (двойной щелчок) не начинаем */
 export const REVIEW_RESEND_GUARD_MS = 10_000;
 export function reviewJustSent(reviewSentAt: string | null | undefined, now: Date): boolean {

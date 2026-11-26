@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { EXAM_POLL_MS } from '../../supabase/functions/_shared/exam';
+import { AWAY_LIMIT_COUNT, AWAY_LIMIT_MS, EXAM_POLL_MS } from '../../supabase/functions/_shared/exam';
 import { apiOpen, getServerOffset, type LobbyResponse, type OpenResponse } from './api';
 import { lobbyMinutesText, lobbyView, lobbyWaitText } from './examLogic';
 import { examTexts } from './i18n';
@@ -66,6 +66,12 @@ export function ExamLobby({ code, initial, onLeave }: { code: string; initial: L
         </>
       )}
       {minutesText && <div className="lobby-wait">{minutesText}</div>}
+      {/* Правила ученик видит заранее: общее — в ожидании, точное (преподаватель включил закрытие за выходы) — перед стартом */}
+      {lv.kind !== 'countdown' && (
+        <div className="lobby-rules">
+          {view.state === 'countdown' && view.attempt.awayStrict ? t.awayRule(AWAY_LIMIT_COUNT, AWAY_LIMIT_MS / 1000) : t.lobbyRules}
+        </div>
+      )}
       <div className="lobby-offline">{offline ? t.offline : ''}</div>
     </div>
   );

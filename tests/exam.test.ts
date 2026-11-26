@@ -3,7 +3,7 @@ import {
   EXAM_LINK_HOURS, publicSnapshot, reviewSnapshot, parseOpen, scoreAttempt, pickVariant, examCode,
   parseStartPayload, tgPlain, reviewLines, chunkLines, examLang, reviewHead, reviewButtonText, reviewJustSent, REVIEW_RESEND_GUARD_MS,
   EXAM_MIN_MINUTES, EXAM_MAX_MINUTES, EXAM_COUNTDOWN_SEC, EXAM_START_LEAD_SEC, EXAM_POLL_MS, sessionEnd, sessionPhase, clampMinutes, countdownDigit,
-  shuffleOptions, awayMs, AWAY_MS_MAX,
+  shuffleOptions, awayMs, AWAY_MS_MAX, awayUsed, AWAY_LIMIT_COUNT, AWAY_LIMIT_MS,
 } from '../supabase/functions/_shared/exam';
 import * as examShared from '../supabase/functions/_shared/exam';
 
@@ -144,6 +144,19 @@ describe('время', () => {
   it('старый срок попытки (30 мин от входа) удалён: конец у всех общий — от старта сессии', () => {
     const mod: Record<string, unknown> = examShared;
     for (const dead of ['EXAM_MINUTES', 'deadlineOf', 'attemptState']) expect(mod[dead]).toBeUndefined();
+  });
+});
+
+describe('правило о выходах: пороги и счёт сверх возвращения преподавателем', () => {
+  it('пороги: 3 выхода или 10 секунд (их же получает exam_attempt_away_check)', () => {
+    expect(AWAY_LIMIT_COUNT).toBe(3);
+    expect(AWAY_LIMIT_MS).toBe(10_000);
+  });
+  it('awayUsed: без возвращения — все выходы; после возвращения — только новые; пустые поля — нули', () => {
+    expect(awayUsed({ away_count: 2, away_ms: 4500 })).toEqual({ count: 2, ms: 4500 });
+    expect(awayUsed({ away_count: 4, away_ms: 15_000, away_base_count: 3, away_base_ms: 12_000 })).toEqual({ count: 1, ms: 3000 });
+    expect(awayUsed({})).toEqual({ count: 0, ms: 0 });
+    expect(awayUsed({ away_count: 1, away_ms: 100, away_base_count: 5, away_base_ms: 900 })).toEqual({ count: 0, ms: 0 });
   });
 });
 

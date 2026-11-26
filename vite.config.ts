@@ -55,14 +55,22 @@ export default defineConfig(({ command }) => ({
   build: {
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
+      // tg.html — отдельный лёгкий вход для /tg и /tg/exam (без клиента базы и кода сайта)
+      input: { main: path.resolve(__dirname, 'index.html'), tg: path.resolve(__dirname, 'tg.html') },
       output: {
-        manualChunks: {
-          // react-dom/client указан отдельно: иначе сам React DOM попадает в основной файл и скачивается заново после каждого деплоя
-          vendor: ['react', 'react-dom', 'react-dom/client'],
-          supabase: ['@supabase/supabase-js'],
-          query: ['@tanstack/react-query'],
-          docx: ['docx'],
-          sheets: ['read-excel-file/browser', 'write-excel-file/browser', 'papaparse'],
+        // Функция, а не список: при списке сам React попадал в файл библиотеки запросов, и её тянули страницы,
+        // которым она не нужна (мини-приложение, билет ученика). Здесь каждая библиотека лежит строго в своём файле.
+        manualChunks(id) {
+          const n = id.replace(/\\/g, '/');
+          if (n.includes('commonjsHelpers')) return 'vendor';
+          if (!n.includes('/node_modules/')) return undefined;
+          // react-dom в vendor: иначе он уходит в основной файл и скачивается заново после каждого деплоя
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(n)) return 'vendor';
+          if (n.includes('/node_modules/@tanstack/')) return 'query';
+          if (n.includes('/node_modules/@supabase/')) return 'supabase';
+          if (n.includes('/node_modules/docx/')) return 'docx';
+          if (/\/node_modules\/(read-excel-file|write-excel-file|papaparse)\//.test(n)) return 'sheets';
+          return undefined;
         },
       },
     },

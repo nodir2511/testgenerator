@@ -26,7 +26,8 @@ import {
   SlidersHorizontal,
   Check
 } from 'lucide-react';
-import { nctTypesFor, nctTypeName } from '../lib/nctTypes';
+import { nctTypeLabel as nctTypeName } from '../lib/nctTypesLazy';
+import { useNctTypes } from '../hooks/useNctTypes';
 import { NCT_DIFFICULTIES, nctDifficultyName } from '../lib/nctDifficulty';
 import { Badge, Button, Card, EmptyState, Field, IconButton, Skeleton } from './ui';
 import { PassageEditor } from './PassageEditor';
@@ -116,6 +117,8 @@ export const QuestionList: React.FC<QuestionListProps> = ({
       return (data || []) as Subject[];
     },
   });
+  // Метки НЦТ (видит главный админ): список только выбранного предмета, без предмета — всех
+  const nctTypes = useNctTypes(subjects.find((x) => x.id === filterSubjectId)?.name, isOwner && (!filterSubjectId || subjectsLoaded));
 
   const { data: chapters = [], isSuccess: chaptersLoaded } = useQuery({
     queryKey: ['chapters', filterSubjectId],
@@ -677,7 +680,7 @@ export const QuestionList: React.FC<QuestionListProps> = ({
             >
               <option value="all">Любая метка НЦТ</option>
               <option value="none">Без метки</option>
-              {nctTypesFor((subjects as any[]).find((x: any) => x.id === filterSubjectId)?.name).map(t => <option key={t.code} value={t.code}>{t.name}</option>)}
+              {nctTypes.map(t => <option key={t.code} value={t.code}>{t.name}</option>)}
             </CustomSelect>
           )}
 

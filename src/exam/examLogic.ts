@@ -101,6 +101,15 @@ export const progressFraction = (answered: number, total: number): number =>
 export const stepNav = (count: number, pos: number, dir: 1 | -1): number =>
   Math.min(Math.max(0, count - 1), Math.max(0, pos + dir));
 
+/**
+ * Режим «без возврата к вопросам»: с какой позиции навигации продолжать. serverPos — номер (с нуля, в билете)
+ * самого дальнего вопроса, до которого ученик дошёл; пустые места в навигацию не входят — берём первый вопрос не раньше него.
+ */
+export function noBackStartPos(nav: number[], serverPos: number): number {
+  const p = nav.findIndex((i) => i >= serverPos);
+  return p < 0 ? Math.max(0, nav.length - 1) : p;
+}
+
 /** С какой позиции начинать: первый вопрос без ответа, иначе первый */
 export function firstUnansweredPos(questions: ExamQ[], answers: Answers): number {
   const nav = navIndexes(questions);

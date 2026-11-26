@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FormattedText } from '../components/FormulaEditor';
 import { isEmptyQ, matchingAnswer, openDigits, OPEN_CELLS, pickText, sortByOrder, type Answer, type Lang, type SaveStatus } from './examLogic';
 import { examTexts, type ExamTexts } from './i18n';
+import { AI_NOTICE } from './watermark';
 
 const LETTERS = 'ABCDEFGH';
 
@@ -127,7 +128,9 @@ export function MatchTable({ left, right, answer, onAnswer }: { left: Array<{ id
 }
 
 /** Вопрос для ответа: варианты, пары, число. Каждое изменение сразу уходит наверх (там сохраняется на сервере). */
-export function ExamQuestion({ snap, n, lang, prevPassageId, answer, saveState, onAnswer, onEnter, openCells = OPEN_CELLS }: CommonProps & {
+export function ExamQuestion({ snap, n, lang, prevPassageId, answer, saveState, onAnswer, onEnter, openCells = OPEN_CELLS, aiNotice = false }: CommonProps & {
+  /** мелкая цитата о честности между условием и ответами — для всех, кому покажут задание (только в идущем билете) */
+  aiNotice?: boolean;
   answer: Answer | undefined; saveState: SaveStatus; onAnswer: (a: Answer, deferred?: boolean) => void; onEnter?: () => void;
   /** сколько клеток у открытого ответа (по предмету, как на бланке) */
   openCells?: number;
@@ -143,6 +146,7 @@ export function ExamQuestion({ snap, n, lang, prevPassageId, answer, saveState, 
     <div className="exam-card" id={`q-${n}`}>
       <Passage snap={snap} prevPassageId={prevPassageId} />
       <Head snap={snap} n={n} lang={lang} />
+      {aiNotice && <div className="q-ai" aria-hidden="true">{AI_NOTICE}</div>}
 
       {snap.type === 'test' && (
         <div className="opts" role="radiogroup">

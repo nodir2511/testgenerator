@@ -17,7 +17,8 @@ import { FormattedText } from './FormulaEditor';
 import { Badge, Button } from './ui';
 import { CustomSelect } from './CustomSelect';
 import { nctConfigByKey } from '../../supabase/functions/_shared/nctConfigs';
-import { nctTypeName } from '../lib/nctTypes';
+import { nctTypeLabel as nctTypeName } from '../lib/nctTypesLazy';
+import { useNctTypes } from '../hooks/useNctTypes';
 
 // Замена вопросов в готовом наборе билетов — и сразу после генерации, и в архиве.
 // Все изменения идут одной транзакцией (update_batch_questions); после них набор перечитывается из базы.
@@ -458,6 +459,7 @@ const Brief: React.FC<{ q: any }> = ({ q }) => {
 };
 
 const ReplaceModal: React.FC<{ batch: EditBatch; ed: Ed; slot: Slot; onClose: () => void }> = ({ batch, ed, slot, onClose }) => {
+  useNctTypes(batch.subjectName); // названия типов НЦТ этого предмета (подгружаются отдельным файлом)
   const data = ed.data!;
   // Билет по формату НЦТ: замена только из пула раздела, того же вида и типа задания
   const nctBatch = Boolean(batch.generation_params?.nct) && !!slot.questionId;

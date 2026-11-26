@@ -16,7 +16,9 @@ export interface CachedScan {
   pairs: Array<{ a: string; b: string; score: number; exact: boolean; answerDiffers: boolean }>;
 }
 
-const key = (subjectId: string) => `examiner_quality_scan_${subjectId}`;
+// Ключ — предмет или «предмет:глава» (проверка одной главы хранится отдельно от проверки всего предмета)
+const key = (scope: string) => `examiner_quality_scan_${scope}`;
+export const scanScope = (subjectId: string, chapterId?: string | null) => (chapterId ? `${subjectId}:${chapterId}` : subjectId);
 const MAX_CHARS = 3_000_000;
 
 export const compactQuestion = (q: BankQ): CompactQ => ({
@@ -24,29 +26,31 @@ export const compactQuestion = (q: BankQ): CompactQ => ({
   chapter: q.chapter ? { name: q.chapter.name } : null, topic: q.topic ? { name: q.topic.name } : null, linked_ids: q.linked_ids ?? [], view: answerView(q),
 });
 
-/** Отпечаток предмета: число неудалённых вопросов и время последнего изменения любого вопроса (в т. ч. удаления) */
-export async function subjectFingerprint(subjectId: string): Promise<string> {
+/** Отпечаток предмета (или одной его главы): число неудалённых вопросов и время последнего изменения любого вопроса (в т. ч. удаления) */
+export async function subjectFingerprint(subjectId: string, chapterId?: string | null): Promise<string> {
+  const countQ = supabase.from('questions').select('id', { count: 'exact', head: true }).eq('subject_id', subjectId).eq('is_deleted', false);
+  const lastQ = supabase.from('questions').select('updated_at').eq('subject_id', subjectId);
   const [count, last] = await Promise.all([
-    supabase.from('questions').select('id', { count: 'exact', head: true }).eq('subject_id', subjectId).eq('is_deleted', false),
-    supabase.from('questions').select('updated_at').eq('subject_id', subjectId).order('updated_at', { ascending: false }).limit(1),
+    chapterId ? countQ.eq('chapter_id', chapterId) : countQ,
+    (chapterId ? lastQ.eq('chapter_id', chapterId) : lastQ).order('updated_at', { ascending: false }).limit(1),
   ]);
   if (count.error) throw count.error;
   if (last.error) throw last.error;
   return `${count.count ?? 0}|${last.data?.[0]?.updated_at ?? ''}`;
 }
 
-export function readScanCache(subjectId: string): CachedScan | null {
+export function readScanCache(scope: string): CachedScan | null {
   try {
-    const raw = localStorage.getItem(key(subjectId));
+    const raw = localStorage.getItem(key(scope));
     const c = raw ? (JSON.parse(raw) as CachedScan) : null;
     return c && c.v === 2 && Array.isArray(c.pairs) && Array.isArray(c.issues) && Array.isArray(c.questions) ? c : null;
   } catch { return null; }
 }
 
-export function writeScanCache(subjectId: string, c: CachedScan) {
+export function writeScanCache(scope: string, c: CachedScan) {
   try {
     const raw = JSON.stringify(c);
-    if (raw.length > MAX_CHARS) { localStorage.removeItem(key(subjectId)); return; }
-    localStorage.setItem(key(subjectId), raw);
+    if (raw.length > MAX_CHARS) { localStorage.removeItem(key(scope)); return; }
+    localStorage.setItem(key(scope), raw);
   } catch { /* память браузера недоступна или переполнена — работаем без кэша */ }
 }

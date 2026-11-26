@@ -67,6 +67,24 @@ alter table public.exam_attempts add column if not exists away_count int not nul
 alter table public.exam_attempts add column if not exists away_ms bigint not null default 0;
 alter table public.exam_attempts add column if not exists away_since timestamptz;
 
+-- Открытое правило о выходах (ученик видит его до и во время билета): если у запуска away_strict = true, попытка
+-- закрывается сама после 3-го выхода или когда вне страницы набралось больше 10 секунд (пороги задаёт tg-exam:
+-- AWAY_LIMIT_COUNT и AWAY_LIMIT_MS в _shared/exam.ts). away_strict ставит exam_session_start (галочка преподавателя).
+-- away_closed_at — когда попытку закрыло правило (пусто — не закрывало); away_base_count / away_base_ms — счётчики
+-- на момент, когда преподаватель вернул ученика в билет (exam_attempt_reopen): правило считает только то, что сверх них.
+-- copy_count — попытки скопировать текст билета (копирование, вырезание, меню по долгому нажатию); пишет exam_attempt_copy.
+alter table public.exam_links add column if not exists away_strict boolean not null default false;
+alter table public.exam_attempts add column if not exists away_closed_at timestamptz;
+alter table public.exam_attempts add column if not exists away_base_count int not null default 0;
+alter table public.exam_attempts add column if not exists away_base_ms bigint not null default 0;
+alter table public.exam_attempts add column if not exists copy_count int not null default 0;
+
+-- Режим «без возврата к вопросам» (галочка преподавателя при «Начать», exam_links.no_back): ученик идёт только вперёд.
+-- exam_attempts.pos — номер (с нуля, по порядку в билете) самого дальнего вопроса, до которого он дошёл; пишет только
+-- exam_attempt_advance, назад не уменьшается. tg-exam не принимает ответы на вопросы раньше pos.
+alter table public.exam_links add column if not exists no_back boolean not null default false;
+alter table public.exam_attempts add column if not exists pos int not null default 0;
+
 create index if not exists exam_links_batch_idx on public.exam_links (batch_id);
 create index if not exists exam_links_created_by_idx on public.exam_links (created_by);
 create index if not exists exam_attempts_ticket_idx on public.exam_attempts (ticket_id);
@@ -274,11 +292,143 @@ begin
 end;
 $$;
 
+-- Правило о выходах (вызывает только tg-exam сервисным ключом, после exam_attempt_focus и при открытии билета).
+-- Если у запуска away_strict и попытка идёт, а выходов сверх away_base_count набралось p_max_count или времени вне
+-- страницы сверх away_base_ms (вместе с текущим незаконченным выходом) больше p_max_ms — попытка закрывается одним
+-- атомарным обновлением: finished_at, away_closed_at, незаконченный выход закрыт. Возвращает, закрыта ли попытка сейчас.
+-- Балл после этого ставит tg-exam (finalize), как при обычной сдаче.
+create or replace function public.exam_attempt_away_check(p_attempt_id uuid, p_max_count int, p_max_ms bigint)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n int;
+begin
+  update public.exam_attempts a
+     set finished_at = now(),
+         away_closed_at = now(),
+         away_ms = a.away_ms + case
+           when a.away_since is null then 0
+           else greatest(0, (extract(epoch from (now() - a.away_since)) * 1000)::bigint)
+         end,
+         away_since = null
+    from public.exam_links l
+   where a.id = p_attempt_id
+     and l.code = a.code
+     and l.away_strict
+     and a.finished_at is null
+     and l.session_start_at is not null
+     and now() >= l.session_start_at
+     and now() < l.session_start_at + make_interval(mins => l.duration_min)
+     and l.closed_at is null
+     and l.closes_at > now()
+     and (a.away_count - a.away_base_count >= p_max_count
+          or a.away_ms - a.away_base_ms + case
+               when a.away_since is null then 0
+               else greatest(0, (extract(epoch from (now() - a.away_since)) * 1000)::bigint)
+             end > p_max_ms);
+  get diagnostics n = row_count;
+  return n > 0;
+end;
+$$;
+
+-- Попытка скопировать текст билета (вызывает только tg-exam сервисным ключом): счётчик растёт, только пока попытка идёт.
+create or replace function public.exam_attempt_copy(p_attempt_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n int;
+begin
+  update public.exam_attempts a
+     set copy_count = a.copy_count + 1
+    from public.exam_links l
+   where a.id = p_attempt_id
+     and l.code = a.code
+     and a.finished_at is null
+     and l.session_start_at is not null
+     and now() >= l.session_start_at
+     and now() < l.session_start_at + make_interval(mins => l.duration_min)
+     and l.closed_at is null
+     and l.closes_at > now();
+  get diagnostics n = row_count;
+  return n > 0;
+end;
+$$;
+
+-- Ученик перешёл к вопросу p_pos (вызывает только tg-exam сервисным ключом): pos только растёт и только пока попытка идёт.
+-- Возвращает pos после обновления (null — попытка не идёт).
+create or replace function public.exam_attempt_advance(p_attempt_id uuid, p_pos int)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  r int;
+begin
+  update public.exam_attempts a
+     set pos = greatest(a.pos, least(greatest(coalesce(p_pos, 0), 0), 1000))
+    from public.exam_links l
+   where a.id = p_attempt_id
+     and l.code = a.code
+     and a.finished_at is null
+     and l.session_start_at is not null
+     and now() >= l.session_start_at
+     and now() < l.session_start_at + make_interval(mins => l.duration_min)
+     and l.closed_at is null
+     and l.closes_at > now()
+  returning a.pos into r;
+  return r;
+end;
+$$;
+
+-- Вернуть в билет ученика, которого закрыло правило о выходах (ложное срабатывание: звонок, шторка уведомлений):
+-- автор запуска или главный админ, и только пока сессия идёт. Ответы остаются, балл стирается (посчитается при сдаче),
+-- счётчики выходов видны как были, но правило начинает счёт заново (away_base_*).
+create or replace function public.exam_attempt_reopen(p_attempt_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  a public.exam_attempts;
+  l public.exam_links;
+begin
+  select * into a from public.exam_attempts where id = p_attempt_id for update;
+  if not found then raise exception 'Попытка не найдена'; end if;
+  select * into l from public.exam_links where code = a.code for share;
+  if l.created_by is distinct from auth.uid() and not public.is_owner() then
+    raise exception 'Вернуть ученика в билет может только автор запуска';
+  end if;
+  if a.away_closed_at is null or a.finished_at is null then
+    raise exception 'Этот билет не закрыт за выходы';
+  end if;
+  if l.closed_at is not null or l.closes_at <= now() or l.session_start_at is null
+     or now() >= l.session_start_at + make_interval(mins => l.duration_min) then
+    raise exception 'Сессия уже закончилась — вернуть в билет нельзя';
+  end if;
+  update public.exam_attempts
+     set finished_at = null, score = null, max_score = null, away_closed_at = null, away_since = null,
+         away_base_count = away_count, away_base_ms = away_ms
+   where id = p_attempt_id;
+end;
+$$;
+
 -- Начать сессию: автор запуска или главный админ. Старт через 6 секунд (EXAM_START_LEAD_SEC в _shared/exam.ts):
 -- отсчёт 3 с + один интервал опроса клиента (3 с) — каждый ученик успевает увидеть цифры 3, 2, 1.
 -- Сессия должна закончиться до закрытия ссылки (closes_at), иначе отказ.
 -- Уже начатую сессию не трогает (идемпотентно: возвращает строку как есть).
-create or replace function public.exam_session_start(p_code text, p_minutes int)
+-- p_away_strict — правило о выходах (away_strict), p_no_back — без возврата к вопросам (no_back);
+-- по умолчанию оба выключены: прежняя версия сайта их не передаёт.
+drop function if exists public.exam_session_start(text, int);
+drop function if exists public.exam_session_start(text, int, boolean);
+create or replace function public.exam_session_start(p_code text, p_minutes int, p_away_strict boolean default false, p_no_back boolean default false)
 returns public.exam_links
 language plpgsql
 security definer
@@ -302,7 +452,7 @@ begin
     raise exception 'Ссылка закроется раньше конца сессии: выберите меньше минут';
   end if;
   update public.exam_links
-     set session_start_at = now() + interval '6 seconds', duration_min = p_minutes
+     set session_start_at = now() + interval '6 seconds', duration_min = p_minutes, away_strict = coalesce(p_away_strict, false), no_back = coalesce(p_no_back, false)
    where code = p_code
   returning * into l;
   return l;
@@ -343,12 +493,20 @@ revoke all on function public.exam_attempt_close(uuid) from public, anon, authen
 grant execute on function public.exam_attempt_close(uuid) to service_role;
 revoke all on function public.exam_attempt_focus(uuid, boolean, bigint) from public, anon, authenticated;
 grant execute on function public.exam_attempt_focus(uuid, boolean, bigint) to service_role;
+revoke all on function public.exam_attempt_away_check(uuid, int, bigint) from public, anon, authenticated;
+grant execute on function public.exam_attempt_away_check(uuid, int, bigint) to service_role;
+revoke all on function public.exam_attempt_copy(uuid) from public, anon, authenticated;
+grant execute on function public.exam_attempt_copy(uuid) to service_role;
+revoke all on function public.exam_attempt_advance(uuid, int) from public, anon, authenticated;
+grant execute on function public.exam_attempt_advance(uuid, int) to service_role;
+revoke all on function public.exam_attempt_reopen(uuid) from public, anon;
+grant execute on function public.exam_attempt_reopen(uuid) to authenticated;
 
 revoke all on function public.exam_link_create(uuid) from public, anon;
 grant execute on function public.exam_link_create(uuid) to authenticated;
 revoke all on function public.exam_link_close(text) from public, anon;
 grant execute on function public.exam_link_close(text) to authenticated;
-revoke all on function public.exam_session_start(text, int) from public, anon;
-grant execute on function public.exam_session_start(text, int) to authenticated;
+revoke all on function public.exam_session_start(text, int, boolean, boolean) from public, anon;
+grant execute on function public.exam_session_start(text, int, boolean, boolean) to authenticated;
 revoke all on function public.exam_attempt_set_variant(uuid, uuid) from public, anon;
 grant execute on function public.exam_attempt_set_variant(uuid, uuid) to authenticated;

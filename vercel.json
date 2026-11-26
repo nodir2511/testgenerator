@@ -2,11 +2,11 @@
   "rewrites": [
     {
       "source": "/tg",
-      "destination": "/index.html"
+      "destination": "/tg.html"
     },
     {
       "source": "/tg/(.*)",
-      "destination": "/index.html"
+      "destination": "/tg.html"
     },
     {
       "source": "/game",
@@ -141,11 +141,20 @@
       ]
     },
     {
-      "source": "/(favicon\\.svg|font-loader\\.js)",
+      "source": "/favicon\\.svg",
       "headers": [
         {
           "key": "Cache-Control",
           "value": "public, max-age=86400, stale-while-revalidate=604800"
+        }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, max-age=0"
         }
       ]
     },

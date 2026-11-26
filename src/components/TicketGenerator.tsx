@@ -209,6 +209,8 @@ export const TicketGenerator: React.FC = () => {
     return ok ? (v as NctDifficultyShares) : NCT_DEFAULT_DIFFICULTY;
   });
   const diffSum = diffShares.easy + diffShares.medium + diffShares.hard;
+  // Выбор сложности можно выключить: тогда сложность при подборе не учитывается
+  const [diffOn, setDiffOn] = useState<boolean>(() => getStorageBool('examiner_nct_diff_on', true));
   const setDiffShare = (key: keyof NctDifficultyShares, raw: string) => {
     const n = Math.max(0, Math.min(100, Math.round(Number(raw) || 0)));
     setDiffShares((prev) => {
@@ -453,7 +455,7 @@ export const TicketGenerator: React.FC = () => {
     test: testCount, matching: matchingCount, open: openCount, tickets: ticketCount,
     ...(readingCount + clozeCount > 0 ? { reading: readingCount, cloze: clozeCount } : {}),
     shuffleOptions, shuffleMatching, title: customTitle.trim() || null, nct: nctMode, nctPerm,
-    ...(nctMode && isOwner ? { nctDiff: diffShares } : {}),
+    ...(nctMode && isOwner ? { nctDiff: diffOn ? diffShares : null } : {}),
   });
 
   // Последние наборы пользователя — чтобы повторить с теми же настройками
@@ -528,7 +530,7 @@ export const TicketGenerator: React.FC = () => {
     ? 'Лимит на сегодня исчерпан'
     : cooldownLeft > 0
     ? `Можно через ${formatWait(cooldownLeft)}`
-    : nctMode && isOwner && diffSum !== 100
+    : nctMode && isOwner && diffOn && diffSum !== 100
     ? 'Доли сложности: сумма не 100 %'
     : null;
   const healthDot = !health ? 'bg-slate-300' : health.status === 'green' ? 'bg-emerald-500' : health.status === 'amber' ? 'bg-amber-500' : 'bg-rose-500';
@@ -581,7 +583,7 @@ export const TicketGenerator: React.FC = () => {
             editComposition, setEditComposition, testCount, setTestCount, matchingCount, setMatchingCount, openCount, setOpenCount,
             readingCount, setReadingCount, clozeCount, setClozeCount, showTexts, standard, isStandard,
           }}
-          nct={{ isChem, nctCfg, nctPref, setNctPref, nctMode, diffShares, setDiffShare, diffSum, permAvailable, permPref, setPermPref }}
+          nct={{ isChem, nctCfg, nctPref, setNctPref, nctMode, diffShares, setDiffShare, diffSum, diffOn, setDiffOn, permAvailable, permPref, setPermPref }}
           variants={{ variantChoices, ticketCount, setTicketCount }}
           quota={{ limits, userLimits, leftToday }}
           pool={{ poolStats, pickEmpty, health, healthDot, fitted, fittedTotal, scopeMode, setScopeMode }}

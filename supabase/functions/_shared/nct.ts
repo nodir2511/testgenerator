@@ -322,8 +322,9 @@ function splitQuota(quota: number, counts: Array<{ k: NctSection; want: number; 
  * в билете не повторяется. Часть мест (NCT_QUOTA) берётся из сборника НЦТ. Нет вопросов с нужной меткой —
  * берутся неразмеченные вопросы раздела. Темы стараются не повторяться в билете: на каждое место предпочтительны
  * вопросы тем, из которых в билете ещё ничего не взято (а при нехватке — наименее использованных).
+ * difficulty = null — сложность не учитывается (выбор сложности выключен), в том числе у открытых.
  */
-export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random, _totals?: ChapterTotals, difficulty: NctDifficultyShares = NCT_DEFAULT_DIFFICULTY, cfg: NctConfig = CHEM_CONFIG): NctPicked {
+export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random, _totals?: ChapterTotals, difficulty: NctDifficultyShares | null = NCT_DEFAULT_DIFFICULTY, cfg: NctConfig = CHEM_CONFIG): NctPicked {
   if (cfg.textSections) return pickNctText(pool, ticketCount, rnd, difficulty, cfg);
   const SECTION_KEYS = cfg.sections.map((x) => x.key);
   const NAME = (k: string) => cfg.sections.find((x) => x.key === k)?.name ?? k;
@@ -459,12 +460,13 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
 
   const diffHit: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
   const diffMiss: Record<Kind, number> = { test: 0, matching: 0, open: 0 };
-  const pickOne = (list: any[], section: NctSection, kind: Kind, wantNct: boolean, diff: number): any[] | null => {
+  const pickOne = (list: any[], section: NctSection, kind: Kind, wantNct: boolean, diff: number | null): any[] | null => {
     const free = list.filter((q) => q.type === kind && !usedIds.has(q.id));
     // вопросы того же вида из всех разделов выбранных тем — для близких типов из других разделов
     const wideAll = scoped.filter((q) => q.type === kind && !usedIds.has(q.id));
     // сначала нужная сложность, затем ближайшие; вопросы без оценки сложности — в последнюю очередь
-    const levels: Array<number | null> = [diff, ...[1, 2, 3].filter((d) => d !== diff).sort((a, b) => Math.abs(a - diff) - Math.abs(b - diff)), null];
+    // сложность выключена (diff = null) — сразу берём любые свободные вопросы этого вида
+    const levels: Array<number | null> = diff === null ? [] : [diff, ...[1, 2, 3].filter((d) => d !== diff).sort((a, b) => Math.abs(a - diff) - Math.abs(b - diff)), null];
     for (const lvl of levels) {
       const byLvl = lvl === null ? free.filter((q) => !q.nct_difficulty) : free.filter((q) => q.nct_difficulty === lvl);
       if (byLvl.length < T) continue;
@@ -482,7 +484,7 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
       const own = free.filter((q) => !q.isNct);
       const got = tryPools(wantNct ? [nctFree, own] : [own, nctFree], section, kind, wideAll);
       if (got) {
-        diffMiss[kind]++;
+        if (diff !== null) diffMiss[kind]++;
         return got;
       }
     }
@@ -508,7 +510,8 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
       .filter((c) => c.want > 0);
     const quota = splitQuota(cfg.quota[kind], counts);
     const nPlaces = counts.reduce((a, c) => a + c.want, 0);
-    const targets = kind === 'open'
+    const targets = difficulty === null ? []
+      : kind === 'open'
       ? difficultyTargets(nPlaces, { easy: (100 * cfg.openDifficulty[0]) / cfg.composition.open, medium: (100 * cfg.openDifficulty[1]) / cfg.composition.open, hard: (100 * cfg.openDifficulty[2]) / cfg.composition.open }, rnd)
       : difficultyTargets(nPlaces, difficulty, rnd);
     let place = 0;
@@ -518,7 +521,7 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
       for (let i = flags.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [flags[i], flags[j]] = [flags[j], flags[i]]; }
       let got = 0;
       for (let i = 0; i < want; i++) {
-        const rows = pickOne(bySection.get(k) ?? [], k, kind, flags[i], targets[place++] ?? 2);
+        const rows = pickOne(bySection.get(k) ?? [], k, kind, flags[i], difficulty === null ? null : (targets[place++] ?? 2));
         if (!rows) continue;
         got++;
         for (let t = 0; t < T; t++) dst[t].push(rows[t]);
@@ -549,7 +552,7 @@ export function pickNct(pool: any[], ticketCount: number, rnd: Rnd = Math.random
  * типы заданий внутри текста задаёт сам текст. Не хватило текста — места остаются пустыми и добираются обычными тестами
  * (TicketGenerator), в заметках об этом сказано.
  */
-function pickNctText(pool: any[], T: number, rnd: Rnd, difficulty: NctDifficultyShares, cfg: NctConfig): NctPicked {
+function pickNctText(pool: any[], T: number, rnd: Rnd, difficulty: NctDifficultyShares | null, cfg: NctConfig): NctPicked {
   const ts = cfg.textSections!;
   const notes: string[] = [];
   const blocks = passageBlocks(pool.filter((q) => q.type === 'test'));

@@ -3,14 +3,21 @@
 // «Билеты классу»: ученик проходит билет набора на странице /tg/exam внутри Telegram,
 // преподаватель рассылает разбор и получает ссылку и итог в бот.
 //
-// Ученик (заголовок X-Tg-Init-Data, подпись Telegram): open, start, save, focus, submit, review.
+// Ученик (заголовок X-Tg-Init-Data, подпись Telegram): open, start, save, focus, copy, submit, review.
 //   focus — ученик ушёл со страницы билета или вернулся (RPC exam_attempt_focus); преподаватель видит это в таблице запуска.
+//   Запуск с away_strict (галочка преподавателя при «Начать»): после focus и при open правило о выходах
+//   (RPC exam_attempt_away_check, пороги AWAY_LIMIT_COUNT / AWAY_LIMIT_MS) может закрыть попытку — ученик видит
+//   это правило заранее; преподаватель может вернуть его в билет (RPC exam_attempt_reopen с сайта).
+//   copy — попытка скопировать текст билета (RPC exam_attempt_copy), преподаватель видит счётчик.
+//   advance — ученик перешёл к следующему вопросу (RPC exam_attempt_advance); при exam_links.no_back («без возврата
+//   к вопросам») save не принимает ответы на вопросы раньше exam_attempts.pos.
 //   start — вход в зал ожидания (вариант, имя, язык); вопросы ученик получает только когда часы сервера дошли
 //   до exam_links.session_start_at (преподаватель нажал «Начать»); конец у всех общий — effEnd(запуска).
 //   Привязка к аккаунту сайта не нужна; личность — id из подписи. Данных tg-app здесь нет.
 //   Ключи ответов (is_correct, correct_match_id, correct_numeric_answer) ученик получает только
 //   в review — после сдачи и после того, как преподаватель отправил разбор. Баллы считает сервер.
-// Преподаватель (Authorization: Bearer <JWT сайта>): review_send, link_send, notify_closed.
+// Преподаватель (Authorization: Bearer <JWT сайта>): review_send, link_send, invite_send, notify_closed.
+//   invite_send — ссылка нового запуска ученикам своего прошлого запуска (всем или выбранным), личным сообщением бота.
 //   Доступ: автор запуска (exam_links.created_by) или главный админ (profiles.is_owner).
 //
 // Таблицы exam_links и exam_attempts (supabase/sql/exam_links.sql) пишет только эта функция
@@ -25,7 +32,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
-  awayMs, chunkLines, closedSummary, examLang, LINK_SEND_BUTTON, linkSendText, pickVariant, publicSnapshot, reviewButtonText, reviewHead, reviewJustSent, reviewLines, reviewSnapshot, scoreAttempt,
+  awayMs, awayUsed, AWAY_LIMIT_COUNT, AWAY_LIMIT_MS, chunkLines, inviteTargets, inviteText, closedSummary, examLang, LINK_SEND_BUTTON, linkSendText, pickVariant, publicSnapshot, reviewButtonText, reviewHead, reviewJustSent, reviewLines, reviewSnapshot, scoreAttempt,
   sessionEnd, sessionPhase, shuffleOptions, tgPlain,
   type ExamAnswer, type ExamAnswers, type ExamQuestion,
 } from '../_shared/exam.ts';
@@ -58,20 +65,21 @@ const json = (body: unknown, status = 200) =>
 // ---------------- Данные ----------------
 type Link = {
   code: string; batch_id: string; created_by: string; created_at: string; closes_at: string; closed_at: string | null;
-  duration_min: number; review_sent_at: string | null; session_start_at: string | null;
+  duration_min: number; review_sent_at: string | null; session_start_at: string | null; away_strict: boolean | null; no_back: boolean | null;
   batch: { title: string | null; generation_params: any; subject: { name: string | null } | null } | null;
 };
 type Attempt = {
   id: string; code: string; tg_user_id: number; student_name: string; ticket_id: string; started_at: string;
   deadline_at: string | null; finished_at: string | null; answers: ExamAnswers | null; score: number | null; max_score: number | null;
   lang: string | null;
+  away_count: number | null; away_ms: number | null; away_base_count: number | null; away_base_ms: number | null; away_closed_at: string | null; pos: number | null;
   /** номер варианта — только у попытки из readAttempt (один join, без отдельного запроса к tickets) */
   ticket?: { ticket_number: number | null } | null;
 };
 type QCache = Map<string, ExamQuestion[]>;
 
-const LINK_COLS = 'code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, session_start_at, batch:ticket_batches(title, generation_params, subject:subjects(name))';
-const ATTEMPT_COLS = 'id, code, tg_user_id, student_name, ticket_id, started_at, deadline_at, finished_at, answers, score, max_score, lang';
+const LINK_COLS = 'code, batch_id, created_by, created_at, closes_at, closed_at, duration_min, review_sent_at, session_start_at, away_strict, no_back, batch:ticket_batches(title, generation_params, subject:subjects(name))';
+const ATTEMPT_COLS = 'id, code, tg_user_id, student_name, ticket_id, started_at, deadline_at, finished_at, answers, score, max_score, lang, away_count, away_ms, away_base_count, away_base_ms, away_closed_at, pos';
 const ATTEMPT_VIEW_COLS = `${ATTEMPT_COLS}, ticket:tickets(ticket_number)`;
 
 const ms = (iso: string | null | undefined) => {
@@ -178,6 +186,26 @@ async function finishExpired(l: Link, now: Date, cache: QCache) {
   }
 }
 
+/** Правило о выходах для страницы ученика: включено ли, пороги и сколько уже израсходовано */
+const awayRules = (l: Link, a: Attempt) => ({
+  strict: l.away_strict === true, maxCount: AWAY_LIMIT_COUNT, maxMs: AWAY_LIMIT_MS, ...awayUsed(a),
+});
+
+/**
+ * Проверить правило о выходах (только запуск с away_strict и идущая попытка). База закрывает попытку атомарно;
+ * здесь ей сразу ставится балл. Возвращает актуальную попытку и признак «закрыта сейчас».
+ */
+async function enforceAway(l: Link, a: Attempt, cache: QCache): Promise<{ a: Attempt; closed: boolean }> {
+  if (l.away_strict !== true || a.finished_at) return { a, closed: false };
+  const { data: closed, error } = await sb.rpc('exam_attempt_away_check', {
+    p_attempt_id: a.id, p_max_count: AWAY_LIMIT_COUNT, p_max_ms: AWAY_LIMIT_MS,
+  });
+  if (error) throw error;
+  if (closed !== true) return { a, closed: false };
+  const fresh = (await readAttemptById(a.id)) ?? a;
+  return { a: { ...(await finalize(fresh, cache)), ticket: a.ticket }, closed: true };
+}
+
 /** Номер варианта: из join readAttempt; отдельный запрос — только если попытка прочитана без него */
 async function ticketNumber(a: Attempt): Promise<number | null> {
   if (a.ticket !== undefined) return a.ticket?.ticket_number ?? null;
@@ -200,11 +228,18 @@ async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache)
     lang: langOf(a),
   };
   if (a && !a.finished_at && stateOf(a, l, now) === 'expired') a = await finalize(a, cache); // приём закончен — сдаём
+  // Ученик вернулся после долгого выхода, а сообщение о возвращении ещё не дошло: правило проверяем и здесь
+  if (a && !a.finished_at && stateOf(a, l, now) === 'running') a = (await enforceAway(l, a, cache)).a;
   if (a?.finished_at) {
     // Запуск закрыли до старта сессии (вопросов ученик не видел) — «закрыто», без балла
     if (!inSession(a, l)) return { ...base, state: 'closed' as const };
     if (a.score == null) a = await finalize(a, cache); // сдана, но балл не записан (сбой) — досчитываем
-    return { ...base, state: 'finished' as const, attempt: { score: a.score ?? 0, max: a.max_score ?? 0, review: !!l.review_sent_at } };
+    // awayClosed — билет закрыло правило о выходах; canReturn — сессия ещё идёт, преподаватель может вернуть в билет
+    const awayClosed = !!a.away_closed_at;
+    return {
+      ...base, state: 'finished' as const,
+      attempt: { score: a.score ?? 0, max: a.max_score ?? 0, review: !!l.review_sent_at, awayClosed, canReturn: awayClosed && phaseOf(l, now) === 'running' },
+    };
   }
   const st = a ? stateOf(a, l, now) : null;
   if (a && st === 'waiting') {
@@ -214,7 +249,7 @@ async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache)
     return {
       ...base,
       state: 'countdown' as const,
-      attempt: { ticketNumber: await ticketNumber(a), startsAt: new Date(ms(l.session_start_at)).toISOString() },
+      attempt: { ticketNumber: await ticketNumber(a), startsAt: new Date(ms(l.session_start_at)).toISOString(), awayStrict: l.away_strict === true },
     };
   }
   if (a && st === 'running') {
@@ -232,6 +267,10 @@ async function studentView(l: Link, a: Attempt | null, now: Date, cache: QCache)
           snapshot: !q.snapshot || q.snapshot.empty === true ? { empty: true, type: q.snapshot?.type ?? null } : shuffleOptions(publicSnapshot(q.snapshot), a.id, q.tqId),
         })),
         answers: a.answers ?? {},
+        away: awayRules(l, a),
+        // Без возврата к вопросам: pos — номер самого дальнего вопроса, до которого дошёл ученик
+        noBack: l.no_back === true, pos: a.pos ?? 0,
+        studentName: a.student_name, // для водяного знака поверх билета
       },
     };
   }
@@ -348,7 +387,7 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
   // запуска он не закрыт и не истёк, сдавать нечего; лишние запросы к базе не нужны
   const lobby = action === 'open' && ['waiting', 'countdown'].includes(phaseOf(l, now));
   // focus (уход со страницы и возвращение) тоже лёгкий: одно обновление своей попытки
-  if (action !== 'save' && action !== 'focus' && !lobby) await finishExpired(l, now, cache);
+  if (action !== 'save' && action !== 'focus' && action !== 'copy' && action !== 'advance' && !lobby) await finishExpired(l, now, cache);
   let a = await readAttempt(code, tgUser.id);
 
   switch (action) {
@@ -391,6 +430,10 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
       const questions = await ticketQuestions(a.ticket_id, cache);
       const q = questions.find((x) => x.tqId === body.tqId);
       if (!q) return json({ error: 'bad_question', message: 'Этого вопроса нет в вашем билете.' }, 400);
+      // Без возврата к вопросам: ответ на вопрос, который ученик уже прошёл, не принимается (ответ остаётся прежним)
+      if (l.no_back === true && questions.indexOf(q) < (a.pos ?? 0)) {
+        return json({ error: 'question_locked', message: 'К этому вопросу вернуться нельзя.' }, 409);
+      }
       const ans = cleanAnswer(q.snapshot, body.answer);
       if (ans === undefined) return json({ error: 'bad_answer', message: 'Некорректный ответ.' }, 400);
       // Одно атомарное обновление в базе: ответ дописывается к сохранённым и только пока попытка идёт
@@ -417,7 +460,28 @@ async function studentAction(action: string, body: any, tgUser: TgInitUser): Pro
         p_attempt_id: a.id, p_away: away, p_ms: away ? null : awayMs(body.ms),
       });
       if (error) throw error;
-      return json({ ok: changed === true });
+      // Правило о выходах: третий выход или больше 10 секунд вне страницы закрывают билет (если преподаватель включил)
+      if (l.away_strict !== true) return json({ ok: changed === true });
+      const res = await enforceAway(l, a, cache);
+      const cur = res.closed ? res.a : ((await readAttemptById(a.id)) ?? a);
+      return json({ ok: changed === true, closed: res.closed, away: awayRules(l, cur) });
+    }
+
+    case 'advance': {
+      if (!a || stateOf(a, l, now) !== 'running') return json({ ok: false });
+      const p = Number(body.pos);
+      if (!Number.isInteger(p) || p < 0 || p > 1000) return json({ error: 'bad_question', message: 'Некорректный вопрос.' }, 400);
+      const { data: pos, error } = await sb.rpc('exam_attempt_advance', { p_attempt_id: a.id, p_pos: p });
+      if (error) throw error;
+      return json({ ok: pos != null, pos: pos ?? a.pos ?? 0 });
+    }
+
+    case 'copy': {
+      // Попытка скопировать текст билета: только счётчик для преподавателя, билет не закрывается
+      if (!a || stateOf(a, l, now) !== 'running') return json({ ok: false });
+      const { data: counted, error } = await sb.rpc('exam_attempt_copy', { p_attempt_id: a.id });
+      if (error) throw error;
+      return json({ ok: counted === true });
     }
 
     case 'submit': {
@@ -512,6 +576,31 @@ async function teacherAction(action: string, body: any, userId: string): Promise
       return ok ? json({ ok: true }) : json({ error: 'Бот не смог написать вам: откройте бота в Telegram и нажмите «Start».' }, 502);
     }
 
+    case 'invite_send': {
+      // Ссылка этого запуска — ученикам своего прошлого запуска (всем или выбранным). Чужой прошлый запуск — как несуществующий
+      if (!linkOpen(l, now)) return json({ error: 'Запуск уже закрыт.' }, 409);
+      if (phaseOf(l, now) === 'ended') return json({ error: 'Время билета уже закончилось.' }, 409);
+      const fromCode = typeof body.from === 'string' ? body.from.trim().toUpperCase() : '';
+      const from = CODE_RE.test(fromCode) && fromCode !== code ? await loadLink(fromCode) : null;
+      // allowed выше уже проверил права на этот запуск; прошлый должен принадлежать тому же автору
+      if (!from || from.created_by !== l.created_by) return json({ error: 'Прошлый запуск не найден' }, 404);
+      const { data, error } = await sb.from('exam_attempts').select('id, tg_user_id, lang').eq('code', fromCode).order('started_at').limit(1000);
+      if (error) throw error;
+      const targets = inviteTargets((data ?? []) as Array<{ id: string; tg_user_id: number; lang: string | null }>, body.ids);
+      if (!targets.length) return json({ error: 'Некого приглашать: выберите учеников.' }, 400);
+      const bot = await botName();
+      if (!bot) return json({ error: 'Не удалось получить имя бота. Попробуйте ещё раз.' }, 502);
+      const url = `https://t.me/${bot}?start=exam_${code}`;
+      let sent = 0, failed = 0;
+      for (const t of targets) {
+        // Личный чат с ботом: его id совпадает с id пользователя Telegram (ученик уже нажимал «Start» в прошлый раз)
+        const ok = await sendText(Number(t.tg_user_id), inviteText(title, t.lang), { inline_keyboard: [[{ text: LINK_SEND_BUTTON, url }]] });
+        if (ok) sent++; else failed++;
+        await sleep(40); // не чаще ~25 сообщений в секунду
+      }
+      return json({ sent, failed });
+    }
+
     case 'notify_closed': {
       const chat = await teacherChat(userId);
       if (!chat) return json({ error: NOT_LINKED }, 400);
@@ -526,8 +615,8 @@ async function teacherAction(action: string, body: any, userId: string): Promise
   return json({ error: 'Неизвестное действие' }, 400);
 }
 
-const STUDENT_ACTIONS = new Set(['open', 'start', 'save', 'focus', 'submit', 'review']);
-const TEACHER_ACTIONS = new Set(['review_send', 'link_send', 'notify_closed']);
+const STUDENT_ACTIONS = new Set(['open', 'start', 'save', 'focus', 'copy', 'advance', 'submit', 'review']);
+const TEACHER_ACTIONS = new Set(['review_send', 'link_send', 'invite_send', 'notify_closed']);
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });

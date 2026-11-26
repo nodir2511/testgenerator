@@ -248,6 +248,13 @@ describe('сложность в режиме НЦТ', () => {
     const r = pickNct(p, 1, rng(3), undefined, { easy: 50, medium: 40, hard: 10 });
     expect(r.kinds[0][0].length + r.kinds[1][0].length + r.kinds[2][0].length).toBe(27);
   });
+
+  it('выбор сложности выключен (null): билет полный, без заметки «взята ближайшая»', () => {
+    const p = pool(all49, { test: 4, matching: 4, open: 4 }).map((q) => ({ ...q, nct_difficulty: 1 }));
+    const r = pickNct(p, 1, rng(3), undefined, null);
+    expect(r.kinds[0][0].length + r.kinds[1][0].length + r.kinds[2][0].length).toBe(27);
+    expect(r.notes.some((n) => n.includes('сложности'))).toBe(false);
+  });
 });
 
 describe('expandPermuted', () => {

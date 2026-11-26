@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Chapter, Passage, QuestionType, Source, Subject, Topic } from '../../types/database';
-import { nctTypesFor } from '../../lib/nctTypes';
+import { useNctTypes } from '../../hooks/useNctTypes';
 import { NCT_DIFFICULTIES } from '../../lib/nctDifficulty';
 import { passageLabel, PASSAGE_QUESTIONS } from '../../lib/passages';
 import { CustomSelect } from '../CustomSelect';
@@ -60,6 +60,8 @@ export const TaxonomyFields: React.FC<TaxonomyFieldsProps> = ({
   passageOrder,
   setPassageOrder,
 }) => {
+  // Метки НЦТ ставит только главный админ; список — только выбранного предмета
+  const nctTypes = useNctTypes((subjects as any[]).find((x: any) => x.id === subjectId)?.name, isOwner && !!subjectId && (subjects as any[]).length > 0);
   return (
         <div id="qf-taxonomy" className="scroll-mt-24 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-1 gap-4">
           <Field label="Предмет" required>
@@ -125,7 +127,7 @@ export const TaxonomyFields: React.FC<TaxonomyFieldsProps> = ({
                 className="w-full text-sm p-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
               >
                 <option value="">-- Без метки --</option>
-                {nctTypesFor((subjects as any[]).find((x: any) => x.id === subjectId)?.name).map(t => <option key={t.code} value={t.code}>{t.name} ({t.code})</option>)}
+                {nctTypes.map(t => <option key={t.code} value={t.code}>{t.name} ({t.code})</option>)}
               </CustomSelect>
             </Field>
           )}
