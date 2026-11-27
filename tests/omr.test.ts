@@ -106,6 +106,42 @@ describe('распознавание бланка по снимку', () => {
     expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
   });
 
+  // Реальные снимки: метки отпечатаны серым, полоска лежит на тёмном столе, край листа в 1–2 мм от метки. Тёмный стол
+  // в окне усреднения опускал среднее, и при пороге 0,8 метки не находились — бланк отклонялся, хотя виден целиком.
+  for (const deg of [0, 3, 180 - 4]) {
+    it(`серые метки, лист на тёмном столе вплотную к краю — бланк находится (снимок под ${deg}°)`, () => {
+      const layout = OMR_LAYOUTS.chemphys;
+      const { img, truth } = render(layout, 77, deg);
+      const pad = 10, W = img.w + 2 * pad, H = img.h + 2 * pad;
+      const data = new Uint8Array(W * H).fill(30);
+      for (let y = 0; y < img.h; y++) for (let x = 0; x < img.w; x++) {
+        const v = img.data[y * img.w + x];
+        data[(y + pad) * W + x + pad] = v < 60 ? Math.round(140 + v * 0.3) : v;
+      }
+      const res = omrRead({ w: W, h: H, data }, layout);
+      expect(res.ok && res.codeOk).toBe(true);
+      if (!res.ok) return;
+      expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+    });
+  }
+
+  // Реальный бланк: ответы отмечены бледной редкой штриховкой карандашом — кружок закрашен на 0,2–0,4, остальные пусты.
+  // Порог 0,4 не проходил ни один, и весь бланк читался пустым. Одна бледная отметка в пустом ряду — ответ с сомнением.
+  for (const deg of [0, 3, 180 - 4]) {
+    it(`бледная штриховка карандашом читается как ответ с сомнением (снимок под ${deg}°)`, () => {
+      const layout = OMR_LAYOUTS.chemphys;
+      const { img, truth } = render(layout, 81, deg, { hatch: 130 });
+      const res = omrRead(img, layout);
+      expect(res.ok && res.codeOk).toBe(true);
+      if (!res.ok) return;
+      expect(res.variant.answer).toBe(truth.variant);
+      expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+      expect(res.matching.map((m) => m.rows.map((r) => (r.answer === null ? null : Number(r.answer))))).toEqual(truth.matching);
+      // Пустые ряды остаются пустыми, а бледные ответы помечены сомнением — проверяющий их видит
+      for (const t of res.tests) if (t.answer !== null && Math.max(...t.fills) < 0.4) expect(t.unsure).toBe(true);
+    });
+  }
+
   // Реальный бланк таджикского: «1» написана тонко и вплотную к левой линии клетки. Очистка рамки принимала такой
   // штрих за остаток линии (высокий, в краевой полосе окна) и стирала — клетка выглядела пустой.
   for (const deg of [0, 3, 180 - 4]) {

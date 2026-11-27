@@ -199,8 +199,11 @@ const WIDE_OFF_MAX = 0.35;
 /**
  * Последняя попытка, когда бланк так и не нашёлся: бледная печать (порог меток 0,8 — при строгом часть метки выпадает
  * и она уже не квадрат), сильный наклон камеры и лист рядом с чужими (четвёрок больше). Отбирают те же код и кружки.
+ * Порог 0,9 — серые метки на листе, лежащем на тёмном столе: тёмный фон в окне усреднения опускает среднее, и при 0,8
+ * часть меток уже не квадрат.
  */
-const LAST_K = 0.8, LAST_OFF_MAX = 0.6, LAST_AREA_MAX = 3, LAST_LIMIT = 600;
+const LAST_KS = [0.8, 0.9];
+const LAST_OFF_MAX = 0.6, LAST_AREA_MAX = 3, LAST_LIMIT = 600;
 /** Сдвиги квадратиков кода в последней попытке (мм): у поднятого края листа они уезжают; до соседнего квадратика 5 мм */
 const CODE_SHIFTS = [0, -0.6, 0.6, -1.2, 1.2];
 
@@ -208,6 +211,11 @@ const CODE_SHIFTS = [0, -0.6, 0.6, -1.2, 1.2];
 /** Доля закрашенной площади кружка, начиная с которой он считается отмеченным */
 export const FILL_ON = 0.40;
 const UNSURE_LO = 0.18;
+/**
+ * Бледная отметка в пустом ряду (заполнение от FAINT_ON при остальных кружках не больше FAINT_CLEAN) — ответ с сомнением.
+ * На 315 реальных бланках такие ряды встречались только с бледной ручкой или карандашом и были ответом ученика.
+ */
+const FAINT_ON = 0.15, FAINT_CLEAN = 0.05;
 
 type At = (x: number, y: number) => number;
 
@@ -316,7 +324,12 @@ function pickOne(options: OmrCircle[], at: At, far: boolean): Picked {
   const on: number[] = [];
   fills.forEach((f, i) => { if (f >= FILL_ON) on.push(i); });
   const unsure = fills.some((f) => f >= UNSURE_LO && f < FILL_ON + 0.1);
-  if (on.length === 0) return { answer: null, unsure, fills };
+  if (on.length === 0) {
+    // Бледная штриховка карандашом: ни один кружок не дотянул до порога, но закрашен ровно один, а остальные чисты
+    const top = fills.indexOf(Math.max(...fills));
+    if (fills[top] >= FAINT_ON && fills.every((f, i) => i === top || f <= FAINT_CLEAN)) return { answer: options[top].value, unsure: true, fills };
+    return { answer: null, unsure, fills };
+  }
   if (on.length > 1) return { answer: 'multi', unsure: true, fills, candidates: on.map((i) => options[i].value) };
   return { answer: options[on[0]].value, unsure, fills };
 }
@@ -812,7 +825,7 @@ function locate(img: GrayImage, layout: OmrLayout, opts: OmrOptions): Located {
     const before = { best, kUsed, shapeBad };
     const diagPerSide = Math.hypot(lm[3].x - lm[0].x, lm[3].y - lm[0].y) / lm[0].size;
     for (let i = 0; i < squares.length && !sure(); i++) tryQuads(findMarkersWide(squares[i], Math.max(want, 1 / want), diagPerSide), MARKER_K[i]);
-    if (!found()) tryQuads(findMarkersWide(squaresAt(LAST_K), Math.max(want, 1 / want), diagPerSide, true), LAST_K, CODE_SHIFTS);
+    for (const k of LAST_KS) if (!found()) tryQuads(findMarkersWide(squaresAt(k), Math.max(want, 1 / want), diagPerSide, true), k, CODE_SHIFTS);
     // Не помогло — итог и причина отказа остаются такими, какими были без запасного поиска
     if (found()) anyMarkers = true;
     else ({ best, kUsed, shapeBad } = before);

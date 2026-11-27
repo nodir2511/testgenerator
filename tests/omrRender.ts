@@ -27,7 +27,7 @@ const along = (p: number[][], x: number) => {
 export interface Truth { variant: number | null; tests: Array<string | null>; matching: Array<Array<number | null>>; open: number[]; openText: string[] }
 
 /** draw — дорисовать на бланке свои штрихи (координаты в мм бланка; v — яркость штриха, бумага 235), например цифру у самого края клетки или бледным карандашом */
-export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; curl?: number; fold?: number; sag?: number; ridge?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
+export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; curl?: number; fold?: number; sag?: number; ridge?: number; hatch?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
   const r = rng(seed);
   const W = Math.round(layout.strip.w * S), H = Math.round(layout.strip.h * S);
   const d = new Float32Array(W * H).fill(235);
@@ -40,7 +40,9 @@ export function render(layout: OmrLayout, seed: number, deg: number, opts: { gly
     const R = c.d / 2;
     for (let py = Math.floor((c.y - R) * S); py <= Math.ceil((c.y + R) * S); py++) for (let px = Math.floor((c.x - R) * S); px <= Math.ceil((c.x + R) * S); px++) {
       const dist = Math.hypot((px + 0.5) / S - c.x, (py + 0.5) / S - c.y);
-      if (fill ? dist <= R * 0.85 : dist <= R && dist >= R - 0.3) dot(px, py, fill ? 40 : 20);
+      // hatch: отметка — редкая бледная штриховка карандашом (полосы 0,3 мм с шагом 0,8 мм, яркость opts.hatch)
+      const hatched = !opts.hatch || ((px + py) / S) % 0.8 < 0.3;
+      if (fill ? dist <= R * 0.85 && hatched : dist <= R && dist >= R - 0.3) dot(px, py, fill ? opts.hatch ?? 40 : 20);
     }
   };
   for (const m of layout.markers) rect(m.x - m.size / 2, m.y - m.size / 2, m.size, m.size);
