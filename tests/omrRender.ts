@@ -14,6 +14,10 @@ const FOLD_Y = [[9, 0], [60, 0.15], [105, 0.5], [145, 0.3], [201, 0]];
 /** Профиль прогиба полоски, лежащей на стопке листов: [x бланка, мм; сдвиг в долях sag]. Снят с реального фото
  * (пачка batch-13, №9): тесты почти на месте, соответствие 9 уехало влево на ~2,5 мм, соответствие 10 — на ~4 мм */
 const SAG_X = [[9, 0], [40, -0.05], [55, -0.2], [85, -0.65], [105, -0.85], [126, -1], [150, -0.9], [170, -0.5], [201, 0]];
+/** Профиль «домика»: полоска согнута поперёк, сгиб проходит через соответствие 9 и приподнят к камере (пачка batch-17,
+ * №10 и №13): рамка 9 сжата по ширине на ~2 мм и уехала влево дальше запаса поиска столбцов, квадратики кода сдвинуты.
+ * [x бланка, мм; сдвиг в долях ridge] */
+const RIDGE_X = [[9, 0], [50, -0.2], [80, -0.7], [110, -1.1], [150, -1], [175, -0.35], [195, -0.25], [201, 0]];
 const along = (p: number[][], x: number) => {
   if (x <= p[0][0]) return p[0][1];
   for (let i = 1; i < p.length; i++) if (x <= p[i][0]) return p[i - 1][1] + ((p[i][1] - p[i - 1][1]) * (x - p[i - 1][0])) / (p[i][0] - p[i - 1][0]);
@@ -23,7 +27,7 @@ const along = (p: number[][], x: number) => {
 export interface Truth { variant: number | null; tests: Array<string | null>; matching: Array<Array<number | null>>; open: number[]; openText: string[] }
 
 /** draw — дорисовать на бланке свои штрихи (координаты в мм бланка; v — яркость штриха, бумага 235), например цифру у самого края клетки или бледным карандашом */
-export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; curl?: number; fold?: number; sag?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
+export function render(layout: OmrLayout, seed: number, deg: number, opts: { glyphs?: boolean; bend?: number; curl?: number; fold?: number; sag?: number; ridge?: number; draw?: (stroke: (ax: number, ay: number, bx: number, by: number, wmm: number, v?: number) => void) => void } = {}): { img: GrayImage; truth: Truth } {
   const r = rng(seed);
   const W = Math.round(layout.strip.w * S), H = Math.round(layout.strip.h * S);
   const d = new Float32Array(W * H).fill(235);
@@ -120,6 +124,8 @@ export function render(layout: OmrLayout, seed: number, deg: number, opts: { gly
     }
     // Полоска прогнулась поперёк (лежит на стопке): середина листа уехала влево на sag мм, у меток сдвига нет
     if (opts.sag) mx -= along(SAG_X, mx) * opts.sag;
+    // Сгиб «домиком» через соответствие 9: рамка 9 сжата по ширине, правее сгиба всё уехало влево до ridge мм
+    if (opts.ridge) mx -= along(RIDGE_X, mx) * opts.ridge;
     if (mx < 0 || my < 0 || mx >= layout.strip.w || my >= layout.strip.h) continue;
     data[y * PW + x] = d[Math.floor(my * S) * W + Math.floor(mx * S)];
   }

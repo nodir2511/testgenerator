@@ -49,4 +49,21 @@ describe('распознавание бланка по снимку: лист с
       });
     }
   }
+
+  // Реальные снимки химии/физики (пачка batch-17, №10 и №13): полоска согнута «домиком», сгиб проходит через соответствие 9.
+  // Рамка 9 сжата по ширине на ~2 мм и не находилась, столбцы искались от места по раскладке: бланк отбраковывался,
+  // а при сдвиге дальше запаса поиска — принимался с ответами соответствий со сдвигом на столбец
+  for (const seed of [10, 17, 31]) {
+    for (const deg of [2, 177]) {
+      it(`chemphys: сгиб «домиком» через соответствие 9 (снимок ${seed}, под ${deg}°) — бланк принимается, ответы на месте`, () => {
+        const layout = OMR_LAYOUTS.chemphys;
+        const { img, truth } = render(layout, seed, deg, { ridge: 5 });
+        const res = omrRead(img, layout);
+        expect(res.ok && res.codeOk).toBe(true);
+        if (!res.ok) return;
+        expect(res.tests.map((t) => t.answer)).toEqual(truth.tests);
+        expect(res.matching.map((m) => m.rows.map((r) => r.answer))).toEqual(truth.matching);
+      });
+    }
+  }
 });
