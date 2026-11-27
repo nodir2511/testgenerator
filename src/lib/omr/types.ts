@@ -28,7 +28,8 @@ export interface Picked {
   candidates?: Array<string | number>;
 }
 
-export interface OpenBox { ink: number; hasDigit: boolean; heightMm: number; widthMm: number; cols: number; rows: number; bitmap: Uint8Array }
+/** gray — серая вырезка всей клетки с полем 0,5 мм (CELL_W×CELL_H, как на фото): по ней сеть читает цифру; есть только у клеток с цифрой */
+export interface OpenBox { ink: number; hasDigit: boolean; heightMm: number; widthMm: number; cols: number; rows: number; bitmap: Uint8Array; gray?: Uint8Array }
 
 export type OmrFail = 'markers' | 'shape' | 'homography';
 

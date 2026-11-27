@@ -358,6 +358,32 @@ export function fitOpenFrame(at: At, boxes: Array<{ x: number; y: number; w: num
 /** Рамка клетки: ниже какой доли совпадения место клетки считается неверным и выше какой — найденным заново */
 const CELL_OFF = 0.5, CELL_SURE = 0.8;
 
+/** Размер серой вырезки клетки для сети цифр */
+export const CELL_W = 28, CELL_H = 32;
+const CELL_PAD = 0.5; // мм вокруг клетки: цифра, вылезшая за рамку, остаётся целой
+
+/**
+ * Серая вырезка всей клетки открытого ответа (с рамкой и полем вокруг), растянутая до CELL_W×CELL_H.
+ * Окно openBox режет 0,9 мм от рамки и переводит в чёрно-белое: крупная цифра обрезается, тонкая рвётся, бледная
+ * пропадает. Сеть цифр читает эту вырезку целиком и сама не обращает внимания на рамку.
+ */
+export function cellGray(img: GrayImage, H: H3, b: { x: number; y: number; w: number; h: number }): Uint8Array {
+  const out = new Uint8Array(CELL_W * CELL_H);
+  const sx = (b.w + 2 * CELL_PAD) / CELL_W, sy = (b.h + 2 * CELL_PAD) / CELL_H;
+  for (let y = 0; y < CELL_H; y++) for (let x = 0; x < CELL_W; x++) {
+    let s = 0;
+    for (let k = 0; k < 4; k++) { // среднее по четырём точкам внутри пикселя вырезки
+      const [fx, fy] = applyH(H, b.x - CELL_PAD + (x + 0.25 + 0.5 * (k & 1)) * sx, b.y - CELL_PAD + (y + 0.25 + 0.5 * (k >> 1)) * sy);
+      const x0 = Math.floor(fx), y0 = Math.floor(fy);
+      if (x0 < 0 || y0 < 0 || x0 + 1 >= img.w || y0 + 1 >= img.h) { s += 200; continue; }
+      const ax = fx - x0, ay = fy - y0, i = y0 * img.w + x0;
+      s += (img.data[i] * (1 - ax) + img.data[i + 1] * ax) * (1 - ay) + (img.data[i + img.w] * (1 - ax) + img.data[i + img.w + 1] * ax) * ay;
+    }
+    out[y * CELL_W + x] = Math.round(s / 4);
+  }
+  return out;
+}
+
 function openBox(at: At, b: { x: number; y: number; w: number; h: number }): OpenBox {
   const inset = 0.9, step = 0.15;
   const x0 = b.x + inset, x1 = b.x + b.w - inset, y0 = b.y + inset, y1 = b.y + b.h - inset;
@@ -921,9 +947,9 @@ export function omrRead(img: GrayImage, layout: OmrLayout, opts: OmrOptions = {}
           const own = fitOpenFrame(at, [cell]);
           if (own.here < CELL_OFF && own.s > CELL_SURE) cell = { ...cell, x: cell.x + own.dx, y: cell.y + own.dy };
           const strict = openBox(at, cell);
-          if (strict.hasDigit) return strict;
+          if (strict.hasDigit) return { ...strict, gray: cellGray(img, best.H, cell) };
           const faint = openBox(atSoft(), cell);
-          return faint.hasDigit ? faint : strict;
+          return faint.hasDigit ? { ...faint, gray: cellGray(img, best.H, cell) } : strict;
         }),
       };
     }),
